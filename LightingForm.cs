@@ -12,10 +12,10 @@ public sealed class LightingForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox     = false;
         StartPosition   = FormStartPosition.CenterScreen;
-        ClientSize      = new Size(356, 416);
+        ClientSize      = new Size(356, 566);
 
         var keyboard = new RgbDevicePanel(
-            "Keyboard (4 zones)", RgbEffects.Keyboard,
+            "Keyboard (all zones)", RgbEffects.Keyboard,
             (e, c, b, s) => rgb.ApplyKeyboard(e.ModeByte, e.IsEffect, b, s, c))
         { Location = new Point(12, 10) };
 
@@ -24,17 +24,21 @@ public sealed class LightingForm : Form
             (e, c, b, s) => rgb.ApplyLightbar(e.ModeByte, e.IsEffect, b, s, c))
         { Location = new Point(12, 202) };
 
+        var zones = new KeyboardZonePanel(rgb) { Location = new Point(12, 394) };
+
         Controls.Add(keyboard);
         Controls.Add(lightbar);
+        Controls.Add(zones);
 
         if (!rgb.Available)
         {
             keyboard.Enabled = false;
             lightbar.Enabled = false;
+            zones.Enabled    = false;
             Controls.Add(new Label
             {
                 Text      = "RGB device not found: " + (rgb.LastError ?? string.Empty),
-                Location  = new Point(14, 394),
+                Location  = new Point(14, 544),
                 Size      = new Size(330, 18),
                 ForeColor = Color.Gray,
             });
@@ -123,6 +127,66 @@ public sealed class LightingForm : Form
                 _color = dlg.Color;
                 _colorBtn.BackColor = _color;
             }
+        }
+    }
+
+    /// <summary>Set a static colour for each of the four keyboard zones independently.</summary>
+    private sealed class KeyboardZonePanel : GroupBox
+    {
+        private static readonly byte StaticMode = RgbEffects.Keyboard[0].ModeByte;
+        private readonly AcerEneRgb _rgb;
+        private readonly Button[] _zoneBtns = new Button[4];
+        private readonly Color[] _colors = { Color.Red, Color.Lime, Color.Blue, Color.Magenta };
+        private readonly TrackBar _bri;
+
+        public KeyboardZonePanel(AcerEneRgb rgb)
+        {
+            _rgb = rgb;
+            Text = "Keyboard — per-zone (static)";
+            Size = new Size(332, 162);
+
+            Controls.Add(new Label { Text = "Zone colours (left → right)", Location = new Point(14, 24), AutoSize = true });
+            for (int i = 0; i < 4; i++)
+            {
+                int idx = i;
+                var btn = new Button
+                {
+                    Text      = (i + 1).ToString(),
+                    Location  = new Point(14 + i * 78, 46),
+                    Size      = new Size(70, 34),
+                    BackColor = _colors[i],
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                };
+                btn.Click += (_, _) => PickZone(idx);
+                _zoneBtns[i] = btn;
+                Controls.Add(btn);
+            }
+
+            Controls.Add(new Label { Text = "Brightness", Location = new Point(14, 92), AutoSize = true });
+            _bri = new TrackBar { Location = new Point(12, 110), Size = new Size(228, 40), Minimum = 0, Maximum = 100, Value = 100, TickFrequency = 10 };
+            Controls.Add(_bri);
+
+            var applyBtn = new Button { Text = "Apply", Location = new Point(246, 114), Size = new Size(72, 28) };
+            applyBtn.Click += (_, _) => ApplyZones();
+            Controls.Add(applyBtn);
+        }
+
+        private void PickZone(int i)
+        {
+            using var dlg = new ColorDialog { Color = _colors[i], FullOpen = true };
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _colors[i] = dlg.Color;
+                _zoneBtns[i].BackColor = dlg.Color;
+            }
+        }
+
+        private void ApplyZones()
+        {
+            byte bri = (byte)_bri.Value;
+            for (int i = 0; i < 4; i++)
+                _rgb.ApplyKeyboardZone(i, StaticMode, isEffect: false, bri, speed: 0, _colors[i]);
         }
     }
 }
