@@ -11,7 +11,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
 
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
@@ -26,7 +26,4 @@
 
   <ItemGroup>
     <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="HidSharp" Version="2.1.0" />
-  </ItemGroup>
-
-</Project>
+    <PackageReference Inclu

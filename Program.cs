@@ -26,6 +26,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly TurboKeyWatcher _turbo;
     private AcerProfile _lastNonTurbo = AcerProfile.Balanced;
     private DateTime _lastTurboPress = DateTime.MinValue;
+    private DateTime _lastNotify = DateTime.MinValue;
     private readonly NotifyIcon _tray;
     private readonly MainForm _form;
     private readonly LightingForm _lighting;
@@ -84,10 +85,8 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         if (!_wmi.SetProfile(p))
         {
-            _tray.ShowBalloonTip(3000, "Acer Helper",
-                "Failed to set " + AcerProfileInfo.DisplayName(p) +
-                (_wmi.LastError != null ? ": " + _wmi.LastError : string.Empty),
-                ToolTipIcon.Error);
+            Notify("Failed to set " + AcerProfileInfo.DisplayName(p) +
+                   (_wmi.LastError != null ? ": " + _wmi.LastError : string.Empty), ToolTipIcon.Error);
         }
         Refresh();
     }
@@ -101,108 +100,4 @@ internal sealed class TrayAppContext : ApplicationContext
         if (!ok)
         {
             string what = mode == FanMode.Custom ? $"Custom {cpuPercent}%/{gpuPercent}%" : mode.ToString();
-            _tray.ShowBalloonTip(3000, "Acer Helper",
-                $"Fans: {what} failed" + (_wmi.LastError != null ? " — " + _wmi.LastError : string.Empty),
-                ToolTipIcon.Error);
-        }
-        Refresh();
-    }
-
-    private void OnTurbo()
-    {
-        // debounce paired press/release reports
-        DateTime now = DateTime.UtcNow;
-        if ((now - _lastTurboPress).TotalMilliseconds < 350) return;
-        _lastTurboPress = now;
-
-        byte mask = _wmi.GetSupportedMask();
-        AcerProfile? cur = _wmi.GetProfile();
-        AcerProfile target;
-
-        if (_form.TurboToggles)
-        {
-            if (cur == AcerProfile.Turbo)
-            {
-                target = _lastNonTurbo;
-            }
-            else
-            {
-                if (cur.HasValue) _lastNonTurbo = cur.Value;
-                target = AcerProfile.Turbo;
-            }
-        }
-        else
-        {
-            target = NextSupported(cur, mask);
-        }
-
-        if (_wmi.SetProfile(target))
-            _tray.ShowBalloonTip(1200, "Acer Helper", "Profile: " + AcerProfileInfo.DisplayName(target), ToolTipIcon.Info);
-        Refresh();
-    }
-
-    private static AcerProfile NextSupported(AcerProfile? cur, byte mask)
-    {
-        AcerProfile[] all = AcerProfileInfo.All;
-        int start = 0;
-        if (cur.HasValue)
-            for (int i = 0; i < all.Length; i++) if (all[i] == cur.Value) { start = i; break; }
-
-        for (int step = 1; step <= all.Length; step++)
-        {
-            AcerProfile cand = all[(start + step) % all.Length];
-            if (mask == 0 || AcerProfileInfo.IsSupported(mask, cand)) return cand;
-        }
-        return cur ?? AcerProfile.Balanced;
-    }
-
-    private void Refresh()
-    {
-        _clamshell.Evaluate();   // re-apply clamshell for current display/power state
-
-        AcerProfile? current = _wmi.GetProfile();
-        byte mask = _wmi.GetSupportedMask();
-        SensorSnapshot sensors = _wmi.ReadSensors();
-
-        string status = _wmi.Available
-            ? string.Empty
-            : "WMI unavailable — run as Administrator on an Acer gaming laptop.";
-
-        _form.RefreshState(current, mask, sensors, status);
-
-        _tray.Text = "Acer Helper — " +
-            (current.HasValue ? AcerProfileInfo.DisplayName(current.Value) : "?");
-
-        foreach (var kv in _menuItems)
-        {
-            kv.Value.Checked = current.HasValue && current.Value == kv.Key;
-            kv.Value.Enabled = mask == 0 || AcerProfileInfo.IsSupported(mask, kv.Key);
-        }
-    }
-
-    private void ShowForm()
-    {
-        _form.Show();
-        _form.WindowState = FormWindowState.Normal;
-        _form.Activate();
-    }
-
-    private void ShowLighting()
-    {
-        _lighting.Show();
-        _lighting.WindowState = FormWindowState.Normal;
-        _lighting.Activate();
-    }
-
-    private void ExitApp()
-    {
-        _timer.Stop();
-        _tray.Visible = false;
-        _tray.Dispose();
-        _wmi.Dispose();
-        _rgb.Dispose();
-        _clamshell.Dispose();
-        _turbo.Dispose();
-        ExitThread();
-    }
-}
+            Notify($"Fans: {what} failed" + (_wmi

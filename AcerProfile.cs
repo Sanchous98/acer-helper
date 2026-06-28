@@ -38,21 +38,3 @@ public static class AcerProfileInfo
     /// <summary>True if the supported-profiles bitmask (index 0x0A) includes this profile.</summary>
     public static bool IsSupported(byte mask, AcerProfile p) => (mask & (1 << (byte)p)) != 0;
 }
-
-/// <summary>Fan behaviour, as written to SetGamingFanBehavior. Verified on Acer Nitro 18.</summary>
-public enum FanMode : byte
-{
-    Auto   = 1,
-    Max    = 2,   // "Turbo" fan behaviour
-    Custom = 3,
-}
-
-/// <summary>Live sensor readings. A field of -1 means unavailable/unsupported.</summary>
-public struct SensorSnapshot
-{
-    public int CpuTempC;
-    public int GpuTempC;
-    public int CpuFanRpm;
-    public int GpuFanRpm;
-}
-
