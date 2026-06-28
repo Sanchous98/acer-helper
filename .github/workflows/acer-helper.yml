@@ -1,0 +1,45 @@
+name: acer-helper
+
+# Builds the Acer Helper tray app (C# / .NET 8 WinForms) as a STANDALONE
+# single-file, self-contained, compressed .exe — no .NET runtime install needed
+# on the target machine.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build standalone AcerHelper.exe
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish (standalone single-file, self-contained, compressed)
+        run: >
+          dotnet publish AcerHelper.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          -o publish
+
+      - name: List output
+        shell: cmd
+        run: dir publish
+
+      - name: Upload standalone exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcerHelper-standalone-win-x64
+          path: publish/AcerHelper.exe
+          if-no-files-found: error
