@@ -236,14 +236,30 @@ internal sealed class TrayAppContext : ApplicationContext
         return new List<OptionToggle>
         {
             new("Battery charge limit (~80%)",   batt.HasValue, batt ?? false,
-                b => { if (!_battery.SetLimit(b))          NotifyFail("Battery limit",    _battery.LastError); }),
+                b => RunHwSet(() => _battery.SetLimit(b),         "Battery limit",     () => _battery.LastError)),
             new("USB charging when powered off", usb.HasValue,  usb  ?? false,
-                b => { if (!_apge.SetUsbCharging(b))       NotifyFail("USB charging",     _apge.LastError); }),
+                b => RunHwSet(() => _apge.SetUsbCharging(b),      "USB charging",      () => _apge.LastError)),
             new("LCD overdrive",                 lcd.HasValue,  lcd  ?? false,
-                b => { if (!_wmi.SetLcdOverdrive(b))       NotifyFail("LCD overdrive",    _wmi.LastError); }),
+                b => RunHwSet(() => _wmi.SetLcdOverdrive(b),      "LCD overdrive",     () => _wmi.LastError)),
             new("Keyboard backlight timeout",    kbd.HasValue,  kbd  ?? false,
-                b => { if (!_apge.SetBacklightTimeout(b))  NotifyFail("Backlight timeout", _apge.LastError); }),
+                b => RunHwSet(() => _apge.SetBacklightTimeout(b), "Backlight timeout", () => _apge.LastError)),
         };
+    }
+
+    /// <summary>Run a hardware Set off the UI thread (WMI/ACPI calls can stall ~100ms);
+    /// report failures back on the UI thread so the window never freezes.</summary>
+    private void RunHwSet(Func<bool> set, string what, Func<string?> err)
+    {
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            bool ok;
+            try { ok = set(); } catch { ok = false; }
+            if (!ok)
+            {
+                string? e = err();
+                try { _form.BeginInvoke((Action)(() => NotifyFail(what, e))); } catch { /* shutting down */ }
+            }
+        });
     }
 
     private void NotifyFail(string what, string? err)
