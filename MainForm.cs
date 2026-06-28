@@ -3,7 +3,11 @@ using System.Windows.Forms;
 
 namespace AcerHelper;
 
-/// <summary>Compact window: performance profile, live monitoring, fan control.</summary>
+/// <summary>
+/// Compact window: performance profile, live monitoring, fan control and options.
+/// Layout is built entirely from TableLayoutPanel/FlowLayoutPanel so it stays
+/// aligned at any DPI / text length (no hand-placed pixel coordinates).
+/// </summary>
 public sealed class MainForm : Form
 {
     private readonly Action<AcerProfile> _onApplyProfile;
@@ -12,26 +16,25 @@ public sealed class MainForm : Form
     private readonly Action<bool> _setClamshell;
     private readonly Action<bool> _onTurboToggleChanged;
     private readonly Action<bool> _setAutostart;
-    private readonly bool _turboTogglesInitial;
     private readonly System.Windows.Forms.Timer _fanDebounce = new() { Interval = 400 };
-    private CheckBox _turboToggle = null!;
+
+    private readonly Dictionary<AcerProfile, Button> _profileButtons = new();
+    private CheckBox    _turboToggle = null!;
+    private Label       _cpuLabel    = null!;
+    private Label       _gpuLabel    = null!;
+    private RadioButton _rbAuto      = null!;
+    private RadioButton _rbMax       = null!;
+    private RadioButton _rbCustom    = null!;
+    private TrackBar    _cpuBar      = null!;
+    private TrackBar    _gpuBar      = null!;
+    private Label       _cpuPct      = null!;
+    private Label       _gpuPct      = null!;
+    private Label       _statusLabel = null!;
+
+    private static readonly Color Accent = Color.FromArgb(0x2E, 0x7D, 0x32);
 
     /// <summary>If true, the Turbo key toggles Turbo; otherwise it cycles profiles.</summary>
     public bool TurboToggles => _turboToggle.Checked;
-
-    private readonly Dictionary<AcerProfile, Button> _profileButtons = new();
-    private readonly Label _cpuLabel;
-    private readonly Label _gpuLabel;
-    private readonly RadioButton _rbAuto;
-    private readonly RadioButton _rbMax;
-    private readonly RadioButton _rbCustom;
-    private readonly TrackBar _cpuBar;
-    private readonly TrackBar _gpuBar;
-    private readonly Label _cpuPct;
-    private readonly Label _gpuPct;
-    private readonly Label _statusLabel;
-
-    private static readonly Color Accent = Color.FromArgb(0x2E, 0x7D, 0x32);
 
     public MainForm(Action<AcerProfile> onApplyProfile, Action<FanMode, byte, byte> onApplyFan,
                     Action onOpenLighting, Func<bool> clamshellEnabled, Action<bool> setClamshell,
@@ -44,117 +47,173 @@ public sealed class MainForm : Form
         _setClamshell         = setClamshell;
         _onTurboToggleChanged = onTurboToggleChanged;
         _setAutostart         = setAutostart;
-        _turboTogglesInitial  = turboToggles;
 
         // debounce: apply fan speed once, ~400 ms after the slider stops moving
         _fanDebounce.Tick += (_, _) => { _fanDebounce.Stop(); ApplyNow(); };
 
-        Text            = "Acer Helper";
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox     = false;
-        StartPosition   = FormStartPosition.CenterScreen;
-        ClientSize      = new Size(340, 528);
+        SuspendLayout();
 
-        // ---- Performance profile ----
-        var grpProfile = new GroupBox { Text = "Performance profile", Location = new Point(10, 8), Size = new Size(320, 84) };
-        int bx = 10;
+        Text            = "Acer Helper";
+        Font            = new Font("Segoe UI", 9F);
+        AutoScaleMode   = AutoScaleMode.Font;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox     = false;
+        MinimizeBox     = false;   // app lives in the tray; close (X) just hides it
+        StartPosition   = FormStartPosition.CenterScreen;
+        AutoSize        = true;
+        AutoSizeMode    = AutoSizeMode.GrowAndShrink;
+
+        var root = new TableLayoutPanel
+        {
+            Dock         = DockStyle.Fill,
+            ColumnCount  = 1,
+            AutoSize     = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding      = new Padding(12),
+            MinimumSize  = new Size(384, 0),
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        root.Controls.Add(WrapGroup("Performance profile", BuildProfiles()));
+        root.Controls.Add(WrapGroup("Monitoring",          BuildMonitor()));
+        root.Controls.Add(WrapGroup("Fans",                BuildFans()));
+        root.Controls.Add(WrapGroup("Options",             BuildOptions(clamshellEnabled, turboToggles, autostartEnabled)));
+        root.Controls.Add(BuildBottom());
+
+        Controls.Add(root);
+        ResumeLayout(true);
+
+        UpdateFanEnabled();
+    }
+
+    /// <summary>Wrap a control in an auto-sizing GroupBox that fills its row width.</summary>
+    private static GroupBox WrapGroup(string title, Control inner)
+    {
+        inner.Dock = DockStyle.Fill;
+        var g = new GroupBox
+        {
+            Text         = title,
+            Dock         = DockStyle.Fill,
+            AutoSize     = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding      = new Padding(10, 8, 10, 10),
+            Margin       = new Padding(0, 0, 0, 10),
+        };
+        g.Controls.Add(inner);
+        return g;
+    }
+
+    private Control BuildProfiles()
+    {
+        int n = AcerProfileInfo.All.Length;
+        var t = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = n, RowCount = 1 };
+        t.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         foreach (var p in AcerProfileInfo.All)
         {
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / n));
             var btn = new Button
             {
                 Text      = AcerProfileInfo.DisplayName(p),
-                Location  = new Point(bx, 26),
-                Size      = new Size(58, 44),
                 Tag       = p,
+                Dock      = DockStyle.Fill,
                 FlatStyle = FlatStyle.Flat,
-                Font      = new Font(Font.FontFamily, 7.5f),
+                Margin    = new Padding(2),
             };
             btn.Click += (s, _) => _onApplyProfile((AcerProfile)((Button)s!).Tag!);
             _profileButtons[p] = btn;
-            grpProfile.Controls.Add(btn);
-            bx += 61;
+            t.Controls.Add(btn);
         }
-        Controls.Add(grpProfile);
+        return t;
+    }
 
-        // ---- Monitoring ----
-        var grpSensors = new GroupBox { Text = "Monitoring", Location = new Point(10, 98), Size = new Size(320, 62) };
-        _cpuLabel = new Label { Text = "CPU:  …", Location = new Point(14, 22), AutoSize = true };
-        _gpuLabel = new Label { Text = "GPU:  …", Location = new Point(14, 40), AutoSize = true };
-        grpSensors.Controls.Add(_cpuLabel);
-        grpSensors.Controls.Add(_gpuLabel);
-        Controls.Add(grpSensors);
+    private Control BuildMonitor()
+    {
+        var t = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2 };
+        _cpuLabel = new Label { Text = "CPU:  …", AutoSize = true, Margin = new Padding(2, 3, 2, 3) };
+        _gpuLabel = new Label { Text = "GPU:  …", AutoSize = true, Margin = new Padding(2, 3, 2, 3) };
+        t.Controls.Add(_cpuLabel, 0, 0);
+        t.Controls.Add(_gpuLabel, 0, 1);
+        return t;
+    }
 
-        // ---- Fans ----
-        var grpFans = new GroupBox { Text = "Fans", Location = new Point(10, 166), Size = new Size(320, 212) };
+    private Control BuildFans()
+    {
+        var t = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 4 };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60));
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46));
 
-        _rbAuto   = new RadioButton { Text = "Auto",   Location = new Point(14, 24),  AutoSize = true, Checked = true };
-        _rbMax    = new RadioButton { Text = "Max",    Location = new Point(96, 24),  AutoSize = true };
-        _rbCustom = new RadioButton { Text = "Custom", Location = new Point(170, 24), AutoSize = true };
+        // row 0: mode radios
+        var modes = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 0, 0, 4) };
+        _rbAuto   = new RadioButton { Text = "Auto",   AutoSize = true, Checked = true };
+        _rbMax    = new RadioButton { Text = "Max",    AutoSize = true };
+        _rbCustom = new RadioButton { Text = "Custom", AutoSize = true };
         _rbAuto.CheckedChanged   += (s, _) => OnFanModeChanged(s);
         _rbMax.CheckedChanged    += (s, _) => OnFanModeChanged(s);
         _rbCustom.CheckedChanged += (s, _) => OnFanModeChanged(s);
-        grpFans.Controls.Add(_rbAuto);
-        grpFans.Controls.Add(_rbMax);
-        grpFans.Controls.Add(_rbCustom);
+        modes.Controls.Add(_rbAuto);
+        modes.Controls.Add(_rbMax);
+        modes.Controls.Add(_rbCustom);
+        t.Controls.Add(modes, 0, 0);
+        t.SetColumnSpan(modes, 3);
 
-        grpFans.Controls.Add(new Label { Text = "CPU fan", Location = new Point(14, 58), AutoSize = true });
-        _cpuPct = new Label { Text = "70%", Location = new Point(272, 58), AutoSize = true };
-        _cpuBar = new TrackBar { Location = new Point(12, 76), Size = new Size(296, 40), Minimum = 0, Maximum = 100, Value = 70, TickFrequency = 10 };
+        // row 1: CPU fan
+        _cpuBar = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100, Value = 70, TickFrequency = 10, AutoSize = false, Height = 40 };
+        _cpuPct = new Label { Text = "70%", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(2, 10, 2, 0) };
         _cpuBar.ValueChanged += (_, _) => { _cpuPct.Text = _cpuBar.Value + "%"; DebounceFanApply(); };
-        grpFans.Controls.Add(_cpuPct);
-        grpFans.Controls.Add(_cpuBar);
+        t.Controls.Add(new Label { Text = "CPU fan", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(2, 10, 2, 0) }, 0, 1);
+        t.Controls.Add(_cpuBar, 1, 1);
+        t.Controls.Add(_cpuPct, 2, 1);
 
-        grpFans.Controls.Add(new Label { Text = "GPU fan", Location = new Point(14, 118), AutoSize = true });
-        _gpuPct = new Label { Text = "70%", Location = new Point(272, 118), AutoSize = true };
-        _gpuBar = new TrackBar { Location = new Point(12, 136), Size = new Size(296, 40), Minimum = 0, Maximum = 100, Value = 70, TickFrequency = 10 };
+        // row 2: GPU fan
+        _gpuBar = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100, Value = 70, TickFrequency = 10, AutoSize = false, Height = 40 };
+        _gpuPct = new Label { Text = "70%", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(2, 10, 2, 0) };
         _gpuBar.ValueChanged += (_, _) => { _gpuPct.Text = _gpuBar.Value + "%"; DebounceFanApply(); };
-        grpFans.Controls.Add(_gpuPct);
-        grpFans.Controls.Add(_gpuBar);
+        t.Controls.Add(new Label { Text = "GPU fan", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(2, 10, 2, 0) }, 0, 2);
+        t.Controls.Add(_gpuBar, 1, 2);
+        t.Controls.Add(_gpuPct, 2, 2);
 
-        var applyFan = new Button { Text = "Apply fans", Location = new Point(208, 178), Size = new Size(100, 26) };
-        applyFan.Click += (_, _) => _onApplyFan(SelectedMode(), (byte)_cpuBar.Value, (byte)_gpuBar.Value);
-        grpFans.Controls.Add(applyFan);
+        // row 3: apply
+        var apply = new Button { Text = "Apply fans", AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(2, 6, 2, 0), Padding = new Padding(10, 3, 10, 3) };
+        apply.Click += (_, _) => _onApplyFan(SelectedMode(), (byte)_cpuBar.Value, (byte)_gpuBar.Value);
+        t.Controls.Add(apply, 1, 3);
+        t.SetColumnSpan(apply, 2);
 
-        Controls.Add(grpFans);
+        return t;
+    }
 
-        var clamshell = new CheckBox
-        {
-            Text     = "Keep awake with lid closed (when docked on AC)",
-            Location = new Point(14, 384),
-            AutoSize = true,
-            Checked  = clamshellEnabled(),
-        };
+    private Control BuildOptions(Func<bool> clamshellEnabled, bool turboToggles, Func<bool> autostartEnabled)
+    {
+        var t = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false };
+
+        var clamshell = new CheckBox { Text = "Stay awake when lid closed (docked, on AC)", AutoSize = true, Checked = clamshellEnabled(), Margin = new Padding(2) };
         clamshell.CheckedChanged += (s, _) => _setClamshell(((CheckBox)s!).Checked);
-        Controls.Add(clamshell);
 
-        _turboToggle = new CheckBox
-        {
-            Text     = "Turbo key: toggle Turbo (else cycle profiles)",
-            Location = new Point(14, 408),
-            AutoSize = true,
-            Checked  = _turboTogglesInitial,
-        };
+        _turboToggle = new CheckBox { Text = "Turbo key toggles Turbo (otherwise cycles profiles)", AutoSize = true, Checked = turboToggles, Margin = new Padding(2) };
         _turboToggle.CheckedChanged += (s, _) => _onTurboToggleChanged(((CheckBox)s!).Checked);
-        Controls.Add(_turboToggle);
 
-        var autostart = new CheckBox
-        {
-            Text     = "Start with Windows",
-            Location = new Point(14, 432),
-            AutoSize = true,
-            Checked  = autostartEnabled(),
-        };
+        var autostart = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = autostartEnabled(), Margin = new Padding(2) };
         autostart.CheckedChanged += (s, _) => _setAutostart(((CheckBox)s!).Checked);
-        Controls.Add(autostart);
 
-        var lightingBtn = new Button { Text = "Lighting…", Location = new Point(236, 462), Size = new Size(92, 28) };
-        lightingBtn.Click += (_, _) => _onOpenLighting();
-        Controls.Add(lightingBtn);
+        t.Controls.Add(clamshell);
+        t.Controls.Add(_turboToggle);
+        t.Controls.Add(autostart);
+        return t;
+    }
 
-        _statusLabel = new Label { Text = string.Empty, Location = new Point(12, 466), Size = new Size(216, 40), ForeColor = Color.Gray };
-        Controls.Add(_statusLabel);
+    private Control BuildBottom()
+    {
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 0) };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        UpdateFanEnabled();
+        _statusLabel = new Label { Text = string.Empty, AutoSize = false, Dock = DockStyle.Fill, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleLeft };
+        var lighting = new Button { Text = "Lighting…", AutoSize = true, Anchor = AnchorStyles.Right, Padding = new Padding(12, 4, 12, 4), Margin = new Padding(2) };
+        lighting.Click += (_, _) => _onOpenLighting();
+
+        t.Controls.Add(_statusLabel, 0, 0);
+        t.Controls.Add(lighting, 1, 0);
+        return t;
     }
 
     private FanMode SelectedMode() =>

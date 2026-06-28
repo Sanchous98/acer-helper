@@ -3,46 +3,60 @@ using System.Windows.Forms;
 
 namespace AcerHelper;
 
-/// <summary>Lighting window: keyboard (4-zone) and lightbar mode/colour/brightness/speed.</summary>
+/// <summary>Lighting window: keyboard (all zones), per-zone keyboard, and lightbar.</summary>
 public sealed class LightingForm : Form
 {
     public LightingForm(AcerEneRgb rgb)
     {
         Text            = "Acer Helper — Lighting";
-        FormBorderStyle = FormBorderStyle.FixedSingle;
+        Font            = new Font("Segoe UI", 9F);
+        AutoScaleMode   = AutoScaleMode.Font;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox     = false;
+        MinimizeBox     = false;   // tray app; close (X) just hides the window
         StartPosition   = FormStartPosition.CenterScreen;
-        ClientSize      = new Size(356, 566);
+        AutoSize        = true;
+        AutoSizeMode    = AutoSizeMode.GrowAndShrink;
 
-        var keyboard = new RgbDevicePanel(
-            "Keyboard (all zones)", RgbEffects.Keyboard,
-            (e, c, b, s) => rgb.ApplyKeyboard(e.ModeByte, e.IsEffect, b, s, c))
-        { Location = new Point(12, 10) };
+        SuspendLayout();
 
-        var lightbar = new RgbDevicePanel(
-            "Lightbar", RgbEffects.Lightbar,
-            (e, c, b, s) => rgb.ApplyLightbar(e.ModeByte, e.IsEffect, b, s, c))
-        { Location = new Point(12, 202) };
+        var root = new TableLayoutPanel
+        {
+            Dock         = DockStyle.Fill,
+            ColumnCount  = 1,
+            AutoSize     = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding      = new Padding(12),
+            MinimumSize  = new Size(392, 0),
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        var zones = new KeyboardZonePanel(rgb) { Location = new Point(12, 394) };
+        var keyboard = new RgbDevicePanel("Keyboard (all zones)", RgbEffects.Keyboard,
+            (e, c, b, s) => rgb.ApplyKeyboard(e.ModeByte, e.IsEffect, b, s, c));
+        var zones    = new KeyboardZonePanel(rgb);
+        var lightbar = new RgbDevicePanel("Lightbar", RgbEffects.Lightbar,
+            (e, c, b, s) => rgb.ApplyLightbar(e.ModeByte, e.IsEffect, b, s, c));
 
-        Controls.Add(keyboard);
-        Controls.Add(lightbar);
-        Controls.Add(zones);
+        root.Controls.Add(keyboard);
+        root.Controls.Add(zones);
+        root.Controls.Add(lightbar);
 
         if (!rgb.Available)
         {
             keyboard.Enabled = false;
-            lightbar.Enabled = false;
             zones.Enabled    = false;
-            Controls.Add(new Label
+            lightbar.Enabled = false;
+            root.Controls.Add(new Label
             {
                 Text      = "RGB device not found: " + (rgb.LastError ?? string.Empty),
-                Location  = new Point(14, 544),
-                Size      = new Size(330, 18),
+                AutoSize  = true,
                 ForeColor = Color.Gray,
+                Margin    = new Padding(2, 4, 2, 2),
             });
         }
+
+        Controls.Add(root);
+        ResumeLayout(true);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -56,58 +70,56 @@ public sealed class LightingForm : Form
         base.OnFormClosing(e);
     }
 
-    /// <summary>A group box with mode/colour/brightness/speed controls for one light.</summary>
+    /// <summary>Mode / colour / brightness / speed controls for one light.</summary>
     private sealed class RgbDevicePanel : GroupBox
     {
         private readonly RgbEffect[] _effects;
         private readonly Func<RgbEffect, Color, byte, byte, bool> _apply;
         private readonly ComboBox _mode;
-        private readonly Button _colorBtn;
+        private readonly Button   _colorBtn;
         private readonly TrackBar _bri;
         private readonly TrackBar _speed;
         private Color _color = Color.Red;
 
         public RgbDevicePanel(string title, RgbEffect[] effects, Func<RgbEffect, Color, byte, byte, bool> apply)
         {
-            Text     = title;
-            _effects = effects;
-            _apply   = apply;
-            Size     = new Size(332, 182);
+            _effects     = effects;
+            _apply       = apply;
+            Text         = title;
+            Dock         = DockStyle.Fill;
+            AutoSize     = true;
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            Padding      = new Padding(10, 8, 10, 10);
+            Margin       = new Padding(0, 0, 0, 10);
 
-            _mode = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Location      = new Point(14, 26),
-                Size          = new Size(184, 24),
-            };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 5 };
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+
+            _mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6) };
             foreach (var e in effects) _mode.Items.Add(e.Name);
             _mode.SelectedIndex = 0;
             _mode.SelectedIndexChanged += (_, _) => UpdateEnabled();
-            Controls.Add(_mode);
 
-            _colorBtn = new Button
-            {
-                Text      = "Colour",
-                Location  = new Point(214, 25),
-                Size      = new Size(104, 26),
-                BackColor = _color,
-                FlatStyle = FlatStyle.Flat,
-            };
+            _colorBtn = new Button { Text = "Colour…", Dock = DockStyle.Fill, BackColor = _color, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Margin = new Padding(2, 2, 2, 6) };
             _colorBtn.Click += (_, _) => PickColor();
-            Controls.Add(_colorBtn);
 
-            Controls.Add(new Label { Text = "Brightness", Location = new Point(14, 60), AutoSize = true });
-            _bri = new TrackBar { Location = new Point(12, 78), Size = new Size(306, 40), Minimum = 0, Maximum = 100, Value = 100, TickFrequency = 10 };
-            Controls.Add(_bri);
+            t.Controls.Add(_mode, 0, 0);
+            t.Controls.Add(_colorBtn, 1, 0);
 
-            Controls.Add(new Label { Text = "Speed", Location = new Point(14, 120), AutoSize = true });
-            _speed = new TrackBar { Location = new Point(12, 138), Size = new Size(228, 40), Minimum = 0, Maximum = 9, Value = 5 };
-            Controls.Add(_speed);
+            t.Controls.Add(new Label { Text = "Brightness", AutoSize = true, Margin = new Padding(2, 4, 2, 0) }, 0, 1);
+            _bri = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100, Value = 100, TickFrequency = 10, AutoSize = false, Height = 40 };
+            t.Controls.Add(_bri, 0, 2);
+            t.SetColumnSpan(_bri, 2);
 
-            var applyBtn = new Button { Text = "Apply", Location = new Point(246, 142), Size = new Size(72, 28) };
+            t.Controls.Add(new Label { Text = "Speed", AutoSize = true, Margin = new Padding(2, 4, 2, 0) }, 0, 3);
+            _speed = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 9, Value = 5, AutoSize = false, Height = 40 };
+            var applyBtn = new Button { Text = "Apply", AutoSize = true, Anchor = AnchorStyles.Right, Padding = new Padding(12, 3, 12, 3), Margin = new Padding(2, 6, 2, 0) };
             applyBtn.Click += (_, _) => _apply(Current, _color, (byte)_bri.Value, (byte)_speed.Value);
-            Controls.Add(applyBtn);
+            t.Controls.Add(_speed, 0, 4);
+            t.Controls.Add(applyBtn, 1, 4);
 
+            Controls.Add(t);
             UpdateEnabled();
         }
 
@@ -136,40 +148,61 @@ public sealed class LightingForm : Form
         private static readonly byte StaticMode = RgbEffects.Keyboard[0].ModeByte;
         private readonly AcerEneRgb _rgb;
         private readonly Button[] _zoneBtns = new Button[4];
-        private readonly Color[] _colors = { Color.Red, Color.Lime, Color.Blue, Color.Magenta };
+        private readonly Color[]  _colors   = { Color.Red, Color.Lime, Color.Blue, Color.Magenta };
         private readonly TrackBar _bri;
 
         public KeyboardZonePanel(AcerEneRgb rgb)
         {
-            _rgb = rgb;
-            Text = "Keyboard — per-zone (static)";
-            Size = new Size(332, 162);
+            _rgb         = rgb;
+            Text         = "Keyboard — per-zone (static)";
+            Dock         = DockStyle.Fill;
+            AutoSize     = true;
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            Padding      = new Padding(10, 8, 10, 10);
+            Margin       = new Padding(0, 0, 0, 10);
 
-            Controls.Add(new Label { Text = "Zone colours (left → right)", Location = new Point(14, 24), AutoSize = true });
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 3 };
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            t.Controls.Add(new Label { Text = "Zone colours (left → right)", AutoSize = true, Margin = new Padding(2, 2, 2, 4) }, 0, 0);
+
+            // row 1: four equal-width zone buttons
+            var zonesRow = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 4, RowCount = 1 };
+            zonesRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             for (int i = 0; i < 4; i++)
             {
                 int idx = i;
+                zonesRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
                 var btn = new Button
                 {
                     Text      = (i + 1).ToString(),
-                    Location  = new Point(14 + i * 78, 46),
-                    Size      = new Size(70, 34),
+                    Dock      = DockStyle.Fill,
                     BackColor = _colors[i],
                     ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
+                    Margin    = new Padding(2),
                 };
                 btn.Click += (_, _) => PickZone(idx);
                 _zoneBtns[i] = btn;
-                Controls.Add(btn);
+                zonesRow.Controls.Add(btn);
             }
+            t.Controls.Add(zonesRow, 0, 1);
 
-            Controls.Add(new Label { Text = "Brightness", Location = new Point(14, 92), AutoSize = true });
-            _bri = new TrackBar { Location = new Point(12, 110), Size = new Size(228, 40), Minimum = 0, Maximum = 100, Value = 100, TickFrequency = 10 };
-            Controls.Add(_bri);
-
-            var applyBtn = new Button { Text = "Apply", Location = new Point(246, 114), Size = new Size(72, 28) };
+            // row 2: brightness label + slider + apply
+            _bri = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100, Value = 100, TickFrequency = 10, AutoSize = false, Height = 40 };
+            var applyBtn = new Button { Text = "Apply", AutoSize = true, Anchor = AnchorStyles.Right, Padding = new Padding(12, 3, 12, 3), Margin = new Padding(2, 8, 2, 0) };
             applyBtn.Click += (_, _) => ApplyZones();
-            Controls.Add(applyBtn);
+
+            var briRow = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 1 };
+            briRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            briRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            briRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            briRow.Controls.Add(new Label { Text = "Brightness", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(2, 12, 8, 0) }, 0, 0);
+            briRow.Controls.Add(_bri, 1, 0);
+            briRow.Controls.Add(applyBtn, 2, 0);
+            t.Controls.Add(briRow, 0, 2);
+
+            Controls.Add(t);
         }
 
         private void PickZone(int i)
