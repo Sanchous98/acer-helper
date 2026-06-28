@@ -19,9 +19,11 @@ public sealed class AcerApGe : IDisposable
     private const string ScopePath = @"\\.\root\WMI";
     private const string ClassName = "APGeAction";
 
-    private const uint  USB_GET   = 0x4;
-    private const ulong USB_OFF   = 663300;        // val 0
-    private const ulong USB_ON    = 659204;        // val 10 (charge until battery 10%)
+    private const uint  USB_GET = 0x4;
+    private const ulong USB_OFF = 663300;          // 0  = off
+    private const ulong USB_10  = 659204;          // stop charging at 10%
+    private const ulong USB_20  = 1314564;         // stop charging at 20%
+    private const ulong USB_30  = 1969924;         // stop charging at 30%
 
     private const uint  KBD_GET     = 0x88401;
     private const ulong KBD_GET_ON  = 0x1E0000080000;
@@ -63,19 +65,29 @@ public sealed class AcerApGe : IDisposable
         _ = outp["uiOutput"];
     }
 
-    // ---- USB charging while powered off ----
+    // ---- USB charging while powered off (off / stop at 10% / 20% / 30%) ----
 
-    public bool? GetUsbCharging()
+    /// <summary>Current USB-charging threshold: 0=off, 10/20/30; null if unsupported.</summary>
+    public int? GetUsbChargingLevel()
     {
         if (_obj == null) return null;
-        try { return GetFunction(USB_GET) != USB_OFF; }
+        try
+        {
+            ulong r = GetFunction(USB_GET);
+            if (r == USB_OFF) return 0;
+            if (r == USB_10)  return 10;
+            if (r == USB_20)  return 20;
+            if (r == USB_30)  return 30;
+            return null;
+        }
         catch (Exception ex) { LastError = ex.Message; return null; }
     }
 
-    public bool SetUsbCharging(bool on)
+    public bool SetUsbChargingLevel(int level)
     {
         if (_obj == null) return false;
-        try { SetFunction(on ? USB_ON : USB_OFF); return true; }
+        ulong v = level switch { 10 => USB_10, 20 => USB_20, 30 => USB_30, _ => USB_OFF };
+        try { SetFunction(v); return true; }
         catch (Exception ex) { LastError = ex.Message; return false; }
     }
 

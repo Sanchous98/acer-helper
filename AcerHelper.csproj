@@ -11,7 +11,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.10.1</Version>
+    <Version>0.13.1</Version>
 
     <ApplicationManifest>app.manifest</ApplicationManifest>
 

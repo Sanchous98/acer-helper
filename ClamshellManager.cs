@@ -15,6 +15,7 @@ public sealed class ClamshellManager : IDisposable
     private readonly EventHandler _onDisplay;
     private readonly PowerModeChangedEventHandler _onPower;
     private bool _enabled;
+    private bool? _applied;   // last lid action written (true = do nothing); null = unknown
 
     public bool Enabled   => _enabled;
     public bool Supported => Clamshell.Available;
@@ -30,17 +31,21 @@ public sealed class ClamshellManager : IDisposable
     public void SetEnabled(bool value)
     {
         _enabled = value;
-        if (!value) Clamshell.Disable();   // restore "sleep on lid close"
+        if (!value) { Clamshell.Disable(); _applied = false; }  // restore "sleep on lid close"
+        else _applied = null;                                   // force re-apply on next Evaluate
         Evaluate();
     }
 
-    /// <summary>Apply the correct lid action for the current display + power state.</summary>
+    /// <summary>Apply the correct lid action for the current display + power state.
+    /// Writes the power setting only when the desired state actually changes.</summary>
     public void Evaluate()
     {
         if (!_enabled) return;
         bool active = DisplayInfo.HasExternalDisplay() && OnAc();
+        if (_applied == active) return;    // already in this state - don't rewrite power policy
         if (active) Clamshell.Enable();    // lid close = do nothing
         else        Clamshell.Disable();   // lid close = sleep
+        _applied = active;
     }
 
     private static bool OnAc()

@@ -3,8 +3,13 @@ using System.Windows.Forms;
 
 namespace AcerHelper;
 
-/// <summary>A hardware on/off option shown in the Options group.</summary>
-public sealed record OptionToggle(string Label, bool Supported, bool Initial, Action<bool> OnChange);
+/// <summary>A hardware on/off option shown in the Options group.
+/// If <paramref name="Confirm"/> is set, it is asked before turning the option ON;
+/// returning false reverts the checkbox.</summary>
+public sealed record OptionToggle(string Label, bool Supported, bool Initial, Action<bool> OnChange, Func<bool>? Confirm = null);
+
+/// <summary>A hardware multi-choice option (dropdown) shown in the Options group.</summary>
+public sealed record OptionChoice(string Label, bool Supported, IReadOnlyList<string> Options, int InitialIndex, Action<int> OnChange);
 
 /// <summary>
 /// Compact window: performance profile, live monitoring, fan control and options.
@@ -19,7 +24,9 @@ public sealed class MainForm : Form
     private readonly Action<bool> _setClamshell;
     private readonly Action<bool> _onTurboToggleChanged;
     private readonly Action<bool> _setAutostart;
+    private readonly Action<int, int, int> _onFanSettingsChanged;
     private readonly System.Windows.Forms.Timer _fanDebounce = new() { Interval = 400 };
+    private bool _loading = true;   // suppress fan apply/persist while restoring saved state
 
     private readonly Dictionary<AcerProfile, Button> _profileButtons = new();
     private CheckBox    _turboToggle = null!;
@@ -43,7 +50,8 @@ public sealed class MainForm : Form
                     Action onOpenLighting, Func<bool> clamshellEnabled, Action<bool> setClamshell,
                     bool turboToggles, Action<bool> onTurboToggleChanged,
                     Func<bool> autostartEnabled, Action<bool> setAutostart,
-                    IReadOnlyList<OptionToggle> hwToggles)
+                    IReadOnlyList<OptionToggle> hwToggles, IReadOnlyList<OptionChoice> hwChoices,
+                    int fanModeInit, int cpuFanInit, int gpuFanInit, Action<int, int, int> onFanSettingsChanged)
     {
         _onApplyProfile       = onApplyProfile;
         _onApplyFan           = onApplyFan;
@@ -51,6 +59,7 @@ public sealed class MainForm : Form
         _setClamshell         = setClamshell;
         _onTurboToggleChanged = onTurboToggleChanged;
         _setAutostart         = setAutostart;
+        _onFanSettingsChanged = onFanSettingsChanged;
 
         // debounce: apply fan speed once, ~400 ms after the slider stops moving
         _fanDebounce.Tick += (_, _) => { _fanDebounce.Stop(); ApplyNow(); };
@@ -82,13 +91,23 @@ public sealed class MainForm : Form
         root.Controls.Add(WrapGroup("Performance profile", BuildProfiles()));
         root.Controls.Add(WrapGroup("Monitoring",          BuildMonitor()));
         root.Controls.Add(WrapGroup("Fans",                BuildFans()));
-        root.Controls.Add(WrapGroup("Options",             BuildOptions(clamshellEnabled, turboToggles, autostartEnabled, hwToggles)));
+        root.Controls.Add(WrapGroup("Options",             BuildOptions(clamshellEnabled, turboToggles, autostartEnabled, hwToggles, hwChoices)));
         root.Controls.Add(BuildBottom());
 
         Controls.Add(root);
         ResumeLayout(true);
 
+        // restore saved fan selection (guarded by _loading -> no apply during restore)
+        _cpuBar.Value = Math.Min(Math.Max(cpuFanInit, 0), 100);
+        _gpuBar.Value = Math.Min(Math.Max(gpuFanInit, 0), 100);
+        _cpuPct.Text  = _cpuBar.Value + "%";
+        _gpuPct.Text  = _gpuBar.Value + "%";
+        (fanModeInit == (int)FanMode.Max ? _rbMax
+         : fanModeInit == (int)FanMode.Custom ? _rbCustom
+         : _rbAuto).Checked = true;
+
         UpdateFanEnabled();
+        _loading = false;
     }
 
     /// <summary>Wrap a control in an auto-sizing GroupBox that fills its row width.</summary>
@@ -188,17 +207,43 @@ public sealed class MainForm : Form
     }
 
     private Control BuildOptions(Func<bool> clamshellEnabled, bool turboToggles, Func<bool> autostartEnabled,
-                                 IReadOnlyList<OptionToggle> hwToggles)
+                                 IReadOnlyList<OptionToggle> hwToggles, IReadOnlyList<OptionChoice> hwChoices)
     {
         var t = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false };
 
-        // hardware toggles (battery limit, USB charging, LCD overdrive, backlight timeout)
+        // hardware toggles (battery limit, LCD overdrive, backlight timeout)
         foreach (OptionToggle tog in hwToggles)
         {
             var cb = new CheckBox { Text = tog.Label, AutoSize = true, Checked = tog.Initial, Enabled = tog.Supported, Margin = new Padding(2) };
             Action<bool> onChange = tog.OnChange;
-            cb.CheckedChanged += (s, _) => onChange(((CheckBox)s!).Checked);
+            Func<bool>?  confirm  = tog.Confirm;
+            bool guard = false;
+            cb.CheckedChanged += (s, _) =>
+            {
+                if (guard) return;
+                var box = (CheckBox)s!;
+                if (box.Checked && confirm != null && !confirm())   // ask before enabling
+                {
+                    guard = true; box.Checked = false; guard = false;
+                    return;
+                }
+                onChange(box.Checked);
+            };
             t.Controls.Add(cb);
+        }
+
+        // hardware dropdowns (USB charging threshold)
+        foreach (OptionChoice ch in hwChoices)
+        {
+            var row = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0), Enabled = ch.Supported };
+            row.Controls.Add(new Label { Text = ch.Label, AutoSize = true, Margin = new Padding(2, 6, 6, 2) });
+            var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80, Margin = new Padding(2) };
+            foreach (string o in ch.Options) combo.Items.Add(o);
+            combo.SelectedIndex = Math.Min(Math.Max(ch.InitialIndex, 0), ch.Options.Count - 1);
+            Action<int> onPick = ch.OnChange;
+            combo.SelectedIndexChanged += (s, _) => onPick(((ComboBox)s!).SelectedIndex);
+            row.Controls.Add(combo);
+            t.Controls.Add(row);
         }
 
         var clamshell = new CheckBox { Text = "Stay awake when lid closed (docked, on AC)", AutoSize = true, Checked = clamshellEnabled(), Margin = new Padding(2) };
@@ -244,18 +289,22 @@ public sealed class MainForm : Form
     private void OnFanModeChanged(object? sender)
     {
         UpdateFanEnabled();
+        if (_loading) return;
         if (sender is RadioButton rb && rb.Checked) ApplyNow();   // apply live on mode switch
     }
 
     private void DebounceFanApply()
     {
-        if (!_rbCustom.Checked) return;      // only custom uses the sliders
+        if (_loading || !_rbCustom.Checked) return;   // only custom uses the sliders
         _fanDebounce.Stop();
         _fanDebounce.Start();                // restart; applies once after the slider settles
     }
 
     private void ApplyNow()
-        => _onApplyFan(SelectedMode(), (byte)_cpuBar.Value, (byte)_gpuBar.Value);
+    {
+        _onApplyFan(SelectedMode(), (byte)_cpuBar.Value, (byte)_gpuBar.Value);
+        _onFanSettingsChanged((int)SelectedMode(), _cpuBar.Value, _gpuBar.Value);   // persist choice
+    }
 
     /// <summary>Place the window in the bottom-right corner, just above the tray.</summary>
     public void PositionNearTray()

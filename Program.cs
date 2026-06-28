@@ -50,10 +50,15 @@ internal sealed class TrayAppContext : ApplicationContext
                              b => { _settings.TurboToggles = b; _settings.Save(); },
                              Autostart.IsEnabled,
                              b => Autostart.SetEnabled(b),
-                             BuildHardwareToggles());
+                             BuildHardwareToggles(), BuildHardwareChoices(),
+                             _settings.FanMode, _settings.CpuFan, _settings.GpuFan,
+                             (m, c, g) => { _settings.FanMode = m; _settings.CpuFan = c; _settings.GpuFan = g; _settings.Save(); });
 
         // restore persisted clamshell preference
         if (_settings.Clamshell) _clamshell.SetEnabled(true);
+
+        // restore persisted Bluelight Shield (gamma) level
+        if (_settings.Bluelight > 0) Bluelight.Apply(_settings.Bluelight);
 
         var menu = new ContextMenuStrip();
         foreach (var p in AcerProfileInfo.All)
@@ -229,20 +234,41 @@ internal sealed class TrayAppContext : ApplicationContext
     private IReadOnlyList<OptionToggle> BuildHardwareToggles()
     {
         bool? batt = _battery.GetLimit();
-        bool? usb  = _apge.GetUsbCharging();
+        bool? cal  = _battery.GetCalibration();
         bool? lcd  = _wmi.GetLcdOverdrive();
         bool? kbd  = _apge.GetBacklightTimeout();
 
         return new List<OptionToggle>
         {
-            new("Battery charge limit (~80%)",   batt.HasValue, batt ?? false,
+            new("Battery charge limit (~80%)", batt.HasValue, batt ?? false,
                 b => RunHwSet(() => _battery.SetLimit(b),         "Battery limit",     () => _battery.LastError)),
-            new("USB charging when powered off", usb.HasValue,  usb  ?? false,
-                b => RunHwSet(() => _apge.SetUsbCharging(b),      "USB charging",      () => _apge.LastError)),
-            new("LCD overdrive",                 lcd.HasValue,  lcd  ?? false,
+            new("LCD overdrive",               lcd.HasValue,  lcd  ?? false,
                 b => RunHwSet(() => _wmi.SetLcdOverdrive(b),      "LCD overdrive",     () => _wmi.LastError)),
-            new("Keyboard backlight timeout",    kbd.HasValue,  kbd  ?? false,
+            new("Keyboard backlight timeout",  kbd.HasValue,  kbd  ?? false,
                 b => RunHwSet(() => _apge.SetBacklightTimeout(b), "Backlight timeout", () => _apge.LastError)),
+            new("Battery calibration (runs a full cycle)", cal.HasValue, cal ?? false,
+                b => RunHwSet(() => _battery.SetCalibration(b),   "Battery calibration", () => _battery.LastError),
+                Confirm: () => MessageBox.Show(
+                    "Start battery calibration?\n\nThe battery will be charged to 100% and then fully discharged to recalibrate the gauge. " +
+                    "This can take several hours; keep the laptop on AC power. You can cancel by unticking this box.",
+                    "Acer Helper", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes),
+        };
+    }
+
+    /// <summary>Build the hardware dropdowns (USB charging threshold).</summary>
+    private IReadOnlyList<OptionChoice> BuildHardwareChoices()
+    {
+        int[] levels = { 0, 10, 20, 30 };
+        int? usb = _apge.GetUsbChargingLevel();
+        int idx = Array.IndexOf(levels, usb ?? 0);
+        if (idx < 0) idx = 0;
+
+        return new List<OptionChoice>
+        {
+            new("USB charging when off:", usb.HasValue, new[] { "Off", "10%", "20%", "30%" }, idx,
+                i => RunHwSet(() => _apge.SetUsbChargingLevel(levels[i]), "USB charging", () => _apge.LastError)),
+            new("Bluelight Shield:", true, new[] { "Off", "Low", "Medium", "High", "Long-use" }, _settings.Bluelight,
+                i => { Bluelight.Apply(i); _settings.Bluelight = i; _settings.Save(); }),
         };
     }
 
