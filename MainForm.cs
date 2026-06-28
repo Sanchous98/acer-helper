@@ -59,7 +59,8 @@ public sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox     = false;
         MinimizeBox     = false;   // app lives in the tray; close (X) just hides it
-        StartPosition   = FormStartPosition.CenterScreen;
+        StartPosition   = FormStartPosition.Manual;   // we place it next to the tray
+        ShowInTaskbar   = false;
         AutoSize        = true;
         AutoSizeMode    = AutoSizeMode.GrowAndShrink;
 
@@ -241,6 +242,24 @@ public sealed class MainForm : Form
 
     private void ApplyNow()
         => _onApplyFan(SelectedMode(), (byte)_cpuBar.Value, (byte)_gpuBar.Value);
+
+    /// <summary>Place the window in the bottom-right corner, just above the tray.</summary>
+    public void PositionNearTray()
+    {
+        Size sz = AutoSize ? PreferredSize : Size;
+        Screen screen = Screen.PrimaryScreen ?? Screen.FromControl(this);
+        Rectangle wa = screen.WorkingArea;
+        const int margin = 12;
+        Location = new Point(
+            Math.Max(wa.Left, wa.Right  - sz.Width  - margin),
+            Math.Max(wa.Top,  wa.Bottom - sz.Height - margin));
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        PositionNearTray();   // final size is known once shown
+    }
 
     /// <summary>Closing the window hides it to tray instead of exiting.</summary>
     protected override void OnFormClosing(FormClosingEventArgs e)

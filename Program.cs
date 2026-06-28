@@ -24,7 +24,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly AcerWmi _wmi = new();
     private readonly AcerEneRgb _rgb = new();
     private readonly ClamshellManager _clamshell = new();
-    private readonly TurboKeyWatcher _turbo;
+    private readonly AcerHotkeyWatcher _hotkeys;
     private readonly Settings _settings = Settings.Load();
     private readonly Dictionary<AcerProfile, Icon> _icons = new();
     private AcerProfile _lastNonTurbo = AcerProfile.Balanced;
@@ -83,7 +83,15 @@ internal sealed class TrayAppContext : ApplicationContext
                 "Acer Helper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
-        _turbo = new TurboKeyWatcher(OnTurbo);
+        _hotkeys = new AcerHotkeyWatcher();
+        _hotkeys.Pressed += key =>
+        {
+            switch (key)
+            {
+                case AcerHotkey.Turbo: OnTurbo(); break;
+                case AcerHotkey.Nitro: OnNitro(); break;
+            }
+        };
 
         Refresh();
 
@@ -201,6 +209,19 @@ internal sealed class TrayAppContext : ApplicationContext
         }
     }
 
+    private DateTime _lastNitroPress = DateTime.MinValue;
+
+    /// <summary>Nitro key: toggle our window next to the tray.</summary>
+    private void OnNitro()
+    {
+        DateTime now = DateTime.UtcNow;
+        if ((now - _lastNitroPress).TotalMilliseconds < 600) return;
+        _lastNitroPress = now;
+
+        if (_form.Visible) _form.Hide();
+        else               ShowForm();
+    }
+
     /// <summary>A small colour-coded tray icon for the active profile (cached).</summary>
     private Icon ProfileIcon(AcerProfile p)
     {
@@ -236,6 +257,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         _form.Show();
         _form.WindowState = FormWindowState.Normal;
+        _form.PositionNearTray();   // re-anchor next to the tray on every show
         _form.Activate();
     }
 
@@ -254,7 +276,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _wmi.Dispose();
         _rgb.Dispose();
         _clamshell.Dispose();
-        _turbo.Dispose();
+        _hotkeys.Dispose();
         foreach (Icon i in _icons.Values) { DestroyIcon(i.Handle); i.Dispose(); }
         ExitThread();
     }
