@@ -24,6 +24,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly AcerWmi _wmi = new();
     private readonly AcerEneRgb _rgb = new();
     private readonly ClamshellManager _clamshell = new();
+    private readonly AcerBattery _battery = new();
+    private readonly AcerApGe _apge = new();
     private readonly AcerHotkeyWatcher _hotkeys;
     private readonly Settings _settings = Settings.Load();
     private readonly Dictionary<AcerProfile, Icon> _icons = new();
@@ -47,7 +49,8 @@ internal sealed class TrayAppContext : ApplicationContext
                              _settings.TurboToggles,
                              b => { _settings.TurboToggles = b; _settings.Save(); },
                              Autostart.IsEnabled,
-                             b => Autostart.SetEnabled(b));
+                             b => Autostart.SetEnabled(b),
+                             BuildHardwareToggles());
 
         // restore persisted clamshell preference
         if (_settings.Clamshell) _clamshell.SetEnabled(true);
@@ -222,6 +225,30 @@ internal sealed class TrayAppContext : ApplicationContext
         else               ShowForm();
     }
 
+    /// <summary>Build the hardware on/off toggles, reading current state and support.</summary>
+    private IReadOnlyList<OptionToggle> BuildHardwareToggles()
+    {
+        bool? batt = _battery.GetLimit();
+        bool? usb  = _apge.GetUsbCharging();
+        bool? lcd  = _wmi.GetLcdOverdrive();
+        bool? kbd  = _apge.GetBacklightTimeout();
+
+        return new List<OptionToggle>
+        {
+            new("Battery charge limit (~80%)",   batt.HasValue, batt ?? false,
+                b => { if (!_battery.SetLimit(b))          NotifyFail("Battery limit",    _battery.LastError); }),
+            new("USB charging when powered off", usb.HasValue,  usb  ?? false,
+                b => { if (!_apge.SetUsbCharging(b))       NotifyFail("USB charging",     _apge.LastError); }),
+            new("LCD overdrive",                 lcd.HasValue,  lcd  ?? false,
+                b => { if (!_wmi.SetLcdOverdrive(b))       NotifyFail("LCD overdrive",    _wmi.LastError); }),
+            new("Keyboard backlight timeout",    kbd.HasValue,  kbd  ?? false,
+                b => { if (!_apge.SetBacklightTimeout(b))  NotifyFail("Backlight timeout", _apge.LastError); }),
+        };
+    }
+
+    private void NotifyFail(string what, string? err)
+        => Notify(what + " failed" + (err != null ? ": " + err : string.Empty), ToolTipIcon.Error);
+
     /// <summary>A small colour-coded tray icon for the active profile (cached).</summary>
     private Icon ProfileIcon(AcerProfile p)
     {
@@ -276,6 +303,8 @@ internal sealed class TrayAppContext : ApplicationContext
         _wmi.Dispose();
         _rgb.Dispose();
         _clamshell.Dispose();
+        _battery.Dispose();
+        _apge.Dispose();
         _hotkeys.Dispose();
         foreach (Icon i in _icons.Values) { DestroyIcon(i.Handle); i.Dispose(); }
         ExitThread();

@@ -3,6 +3,9 @@ using System.Windows.Forms;
 
 namespace AcerHelper;
 
+/// <summary>A hardware on/off option shown in the Options group.</summary>
+public sealed record OptionToggle(string Label, bool Supported, bool Initial, Action<bool> OnChange);
+
 /// <summary>
 /// Compact window: performance profile, live monitoring, fan control and options.
 /// Layout is built entirely from TableLayoutPanel/FlowLayoutPanel so it stays
@@ -39,7 +42,8 @@ public sealed class MainForm : Form
     public MainForm(Action<AcerProfile> onApplyProfile, Action<FanMode, byte, byte> onApplyFan,
                     Action onOpenLighting, Func<bool> clamshellEnabled, Action<bool> setClamshell,
                     bool turboToggles, Action<bool> onTurboToggleChanged,
-                    Func<bool> autostartEnabled, Action<bool> setAutostart)
+                    Func<bool> autostartEnabled, Action<bool> setAutostart,
+                    IReadOnlyList<OptionToggle> hwToggles)
     {
         _onApplyProfile       = onApplyProfile;
         _onApplyFan           = onApplyFan;
@@ -78,7 +82,7 @@ public sealed class MainForm : Form
         root.Controls.Add(WrapGroup("Performance profile", BuildProfiles()));
         root.Controls.Add(WrapGroup("Monitoring",          BuildMonitor()));
         root.Controls.Add(WrapGroup("Fans",                BuildFans()));
-        root.Controls.Add(WrapGroup("Options",             BuildOptions(clamshellEnabled, turboToggles, autostartEnabled)));
+        root.Controls.Add(WrapGroup("Options",             BuildOptions(clamshellEnabled, turboToggles, autostartEnabled, hwToggles)));
         root.Controls.Add(BuildBottom());
 
         Controls.Add(root);
@@ -183,9 +187,19 @@ public sealed class MainForm : Form
         return t;
     }
 
-    private Control BuildOptions(Func<bool> clamshellEnabled, bool turboToggles, Func<bool> autostartEnabled)
+    private Control BuildOptions(Func<bool> clamshellEnabled, bool turboToggles, Func<bool> autostartEnabled,
+                                 IReadOnlyList<OptionToggle> hwToggles)
     {
         var t = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false };
+
+        // hardware toggles (battery limit, USB charging, LCD overdrive, backlight timeout)
+        foreach (OptionToggle tog in hwToggles)
+        {
+            var cb = new CheckBox { Text = tog.Label, AutoSize = true, Checked = tog.Initial, Enabled = tog.Supported, Margin = new Padding(2) };
+            Action<bool> onChange = tog.OnChange;
+            cb.CheckedChanged += (s, _) => onChange(((CheckBox)s!).Checked);
+            t.Controls.Add(cb);
+        }
 
         var clamshell = new CheckBox { Text = "Stay awake when lid closed (docked, on AC)", AutoSize = true, Checked = clamshellEnabled(), Margin = new Padding(2) };
         clamshell.CheckedChanged += (s, _) => _setClamshell(((CheckBox)s!).Checked);

@@ -118,6 +118,37 @@ public sealed class AcerWmi : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // LCD overdrive (response-time boost). Uses Set/GetGamingProfile, NOT misc.
+    //   Get: GetGamingProfile(0) -> bit 0x1000000000000 set when on.
+    //   Set: SetGamingProfile(on ? 0x1000000000010 : 0x10).
+    // (Encoding from Linuwu-Sense.)
+    // -------------------------------------------------------------------------
+    private const ulong LCD_OD_SET_ON  = 0x1000000000010;
+    private const ulong LCD_OD_SET_OFF = 0x10;
+    private const ulong LCD_OD_GET_BIT = 0x1000000000000;
+
+    /// <summary>True if LCD overdrive is on; null if unsupported/failed.</summary>
+    public bool? GetLcdOverdrive()
+    {
+        if (_obj == null) return null;
+        try { return (Invoke("GetGamingProfile", (uint)0x00) & LCD_OD_GET_BIT) != 0; }
+        catch (Exception ex) { LastError = ex.Message; return null; }
+    }
+
+    /// <summary>Enable/disable LCD overdrive. Returns true on success.</summary>
+    public bool SetLcdOverdrive(bool on)
+    {
+        if (_obj == null) return false;
+        try
+        {
+            ulong outv = Invoke("SetGamingProfile", on ? LCD_OD_SET_ON : LCD_OD_SET_OFF);
+            if ((outv & 0xFF) != 0) { LastError = $"SetGamingProfile status={(outv & 0xFF)}"; return false; }
+            return true;
+        }
+        catch (Exception ex) { LastError = ex.Message; return false; }
+    }
+
+    // -------------------------------------------------------------------------
     // Fans & sensors
     // -------------------------------------------------------------------------
 
