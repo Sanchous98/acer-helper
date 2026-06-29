@@ -5,14 +5,13 @@ namespace AcerHelper.UI;
 
 /// <summary>Windows-only window chrome via DWM, not exposed by Avalonia: rounded corners and the
 /// modern system-backdrop material. The modern Acrylic backdrop (DWMSBT_TRANSIENTWINDOW) is
-/// translucent (shows the windows behind) AND is composited by DWM, so unlike the legacy acrylic it
-/// resizes/moves cleanly without the flicker.</summary>
+/// translucent — it shows the windows behind — and DWM composites it (so a static window doesn't
+/// show square blurred corners behind the rounded content border).</summary>
 internal static class WindowEffects
 {
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     private const int DWMWCP_ROUND = 2;
-    private const int DWMSBT_MAINWINDOW = 2;       // Mica
     private const int DWMSBT_TRANSIENTWINDOW = 3;  // Acrylic (translucent, see-through)
 
     /// <summary>Round the corners and apply the modern translucent Acrylic backdrop.</summary>

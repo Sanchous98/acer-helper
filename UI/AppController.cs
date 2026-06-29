@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using AcerHelper.Features;
 using Avalonia;
@@ -25,6 +26,11 @@ internal sealed class AppController
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
+    // Options/Lighting side panel: a separate acrylic window shown to the main flyout's left, no
+    // animation. _sideContent is what it currently shows (null = hidden).
+    private readonly SidePanelWindow? _sideWin;
+    private object? _sideContent;
+
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
 
@@ -46,6 +52,15 @@ internal sealed class AppController
             d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()),
             lighting);
         _main = new MainWindow { DataContext = _vm };
+        _main.Deactivated += (_, _) => MaybeDismiss();
+
+        if (_vm.ShowOptions || _vm.ShowLighting)
+        {
+            _sideWin = new SidePanelWindow();
+            _sideWin.SetBack(_vm.CloseDrawerCommand);
+            _sideWin.Deactivated += (_, _) => MaybeDismiss();
+        }
+        _vm.PropertyChanged += OnVmChanged;
 
         _svc.ApplyStartupState();
 
@@ -196,7 +211,7 @@ internal sealed class AppController
         var now = DateTime.UtcNow;
         if ((now - _lastNitro).TotalMilliseconds < 600) return;
         _lastNitro = now;
-        if (_main.IsVisible) _main.HideFlyout();
+        if (_main.IsVisible) HideAll();
         else ShowMain();
     }
 
@@ -225,7 +240,7 @@ internal sealed class AppController
 
     private void ToggleMain()
     {
-        if (_main.IsVisible) { _main.HideFlyout(); return; }
+        if (_main.IsVisible) { HideAll(); return; }
         // If the flyout just light-dismissed itself because this very click moved focus off it,
         // don't reopen it — otherwise the tray icon could never close the panel.
         if ((DateTime.UtcNow - _main.LastDismissedUtc).TotalMilliseconds < 300) return;
@@ -240,9 +255,81 @@ internal sealed class AppController
 
     private void ShowLighting()
     {
-        // Lighting is a drawer of the main flyout, not a separate top-level menu.
+        // Lighting is a side panel of the main flyout, not a separate top-level menu.
         ShowMain();
         _vm.OpenLightingCommand.Execute(null);
+    }
+
+    // ---- side panel (Options / Lighting) ----
+
+    private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.IsDrawerOpen) or nameof(MainViewModel.DrawerContent))
+            UpdateSidePanel();
+    }
+
+    /// <summary>Show/hide/swap the side panel to match the view-model (no animation).</summary>
+    private void UpdateSidePanel()
+    {
+        if (_sideWin == null) return;
+
+        object? want = _vm.IsDrawerOpen ? _vm.DrawerContent : null;
+        if (ReferenceEquals(want, _sideContent)) return;
+
+        if (want == null)
+        {
+            // Close: hide the panel and return focus to the main flyout.
+            _sideContent = null;
+            _main.SuppressDismiss = true;
+            _sideWin.Hide();
+            _main.Activate();
+            return;
+        }
+
+        bool firstOpen = _sideContent == null;
+        _sideContent = want;
+        _sideWin.SetPanel(_vm.DrawerTitle, want);   // switching just swaps content in place
+        if (firstOpen)
+        {
+            PositionSide();
+            _main.SuppressDismiss = true;   // showing our own window isn't a click "outside"
+            _sideWin.Show();
+        }
+    }
+
+    /// <summary>Pin the side window to the main flyout's left edge with an 8px gap, matching its height.</summary>
+    private void PositionSide()
+    {
+        if (_sideWin == null) return;
+        var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
+        double s = screen?.Scaling ?? 1.0;
+        int wpx = (int)(360 * s);
+        int gapPx = (int)(8 * s);
+        _sideWin.Height = _main.Bounds.Height;
+        _sideWin.Position = new PixelPoint(_main.Position.X - wpx - gapPx, _main.Position.Y);
+    }
+
+    /// <summary>Light-dismiss: if focus left both the main flyout and the side panel, the user clicked
+    /// outside the app, so hide everything. SuppressDismiss skips the one deactivation we cause by
+    /// opening our own window/dialog.</summary>
+    private void MaybeDismiss()
+    {
+        if (_main.SuppressDismiss) { _main.SuppressDismiss = false; return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_main.IsActive) return;
+            if (_sideWin is { IsActive: true }) return;
+            HideAll();
+        }, DispatcherPriority.Background);
+    }
+
+    private void HideAll()
+    {
+        _sideWin?.Hide();
+        _sideContent = null;
+        _vm.IsDrawerOpen = false;
+        _main.MarkDismissed();
+        _main.Hide();
     }
 
     private void ExitApp()
