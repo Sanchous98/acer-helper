@@ -5,7 +5,7 @@
              x:Class="AcerHelper.UI.App">
 
   <!-- Capability section -> view map. This is the dashboard "framework": MainViewModel exposes the
-       section view-models (split across the full-width and two-column areas) and these templates
+       section view-models (the full-width main column) and the drawer contents, and these templates
        render each one. A new feature/vendor section = a new SectionViewModel + a DataTemplate here;
        the shell (MainWindow) is untouched. -->
   <Application.DataTemplates>
@@ -13,7 +13,9 @@
     <DataTemplate DataType="vm:ProfilesViewModel"><views:ProfilesView/></DataTemplate>
     <DataTemplate DataType="vm:FansViewModel"><views:FansView/></DataTemplate>
     <DataTemplate DataType="vm:BatteryViewModel"><views:BatteryView/></DataTemplate>
+    <!-- Drawer contents (hosted in the main window's slide-out side panel). -->
     <DataTemplate DataType="vm:OptionsViewModel"><views:OptionsView/></DataTemplate>
+    <DataTemplate DataType="vm:LightingViewModel"><views:LightingView/></DataTemplate>
   </Application.DataTemplates>
 
   <Application.Resources>
@@ -119,6 +121,34 @@
       <Setter Property="OnContent" Value="" />
       <Setter Property="OffContent" Value="" />
       <Setter Property="MinWidth" Value="0" />
+    </Style>
+
+    <!-- Side drawer: a clipping container whose width animates 0 <-> open. The inner acrylic panel is
+         fixed-width and right-aligned, so as the container grows the panel is revealed from the right
+         (it appears to slide out leftward from behind the main flyout). Width change drives the
+         window's auto-size; code-behind keeps the bottom-right corner anchored to the tray. -->
+    <Style Selector="Border.drawer">
+      <Setter Property="Width" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Width" Duration="0:0:0.20" Easing="CubicEaseOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Border.drawer.open">
+      <Setter Property="Width" Value="360" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+
+    <!-- Borderless icon button (drawer close). -->
+    <Style Selector="Button.icon">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="7,2" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
     </Style>
 
     <!-- Current-profile chip in the header: a faint accent pill with an accent dot + label. -->

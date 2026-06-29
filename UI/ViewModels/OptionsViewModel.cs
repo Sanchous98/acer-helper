@@ -11,8 +11,6 @@ public sealed class OptionsViewModel : SectionViewModel
 {
     public ObservableCollection<ObservableObject> Rows { get; } = [];
 
-    public override double LayoutWeight => 0.6 + Rows.Count;
-
     public static OptionsViewModel? TryCreate(IDevice device, UiActions a)
     {
         var vm = new OptionsViewModel();

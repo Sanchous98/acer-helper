@@ -6,76 +6,65 @@ using CommunityToolkit.Mvvm.Input;
 namespace AcerHelper.UI.ViewModels;
 
 /// <summary>The dashboard root: device name + current-profile chip (header), the capability sections
-/// (the framework — a collection rendered by DataTemplates), status and the Lighting button (footer).
-/// Built once from the device's capabilities; <see cref="Refresh"/> pushes live state into it.</summary>
+/// (a collection rendered by DataTemplates) as a single full-width column, and a status line plus
+/// the drawer-launch buttons (footer). Options and Lighting aren't in the main column — they live in
+/// a slide-out side drawer opened from the footer. Built once from the device's capabilities;
+/// <see cref="Refresh"/> pushes live state in.</summary>
 public sealed partial class MainViewModel : ObservableObject
 {
     private readonly MonitorViewModel? _monitor;
     private readonly ProfilesViewModel? _profiles;
     private readonly BatteryViewModel? _battery;
-    private readonly Action _openLighting;
+    private readonly OptionsViewModel? _options;
+    private readonly LightingViewModel? _lighting;
 
     public string DeviceName { get; }
-    public bool ShowLighting { get; }
+    public ObservableCollection<SectionViewModel> Sections { get; } = [];
 
-    /// <summary>Dense single-panel dashboard (G-Helper style): the control-heavy sections that need
-    /// the full width (monitor, performance modes, fan sliders) stack on top; the compact
-    /// row-of-settings sections (battery, options) are balanced into two side-by-side columns to keep
-    /// the panel short. <see cref="ShowColumns"/> is false when there's only one — it then falls back
-    /// into the full-width stack so no half-empty column is left.</summary>
-    public ObservableCollection<SectionViewModel> PrimarySections { get; } = [];
-    public ObservableCollection<SectionViewModel> LeftColumn { get; } = [];
-    public ObservableCollection<SectionViewModel> RightColumn { get; } = [];
-    public bool ShowColumns => LeftColumn.Count > 0;
+    public bool ShowOptions => _options != null;
+    public bool ShowLighting => _lighting != null;
 
     [ObservableProperty] private bool _hasProfile;
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _status = "";
 
-    public MainViewModel(IDevice device, UiActions a)
+    // Side drawer: a single host that shows either the Options or the Lighting content.
+    [ObservableProperty] private object? _drawerContent;
+    [ObservableProperty] private string _drawerTitle = "";
+    [ObservableProperty] private bool _isDrawerOpen;
+
+    public MainViewModel(IDevice device, UiActions a, LightingViewModel? lighting)
     {
-        _openLighting = a.OpenLighting;
         DeviceName = device.VendorName;
-        ShowLighting = device.Lighting != null;
+        _lighting = lighting;
 
-        // Full width on top: the control surfaces that genuinely need it (segmented modes, sliders).
-        if (device.PowerProfiles is { } pp)
-            PrimarySections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile));
-        if (device.FanControl is { } fc)
-            PrimarySections.Add(new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
-
-        // Compact readouts/settings — balanced into two columns (monitor + battery together roughly
-        // match the taller options list, so neither column is left with dead space).
-        var secondary = new List<SectionViewModel>();
+        // Main column (full width, glance order): sensors, performance modes, fans, battery.
         if (device.Sensors != null)
-            secondary.Add(_monitor = new MonitorViewModel());
+            Sections.Add(_monitor = new MonitorViewModel());
+        if (device.PowerProfiles is { } pp)
+            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile));
+        if (device.FanControl is { } fc)
+            Sections.Add(new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
         if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null)
-            secondary.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
-        if (OptionsViewModel.TryCreate(device, a) is { } options)
-            secondary.Add(options);
+            Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
 
-        DistributeSecondary(secondary);
+        // Options live in the drawer, not the main column.
+        _options = OptionsViewModel.TryCreate(device, a);
     }
 
-    /// <summary>Greedy two-column balance: heaviest first into whichever column is currently shorter.
-    /// With a single section there are no columns — it joins the full-width stack instead.</summary>
-    private void DistributeSecondary(List<SectionViewModel> secondary)
+    [RelayCommand] private void OpenOptions() => OpenDrawer("Options", _options);
+    [RelayCommand] private void OpenLighting() => OpenDrawer("Lighting", _lighting);
+    [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
+
+    private void OpenDrawer(string title, object? content)
     {
-        if (secondary.Count < 2)
-        {
-            foreach (var s in secondary) PrimarySections.Add(s);
-            return;
-        }
-
-        double left = 0, right = 0;
-        foreach (var s in secondary.OrderByDescending(x => x.LayoutWeight))
-        {
-            if (left <= right) { LeftColumn.Add(s); left += s.LayoutWeight; }
-            else { RightColumn.Add(s); right += s.LayoutWeight; }
-        }
+        if (content == null) return;
+        // Re-clicking the open drawer's button closes it (toggle).
+        if (IsDrawerOpen && ReferenceEquals(content, DrawerContent)) { IsDrawerOpen = false; return; }
+        DrawerContent = content;
+        DrawerTitle = title;
+        IsDrawerOpen = true;
     }
-
-    [RelayCommand] private void OpenLighting() => _openLighting();
 
     public void Refresh(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable,
                         SensorSnapshot s, BatteryInfoSnapshot battery, string? status)

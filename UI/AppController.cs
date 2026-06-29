@@ -22,7 +22,6 @@ internal sealed class AppController
 
     private readonly MainWindow _main;
     private readonly MainViewModel _vm;
-    private readonly LightingWindow? _lighting;
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
@@ -35,17 +34,17 @@ internal sealed class AppController
         _svc = svc;
 
         var d = _svc.Device;
-        _lighting = d.Lighting != null ? new LightingWindow { DataContext = new LightingViewModel(d.Lighting) } : null;
+        var lighting = d.Lighting != null ? new LightingViewModel(d.Lighting) : null;
         _vm = new MainViewModel(d, new UiActions(
             ApplyProfile, ApplyFan,
             (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g),
-            ShowLighting,
             BuildHardwareToggles(), BuildHardwareChoices(),
             () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
             _svc.Settings.TurboToggles, b => _svc.SetTurboToggles(b),
             () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
             _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan,
-            d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()));
+            d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()),
+            lighting);
         _main = new MainWindow { DataContext = _vm };
 
         _svc.ApplyStartupState();
@@ -77,7 +76,7 @@ internal sealed class AppController
         }
         if (profiles.Count > 0) menu.Items.Add(new NativeMenuItemSeparator());
         var show = new NativeMenuItem { Header = "Show" }; show.Click += (_, _) => ShowMain(); menu.Items.Add(show);
-        if (_lighting != null) { var light = new NativeMenuItem { Header = "Lighting…" }; light.Click += (_, _) => ShowLighting(); menu.Items.Add(light); }
+        if (_svc.Device.Lighting != null) { var light = new NativeMenuItem { Header = "Lighting…" }; light.Click += (_, _) => ShowLighting(); menu.Items.Add(light); }
         var exit = new NativeMenuItem { Header = "Exit" }; exit.Click += (_, _) => ExitApp(); menu.Items.Add(exit);
         return menu;
     }
@@ -242,10 +241,9 @@ internal sealed class AppController
 
     private void ShowLighting()
     {
-        // Opening our own window steals focus from the flyout; that's not a click "outside" it.
-        _main.SuppressDismiss = true;
-        _lighting?.Show();
-        _lighting?.Activate();
+        // Lighting is now a side drawer of the main flyout, not a separate window.
+        ShowMain();
+        _vm.OpenLightingCommand.Execute(null);
     }
 
     private void ExitApp()

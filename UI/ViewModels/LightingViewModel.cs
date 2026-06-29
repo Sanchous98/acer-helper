@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
 
-/// <summary>The lighting window root: one panel per light (keyboard, lightbar), shown as tabs.
+/// <summary>The lighting drawer root: one panel per light (keyboard, lightbar), shown as tabs.
 /// Built from whatever the device's <see cref="ILighting"/> advertises.</summary>
 public sealed class LightingViewModel
 {

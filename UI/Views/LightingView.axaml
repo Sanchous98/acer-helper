@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:views="clr-namespace:AcerHelper.UI.Views"
+             x:Class="AcerHelper.UI.Views.LightingView"
+             x:DataType="vm:LightingViewModel">
+
+  <!-- One tab per light the device actually exposes (keyboard / lightbar). Each tab's content is the
+       adaptive LightView. With a single light there is just one tab. -->
+  <TabControl ItemsSource="{Binding Panels}" Padding="0">
+    <TabControl.ItemTemplate>
+      <DataTemplate x:DataType="vm:LightViewModel">
+        <TextBlock Text="{Binding Title}"/>
+      </DataTemplate>
+    </TabControl.ItemTemplate>
+    <TabControl.ContentTemplate>
+      <DataTemplate x:DataType="vm:LightViewModel">
+        <views:LightView/>
+      </DataTemplate>
+    </TabControl.ContentTemplate>
+  </TabControl>
+</UserControl>

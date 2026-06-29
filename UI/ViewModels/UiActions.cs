@@ -8,7 +8,6 @@ public sealed record UiActions(
     Action<PerformanceProfile> ApplyProfile,
     Action<FanMode, byte, byte> ApplyFan,
     Action<int, int, int> PersistFan,
-    Action OpenLighting,
     IReadOnlyList<OptionToggle> HwToggles,
     IReadOnlyList<OptionChoice> HwChoices,
     Func<bool> ClamshellEnabled, Action<bool> SetClamshell,

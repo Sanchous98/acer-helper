@@ -3,45 +3,59 @@
         xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Acer Helper" Width="468" CanResize="False" ShowInTaskbar="False"
-        SizeToContent="Height" WindowStartupLocation="Manual"
+        Title="Acer Helper" CanResize="False" ShowInTaskbar="False"
+        SizeToContent="WidthAndHeight" WindowStartupLocation="Manual"
         Topmost="True" SystemDecorations="None" Background="Transparent">
 
-  <!-- Win11 quick-settings flyout: a frameless rounded acrylic body, sized to its content. Dense
-       single-panel layout (G-Helper style): full-width primary controls on top, then the compact
-       settings sections balanced into two columns so everything fits without scrolling. Acrylic
-       level + light-dismiss + tray placement live in code-behind. -->
-  <Border Classes="root">
-    <DockPanel Margin="14">
+  <!-- Win11 quick-settings flyout: a frameless rounded acrylic body sized to its content. The main
+       quick panel sits on the right (anchored to the tray); Options/Lighting open as a side drawer
+       that slides out to its left. Acrylic level + light-dismiss + tray placement live in code-behind. -->
+  <Grid ColumnDefinitions="Auto,Auto">
 
-      <!-- Header: device name + current-profile accent chip -->
-      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
-        <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
-        <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
-            <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
-                       Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
-          </StackPanel>
-        </Border>
-      </Grid>
+    <!-- Side drawer (left): width animates open/closed; the inner acrylic panel is fixed-width. -->
+    <Border Grid.Column="0" Classes="drawer" Classes.open="{Binding IsDrawerOpen}">
+      <Border Classes="root" Width="360" HorizontalAlignment="Right">
+        <DockPanel Margin="14">
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,0,0,10">
+            <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DrawerTitle}"/>
+            <Button Grid.Column="1" Classes="icon" Content="&#x2715;" Command="{Binding CloseDrawerCommand}"/>
+          </Grid>
+          <ContentControl Content="{Binding DrawerContent}"/>
+        </DockPanel>
+      </Border>
+    </Border>
 
-      <!-- Footer: status text + optional Lighting button -->
-      <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
-        <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
-        <Button Grid.Column="1" Classes="accent" Content="Lighting…" Padding="16,5"
-                IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
-      </Grid>
+    <!-- Main quick panel (right) -->
+    <Border Grid.Column="1" Classes="root" Width="468">
+      <DockPanel Margin="14">
 
-      <!-- Body: full-width primary sections, then the two-column settings grid. -->
-      <StackPanel>
-        <ItemsControl ItemsSource="{Binding PrimarySections}"/>
-        <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowColumns}">
-          <ItemsControl Grid.Column="0" ItemsSource="{Binding LeftColumn}"  Margin="0,0,4,0"/>
-          <ItemsControl Grid.Column="1" ItemsSource="{Binding RightColumn}" Margin="4,0,0,0"/>
+        <!-- Header: device name + current-profile accent chip -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+          <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
+          <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
+              <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                         Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
+            </StackPanel>
+          </Border>
         </Grid>
-      </StackPanel>
 
-    </DockPanel>
-  </Border>
+        <!-- Footer: status text + drawer launch buttons -->
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
+          <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+            <Button Content="Options" Padding="14,5"
+                    IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
+            <Button Classes="accent" Content="Lighting" Padding="14,5"
+                    IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
+          </StackPanel>
+        </Grid>
+
+        <!-- Body: capability sections, single full-width column. -->
+        <ItemsControl ItemsSource="{Binding Sections}"/>
+
+      </DockPanel>
+    </Border>
+  </Grid>
 </Window>
