@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Vendors.Acer;
 
 /// <summary>One lighting mode of the ENE controller (verified on Acer Nitro 18).</summary>
 public sealed class RgbEffect
@@ -14,11 +14,17 @@ public sealed class RgbEffect
         Name = name; ModeByte = modeByte; IsEffect = isEffect; HasColor = hasColor; HasSpeed = hasSpeed;
     }
 
+    /// <summary>Project to the vendor-neutral descriptor the UI binds to (this effect is the opaque handle).</summary>
+    public RgbModeInfo ToModeInfo() => new(Name, HasColor, HasSpeed, this);
+
     public override string ToString() => Name;
 }
 
 public static class RgbEffects
 {
+    /// <summary>Mode byte for the plain "Static" effect (used for per-zone colours).</summary>
+    public static byte StaticModeByte => STATIC;
+
     // mode bytes
     private const byte STATIC    = 0x02;
     private const byte BREATHING = 0x04;

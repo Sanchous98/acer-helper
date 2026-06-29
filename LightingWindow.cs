@@ -1,18 +1,15 @@
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using SDColor = System.Drawing.Color;
 
 namespace AcerHelper;
 
-/// <summary>Lighting window: keyboard (all zones), per-zone, lightbar.</summary>
+/// <summary>Lighting window: keyboard (all zones), per-zone, lightbar. Adapts to the device's
+/// advertised effects and zone count.</summary>
 public sealed class LightingWindow : Window
 {
-    private static readonly byte StaticMode = RgbEffects.Keyboard[0].ModeByte;
-
-    public LightingWindow(IRgb rgb)
+    public LightingWindow(ILighting lighting)
     {
         Title = "Acer Helper — Lighting";
         Width = 380;
@@ -23,23 +20,14 @@ public sealed class LightingWindow : Window
 
         var root = new StackPanel { Margin = new Thickness(12), Spacing = 0 };
 
-        if (!rgb.Available)
-        {
-            root.Children.Add(new TextBlock
-            {
-                Text = "RGB device not found: " + (rgb.LastError ?? string.Empty),
-                Foreground = Brushes.Gray,
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-        else
-        {
-            root.Children.Add(DevicePanel("Keyboard (all zones)", RgbEffects.Keyboard,
-                (e, c, b, s) => rgb.ApplyKeyboard(e.ModeByte, e.IsEffect, b, s, c)));
-            root.Children.Add(ZonePanel(rgb));
-            root.Children.Add(DevicePanel("Lightbar", RgbEffects.Lightbar,
-                (e, c, b, s) => rgb.ApplyLightbar(e.ModeByte, e.IsEffect, b, s, c)));
-        }
+        if (lighting.KeyboardEffects.Count > 0)
+            root.Children.Add(DevicePanel("Keyboard (all zones)", lighting.KeyboardEffects,
+                (e, c, b, s) => lighting.ApplyKeyboard(e, b, s, c)));
+        if (lighting.KeyboardZones > 1)
+            root.Children.Add(ZonePanel(lighting));
+        if (lighting.LightbarEffects.Count > 0)
+            root.Children.Add(DevicePanel("Lightbar", lighting.LightbarEffects,
+                (e, c, b, s) => lighting.ApplyLightbar(e, b, s, c)));
 
         Content = root;
         Closing += (_, e) => { e.Cancel = true; Hide(); };
@@ -55,7 +43,7 @@ public sealed class LightingWindow : Window
         Child = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = header, FontWeight = FontWeight.SemiBold }, content } },
     };
 
-    private static Control DevicePanel(string title, RgbEffect[] effects, Func<RgbEffect, SDColor, byte, byte, bool> apply)
+    private static Control DevicePanel(string title, IReadOnlyList<RgbModeInfo> effects, Func<RgbModeInfo, AccentColor, byte, byte, bool> apply)
     {
         var combo = new ComboBox { ItemsSource = effects.Select(e => e.Name).ToList(), SelectedIndex = 0, MinWidth = 160 };
         var picker = new ColorPicker { Color = Colors.Red };
@@ -74,7 +62,7 @@ public sealed class LightingWindow : Window
         {
             var e = effects[Math.Max(combo.SelectedIndex, 0)];
             var c = picker.Color;
-            apply(e, SDColor.FromArgb(c.R, c.G, c.B), (byte)bri.Value, (byte)spd.Value);
+            apply(e, new AccentColor(c.R, c.G, c.B), (byte)bri.Value, (byte)spd.Value);
         };
         UpdateEnabled();
 
@@ -93,14 +81,15 @@ public sealed class LightingWindow : Window
         return Section(title, content);
     }
 
-    private static Control ZonePanel(IRgb rgb)
+    private static Control ZonePanel(ILighting lighting)
     {
-        var pickers = new ColorPicker[4];
-        SDColor[] defaults = { SDColor.Red, SDColor.Lime, SDColor.Blue, SDColor.Magenta };
+        int zones = lighting.KeyboardZones;
+        var pickers = new ColorPicker[zones];
+        Color[] defaults = { Colors.Red, Colors.Lime, Colors.Blue, Colors.Magenta };
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < zones; i++)
         {
-            var p = new ColorPicker { Color = Color.FromRgb(defaults[i].R, defaults[i].G, defaults[i].B) };
+            var p = new ColorPicker { Color = defaults[i % defaults.Length] };
             pickers[i] = p;
             row.Children.Add(new StackPanel { Spacing = 2, Children = { new TextBlock { Text = "Zone " + (i + 1) }, p } });
         }
@@ -110,10 +99,10 @@ public sealed class LightingWindow : Window
         applyBtn.Click += (_, _) =>
         {
             byte b = (byte)bri.Value;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < zones; i++)
             {
                 var c = pickers[i].Color;
-                rgb.ApplyKeyboardZone(i, StaticMode, isEffect: false, b, speed: 0, SDColor.FromArgb(c.R, c.G, c.B));
+                lighting.ApplyKeyboardZone(i, b, new AccentColor(c.R, c.G, c.B));
             }
         };
 

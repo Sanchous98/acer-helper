@@ -1,39 +1,76 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
     <Version>0.14.0</Version>
 
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- RID/self-contained are passed per publish so each TFM×OS resolves correctly:
+         win-x64 (Native AOT) and linux-x64 (self-contained single-file). -->
+  </PropertyGroup>
 
-    <!-- Single self-contained .exe (no .NET runtime install required) -->
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+  <!-- Windows backend: full Acer/Windows (WinExe + COM interop + elevation manifest). -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <OutputType>WinExe</OutputType>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <!-- Portable (Linux) build: no Windows subsystem, no manifest, no System.Management. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!-- OS-specific implementations are selected by file-name suffix (*.Windows.cs / *.Linux.cs):
+       each OS keeps only its own files, so Win32 P/Invoke and System.Management stay entirely out
+       of the portable (net10.0) compile. No preprocessor directives.
+       NOTE: the portable TFM is "net10.0" (it does NOT contain "linux"), so the non-Windows case
+       is expressed as "not windows". -->
+  <ItemGroup>
+    <!-- Исключаем файлы Linux при сборке под Windows -->
+    <Compile Remove="**/*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <!-- Исключаем файлы Windows во всех остальных (портируемых) сборках -->
+    <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+  </ItemGroup>
+
+  <!-- Default packaging: one compressed, self-extracting single-file .exe (JIT).
+       Mutually exclusive with Native AOT, so disabled when PublishAot=true. -->
+  <PropertyGroup Condition="'$(PublishAot)' != 'true'">
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <!-- Trimming is possible with Avalonia but needs care; enable later. -->
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
+  <!-- Native AOT (Windows CI only — cross-OS native compilation is unsupported). Trimming is
+       implied; System.Management is reflection/COM heavy, so root it to keep WMI working. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$(TargetFramework)' == 'net10.0-windows'">
+    <TrimmerRootAssembly Include="System.Management" />
+  </ItemGroup>
+
+  <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux). Tmds.DBus.Protocol
+       is the ACTIVE Linux tray (D-Bus/StatusNotifierItem) transport, so its security pin
+       (advisory GHSA-xrw6-gwf8-vvr9, fixed in 0.21.0) matters most on Linux — keep it global. -->
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.2.3" />
-    <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="8.0.0" />
     <PackageReference Include="HidSharp" Version="2.1.0" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+
+  <!-- Windows-only platform packages (WMI + power/display events). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

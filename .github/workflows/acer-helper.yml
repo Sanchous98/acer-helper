@@ -1,8 +1,9 @@
 name: acer-helper
 
-# Builds the Acer Helper tray app (C# / .NET 8 WinForms) as a STANDALONE
-# single-file, self-contained, compressed .exe — no .NET runtime install needed
-# on the target machine.
+# Builds the Acer Helper tray app (C# / .NET 10, Avalonia UI) as a STANDALONE
+# Native-AOT, self-contained .exe — no .NET runtime install needed on the target.
+# AOT native compilation must run on Windows (cross-OS AOT is unsupported); the
+# windows-2022 runner ships the MSVC toolchain (link.exe) AOT needs.
 
 on:
   push:
@@ -15,22 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Setup .NET 8
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
-      - name: Publish (standalone single-file, self-contained, compressed)
+      - name: Publish (Native AOT, self-contained)
         run: >
           dotnet publish AcerHelper.csproj
           -c Release
+          -f net10.0-windows
           -r win-x64
           --self-contained true
-          -p:PublishSingleFile=true
-          -p:EnableCompressionInSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:DebugType=none
-          -p:DebugSymbols=false
+          -p:PublishAot=true
           -o publish
 
       - name: List output
@@ -40,6 +38,6 @@ jobs:
       - name: Upload standalone exe
         uses: actions/upload-artifact@v7
         with:
-          name: AcerHelper-standalone-win-x64
+          name: AcerHelper-aot-win-x64
           path: publish/AcerHelper.exe
           if-no-files-found: error

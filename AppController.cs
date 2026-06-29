@@ -1,4 +1,3 @@
-using System.IO;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -10,49 +9,50 @@ using Avalonia.Threading;
 
 namespace AcerHelper;
 
-/// <summary>Owns the platform layer, tray icon, windows and the refresh loop.</summary>
+/// <summary>Owns the tray icon, windows and the refresh loop. Talks only to the
+/// <see cref="LaptopService"/> (Application) and the device's feature ports (Domain).</summary>
 internal sealed class AppController
 {
     private readonly IClassicDesktopStyleApplicationLifetime _desktop;
-    private readonly IPlatform _platform = new WindowsPlatform();
-    private readonly Settings _settings = Settings.Load();
-    private readonly Dictionary<AcerProfile, WindowIcon> _icons = new();
-    private readonly Dictionary<AcerProfile, NativeMenuItem> _menuItems = new();
+    private readonly LaptopService _svc;
+    private readonly Dictionary<string, WindowIcon> _icons = new();
+    private readonly Dictionary<string, NativeMenuItem> _menuItems = new();
 
     private readonly MainWindow _main;
-    private readonly LightingWindow _lighting;
+    private readonly LightingWindow? _lighting;
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
-    private AcerProfile _lastNonTurbo = AcerProfile.Balanced;
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
 
-    public AppController(IClassicDesktopStyleApplicationLifetime desktop)
+    public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc)
     {
         _desktop = desktop;
+        _svc = svc;
 
-        _lighting = new LightingWindow(_platform.Rgb);
+        var d = _svc.Device;
+        _lighting = d.Lighting != null ? new LightingWindow(d.Lighting) : null;
         _main = new MainWindow(
+            d,
             ApplyProfile, ApplyFan, ShowLighting,
-            () => _platform.Clamshell.Enabled,
-            b => { _platform.Clamshell.SetEnabled(b); _settings.Clamshell = b; _settings.Save(); },
-            _settings.TurboToggles,
-            b => { _settings.TurboToggles = b; _settings.Save(); },
-            _platform.Autostart.IsEnabled,
-            b => _platform.Autostart.SetEnabled(b),
             BuildHardwareToggles(), BuildHardwareChoices(),
-            _settings.FanMode, _settings.CpuFan, _settings.GpuFan,
-            (m, c, g) => { _settings.FanMode = m; _settings.CpuFan = c; _settings.GpuFan = g; _settings.Save(); });
+            () => d.Clamshell?.Enabled ?? false,
+            b => _svc.SetClamshell(b),
+            _svc.Settings.TurboToggles,
+            b => _svc.SetTurboToggles(b),
+            () => d.Autostart?.IsEnabled() ?? false,
+            b => _svc.SetAutostart(b),
+            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan,
+            (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g));
 
-        if (_settings.Clamshell) _platform.Clamshell.SetEnabled(true);
-        if (_settings.Bluelight > 0) _platform.DisplayTint.Apply(_settings.Bluelight);
+        _svc.ApplyStartupState();
 
         _tray = new TrayIcon { ToolTipText = "Acer Helper", IsVisible = true, Icon = MakeIcon(Colors.Gray), Menu = BuildMenu() };
         _tray.Clicked += (_, _) => ShowMain();
-        TrayIcon.SetIcons(Application.Current!, new TrayIcons { _tray });
+        TrayIcon.SetIcons(Avalonia.Application.Current!, new TrayIcons { _tray });
 
-        _platform.Hotkeys.Pressed += OnHotkey;
+        if (d.Hotkeys != null) d.Hotkeys.Pressed += OnHotkey;
 
         Refresh();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -65,99 +65,111 @@ internal sealed class AppController
     private NativeMenu BuildMenu()
     {
         var menu = new NativeMenu();
-        foreach (var p in AcerProfileInfo.All)
+        var profiles = _svc.Device.PowerProfiles?.All ?? [];
+        foreach (var p in profiles)
         {
-            var item = new NativeMenuItem { Header = AcerProfileInfo.DisplayName(p), ToggleType = NativeMenuItemToggleType.CheckBox };
+            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = NativeMenuItemToggleType.CheckBox };
             item.Click += (_, _) => ApplyProfile(p);
-            _menuItems[p] = item;
+            _menuItems[p.Id] = item;
             menu.Items.Add(item);
         }
-        menu.Items.Add(new NativeMenuItemSeparator());
+        if (profiles.Count > 0) menu.Items.Add(new NativeMenuItemSeparator());
         var show = new NativeMenuItem { Header = "Show" }; show.Click += (_, _) => ShowMain(); menu.Items.Add(show);
-        var light = new NativeMenuItem { Header = "Lighting…" }; light.Click += (_, _) => ShowLighting(); menu.Items.Add(light);
+        if (_lighting != null) { var light = new NativeMenuItem { Header = "Lighting…" }; light.Click += (_, _) => ShowLighting(); menu.Items.Add(light); }
         var exit = new NativeMenuItem { Header = "Exit" }; exit.Click += (_, _) => ExitApp(); menu.Items.Add(exit);
         return menu;
     }
 
     // ---- actions ----
 
-    private void ApplyProfile(AcerProfile p)
+    private void ApplyProfile(PerformanceProfile p)
     {
-        if (!_platform.Performance.SetProfile(p))
-            Notify("Failed to set " + AcerProfileInfo.DisplayName(p) + Err(_platform.Performance.LastError));
+        if (!_svc.ApplyProfile(p)) Notify("Failed to set " + p.DisplayName + Err(_svc.LastError));
         Refresh();
     }
 
     private void ApplyFan(FanMode mode, byte cpu, byte gpu)
     {
-        bool ok = mode == FanMode.Custom ? _platform.Performance.SetCustomSpeeds(cpu, gpu) : _platform.Performance.SetFanMode(mode);
-        if (!ok) Notify("Fans failed" + Err(_platform.Performance.LastError));
+        if (!_svc.ApplyFan(mode, cpu, gpu)) Notify("Fans failed" + Err(_svc.LastError));
         Refresh();
     }
 
-    private IReadOnlyList<OptionToggle> BuildHardwareToggles()
+    private List<OptionToggle> BuildHardwareToggles()
     {
-        var b = _platform.Battery; var perf = _platform.Performance; var per = _platform.Peripherals;
-        bool? batt = b.GetLimit(), cal = b.GetCalibration(), lcd = perf.GetLcdOverdrive(), kbd = per.GetBacklightTimeout();
-        return new List<OptionToggle>
-        {
-            new("Battery charge limit (~80%)", batt.HasValue, batt ?? false,
-                v => RunHwSet(() => b.SetLimit(v), "Battery limit", () => b.LastError)),
-            new("LCD overdrive", lcd.HasValue, lcd ?? false,
-                v => RunHwSet(() => perf.SetLcdOverdrive(v), "LCD overdrive", () => perf.LastError)),
-            new("Keyboard backlight timeout", kbd.HasValue, kbd ?? false,
-                v => RunHwSet(() => per.SetBacklightTimeout(v), "Backlight timeout", () => per.LastError)),
-            // Calibration greyed out until an async confirm dialog is added (avoids starting
-            // a multi-hour charge/discharge cycle on a single click). Logic kept ready.
-            new("Battery calibration (full cycle)", false, cal ?? false,
-                v => RunHwSet(() => b.SetCalibration(v), "Battery calibration", () => b.LastError)),
-        };
+        var d = _svc.Device;
+        var list = new List<OptionToggle>();
+        if (d.BatteryChargeLimit is { } limit)
+            list.Add(new OptionToggle("Battery charge limit (~80%)", true, limit.Get(),
+                v => RunHwSet(() => _svc.SetBatteryLimit(v), "Battery limit")));
+        if (d.LcdOverdrive is { } lcd)
+            list.Add(new OptionToggle("LCD overdrive", true, lcd.Get(),
+                v => RunHwSet(() => _svc.SetLcdOverdrive(v), "LCD overdrive")));
+        if (d.KeyboardBacklight is { } kbd)
+            list.Add(new OptionToggle("Keyboard backlight timeout", true, kbd.GetTimeout(),
+                v => RunHwSet(() => _svc.SetBacklightTimeout(v), "Backlight timeout")));
+        if (d.BatteryCalibration is { } cal)
+            // Supported=false: shown disabled until an async confirm dialog is added (avoids
+            // starting a multi-hour charge/discharge cycle on a single click). Logic kept ready.
+            list.Add(new OptionToggle("Battery calibration (full cycle)", false, cal.Get(),
+                v => RunHwSet(() => _svc.SetBatteryCalibration(v), "Battery calibration")));
+        return list;
     }
 
-    private IReadOnlyList<OptionChoice> BuildHardwareChoices()
+    private List<OptionChoice> BuildHardwareChoices()
     {
-        var per = _platform.Peripherals;
-        int[] levels = { 0, 10, 20, 30 };
-        int? usb = per.GetUsbChargingLevel();
-        int idx = Array.IndexOf(levels, usb ?? 0); if (idx < 0) idx = 0;
-        return new List<OptionChoice>
+        var d = _svc.Device;
+        var list = new List<OptionChoice>();
+
+        if (d.UsbCharging is { } usb)
         {
-            new("USB charging when off:", usb.HasValue, new[] { "Off", "10%", "20%", "30%" }, idx,
-                i => RunHwSet(() => per.SetUsbChargingLevel(levels[i]), "USB charging", () => per.LastError)),
-            new("Bluelight Shield:", true, new[] { "Off", "Low", "Medium", "High", "Long-use" }, _settings.Bluelight,
-                i => { _platform.DisplayTint.Apply(i); _settings.Bluelight = i; _settings.Save(); }),
-        };
+            var levels = usb.Levels;
+            var names = levels.Select(l => l == 0 ? "Off" : $"{l}%").ToList();
+            int idx = IndexOf(levels, usb.Get());
+            list.Add(new OptionChoice("USB charging when off:", true, names, idx,
+                i => RunHwSet(() => _svc.SetUsbCharging(levels[i]), "USB charging")));
+        }
+
+        if (d.DisplayTint is { } tint && tint.Levels > 0)
+        {
+            string[] all = ["Off", "Low", "Medium", "High", "Long-use"];
+            var names = all.Take(tint.Levels).ToList();
+            int idx = Math.Clamp(_svc.Settings.Bluelight, 0, names.Count - 1);
+            list.Add(new OptionChoice("Blue-light filter:", true, names, idx,
+                i => _svc.SetBlueLight(i)));
+        }
+
+        return list;
+    }
+
+    private static int IndexOf(IReadOnlyList<int> list, int value)
+    {
+        for (int i = 0; i < list.Count; i++) if (list[i] == value) return i;
+        return 0;
     }
 
     // ---- hotkeys ----
 
-    private void OnHotkey(AcerHotkey key) => Dispatcher.UIThread.Post(() =>
+    private void OnHotkey(HotkeyAction action) => Dispatcher.UIThread.Post(() =>
     {
-        if (key == AcerHotkey.Turbo) OnTurbo();
-        else OnNitro();
+        switch (action)
+        {
+            case HotkeyAction.TogglePerformance: OnTogglePerformance(); break;
+            case HotkeyAction.ToggleWindow:      OnToggleWindow();      break;
+        }
     });
 
-    private void OnTurbo()
+    private void OnTogglePerformance()
     {
         var now = DateTime.UtcNow;
         if ((now - _lastTurbo).TotalMilliseconds < 800) return;
         _lastTurbo = now;
 
-        byte mask = _platform.Performance.GetSupportedMask();
-        AcerProfile? cur = _platform.Performance.GetProfile();
-        AcerProfile target;
-        if (_main.TurboToggles)
-        {
-            if (cur == AcerProfile.Turbo) target = _lastNonTurbo;
-            else { if (cur.HasValue) _lastNonTurbo = cur.Value; target = AcerProfile.Turbo; }
-        }
-        else target = NextSupported(cur, mask);
-
-        if (_platform.Performance.SetProfile(target)) Notify("Profile: " + AcerProfileInfo.DisplayName(target));
+        var applied = _svc.TogglePerformance();
+        if (applied != null) Notify("Profile: " + applied.DisplayName);
         Refresh();
     }
 
-    private void OnNitro()
+    private void OnToggleWindow()
     {
         var now = DateTime.UtcNow;
         if ((now - _lastNitro).TotalMilliseconds < 600) return;
@@ -166,38 +178,25 @@ internal sealed class AppController
         else ShowMain();
     }
 
-    private static AcerProfile NextSupported(AcerProfile? cur, byte mask)
-    {
-        var all = AcerProfileInfo.All;
-        int start = 0;
-        if (cur.HasValue) for (int i = 0; i < all.Length; i++) if (all[i] == cur.Value) { start = i; break; }
-        for (int step = 1; step <= all.Length; step++)
-        {
-            var cand = all[(start + step) % all.Length];
-            if (mask == 0 || AcerProfileInfo.IsSupported(mask, cand)) return cand;
-        }
-        return cur ?? AcerProfile.Balanced;
-    }
-
     // ---- refresh / windows ----
 
     private void Refresh()
     {
-        _platform.Clamshell.Evaluate();
+        _svc.EvaluateClamshell();
 
-        AcerProfile? current = _platform.Performance.GetProfile();
-        byte mask = _platform.Performance.GetSupportedMask();
-        SensorSnapshot sensors = _platform.Performance.ReadSensors();
-        string status = _platform.Performance.Available ? string.Empty : "WMI unavailable — run as Administrator.";
+        var current = _svc.CurrentProfile();
+        var selectable = _svc.SelectableProfiles();
+        var sensors = _svc.ReadSensors();
+        var status = _svc.Device.StatusMessage ?? string.Empty;
 
-        _main.RefreshState(current, mask, sensors, status);
-        _tray.ToolTipText = "Acer Helper — " + (current.HasValue ? AcerProfileInfo.DisplayName(current.Value) : "?");
-        if (current.HasValue) _tray.Icon = ProfileIcon(current.Value);
+        _main.RefreshState(current, selectable, sensors, status);
+        _tray.ToolTipText = "Acer Helper — " + (current?.DisplayName ?? "?");
+        if (current != null) _tray.Icon = ProfileIcon(current);
 
         foreach (var kv in _menuItems)
         {
-            kv.Value.IsChecked = current.HasValue && current.Value == kv.Key;
-            kv.Value.IsEnabled = mask == 0 || AcerProfileInfo.IsSupported(mask, kv.Key);
+            kv.Value.IsChecked = current?.Id == kv.Key;
+            kv.Value.IsEnabled = selectable.Any(p => p.Id == kv.Key);
         }
     }
 
@@ -210,8 +209,8 @@ internal sealed class AppController
 
     private void ShowLighting()
     {
-        _lighting.Show();
-        _lighting.Activate();
+        _lighting?.Show();
+        _lighting?.Activate();
     }
 
     private void ExitApp()
@@ -219,7 +218,7 @@ internal sealed class AppController
         _timer.Stop();
         _tray.IsVisible = false;
         _tray.Dispose();
-        _platform.Dispose();
+        _svc.Dispose();
         _desktop.Shutdown();
     }
 
@@ -227,41 +226,31 @@ internal sealed class AppController
 
     private void Notify(string text) => _main.SetStatus(text);
 
-    private void RunHwSet(Func<bool> set, string what, Func<string?> err) => Task.Run(() =>
+    private void RunHwSet(Func<bool> set, string what) => Task.Run(() =>
     {
-        bool ok; try { ok = set(); } catch { ok = false; }
-        if (!ok)
-        {
-            string? e = err();
-            Dispatcher.UIThread.Post(() => Notify(what + " failed" + Err(e)));
-        }
+        bool ok;
+        try { ok = set(); }
+        catch { ok = false; }
+        if (ok) return;
+        var e = _svc.LastError;
+        Dispatcher.UIThread.Post(() => Notify($"{what} failed{Err(e)}"));
     });
 
-    private static string Err(string? e) => e != null ? ": " + e : string.Empty;
+    private static string Err(string? e) => e != null ? $": {e}" : string.Empty;
 
-    private WindowIcon ProfileIcon(AcerProfile p)
+    private WindowIcon ProfileIcon(PerformanceProfile p)
     {
-        if (_icons.TryGetValue(p, out var cached)) return cached;
-        Color c = p switch
-        {
-            AcerProfile.Quiet => Color.FromRgb(0x42, 0x85, 0xF4),
-            AcerProfile.Balanced => Color.FromRgb(0x2E, 0x7D, 0x32),
-            AcerProfile.Performance => Color.FromRgb(0xF5, 0x7C, 0x00),
-            AcerProfile.Turbo => Color.FromRgb(0xD3, 0x2F, 0x2F),
-            AcerProfile.Eco => Color.FromRgb(0x00, 0x89, 0x7B),
-            _ => Colors.Gray,
-        };
-        var icon = MakeIcon(c);
-        _icons[p] = icon;
-        return icon;
+        if (_icons.TryGetValue(p.Id, out var cached)) return cached;
+        var c = p.Accent is { } a ? Color.FromRgb(a.R, a.G, a.B) : Colors.Gray;
+        return _icons[p.Id] = MakeIcon(c);
     }
 
     private static WindowIcon MakeIcon(Color c)
     {
         const int sz = 32;
         var wb = new WriteableBitmap(new PixelSize(sz, sz), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        byte[] px = new byte[sz * sz * 4];
-        for (int i = 0; i < sz * sz; i++) { int o = i * 4; px[o] = c.B; px[o + 1] = c.G; px[o + 2] = c.R; px[o + 3] = 255; }
+        var px = new byte[sz * sz * 4];
+        for (var i = 0; i < sz * sz; i++) { int o = i * 4; px[o] = c.B; px[o + 1] = c.G; px[o + 2] = c.R; px[o + 3] = 255; }
         using (var fb = wb.Lock()) Marshal.Copy(px, 0, fb.Address, px.Length);
         using var ms = new MemoryStream();
         wb.Save(ms);

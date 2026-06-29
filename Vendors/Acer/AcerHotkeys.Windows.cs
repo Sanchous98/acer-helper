@@ -1,39 +1,30 @@
 using System.Runtime.InteropServices;
 
-namespace AcerHelper;
-
-/// <summary>Which Acer special key was pressed.</summary>
-public enum AcerHotkey { Turbo, Nitro }
+namespace AcerHelper.Vendors.Acer;
 
 /// <summary>
-/// Single input source for Acer's special keys via RawInput. Detects which key was
-/// pressed and raises <see cref="Pressed"/>; it does not decide what each key does.
-///
-/// Turbo = HID report on usagePage 0x0088/usage 0x01 ("04 85 FF").
-/// Nitro = keyboard extended scancode E0 75 (VKey 0xFF), seen via RawInput keyboard.
-///
-/// Uses a Win32 message-only window (no WinForms). It must be created on the UI thread
-/// so the host message loop (Avalonia) dispatches WM_INPUT to it. RawInput is shared
-/// (RIDEV_INPUTSINK), so this works alongside Acer's service and needs no driver.
+/// Acer special keys on Windows via RawInput, mapped to generic <see cref="HotkeyAction"/>s.
+/// Both the OS capture (message-only window) and the Acer marker decoding live here — no separate
+/// platform layer. Turbo = HID report 04 85 (usage page 0x0088); Nitro = keyboard scancode E0 75.
+/// Must be constructed on the UI thread so the Avalonia message loop dispatches WM_INPUT.
 /// </summary>
-public sealed class AcerHotkeyWatcher : IHotkeys
+public sealed class AcerHotkeys : IHotkeys
 {
     private const int  WM_INPUT        = 0x00FF;
     private const uint RID_INPUT       = 0x10000003;
     private const uint RIDEV_INPUTSINK = 0x00000100;
+    private const int  RIM_TYPEKEYBOARD = 1;
+    private const int  RIM_TYPEHID      = 2;
 
-    private const int RIM_TYPEKEYBOARD = 1;
-    private const int RIM_TYPEHID      = 2;
-
-    private const byte   TURBO_B0 = 0x04, TURBO_B1 = 0x85;   // HID report marker
-    private const ushort NITRO_MAKECODE = 0x75;              // keyboard scancode (extended)
-    private const ushort RI_KEY_BREAK   = 0x01;              // 0 = down, 1 = up
-    private const ushort RI_KEY_E0      = 0x02;              // extended scancode
+    private const byte   TURBO_B0 = 0x04, TURBO_B1 = 0x85;
+    private const ushort NITRO_MAKECODE = 0x75;
+    private const ushort RI_KEY_BREAK   = 0x01;
+    private const ushort RI_KEY_E0      = 0x02;
 
     private static readonly (ushort page, ushort usage)[] Listen =
     {
         (0x0001, 0x06),   // keyboard (Nitro key scancode)
-        (0x0088, 0x01),   // Acer vendor (Turbo)
+        (0x0088, 0x01),   // Acer vendor page (Turbo)
     };
 
     [StructLayout(LayoutKind.Sequential)]
@@ -66,10 +57,9 @@ public sealed class AcerHotkeyWatcher : IHotkeys
     private readonly WndProcDelegate _proc;   // keep alive
     private readonly IntPtr _hwnd;
 
-    public event Action<AcerHotkey>? Pressed;
-    public bool Registered { get; }
+    public event Action<HotkeyAction>? Pressed;
 
-    public AcerHotkeyWatcher()
+    public AcerHotkeys()
     {
         _proc = WndProc;
         const string cls = "AcerHelperHotkeyWnd";
@@ -82,13 +72,12 @@ public sealed class AcerHotkeyWatcher : IHotkeys
         };
         RegisterClassExW(ref wc);   // ignore "already registered"
         _hwnd = CreateWindowExW(0, cls, "AcerHelperHotkeys", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, wc.hInstance, IntPtr.Zero); // HWND_MESSAGE
-
         if (_hwnd == IntPtr.Zero) return;
 
         var rid = new RAWINPUTDEVICE[Listen.Length];
         for (int i = 0; i < Listen.Length; i++)
             rid[i] = new RAWINPUTDEVICE { usagePage = Listen[i].page, usage = Listen[i].usage, flags = RIDEV_INPUTSINK, target = _hwnd };
-        Registered = RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+        RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
     }
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -116,7 +105,7 @@ public sealed class AcerHotkeyWatcher : IHotkeys
                 ushort make  = (ushort)Marshal.ReadInt16(buf, off + 0);
                 ushort flags = (ushort)Marshal.ReadInt16(buf, off + 2);
                 if (make == NITRO_MAKECODE && (flags & RI_KEY_E0) != 0 && (flags & RI_KEY_BREAK) == 0)
-                    Pressed?.Invoke(AcerHotkey.Nitro);
+                    Pressed?.Invoke(HotkeyAction.ToggleWindow);
                 return;
             }
 
@@ -129,7 +118,7 @@ public sealed class AcerHotkeyWatcher : IHotkeys
             int dataOff = off + 8;
             byte b0 = Marshal.ReadByte(buf, dataOff);
             byte b1 = sizeHid > 1 ? Marshal.ReadByte(buf, dataOff + 1) : (byte)0;
-            if (b0 == TURBO_B0 && b1 == TURBO_B1) Pressed?.Invoke(AcerHotkey.Turbo);
+            if (b0 == TURBO_B0 && b1 == TURBO_B1) Pressed?.Invoke(HotkeyAction.TogglePerformance);
         }
         finally { Marshal.FreeHGlobal(buf); }
     }

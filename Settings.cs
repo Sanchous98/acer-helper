@@ -1,8 +1,7 @@
-using System.Text.Json;
-
 namespace AcerHelper;
 
-/// <summary>User preferences persisted to %AppData%\AcerHelper\settings.json.</summary>
+/// <summary>User preferences. Persisted by an <see cref="ISettingsStore"/> (Infrastructure).
+/// Values are vendor-neutral so they survive a hardware/vendor change.</summary>
 public sealed class Settings
 {
     public bool TurboToggles { get; set; }
@@ -13,31 +12,12 @@ public sealed class Settings
     public int CpuFan  { get; set; } = 70;
     public int GpuFan  { get; set; } = 70;
 
-    public int Bluelight { get; set; } = 0;  // 0=off, 1=Low, 2=Medium, 3=High, 4=Long-use
+    public int Bluelight { get; set; }       // 0=off, 1=Low, 2=Medium, 3=High, 4=Long-use
+}
 
-    private static string FilePath => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "AcerHelper", "settings.json");
-
-    public static Settings Load()
-    {
-        try
-        {
-            if (System.IO.File.Exists(FilePath))
-                return JsonSerializer.Deserialize<Settings>(System.IO.File.ReadAllText(FilePath)) ?? new Settings();
-        }
-        catch { /* ignore corrupt/locked settings */ }
-        return new Settings();
-    }
-
-    public void Save()
-    {
-        try
-        {
-            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(FilePath)!);
-            System.IO.File.WriteAllText(FilePath,
-                JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch { /* best effort */ }
-    }
+/// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.</summary>
+public interface ISettingsStore
+{
+    Settings Load();
+    void Save(Settings settings);
 }

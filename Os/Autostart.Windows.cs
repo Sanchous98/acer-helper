@@ -1,23 +1,20 @@
 using System.Diagnostics;
 
-namespace AcerHelper;
+namespace AcerHelper.Os;
 
 /// <summary>
-/// Start Acer Helper automatically at logon. Because the app runs elevated
-/// (requireAdministrator), a plain HKCU\...\Run entry would trigger a UAC prompt
-/// on every logon. Instead we register a Scheduled Task with "highest privileges",
-/// which launches it elevated and silently. Creating/removing the task itself
-/// requires admin — which the app already has.
+/// Start at logon via a Scheduled Task with "highest privileges" — so the elevated app launches
+/// silently without a UAC prompt each logon. Vendor-agnostic. Needs admin (the app has it).
 /// </summary>
-public static class Autostart
+public sealed class Autostart : IAutostart
 {
     private const string TaskName = "AcerHelperAutostart";
 
-    /// <summary>True if the autostart scheduled task exists.</summary>
-    public static bool IsEnabled() => Run($"/query /tn \"{TaskName}\"").exit == 0;
+    public string Label => "Start with Windows";
 
-    /// <summary>Create or remove the autostart task. Returns true on success.</summary>
-    public static bool SetEnabled(bool enable)
+    public bool IsEnabled() => Run($"/query /tn \"{TaskName}\"").exit == 0;
+
+    public bool SetEnabled(bool enable)
     {
         if (enable)
         {
