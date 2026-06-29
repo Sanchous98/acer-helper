@@ -13,7 +13,7 @@ namespace AcerHelper;
 ///     FLAG     : 0x01 static, 0x02 effect
 ///     ZONEMASK : keyboard zone N = 1&lt;&lt;(N-1); 0x0F = all 4 zones; lightbar 0x01
 /// </summary>
-public sealed class AcerEneRgb : IDisposable
+public sealed class AcerEneRgb : IRgb
 {
     private const int VID         = 0x0CF2;
     private const int PID         = 0x5130;

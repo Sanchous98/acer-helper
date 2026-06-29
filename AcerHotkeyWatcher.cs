@@ -18,7 +18,7 @@ public enum AcerHotkey { Turbo, Nitro }
 /// VK hook. RawInput is shared (RIDEV_INPUTSINK), so this works alongside Acer's
 /// service and needs no driver.
 /// </summary>
-public sealed class AcerHotkeyWatcher : IDisposable
+public sealed class AcerHotkeyWatcher : IHotkeys
 {
     private const int  WM_INPUT        = 0x00FF;
     private const uint RID_INPUT       = 0x10000003;

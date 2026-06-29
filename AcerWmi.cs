@@ -13,7 +13,7 @@ namespace AcerHelper;
 ///
 /// Requires administrator privileges.
 /// </summary>
-public sealed class AcerWmi : IDisposable
+public sealed class AcerWmi : IPerformance
 {
     private const string ScopePath = @"\\.\root\WMI";
     private const string ClassName = "AcerGamingFunction";

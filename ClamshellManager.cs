@@ -10,7 +10,7 @@ namespace AcerHelper;
 /// display configuration or power source changes — so unplugging the monitor or
 /// the charger immediately reverts to sleeping on lid close.
 /// </summary>
-public sealed class ClamshellManager : IDisposable
+public sealed class ClamshellManager : IClamshell
 {
     private readonly EventHandler _onDisplay;
     private readonly PowerModeChangedEventHandler _onPower;

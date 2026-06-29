@@ -14,7 +14,7 @@ namespace AcerHelper;
 /// Each feature reports "unsupported" if the read fails, so the UI can grey it out.
 /// Requires admin.
 /// </summary>
-public sealed class AcerApGe : IDisposable
+public sealed class AcerApGe : IPeripherals
 {
     private const string ScopePath = @"\\.\root\WMI";
     private const string ClassName = "APGeAction";

@@ -12,7 +12,7 @@ namespace AcerHelper;
 /// Function-mask bits (Linuwu-Sense): HEALTH_MODE = 1 (charge limit), CALIBRATION_MODE = 2.
 /// Requires admin.
 /// </summary>
-public sealed class AcerBattery : IDisposable
+public sealed class AcerBattery : IBattery
 {
     private const string ScopePath  = @"\\.\root\WMI";
     private const string ClassName  = "BatteryControl";
