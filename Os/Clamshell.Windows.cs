@@ -3,55 +3,29 @@ using Microsoft.Win32;
 
 namespace AcerHelper.Os;
 
-/// <summary>
-/// Keep the laptop awake on lid-close, but ONLY while an external display is connected AND on AC
-/// (like G-Helper). Toggles the Windows AC "lid close action" power setting; the battery value is
-/// left alone (safe). Re-evaluates on display/power changes. Vendor-agnostic.
-/// </summary>
-public sealed class Clamshell : IClamshell
+// Windows hooks for clamshell: the AC "lid close action" power setting (powrprof), AC state
+// (GetSystemPowerStatus), external-display detection (QueryDisplayConfig), and re-evaluation on
+// display/power change events (SystemEvents). The battery lid value is left alone (safe).
+public sealed partial class Clamshell
 {
-    private readonly EventHandler _onDisplay;
-    private readonly PowerModeChangedEventHandler _onPower;
-    private bool _enabled;
-    private bool? _applied;   // last lid action written (true = do nothing); null = unknown
-
-    public Clamshell()
+    private partial void Subscribe()
     {
-        _onDisplay = (_, _) => Evaluate();
-        _onPower   = (_, _) => Evaluate();
-        SystemEvents.DisplaySettingsChanged += _onDisplay;
-        SystemEvents.PowerModeChanged       += _onPower;
+        SystemEvents.DisplaySettingsChanged += OnSystemEvent;
+        SystemEvents.PowerModeChanged       += OnPowerEvent;
     }
 
-    public string Label => "Stay awake when lid closed (docked, on AC)";
-    public bool Enabled => _enabled;
-
-    /// <summary>True if the lid-close power setting is readable (composition gate).</summary>
-    public bool Supported => GetAcLidAction() != null;
-
-    public void SetEnabled(bool value)
+    private partial void Unsubscribe()
     {
-        _enabled = value;
-        if (!value) { SetAcLidAction(LID_SLEEP); _applied = false; }  // restore "sleep on lid close"
-        else _applied = null;                                         // force re-apply on next Evaluate
-        Evaluate();
+        SystemEvents.DisplaySettingsChanged -= OnSystemEvent;
+        SystemEvents.PowerModeChanged       -= OnPowerEvent;
     }
 
-    public void Evaluate()
-    {
-        if (!_enabled) return;
-        bool active = HasExternalDisplay() && OnAc();
-        if (_applied == active) return;
-        SetAcLidAction(active ? LID_DO_NOTHING : LID_SLEEP);
-        _applied = active;
-    }
+    private void OnSystemEvent(object? sender, EventArgs e) => Evaluate();
+    private void OnPowerEvent(object? sender, PowerModeChangedEventArgs e) => Evaluate();
 
-    public void Dispose()
-    {
-        SystemEvents.DisplaySettingsChanged -= _onDisplay;
-        SystemEvents.PowerModeChanged       -= _onPower;
-        if (_enabled) SetAcLidAction(LID_SLEEP);   // never leave lid=do-nothing after exit
-    }
+    private partial bool CanManageLidAction() => GetAcLidAction() != null;
+    private partial bool OnAc() => GetSystemPowerStatus(out SYSTEM_POWER_STATUS s) && s.ACLineStatus == 1;
+    private partial void SetLidStayAwake(bool stayAwake) => SetAcLidAction(stayAwake ? LID_DO_NOTHING : LID_SLEEP);
 
     // ---- lid-close power setting (powrprof) ----
 
@@ -100,8 +74,6 @@ public sealed class Clamshell : IClamshell
 
     [DllImport("kernel32.dll")] private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
 
-    private static bool OnAc() => GetSystemPowerStatus(out SYSTEM_POWER_STATUS s) && s.ACLineStatus == 1;
-
     // ---- external-display detection (QueryDisplayConfig) ----
 
     private const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
@@ -132,7 +104,7 @@ public sealed class Clamshell : IClamshell
     private static extern int QueryDisplayConfig(uint flags, ref uint numPathArrayElements, [Out] PATH_INFO[] pathArray,
         ref uint numModeInfoArrayElements, [Out] MODE_INFO[] modeInfoArray, IntPtr currentTopologyId);
 
-    private static bool HasExternalDisplay()
+    private partial bool HasExternalDisplay()
     {
         try
         {

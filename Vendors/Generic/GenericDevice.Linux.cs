@@ -30,6 +30,7 @@ public static class GenericDevice
             PowerProfiles = profiles,
             Sensors       = sensors,
             FanControl    = fans,
+            BatteryInfo   = BatteryInfo.TryCreate(),
             Autostart     = new Autostart(),
             Owned         = fans != null ? [fans] : [],
         };
