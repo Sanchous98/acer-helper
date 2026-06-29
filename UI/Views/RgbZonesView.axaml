@@ -1,0 +1,31 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.RgbZonesView"
+             x:DataType="vm:RgbZonesViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="8">
+      <TextBlock Classes="section" Text="KEYBOARD ZONES"/>
+
+      <ItemsControl ItemsSource="{Binding Zones}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8"/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ZoneColorViewModel">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="muted" Text="{Binding Label}"/>
+              <ColorPicker Color="{Binding Color, Mode=TwoWay}"/>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock Classes="muted" Text="Brightness"/>
+      <Slider Minimum="0" Maximum="100" TickFrequency="10" Value="{Binding Brightness, Mode=TwoWay}"/>
+
+      <Button Classes="accent" Content="Apply" HorizontalAlignment="Right" Padding="16,5"
+              Command="{Binding ApplyCommand}"/>
+    </StackPanel>
+  </Border>
+</UserControl>

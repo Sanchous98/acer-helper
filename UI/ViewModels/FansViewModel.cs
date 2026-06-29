@@ -1,5 +1,4 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
 
 namespace AcerHelper.UI.ViewModels;
@@ -55,8 +54,6 @@ public sealed partial class FansViewModel : SectionViewModel
     partial void OnIsCustomChanged(bool value) { SlidersEnabled = value; if (value) ApplyIfLive(); }
     partial void OnCpuChanged(double value) { CpuPct = $"{(int)value}%"; Debounce(); }
     partial void OnGpuChanged(double value) { GpuPct = $"{(int)value}%"; Debounce(); }
-
-    [RelayCommand] private void Apply() => ApplyNow();
 
     private FanMode Mode() => IsMax ? FanMode.Max : IsCustom ? FanMode.Custom : FanMode.Auto;
     private void ApplyIfLive() { if (!_loading) ApplyNow(); }

@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+        xmlns:views="clr-namespace:AcerHelper.UI.Views"
+        x:Class="AcerHelper.UI.LightingWindow"
+        x:DataType="vm:LightingViewModel"
+        Title="Acer Helper — Lighting" Width="380" CanResize="False" ShowInTaskbar="False"
+        SizeToContent="Height" WindowStartupLocation="CenterScreen"
+        Topmost="True" Background="Transparent">
+
+  <!-- VM panel -> view map (local to this window): keyboard/lightbar use the device panel,
+       per-zone uses the zones panel. The shell just lists whatever panels the device exposed. -->
+  <Window.DataTemplates>
+    <DataTemplate DataType="vm:RgbDeviceViewModel"><views:RgbDeviceView/></DataTemplate>
+    <DataTemplate DataType="vm:RgbZonesViewModel"><views:RgbZonesView/></DataTemplate>
+  </Window.DataTemplates>
+
+  <Border Classes="root">
+    <ItemsControl Margin="14" ItemsSource="{Binding Panels}"/>
+  </Border>
+</Window>

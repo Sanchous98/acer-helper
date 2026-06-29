@@ -34,7 +34,7 @@ internal sealed class AppController
         _svc = svc;
 
         var d = _svc.Device;
-        _lighting = d.Lighting != null ? new LightingWindow(d.Lighting) : null;
+        _lighting = d.Lighting != null ? new LightingWindow { DataContext = new LightingViewModel(d.Lighting) } : null;
         _vm = new MainViewModel(d, new UiActions(
             ApplyProfile, ApplyFan,
             (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g),

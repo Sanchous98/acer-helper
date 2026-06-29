@@ -26,8 +26,6 @@
                 IsEnabled="{Binding SlidersEnabled}" Value="{Binding Gpu, Mode=TwoWay}"/>
         <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding GpuPct}"/>
       </Grid>
-
-      <Button Content="Apply" HorizontalAlignment="Right" Padding="16,5" Command="{Binding ApplyCommand}"/>
     </StackPanel>
   </Border>
 </UserControl>
