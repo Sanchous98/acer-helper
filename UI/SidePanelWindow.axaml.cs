@@ -5,9 +5,10 @@ using Avalonia.Threading;
 
 namespace AcerHelper.UI;
 
-/// <summary>An acrylic side panel (Options / Lighting) pinned to the left of the main flyout.
-/// Content/title/back-command are set once via <see cref="Configure"/>; <see cref="SlideX"/> animates
-/// its horizontal position so it slides out from (or back behind) the main window.</summary>
+/// <summary>An acrylic/Mica side panel (Options / Lighting) pinned to the left of the main flyout.
+/// It physically slides: <see cref="SlideX"/> animates the window's X. Mica (not acrylic) is used so
+/// that while it slides behind the main window it is occluded (no bleed-through) and the compositor
+/// moves it smoothly.</summary>
 public partial class SidePanelWindow : Window
 {
     private DispatcherTimer? _anim;
@@ -15,19 +16,28 @@ public partial class SidePanelWindow : Window
     public SidePanelWindow()
     {
         InitializeComponent();
-        // NOT topmost: the main flyout is, so during the slide this passes behind it.
-        TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur];
+        // Mica: samples only the wallpaper (not the windows behind), so the main window occludes this
+        // one as it slides behind it; and DWM moves a Mica window smoothly (no per-move blur recompute).
+        TransparencyLevelHint =
+        [
+            WindowTransparencyLevel.Mica,
+            WindowTransparencyLevel.AcrylicBlur,
+            WindowTransparencyLevel.Blur,
+        ];
+        Opened += (_, _) => WindowEffects.RoundCorners(this);   // round the backdrop's corners
+        Closing += (_, e) => { e.Cancel = true; Hide(); };       // reused across opens; never truly close
     }
 
-    public void Configure(string title, object? content, ICommand back)
+    public void SetBack(ICommand back) => BackButton.Command = back;
+
+    public void SetPanel(string title, object? content)
     {
         TitleText.Text = title;
         ContentHost.Content = content;
-        BackButton.Command = back;
     }
 
-    /// <summary>Animate X from <paramref name="fromX"/> to <paramref name="toX"/> (physical px) over a
-    /// short ease-out, keeping Y fixed. Invokes <paramref name="onDone"/> when finished.</summary>
+    /// <summary>Animate the window's X from <paramref name="fromX"/> to <paramref name="toX"/> (physical
+    /// px), Y fixed, then invoke <paramref name="onDone"/>.</summary>
     public void SlideX(int fromX, int toX, int y, Action? onDone)
     {
         _anim?.Stop();

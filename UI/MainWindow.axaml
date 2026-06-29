@@ -5,7 +5,7 @@
         x:DataType="vm:MainViewModel"
         Title="Acer Helper" Width="468" CanResize="False" ShowInTaskbar="False"
         SizeToContent="Height" WindowStartupLocation="Manual"
-        Topmost="True" SystemDecorations="None" Background="Transparent">
+        Topmost="True" WindowDecorations="None" Background="Transparent">
 
   <!-- Win11 quick-settings flyout: a frameless rounded acrylic body of fixed size that never resizes
        or moves (so the DWM blur never flickers). Options/Lighting open as separate acrylic windows

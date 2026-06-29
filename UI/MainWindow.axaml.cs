@@ -17,8 +17,18 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // On Win11 the DWM blurs the desktop behind the transparent window.
-        TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur];
+        // Mica (not Acrylic): Mica samples only the desktop wallpaper, so it does NOT show the windows
+        // behind it — which means a side panel sliding behind this window is properly occluded (no
+        // bleed-through), unlike acrylic which would blur the panel into view. Falls back to acrylic.
+        TransparencyLevelHint =
+        [
+            WindowTransparencyLevel.Mica,
+            WindowTransparencyLevel.AcrylicBlur,
+            WindowTransparencyLevel.Blur,
+        ];
+
+        // Round the acrylic backdrop's corners to match the rounded content border.
+        Opened += (_, _) => WindowEffects.RoundCorners(this);
 
         // Re-anchor the bottom-right corner to the tray when the size changes (effectively once).
         LayoutUpdated += (_, _) =>

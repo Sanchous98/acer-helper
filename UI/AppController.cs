@@ -26,10 +26,10 @@ internal sealed class AppController
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
-    // Options/Lighting side panels (separate acrylic windows pinned to the main flyout's left edge).
-    private readonly SidePanelWindow? _optionsWin;
-    private readonly SidePanelWindow? _lightingWin;
-    private SidePanelWindow? _currentSide;
+    // Options/Lighting side panel: one acrylic window pinned to the main flyout's left edge. It never
+    // moves; the slide is done by translating its content. _sideContent is what it currently shows.
+    private readonly SidePanelWindow? _sideWin;
+    private object? _sideContent;
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
@@ -54,8 +54,12 @@ internal sealed class AppController
         _main = new MainWindow { DataContext = _vm };
         _main.Deactivated += (_, _) => MaybeDismiss();
 
-        _optionsWin  = BuildSidePanel("Options",  _vm.OptionsContent);
-        _lightingWin = BuildSidePanel("Lighting", _vm.LightingContent);
+        if (_vm.ShowOptions || _vm.ShowLighting)
+        {
+            _sideWin = new SidePanelWindow();
+            _sideWin.SetBack(_vm.CloseDrawerCommand);
+            _sideWin.Deactivated += (_, _) => MaybeDismiss();
+        }
         _vm.PropertyChanged += OnVmPropertyChanged;
 
         _svc.ApplyStartupState();
@@ -80,7 +84,7 @@ internal sealed class AppController
         var profiles = _svc.Device.PowerProfiles?.All ?? [];
         foreach (var p in profiles)
         {
-            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = NativeMenuItemToggleType.Radio };
+            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = MenuItemToggleType.Radio };
             item.Click += (_, _) => ApplyProfile(p);
             _menuItems[p.Id] = item;
             menu.Items.Add(item);
@@ -256,90 +260,88 @@ internal sealed class AppController
         _vm.OpenLightingCommand.Execute(null);
     }
 
-    // ---- side panels (Options / Lighting) ----
-
-    private SidePanelWindow? BuildSidePanel(string title, object? content)
-    {
-        if (content == null) return null;
-        var w = new SidePanelWindow();
-        w.Configure(title, content, _vm.CloseDrawerCommand);
-        w.Deactivated += (_, _) => MaybeDismiss();
-        return w;
-    }
+    // ---- side panel (Options / Lighting) ----
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(MainViewModel.IsDrawerOpen) or nameof(MainViewModel.DrawerContent))
-            UpdateSidePanels();
+            UpdateSidePanel();
     }
 
-    /// <summary>Reconcile the visible side panel with the view-model. Switching slides the current one
-    /// behind the main window and the new one out from behind it; the window itself never moves/resizes.</summary>
-    private void UpdateSidePanels()
+    /// <summary>Reconcile the side panel with the view-model. The window physically slides: out from
+    /// behind the main window to its left edge, and back behind it (where the Mica main occludes it)
+    /// on close/switch. Open shows it parked behind main first; close hides it after the slide.</summary>
+    private void UpdateSidePanel()
     {
-        SidePanelWindow? desired = null;
-        if (_vm.IsDrawerOpen)
-            desired = ReferenceEquals(_vm.DrawerContent, _vm.OptionsContent) ? _optionsWin : _lightingWin;
+        if (_sideWin == null) return;
 
-        if (ReferenceEquals(desired, _currentSide)) return;
+        object? want = _vm.IsDrawerOpen ? _vm.DrawerContent : null;
+        if (ReferenceEquals(want, _sideContent)) return;
 
-        var (xOut, xParked, y, heightDip) = SideGeometry();
-        var old = _currentSide;
-        _currentSide = desired;
+        var (xOut, xParked, y) = SideGeometry();
+        string title = _vm.DrawerTitle;
+        _main.SuppressDismiss = true;   // showing/moving our own window isn't a click "outside"
 
-        // Showing/hiding our own windows shifts focus off whatever was active; that's not a click
-        // "outside", so swallow that one deactivation rather than dismissing the whole flyout.
-        _main.SuppressDismiss = true;
-
-        if (old != null) old.SlideX(xOut, xParked, y, old.Hide);   // slide behind main, then hide
-
-        if (desired != null)
+        if (want == null)
         {
-            desired.Height = heightDip;                 // match the main flyout's height
-            desired.Position = new PixelPoint(xParked, y);
-            desired.Show();
-            desired.SlideX(xParked, xOut, y, null);     // emerge from behind main
+            // Close: slide behind the main window, then hide and return focus to main.
+            _sideContent = null;
+            _sideWin.SlideX(xOut, xParked, y, () => { _sideWin!.Hide(); _main.Activate(); });
+        }
+        else if (_sideContent == null)
+        {
+            // Open: park behind the main window (occluded), show, slide out from behind it.
+            _sideContent = want;
+            _sideWin.Height = _main.Bounds.Height;
+            _sideWin.SetPanel(title, want);
+            _sideWin.Position = new PixelPoint(xParked, y);
+            _sideWin.Show();
+            _sideWin.SlideX(xParked, xOut, y, null);
         }
         else
         {
-            _main.Activate();   // pure close: keep the flyout, just return focus to it
+            // Switch: current slides behind main, swap content, new slides out from behind it.
+            _sideContent = want;
+            _sideWin.SlideX(xOut, xParked, y, () =>
+            {
+                _sideWin!.SetPanel(title, want);
+                _sideWin.SlideX(xParked, xOut, y, null);
+            });
         }
     }
 
-    /// <summary>Geometry for a side panel (physical px): parked behind the main window's left edge, or
-    /// out to its left with an 8px gap. Y/height align it with the main flyout.</summary>
-    private (int xOut, int xParked, int y, double heightDip) SideGeometry()
+    /// <summary>Side-panel X positions (physical px): parked behind the main window's left edge (so the
+    /// Mica main occludes it), or out to its left with an 8px gap. Y aligns it with the main flyout.</summary>
+    private (int xOut, int xParked, int y) SideGeometry()
     {
         var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
         double s = screen?.Scaling ?? 1.0;
-        int sideWpx = (int)(360 * s);
+        int wpx = (int)(360 * s);
         int gapPx = (int)(8 * s);
-        int xParked = _main.Position.X;                  // overlaps main -> hidden behind topmost main
-        int xOut = xParked - sideWpx - gapPx;            // pinned to the left with a gap
-        return (xOut, xParked, _main.Position.Y, _main.Bounds.Height);
+        int xParked = _main.Position.X;                  // overlaps main -> occluded by the Mica main
+        int xOut = xParked - wpx - gapPx;                // pinned to the left with a gap
+        return (xOut, xParked, _main.Position.Y);
     }
 
-    /// <summary>Light-dismiss for the whole flyout: if focus left the main window AND both side panels,
-    /// the user clicked outside the app, so hide everything. SuppressDismiss skips the one deactivation
-    /// caused by us opening our own window/dialog.</summary>
+    /// <summary>Light-dismiss for the whole flyout: if focus left both the main window and the side
+    /// panel, the user clicked outside the app, so hide everything. SuppressDismiss skips the one
+    /// deactivation caused by us opening our own window/dialog.</summary>
     private void MaybeDismiss()
     {
         if (_main.SuppressDismiss) { _main.SuppressDismiss = false; return; }
         Dispatcher.UIThread.Post(() =>
         {
             if (_main.IsActive) return;
-            if (_optionsWin is { IsActive: true }) return;
-            if (_lightingWin is { IsActive: true }) return;
+            if (_sideWin is { IsActive: true }) return;
             HideAll();
         }, DispatcherPriority.Background);
     }
 
     private void HideAll()
     {
-        _optionsWin?.Hide();
-        _lightingWin?.Hide();
-        _currentSide = null;
-        _vm.IsDrawerOpen = false;     // _currentSide already null -> UpdateSidePanels is a no-op
+        _sideWin?.Hide();
+        _sideContent = null;
+        _vm.IsDrawerOpen = false;     // _sideContent already null -> UpdateSidePanel is a no-op
         _main.MarkDismissed();
         _main.Hide();
     }
