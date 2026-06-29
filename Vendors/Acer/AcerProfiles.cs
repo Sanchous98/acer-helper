@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.Vendors.Acer;
 
 /// <summary>

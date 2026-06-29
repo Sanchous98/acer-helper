@@ -1,5 +1,6 @@
 using AcerHelper.Os;
 using AcerHelper.Composition;
+using AcerHelper.Features;
 
 namespace AcerHelper.Vendors.Generic;
 

@@ -1,3 +1,4 @@
+using AcerHelper.Features;
 using HidSharp;
 
 namespace AcerHelper.Vendors.Acer;

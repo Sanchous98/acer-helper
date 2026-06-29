@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using AcerHelper.Features;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
@@ -9,6 +10,8 @@ namespace AcerHelper.UI.ViewModels;
 public sealed class OptionsViewModel : SectionViewModel
 {
     public ObservableCollection<ObservableObject> Rows { get; } = [];
+
+    public override double LayoutWeight => 0.6 + Rows.Count;
 
     public static OptionsViewModel? TryCreate(IDevice device, UiActions a)
     {
@@ -36,12 +39,14 @@ public sealed class ToggleRowViewModel : ObservableObject
 {
     private readonly Action<bool> _onChange;
     private readonly Func<bool>? _confirm;
+    private readonly Func<Task<bool>>? _confirmAsync;
     private bool _isOn;
 
-    public ToggleRowViewModel(OptionToggle t) : this(t.Label, t.Initial, t.Supported, t.OnChange, confirm: t.Confirm) { }
+    public ToggleRowViewModel(OptionToggle t)
+        : this(t.Label, t.Initial, t.Supported, t.OnChange, confirm: t.Confirm, confirmAsync: t.ConfirmAsync) { }
 
     public ToggleRowViewModel(string label, bool initial, bool enabled, Action<bool> onChange,
-                              string? tip = null, Func<bool>? confirm = null)
+                              string? tip = null, Func<bool>? confirm = null, Func<Task<bool>>? confirmAsync = null)
     {
         Label = label;
         IsEnabled = enabled;
@@ -49,6 +54,7 @@ public sealed class ToggleRowViewModel : ObservableObject
         _isOn = initial;
         _onChange = onChange;
         _confirm = confirm;
+        _confirmAsync = confirmAsync;
     }
 
     public string Label { get; }
@@ -61,13 +67,37 @@ public sealed class ToggleRowViewModel : ObservableObject
         set
         {
             if (value == _isOn) return;
+
+            // Synchronous veto: ask before committing, snap back if declined.
             if (value && _confirm != null && !_confirm())
             {
                 OnPropertyChanged();   // rejected -> re-notify so the switch snaps back to off
                 return;
             }
+
+            // Async veto (e.g. a modal dialog): show ON now, then confirm and revert if declined.
+            if (value && _confirmAsync != null)
+            {
+                SetProperty(ref _isOn, true);
+                _ = ConfirmAndApplyAsync();
+                return;
+            }
+
             SetProperty(ref _isOn, value);
             _onChange(value);
+        }
+    }
+
+    private async Task ConfirmAndApplyAsync()
+    {
+        if (await _confirmAsync!())
+        {
+            _onChange(true);
+        }
+        else
+        {
+            _isOn = false;                    // revert without firing OnChange (was never applied)
+            OnPropertyChanged(nameof(IsOn));
         }
     }
 }

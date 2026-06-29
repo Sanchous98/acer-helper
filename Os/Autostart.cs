@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.Os;
 
 /// <summary>Run-at-login. The mechanism is OS-specific (a Scheduled Task on Windows, a freedesktop

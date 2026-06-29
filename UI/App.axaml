@@ -4,9 +4,10 @@
              xmlns:views="clr-namespace:AcerHelper.UI.Views"
              x:Class="AcerHelper.UI.App">
 
-  <!-- Capability section -> view map. This is the dashboard "framework": MainViewModel.Sections is a
-       collection of section view-models, and these templates render each one. A new feature/vendor
-       section = a new SectionViewModel + a DataTemplate here; the shell (MainWindow) is untouched. -->
+  <!-- Capability section -> view map. This is the dashboard "framework": MainViewModel exposes the
+       section view-models (split across the full-width and two-column areas) and these templates
+       render each one. A new feature/vendor section = a new SectionViewModel + a DataTemplate here;
+       the shell (MainWindow) is untouched. -->
   <Application.DataTemplates>
     <DataTemplate DataType="vm:MonitorViewModel"><views:MonitorView/></DataTemplate>
     <DataTemplate DataType="vm:ProfilesViewModel"><views:ProfilesView/></DataTemplate>
@@ -58,13 +59,14 @@
       <Setter Property="ClipToBounds" Value="True" />
     </Style>
 
-    <!-- A content card: a subtle translucent layer over the acrylic. -->
+    <!-- A content card: a subtle translucent layer over the acrylic. Compact padding keeps the dense
+         single-panel layout short (two of these sit side by side in the columns area). -->
     <Style Selector="Border.card">
       <Setter Property="Background" Value="{DynamicResource AppCard}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
-      <Setter Property="Padding" Value="14" />
+      <Setter Property="Padding" Value="12" />
       <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
 
@@ -81,7 +83,7 @@
     </Style>
 
     <Style Selector="TextBlock.metric">
-      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontSize" Value="20" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 

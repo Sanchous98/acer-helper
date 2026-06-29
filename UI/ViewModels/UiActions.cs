@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.UI.ViewModels;
 
 /// <summary>Everything the dashboard view-models need from the application layer, bundled into one

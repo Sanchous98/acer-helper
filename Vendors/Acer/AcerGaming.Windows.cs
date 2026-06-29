@@ -1,3 +1,4 @@
+using AcerHelper.Features;
 using AcerHelper.Os;
 
 namespace AcerHelper.Vendors.Acer;

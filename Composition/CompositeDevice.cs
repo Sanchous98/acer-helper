@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.Composition;
 
 /// <summary>A generic <see cref="IDevice"/> assembled from whatever feature ports a backend

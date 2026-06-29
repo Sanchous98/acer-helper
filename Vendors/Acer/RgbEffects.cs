@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.Vendors.Acer;
 
 /// <summary>One lighting mode of the ENE controller (verified on Acer Nitro 18).</summary>

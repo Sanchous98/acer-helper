@@ -3,17 +3,19 @@
         xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Acer Helper" Width="384" CanResize="False" ShowInTaskbar="False"
+        Title="Acer Helper" Width="468" CanResize="False" ShowInTaskbar="False"
         SizeToContent="Height" WindowStartupLocation="Manual"
         Topmost="True" SystemDecorations="None" Background="Transparent">
 
-  <!-- Win11 quick-settings flyout: frameless rounded acrylic body (the root Border tints the DWM
-       blur and is never black). Acrylic level + light-dismiss + placement live in code-behind. -->
+  <!-- Win11 quick-settings flyout: a frameless rounded acrylic body, sized to its content. Dense
+       single-panel layout (G-Helper style): full-width primary controls on top, then the compact
+       settings sections balanced into two columns so everything fits without scrolling. Acrylic
+       level + light-dismiss + tray placement live in code-behind. -->
   <Border Classes="root">
-    <StackPanel Margin="14" Spacing="0">
+    <DockPanel Margin="14">
 
       <!-- Header: device name + current-profile accent chip -->
-      <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
         <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
         <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -24,16 +26,22 @@
         </Border>
       </Grid>
 
-      <!-- Capability sections — the framework: a collection rendered by the App.axaml DataTemplates -->
-      <ItemsControl ItemsSource="{Binding Sections}"/>
-
       <!-- Footer: status text + optional Lighting button -->
-      <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,0">
+      <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
         <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
         <Button Grid.Column="1" Classes="accent" Content="Lighting…" Padding="16,5"
                 IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
       </Grid>
 
-    </StackPanel>
+      <!-- Body: full-width primary sections, then the two-column settings grid. -->
+      <StackPanel>
+        <ItemsControl ItemsSource="{Binding PrimarySections}"/>
+        <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowColumns}">
+          <ItemsControl Grid.Column="0" ItemsSource="{Binding LeftColumn}"  Margin="0,0,4,0"/>
+          <ItemsControl Grid.Column="1" ItemsSource="{Binding RightColumn}" Margin="4,0,0,0"/>
+        </Grid>
+      </StackPanel>
+
+    </DockPanel>
   </Border>
 </Window>

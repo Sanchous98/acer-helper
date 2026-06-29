@@ -1,3 +1,5 @@
+using AcerHelper.Features;
+
 namespace AcerHelper.Composition;
 
 // Linux: no vendor-specific (e.g. Acer via sysfs) codec is wired yet, so there is no vendor device

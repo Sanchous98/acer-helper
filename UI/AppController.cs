@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AcerHelper.Features;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -116,12 +117,24 @@ internal sealed class AppController
             : null;
 
     private OptionToggle? BuildBatteryCalibration()
-        // Supported=false: shown disabled until an async confirm dialog exists (avoids starting a
-        // multi-hour charge/discharge cycle on a single click). Logic kept ready.
+        // Gated behind a confirm dialog (ConfirmCalibrationAsync) so a single click can't kick off a
+        // multi-hour charge/discharge cycle. Turning it OFF (to abort) isn't confirmed.
         => _svc.Device.BatteryCalibration is { } cal
-            ? new OptionToggle("Calibration (full cycle)", false, cal.Get(),
-                v => RunHwSet(() => _svc.SetBatteryCalibration(v), "Battery calibration"))
+            ? new OptionToggle("Calibration (full cycle)", true, cal.Get(),
+                v => RunHwSet(() => _svc.SetBatteryCalibration(v), "Battery calibration"),
+                ConfirmAsync: ConfirmCalibrationAsync)
             : null;
+
+    private Task<bool> ConfirmCalibrationAsync()
+    {
+        // The dialog steals focus from the flyout; that's not a click "outside", so don't dismiss it.
+        _main.SuppressDismiss = true;
+        return Views.ConfirmDialog.ShowAsync(_main,
+            "Start battery calibration?",
+            "This runs a full charge then a full discharge cycle and can take several hours. Keep the "
+            + "laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop.",
+            "Start");
+    }
 
     private List<OptionChoice> BuildHardwareChoices()
     {

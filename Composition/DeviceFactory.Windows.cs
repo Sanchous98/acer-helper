@@ -1,3 +1,4 @@
+using AcerHelper.Features;
 using AcerHelper.Os;
 using AcerHelper.Vendors.Acer;
 

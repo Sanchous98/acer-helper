@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AcerHelper.UI.Views.ConfirmDialog"
+        Title="Acer Helper" Width="380" SizeToContent="Height" CanResize="False"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        Topmost="True" SystemDecorations="None" Background="Transparent">
+
+  <!-- Small frameless acrylic confirmation. Text + confirm-button caption are set in code-behind;
+       buttons close the dialog with a bool result for ShowDialog<bool>. -->
+  <Border Classes="root">
+    <StackPanel Margin="18" Spacing="12">
+      <TextBlock x:Name="TitleText" Classes="h1" TextWrapping="Wrap"/>
+      <TextBlock x:Name="MessageText" Classes="muted" TextWrapping="Wrap"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
+        <Button x:Name="CancelButton" Content="Cancel" Padding="16,5"/>
+        <Button x:Name="ConfirmButton" Classes="accent" Padding="16,5"/>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</Window>

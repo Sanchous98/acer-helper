@@ -1,3 +1,4 @@
+using AcerHelper.Features;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
@@ -20,6 +21,9 @@ public sealed partial class BatteryViewModel : SectionViewModel
     public ToggleRowViewModel? Calibration { get; }
     public bool ShowLimit => Limit != null;
     public bool ShowCalibration => Calibration != null;
+
+    public override double LayoutWeight =>
+        1 + (ShowInfo ? 1.5 : 0) + (ShowLimit ? 1 : 0) + (ShowCalibration ? 1 : 0);
 
     [ObservableProperty] private string _charge = "—";
     [ObservableProperty] private string _state = "";

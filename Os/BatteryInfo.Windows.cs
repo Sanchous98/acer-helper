@@ -1,5 +1,6 @@
 using System.Management;
 using System.Runtime.InteropServices;
+using AcerHelper.Features;
 
 namespace AcerHelper.Os;
 
