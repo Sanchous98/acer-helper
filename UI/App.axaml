@@ -34,12 +34,14 @@
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#E6F3F3F3" />
+          <SolidColorBrush x:Key="AppSurface"     Color="#FFF3F3F3" />
           <SolidColorBrush x:Key="AppCard"        Color="#99FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
           <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#E62A2A2A" />
+          <SolidColorBrush x:Key="AppSurface"     Color="#FF2A2A2A" />
           <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
           <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />

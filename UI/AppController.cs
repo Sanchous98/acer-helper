@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using AcerHelper.Features;
 using Avalonia;
@@ -25,6 +26,11 @@ internal sealed class AppController
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
+    // Options/Lighting side panels (separate acrylic windows pinned to the main flyout's left edge).
+    private readonly SidePanelWindow? _optionsWin;
+    private readonly SidePanelWindow? _lightingWin;
+    private SidePanelWindow? _currentSide;
+
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
 
@@ -46,6 +52,11 @@ internal sealed class AppController
             d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()),
             lighting);
         _main = new MainWindow { DataContext = _vm };
+        _main.Deactivated += (_, _) => MaybeDismiss();
+
+        _optionsWin  = BuildSidePanel("Options",  _vm.OptionsContent);
+        _lightingWin = BuildSidePanel("Lighting", _vm.LightingContent);
+        _vm.PropertyChanged += OnVmPropertyChanged;
 
         _svc.ApplyStartupState();
 
@@ -196,7 +207,7 @@ internal sealed class AppController
         var now = DateTime.UtcNow;
         if ((now - _lastNitro).TotalMilliseconds < 600) return;
         _lastNitro = now;
-        if (_main.IsVisible) _main.Hide();
+        if (_main.IsVisible) HideAll();
         else ShowMain();
     }
 
@@ -225,7 +236,7 @@ internal sealed class AppController
 
     private void ToggleMain()
     {
-        if (_main.IsVisible) { _main.Hide(); return; }
+        if (_main.IsVisible) { HideAll(); return; }
         // If the flyout just light-dismissed itself because this very click moved focus off it,
         // don't reopen it — otherwise the tray icon could never close the panel.
         if ((DateTime.UtcNow - _main.LastDismissedUtc).TotalMilliseconds < 300) return;
@@ -235,15 +246,102 @@ internal sealed class AppController
     private void ShowMain()
     {
         _main.Show();
-        _main.PositionNearTray();
-        _main.Activate();
+        _main.PositionNearTray();   // also forces foreground (needed when opened via the Nitro hotkey)
     }
 
     private void ShowLighting()
     {
-        // Lighting is now a side drawer of the main flyout, not a separate window.
+        // Lighting is a side panel of the main flyout, not a separate top-level menu.
         ShowMain();
         _vm.OpenLightingCommand.Execute(null);
+    }
+
+    // ---- side panels (Options / Lighting) ----
+
+    private SidePanelWindow? BuildSidePanel(string title, object? content)
+    {
+        if (content == null) return null;
+        var w = new SidePanelWindow();
+        w.Configure(title, content, _vm.CloseDrawerCommand);
+        w.Deactivated += (_, _) => MaybeDismiss();
+        return w;
+    }
+
+    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.IsDrawerOpen) or nameof(MainViewModel.DrawerContent))
+            UpdateSidePanels();
+    }
+
+    /// <summary>Reconcile the visible side panel with the view-model. Switching slides the current one
+    /// behind the main window and the new one out from behind it; the window itself never moves/resizes.</summary>
+    private void UpdateSidePanels()
+    {
+        SidePanelWindow? desired = null;
+        if (_vm.IsDrawerOpen)
+            desired = ReferenceEquals(_vm.DrawerContent, _vm.OptionsContent) ? _optionsWin : _lightingWin;
+
+        if (ReferenceEquals(desired, _currentSide)) return;
+
+        var (xOut, xParked, y, heightDip) = SideGeometry();
+        var old = _currentSide;
+        _currentSide = desired;
+
+        // Showing/hiding our own windows shifts focus off whatever was active; that's not a click
+        // "outside", so swallow that one deactivation rather than dismissing the whole flyout.
+        _main.SuppressDismiss = true;
+
+        if (old != null) old.SlideX(xOut, xParked, y, old.Hide);   // slide behind main, then hide
+
+        if (desired != null)
+        {
+            desired.Height = heightDip;                 // match the main flyout's height
+            desired.Position = new PixelPoint(xParked, y);
+            desired.Show();
+            desired.SlideX(xParked, xOut, y, null);     // emerge from behind main
+        }
+        else
+        {
+            _main.Activate();   // pure close: keep the flyout, just return focus to it
+        }
+    }
+
+    /// <summary>Geometry for a side panel (physical px): parked behind the main window's left edge, or
+    /// out to its left with an 8px gap. Y/height align it with the main flyout.</summary>
+    private (int xOut, int xParked, int y, double heightDip) SideGeometry()
+    {
+        var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
+        double s = screen?.Scaling ?? 1.0;
+        int sideWpx = (int)(360 * s);
+        int gapPx = (int)(8 * s);
+        int xParked = _main.Position.X;                  // overlaps main -> hidden behind topmost main
+        int xOut = xParked - sideWpx - gapPx;            // pinned to the left with a gap
+        return (xOut, xParked, _main.Position.Y, _main.Bounds.Height);
+    }
+
+    /// <summary>Light-dismiss for the whole flyout: if focus left the main window AND both side panels,
+    /// the user clicked outside the app, so hide everything. SuppressDismiss skips the one deactivation
+    /// caused by us opening our own window/dialog.</summary>
+    private void MaybeDismiss()
+    {
+        if (_main.SuppressDismiss) { _main.SuppressDismiss = false; return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_main.IsActive) return;
+            if (_optionsWin is { IsActive: true }) return;
+            if (_lightingWin is { IsActive: true }) return;
+            HideAll();
+        }, DispatcherPriority.Background);
+    }
+
+    private void HideAll()
+    {
+        _optionsWin?.Hide();
+        _lightingWin?.Hide();
+        _currentSide = null;
+        _vm.IsDrawerOpen = false;     // _currentSide already null -> UpdateSidePanels is a no-op
+        _main.MarkDismissed();
+        _main.Hide();
     }
 
     private void ExitApp()

@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AcerHelper.UI.SidePanelWindow"
+        Title="Acer Helper" Width="360" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="Manual" SystemDecorations="None" Background="Transparent">
+
+  <!-- A side panel (Options / Lighting) pinned to the left of the main flyout. Acrylic like the main
+       window; its X is animated by AppController so it slides out from / behind the main window. It is
+       NOT topmost (the main flyout is), so during the slide it passes behind the main window. -->
+  <Border Classes="root">
+    <DockPanel Margin="14">
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,10">
+        <Button x:Name="BackButton" Classes="icon" Content="&#x2190;"/>
+        <TextBlock x:Name="TitleText" Grid.Column="1" Classes="h1" VerticalAlignment="Center" Margin="6,0,0,0"/>
+      </Grid>
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <ContentControl x:Name="ContentHost"/>
+      </ScrollViewer>
+    </DockPanel>
+  </Border>
+</Window>
