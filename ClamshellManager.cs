@@ -1,5 +1,5 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
-using System.Windows.Forms;
 
 namespace AcerHelper;
 
@@ -48,8 +48,18 @@ public sealed class ClamshellManager : IClamshell
         _applied = active;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SYSTEM_POWER_STATUS
+    {
+        public byte ACLineStatus; public byte BatteryFlag; public byte BatteryLifePercent;
+        public byte SystemStatusFlag; public uint BatteryLifeTime; public uint BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+
     private static bool OnAc()
-        => SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
+        => GetSystemPowerStatus(out SYSTEM_POWER_STATUS s) && s.ACLineStatus == 1;   // 1 = online
 
     public void Dispose()
     {

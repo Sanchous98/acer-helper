@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 
 namespace AcerHelper;
 
@@ -7,16 +6,15 @@ namespace AcerHelper;
 public enum AcerHotkey { Turbo, Nitro }
 
 /// <summary>
-/// Single input source for Acer's special keys via RawInput. It only detects which
-/// key was pressed and raises <see cref="Pressed"/>; it does NOT decide what each
-/// key does — the application wires actions to the event.
+/// Single input source for Acer's special keys via RawInput. Detects which key was
+/// pressed and raises <see cref="Pressed"/>; it does not decide what each key does.
 ///
-/// The Turbo key is an HID report on usagePage 0x0088 / usage 0x01 (report id 0x04,
-/// "04 85 FF"). The Nitro key (the one next to NumLock that normally launches
-/// NitroSense) is an ordinary keyboard key with the extended scancode E0 75 and no
-/// virtual-key (VKey 0xFF) — so it is detected from RawInput keyboard data, not a
-/// VK hook. RawInput is shared (RIDEV_INPUTSINK), so this works alongside Acer's
-/// service and needs no driver.
+/// Turbo = HID report on usagePage 0x0088/usage 0x01 ("04 85 FF").
+/// Nitro = keyboard extended scancode E0 75 (VKey 0xFF), seen via RawInput keyboard.
+///
+/// Uses a Win32 message-only window (no WinForms). It must be created on the UI thread
+/// so the host message loop (Avalonia) dispatches WM_INPUT to it. RawInput is shared
+/// (RIDEV_INPUTSINK), so this works alongside Acer's service and needs no driver.
 /// </summary>
 public sealed class AcerHotkeyWatcher : IHotkeys
 {
@@ -27,45 +25,76 @@ public sealed class AcerHotkeyWatcher : IHotkeys
     private const int RIM_TYPEKEYBOARD = 1;
     private const int RIM_TYPEHID      = 2;
 
-    // Turbo: HID report on 0x0088 (report id 0x04, marker byte 0x85).
-    private const byte TURBO_B0 = 0x04, TURBO_B1 = 0x85;
+    private const byte   TURBO_B0 = 0x04, TURBO_B1 = 0x85;   // HID report marker
+    private const ushort NITRO_MAKECODE = 0x75;              // keyboard scancode (extended)
+    private const ushort RI_KEY_BREAK   = 0x01;              // 0 = down, 1 = up
+    private const ushort RI_KEY_E0      = 0x02;              // extended scancode
 
-    // Nitro: keyboard key next to NumLock -> extended scancode E0 75 (key-down).
-    private const ushort NITRO_MAKECODE = 0x75;
-    private const ushort RI_KEY_BREAK   = 0x01;   // 0 = key down, 1 = key up
-    private const ushort RI_KEY_E0      = 0x02;   // extended scancode
-
-    // Usage pages we listen on (page, usage).
     private static readonly (ushort page, ushort usage)[] Listen =
     {
-        (0x0001, 0x06),   // Generic Desktop / Keyboard (Nitro key is a scancode here)
+        (0x0001, 0x06),   // keyboard (Nitro key scancode)
         (0x0088, 0x01),   // Acer vendor (Turbo)
     };
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RAWINPUTDEVICE { public ushort usagePage; public ushort usage; public uint flags; public IntPtr target; }
 
+    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WNDCLASSEX
+    {
+        public uint cbSize; public uint style; public WndProcDelegate lpfnWndProc;
+        public int cbClsExtra; public int cbWndExtra; public IntPtr hInstance;
+        public IntPtr hIcon; public IntPtr hCursor; public IntPtr hbrBackground;
+        public string? lpszMenuName; public string lpszClassName; public IntPtr hIconSm;
+    }
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern ushort RegisterClassExW(ref WNDCLASSEX c);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateWindowExW(uint exStyle, string className, string windowName, uint style,
+        int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
+    [DllImport("user32.dll")] private static extern IntPtr DefWindowProcW(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr h);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandleW(string? name);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] d, uint num, uint size);
     [DllImport("user32.dll")]
     private static extern uint GetRawInputData(IntPtr h, uint cmd, IntPtr data, ref uint size, uint hdrSize);
 
-    private readonly MsgWindow _window;
+    private readonly WndProcDelegate _proc;   // keep alive
+    private readonly IntPtr _hwnd;
 
-    /// <summary>Raised (on the UI thread) when a recognised Acer key is pressed.</summary>
     public event Action<AcerHotkey>? Pressed;
-
     public bool Registered { get; }
 
     public AcerHotkeyWatcher()
     {
-        _window = new MsgWindow(OnRawInput);
+        _proc = WndProc;
+        const string cls = "AcerHelperHotkeyWnd";
+        var wc = new WNDCLASSEX
+        {
+            cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+            lpfnWndProc = _proc,
+            hInstance = GetModuleHandleW(null),
+            lpszClassName = cls,
+        };
+        RegisterClassExW(ref wc);   // ignore "already registered"
+        _hwnd = CreateWindowExW(0, cls, "AcerHelperHotkeys", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, wc.hInstance, IntPtr.Zero); // HWND_MESSAGE
+
+        if (_hwnd == IntPtr.Zero) return;
 
         var rid = new RAWINPUTDEVICE[Listen.Length];
         for (int i = 0; i < Listen.Length; i++)
-            rid[i] = new RAWINPUTDEVICE { usagePage = Listen[i].page, usage = Listen[i].usage, flags = RIDEV_INPUTSINK, target = _window.Handle };
+            rid[i] = new RAWINPUTDEVICE { usagePage = Listen[i].page, usage = Listen[i].usage, flags = RIDEV_INPUTSINK, target = _hwnd };
+        Registered = RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+    }
 
-        Registered = RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)));
+    private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        if (msg == WM_INPUT) OnRawInput(lParam);
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
     private void OnRawInput(IntPtr lParam)
@@ -82,7 +111,7 @@ public sealed class AcerHotkeyWatcher : IHotkeys
             int type = Marshal.ReadInt32(buf, 0);
             int off  = (int)hdr;
 
-            if (type == RIM_TYPEKEYBOARD)        // RAWKEYBOARD: MakeCode, Flags, Reserved, VKey, ...
+            if (type == RIM_TYPEKEYBOARD)
             {
                 ushort make  = (ushort)Marshal.ReadInt16(buf, off + 0);
                 ushort flags = (ushort)Marshal.ReadInt16(buf, off + 2);
@@ -100,29 +129,13 @@ public sealed class AcerHotkeyWatcher : IHotkeys
             int dataOff = off + 8;
             byte b0 = Marshal.ReadByte(buf, dataOff);
             byte b1 = sizeHid > 1 ? Marshal.ReadByte(buf, dataOff + 1) : (byte)0;
-
             if (b0 == TURBO_B0 && b1 == TURBO_B1) Pressed?.Invoke(AcerHotkey.Turbo);
         }
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    public void Dispose() => _window.DestroyHandle();
-
-    /// <summary>Message-only window that forwards WM_INPUT.</summary>
-    private sealed class MsgWindow : NativeWindow
+    public void Dispose()
     {
-        private readonly Action<IntPtr> _onInput;
-
-        public MsgWindow(Action<IntPtr> onInput)
-        {
-            _onInput = onInput;
-            CreateHandle(new CreateParams { Caption = "AcerHelperHotkeys", Parent = new IntPtr(-3) }); // HWND_MESSAGE
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_INPUT) _onInput(m.LParam);
-            base.WndProc(ref m);
-        }
+        if (_hwnd != IntPtr.Zero) DestroyWindow(_hwnd);
     }
 }

@@ -21,7 +21,7 @@ public static class Autostart
     {
         if (enable)
         {
-            string exe = Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath;
+            string exe = Environment.ProcessPath ?? Environment.GetCommandLineArgs()[0];
             return Run($"/create /tn \"{TaskName}\" /tr \"\\\"{exe}\\\"\" /sc onlogon /rl highest /f").exit == 0;
         }
         return Run($"/delete /tn \"{TaskName}\" /f").exit == 0;
