@@ -126,13 +126,30 @@
       <Setter Property="MinWidth" Value="0" />
     </Style>
 
-    <!-- Borderless icon button (drawer close). -->
+    <!-- Borderless icon button (drawer close): a compact square glyph, transparent at rest with a
+         subtle rounded highlight on hover/press. The Fluent button paints its background on the inner
+         ContentPresenter, so the states must be set there, not just on the Button. -->
     <Style Selector="Button.icon">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="7,2" />
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
       <Setter Property="FontSize" Value="14" />
       <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.icon /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#1F808080" />
+    </Style>
+    <Style Selector="Button.icon:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#33808080" />
     </Style>
 
     <!-- Current-profile chip in the header: a faint accent pill with an accent dot + label. -->

@@ -9,9 +9,16 @@
        or flicker, and it never overlaps the main window so nothing bleeds through the acrylic. -->
   <Border Classes="root">
     <DockPanel Margin="14">
-      <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,10">
-        <Button x:Name="BackButton" Classes="icon" Content="&#x2190;"/>
-        <TextBlock x:Name="TitleText" Grid.Column="1" Classes="h1" VerticalAlignment="Center" Margin="6,0,0,0"/>
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+        <TextBlock x:Name="TitleText" Classes="h1" VerticalAlignment="Center"/>
+        <!-- Close points toward the main window (to the right). Drawn as a vector so it's centred
+             exactly (a "→" text glyph sits off-centre in its line box). -->
+        <Button x:Name="BackButton" Grid.Column="1" Classes="icon">
+          <Path Width="11" Height="10" Stretch="None"
+                Stroke="{DynamicResource AppMuted}" StrokeThickness="1.6"
+                StrokeLineCap="Round" StrokeJoin="Round"
+                Data="M1,5 H10 M6.5,1.5 L10,5 L6.5,8.5"/>
+        </Button>
       </Grid>
       <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <ContentControl x:Name="ContentHost"/>

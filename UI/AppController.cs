@@ -26,10 +26,12 @@ internal sealed class AppController
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
-    // Options/Lighting side panel: a separate acrylic window shown to the main flyout's left, no
-    // animation. _sideContent is what it currently shows (null = hidden).
-    private readonly SidePanelWindow? _sideWin;
-    private object? _sideContent;
+    // Options/Lighting side panels: one acrylic window each (persistent content, so switching never
+    // flashes stale content), shown to the main flyout's left without animation. _shownWin is the one
+    // currently visible (null = none).
+    private readonly SidePanelWindow? _optionsWin;
+    private readonly SidePanelWindow? _lightingWin;
+    private SidePanelWindow? _shownWin;
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
@@ -54,12 +56,8 @@ internal sealed class AppController
         _main = new MainWindow { DataContext = _vm };
         _main.Deactivated += (_, _) => MaybeDismiss();
 
-        if (_vm.ShowOptions || _vm.ShowLighting)
-        {
-            _sideWin = new SidePanelWindow();
-            _sideWin.SetBack(_vm.CloseDrawerCommand);
-            _sideWin.Deactivated += (_, _) => MaybeDismiss();
-        }
+        _optionsWin  = BuildSidePanel("Options",  _vm.OptionsContent);
+        _lightingWin = BuildSidePanel("Lighting", _vm.LightingContent);
         _vm.PropertyChanged += OnVmChanged;
 
         _svc.ApplyStartupState();
@@ -260,7 +258,17 @@ internal sealed class AppController
         _vm.OpenLightingCommand.Execute(null);
     }
 
-    // ---- side panel (Options / Lighting) ----
+    // ---- side panels (Options / Lighting) ----
+
+    private SidePanelWindow? BuildSidePanel(string title, object? content)
+    {
+        if (content == null) return null;
+        var w = new SidePanelWindow();
+        w.SetPanel(title, content);             // content is set once and stays -> no stale-frame flash
+        w.SetBack(_vm.CloseDrawerCommand);
+        w.Deactivated += (_, _) => MaybeDismiss();
+        return w;
+    }
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -268,48 +276,37 @@ internal sealed class AppController
             UpdateSidePanel();
     }
 
-    /// <summary>Show/hide/swap the side panel to match the view-model (no animation).</summary>
+    /// <summary>Show the side window matching the view-model and hide the other (no animation, no
+    /// content swap — each window keeps its own content).</summary>
     private void UpdateSidePanel()
     {
-        if (_sideWin == null) return;
+        SidePanelWindow? want = null;
+        if (_vm.IsDrawerOpen)
+            want = ReferenceEquals(_vm.DrawerContent, _vm.OptionsContent) ? _optionsWin : _lightingWin;
 
-        object? want = _vm.IsDrawerOpen ? _vm.DrawerContent : null;
-        if (ReferenceEquals(want, _sideContent)) return;
+        if (ReferenceEquals(want, _shownWin)) return;
 
-        if (want == null)
-        {
-            // Close: hide the panel and return focus to the main flyout.
-            _sideContent = null;
-            _main.SuppressDismiss = true;
-            _sideWin.Hide();
-            _main.Activate();
-            return;
-        }
+        var old = _shownWin;
+        _shownWin = want;
+        _main.SuppressDismiss = true;   // showing/hiding our own window isn't a click "outside"
 
-        bool firstOpen = _sideContent == null;
-        _sideContent = want;
-        _sideWin.SetPanel(_vm.DrawerTitle, want);   // switching just swaps content in place
-        if (firstOpen)
-        {
-            PositionSide();
-            _main.SuppressDismiss = true;   // showing our own window isn't a click "outside"
-            _sideWin.Show();
-        }
+        if (want != null) { PositionSide(want); want.Show(); }
+        old?.Hide();
+        if (want == null) _main.Activate();   // closed -> focus back to the main flyout
     }
 
-    /// <summary>Pin the side window to the main flyout's left edge with an 8px gap, matching its height.</summary>
-    private void PositionSide()
+    /// <summary>Pin a side window to the main flyout's left edge with an 8px gap, matching its height.</summary>
+    private void PositionSide(SidePanelWindow win)
     {
-        if (_sideWin == null) return;
         var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
         double s = screen?.Scaling ?? 1.0;
         int wpx = (int)(360 * s);
         int gapPx = (int)(8 * s);
-        _sideWin.Height = _main.Bounds.Height;
-        _sideWin.Position = new PixelPoint(_main.Position.X - wpx - gapPx, _main.Position.Y);
+        win.Height = _main.Bounds.Height;
+        win.Position = new PixelPoint(_main.Position.X - wpx - gapPx, _main.Position.Y);
     }
 
-    /// <summary>Light-dismiss: if focus left both the main flyout and the side panel, the user clicked
+    /// <summary>Light-dismiss: if focus left the main flyout and both side panels, the user clicked
     /// outside the app, so hide everything. SuppressDismiss skips the one deactivation we cause by
     /// opening our own window/dialog.</summary>
     private void MaybeDismiss()
@@ -318,15 +315,17 @@ internal sealed class AppController
         Dispatcher.UIThread.Post(() =>
         {
             if (_main.IsActive) return;
-            if (_sideWin is { IsActive: true }) return;
+            if (_optionsWin is { IsActive: true }) return;
+            if (_lightingWin is { IsActive: true }) return;
             HideAll();
         }, DispatcherPriority.Background);
     }
 
     private void HideAll()
     {
-        _sideWin?.Hide();
-        _sideContent = null;
+        _optionsWin?.Hide();
+        _lightingWin?.Hide();
+        _shownWin = null;
         _vm.IsDrawerOpen = false;
         _main.MarkDismissed();
         _main.Hide();
