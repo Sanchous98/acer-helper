@@ -24,11 +24,6 @@ public sealed partial class MainViewModel : ObservableObject
     public bool ShowOptions => _options != null;
     public bool ShowLighting => _lighting != null;
 
-    // The side-panel contents (rendered in their own windows by AppController). DrawerContent points
-    // at whichever of these is currently open.
-    public object? OptionsContent => _options;
-    public object? LightingContent => _lighting;
-
     [ObservableProperty] private bool _hasProfile;
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _status = "";

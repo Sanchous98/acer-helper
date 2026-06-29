@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Runtime.InteropServices;
 using AcerHelper.Features;
 using Avalonia;
@@ -26,11 +25,6 @@ internal sealed class AppController
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
 
-    // Options/Lighting side panel: one acrylic window pinned to the main flyout's left edge. It never
-    // moves; the slide is done by translating its content. _sideContent is what it currently shows.
-    private readonly SidePanelWindow? _sideWin;
-    private object? _sideContent;
-
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
 
@@ -52,15 +46,6 @@ internal sealed class AppController
             d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()),
             lighting);
         _main = new MainWindow { DataContext = _vm };
-        _main.Deactivated += (_, _) => MaybeDismiss();
-
-        if (_vm.ShowOptions || _vm.ShowLighting)
-        {
-            _sideWin = new SidePanelWindow();
-            _sideWin.SetBack(_vm.CloseDrawerCommand);
-            _sideWin.Deactivated += (_, _) => MaybeDismiss();
-        }
-        _vm.PropertyChanged += OnVmPropertyChanged;
 
         _svc.ApplyStartupState();
 
@@ -211,7 +196,7 @@ internal sealed class AppController
         var now = DateTime.UtcNow;
         if ((now - _lastNitro).TotalMilliseconds < 600) return;
         _lastNitro = now;
-        if (_main.IsVisible) HideAll();
+        if (_main.IsVisible) _main.HideFlyout();
         else ShowMain();
     }
 
@@ -240,7 +225,7 @@ internal sealed class AppController
 
     private void ToggleMain()
     {
-        if (_main.IsVisible) { HideAll(); return; }
+        if (_main.IsVisible) { _main.HideFlyout(); return; }
         // If the flyout just light-dismissed itself because this very click moved focus off it,
         // don't reopen it — otherwise the tray icon could never close the panel.
         if ((DateTime.UtcNow - _main.LastDismissedUtc).TotalMilliseconds < 300) return;
@@ -255,95 +240,9 @@ internal sealed class AppController
 
     private void ShowLighting()
     {
-        // Lighting is a side panel of the main flyout, not a separate top-level menu.
+        // Lighting is a drawer of the main flyout, not a separate top-level menu.
         ShowMain();
         _vm.OpenLightingCommand.Execute(null);
-    }
-
-    // ---- side panel (Options / Lighting) ----
-
-    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(MainViewModel.IsDrawerOpen) or nameof(MainViewModel.DrawerContent))
-            UpdateSidePanel();
-    }
-
-    /// <summary>Reconcile the side panel with the view-model. The window physically slides: out from
-    /// behind the main window to its left edge, and back behind it (where the Mica main occludes it)
-    /// on close/switch. Open shows it parked behind main first; close hides it after the slide.</summary>
-    private void UpdateSidePanel()
-    {
-        if (_sideWin == null) return;
-
-        object? want = _vm.IsDrawerOpen ? _vm.DrawerContent : null;
-        if (ReferenceEquals(want, _sideContent)) return;
-
-        var (xOut, xParked, y) = SideGeometry();
-        string title = _vm.DrawerTitle;
-        _main.SuppressDismiss = true;   // showing/moving our own window isn't a click "outside"
-
-        if (want == null)
-        {
-            // Close: slide behind the main window, then hide and return focus to main.
-            _sideContent = null;
-            _sideWin.SlideX(xOut, xParked, y, () => { _sideWin!.Hide(); _main.Activate(); });
-        }
-        else if (_sideContent == null)
-        {
-            // Open: park behind the main window (occluded), show, slide out from behind it.
-            _sideContent = want;
-            _sideWin.Height = _main.Bounds.Height;
-            _sideWin.SetPanel(title, want);
-            _sideWin.Position = new PixelPoint(xParked, y);
-            _sideWin.Show();
-            _sideWin.SlideX(xParked, xOut, y, null);
-        }
-        else
-        {
-            // Switch: current slides behind main, swap content, new slides out from behind it.
-            _sideContent = want;
-            _sideWin.SlideX(xOut, xParked, y, () =>
-            {
-                _sideWin!.SetPanel(title, want);
-                _sideWin.SlideX(xParked, xOut, y, null);
-            });
-        }
-    }
-
-    /// <summary>Side-panel X positions (physical px): parked behind the main window's left edge (so the
-    /// Mica main occludes it), or out to its left with an 8px gap. Y aligns it with the main flyout.</summary>
-    private (int xOut, int xParked, int y) SideGeometry()
-    {
-        var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
-        double s = screen?.Scaling ?? 1.0;
-        int wpx = (int)(360 * s);
-        int gapPx = (int)(8 * s);
-        int xParked = _main.Position.X;                  // overlaps main -> occluded by the Mica main
-        int xOut = xParked - wpx - gapPx;                // pinned to the left with a gap
-        return (xOut, xParked, _main.Position.Y);
-    }
-
-    /// <summary>Light-dismiss for the whole flyout: if focus left both the main window and the side
-    /// panel, the user clicked outside the app, so hide everything. SuppressDismiss skips the one
-    /// deactivation caused by us opening our own window/dialog.</summary>
-    private void MaybeDismiss()
-    {
-        if (_main.SuppressDismiss) { _main.SuppressDismiss = false; return; }
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_main.IsActive) return;
-            if (_sideWin is { IsActive: true }) return;
-            HideAll();
-        }, DispatcherPriority.Background);
-    }
-
-    private void HideAll()
-    {
-        _sideWin?.Hide();
-        _sideContent = null;
-        _vm.IsDrawerOpen = false;     // _sideContent already null -> UpdateSidePanel is a no-op
-        _main.MarkDismissed();
-        _main.Hide();
     }
 
     private void ExitApp()
