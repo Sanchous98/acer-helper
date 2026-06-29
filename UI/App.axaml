@@ -46,6 +46,9 @@
 
   <Application.Styles>
     <FluentTheme />
+    <!-- ColorPicker/ColorView ship in a separate package; their control templates must be added
+         explicitly or the controls render nothing (empty zone swatches / missing colour field). -->
+    <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml"/>
 
     <!-- Acrylic-tinted, rounded root surface (the flyout body). -->
     <Style Selector="Border.root">
