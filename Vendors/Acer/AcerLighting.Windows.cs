@@ -28,6 +28,14 @@ public sealed class AcerLighting : ILighting, IDisposable
     private readonly HidDevice? _device;
     private HidStream? _stream;
 
+    /// <summary>True if the ENE HID device was found (composition gate).</summary>
+    public bool Available => _device != null;
+    public string? LastError { get; private set; }
+
+    public IReadOnlyList<RgbModeInfo> KeyboardEffects { get; } = RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList();
+    public IReadOnlyList<RgbModeInfo> LightbarEffects { get; }
+    public int KeyboardZones { get; }
+
     /// <summary>Per-model RGB layout (from the quirks config): keyboard zone count and whether a
     /// lightbar exists. Presence of RGB itself is probed (the ENE device is found or not).</summary>
     public AcerLighting(int keyboardZones, bool hasLightbar)
@@ -36,23 +44,19 @@ public sealed class AcerLighting : ILighting, IDisposable
         LightbarEffects = hasLightbar ? RgbEffects.Lightbar.Select(e => e.ToModeInfo()).ToList() : [];
         try
         {
-            foreach (HidDevice d in DeviceList.Local.GetHidDevices(VID, PID))
+            foreach (var d in DeviceList.Local.GetHidDevices(VID, PID))
             {
-                try { if (d.GetMaxFeatureReportLength() == FEATURE_LEN) { _device = d; break; } }
+                try
+                {
+                    if (d.GetMaxFeatureReportLength() != FEATURE_LEN) continue;
+                    _device = d; break;
+                }
                 catch { /* skip interfaces we can't query */ }
             }
             if (_device == null) LastError = $"ENE lighting interface ({VID:X4}:{PID:X4}, {FEATURE_LEN}-byte feature) not found.";
         }
         catch (Exception ex) { LastError = ex.Message; }
     }
-
-    /// <summary>True if the ENE HID device was found (composition gate).</summary>
-    public bool Available => _device != null;
-    public string? LastError { get; private set; }
-
-    public IReadOnlyList<RgbModeInfo> KeyboardEffects { get; } = RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList();
-    public IReadOnlyList<RgbModeInfo> LightbarEffects { get; }
-    public int KeyboardZones { get; }
 
     public bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
     {
@@ -75,19 +79,19 @@ public sealed class AcerLighting : ILighting, IDisposable
         try
         {
             _stream ??= _device.Open();
-            byte[] buf = new byte[FEATURE_LEN];
-            buf[0]  = REPORT_ID;
-            buf[1]  = target;
-            buf[2]  = modeByte;
-            buf[3]  = brightness;                 // 0..0x64
-            buf[4]  = isEffect ? speed : (byte)0;
-            buf[5]  = isEffect ? FLAG_EFFECT : FLAG_STATIC;
-            buf[6]  = color.R;
-            buf[7]  = color.G;
-            buf[8]  = color.B;
-            buf[9]  = zoneMask;
-            buf[10] = 0x00;
-            _stream.SetFeature(buf);
+            _stream.SetFeature([
+                REPORT_ID, 
+                target, 
+                modeByte, 
+                brightness,
+                isEffect ? speed : (byte)0,
+                isEffect ? FLAG_EFFECT : FLAG_STATIC,
+                color.R,
+                color.G,
+                color.B,
+                zoneMask,
+                0x00
+            ]);
             return true;
         }
         catch (Exception ex) { LastError = ex.Message; return false; }

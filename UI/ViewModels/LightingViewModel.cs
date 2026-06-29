@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -25,10 +26,10 @@ public sealed class LightingViewModel
 }
 
 /// <summary>
-/// One light, laid out like popular RGB tools: effect picker, a zone selector (multi-zone static
-/// only), a full colour wheel, and brightness/speed sliders. Everything applies LIVE (debounced),
-/// no Apply button. The colour wheel edits the selected zone (per-zone static) or the single colour
-/// (single-zone / effect). Heuristic for "static" (per-zone capable): honours colour, has no speed.
+/// One light. Applies LIVE (debounced, no Apply button). The colour UI adapts to the selected
+/// effect: a static colour on a multi-zone keyboard shows one editable swatch per zone; any other
+/// colour effect (e.g. Breathing) shows a single colour; effects that cycle their own colours show
+/// no colour control. "Static" = honours colour and has no speed (the only such Acer effect).
 /// </summary>
 public sealed partial class LightViewModel : ObservableObject
 {
@@ -37,18 +38,16 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _loading = true;
-    private bool _suppress;   // guards programmatic EditColor writes (zone switch) from re-applying
 
     public string Title { get; }
     public IReadOnlyList<string> EffectNames { get; }
     public ObservableCollection<ZoneColorViewModel> Zones { get; } = [];
 
     [ObservableProperty] private int _selectedEffectIndex;
-    [ObservableProperty] private int _selectedZoneIndex;
-    [ObservableProperty] private Color _editColor = Colors.Red;
     [ObservableProperty] private bool _hasSpeed;
-    [ObservableProperty] private bool _showColor;
+    [ObservableProperty] private bool _showSingleColor;
     [ObservableProperty] private bool _showZones;
+    [ObservableProperty] private Color _color = Colors.Red;
     [ObservableProperty] private double _brightness = 100;
     [ObservableProperty] private double _speed = 5;
 
@@ -65,8 +64,11 @@ public sealed partial class LightViewModel : ObservableObject
         {
             Color[] def = { Colors.Red, Colors.Lime, Colors.Blue, Colors.Magenta };
             for (int i = 0; i < zones; i++)
-                Zones.Add(new ZoneColorViewModel($"Z{i + 1}", def[i % def.Length]));
-            _editColor = Zones[0].Color;
+            {
+                var z = new ZoneColorViewModel($"Zone {i + 1}", def[i % def.Length]);
+                z.PropertyChanged += OnZoneChanged;
+                Zones.Add(z);
+            }
         }
 
         _debounce.Tick += (_, _) => { _debounce.Stop(); ApplyNow(); };
@@ -74,41 +76,24 @@ public sealed partial class LightViewModel : ObservableObject
         _loading = false;
     }
 
-    partial void OnSelectedEffectIndexChanged(int value)
-    {
-        UpdateColorMode();
-        if (ShowZones && Zones.Count > 0) SetEditColor(Zones[Clamp(SelectedZoneIndex)].Color);
-        Schedule();
-    }
-
-    partial void OnSelectedZoneIndexChanged(int value)
-    {
-        if (value < 0 || value >= Zones.Count) return;
-        SetEditColor(Zones[value].Color);   // jump the wheel to the picked zone (no apply)
-    }
-
-    partial void OnEditColorChanged(Color value)
-    {
-        if (_loading || _suppress) return;
-        if (ShowZones && SelectedZoneIndex >= 0 && SelectedZoneIndex < Zones.Count)
-            Zones[SelectedZoneIndex].Color = value;   // recolours the picked swatch live
-        Schedule();
-    }
-
+    partial void OnSelectedEffectIndexChanged(int value) { UpdateColorMode(); Schedule(); }
+    partial void OnColorChanged(Color value) => Schedule();
     partial void OnBrightnessChanged(double value) => Schedule();
     partial void OnSpeedChanged(double value) => Schedule();
 
-    private RgbModeInfo Current => _effects[Clamp(SelectedEffectIndex)];
-    private int Clamp(int i) => Math.Clamp(i, 0, _effects.Count - 1);
+    private void OnZoneChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ZoneColorViewModel.Color)) Schedule();
+    }
 
-    private void SetEditColor(Color c) { _suppress = true; EditColor = c; _suppress = false; }
+    private RgbModeInfo Current => _effects[Math.Clamp(SelectedEffectIndex, 0, _effects.Count - 1)];
 
     private void UpdateColorMode()
     {
         var e = Current;
         HasSpeed = e.HasSpeed;
-        ShowZones = e.HasColor && !e.HasSpeed && Zones.Count > 1;   // static + multi-zone
-        ShowColor = e.HasColor;
+        ShowZones = e.HasColor && !e.HasSpeed && Zones.Count > 1;   // static + multi-zone -> per-zone swatches
+        ShowSingleColor = e.HasColor && !ShowZones;                 // breathing / single-zone static -> one colour
     }
 
     private void Schedule()
@@ -128,19 +113,13 @@ public sealed partial class LightViewModel : ObservableObject
                 _applyZone(i, b, new AccentColor(c.R, c.G, c.B));
             }
         else
-            _applyAll(Current, new AccentColor(EditColor.R, EditColor.G, EditColor.B), b, s);
+            _applyAll(Current, new AccentColor(Color.R, Color.G, Color.B), b, s);
     }
 }
 
-/// <summary>One keyboard zone: its colour and a brush for the preview swatch.</summary>
+/// <summary>One keyboard zone's editable colour.</summary>
 public sealed partial class ZoneColorViewModel(string label, Color color) : ObservableObject
 {
     public string Label { get; } = label;
-
     [ObservableProperty] private Color _color = color;
-
-    /// <summary>Brush for the zone swatch in the selector (kept in sync with <see cref="Color"/>).</summary>
-    public IBrush Fill => new SolidColorBrush(Color);
-
-    partial void OnColorChanged(Color value) => OnPropertyChanged(nameof(Fill));
 }

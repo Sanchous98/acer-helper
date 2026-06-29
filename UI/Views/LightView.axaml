@@ -4,49 +4,32 @@
              x:Class="AcerHelper.UI.Views.LightView"
              x:DataType="vm:LightViewModel">
 
-  <UserControl.Styles>
-    <!-- Zone selector: a row of colour swatches; the picked one gets an accent ring. -->
-    <Style Selector="ListBox.zones">
-      <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Padding" Value="0"/>
-    </Style>
-    <Style Selector="ListBox.zones ListBoxItem">
-      <Setter Property="Margin" Value="3,0"/>
-      <Setter Property="Padding" Value="0"/>
-      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-    </Style>
-    <Style Selector="Border.sw">
-      <Setter Property="Height" Value="30"/>
-      <Setter Property="CornerRadius" Value="6"/>
-      <Setter Property="BorderThickness" Value="2"/>
-      <Setter Property="BorderBrush" Value="#40808080"/>
-    </Style>
-    <Style Selector="ListBox.zones ListBoxItem:selected Border.sw">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-    </Style>
-  </UserControl.Styles>
-
   <StackPanel Spacing="12" Margin="0,8,0,0">
 
     <!-- Effect picker (always present) -->
     <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding EffectNames}"
               SelectedIndex="{Binding SelectedEffectIndex, Mode=TwoWay}"/>
 
-    <!-- Zone selector — only when the effect is per-zone static on a multi-zone keyboard -->
-    <ListBox Classes="zones" IsVisible="{Binding ShowZones}"
-             ItemsSource="{Binding Zones}" SelectedIndex="{Binding SelectedZoneIndex, Mode=TwoWay}">
-      <ListBox.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ListBox.ItemsPanel>
-      <ListBox.ItemTemplate>
+    <!-- Per-zone colours — static effect on a multi-zone keyboard. Each swatch is editable + live. -->
+    <ItemsControl ItemsSource="{Binding Zones}" IsVisible="{Binding ShowZones}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:ZoneColorViewModel">
-          <Border Classes="sw" Background="{Binding Fill}"/>
+          <StackPanel Spacing="4" HorizontalAlignment="Center" Margin="2,0">
+            <ColorPicker HorizontalAlignment="Center" Color="{Binding Color, Mode=TwoWay}"/>
+            <TextBlock Classes="muted" HorizontalAlignment="Center" Text="{Binding Label}"/>
+          </StackPanel>
         </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
 
-    <!-- Colour wheel — only when the effect honours a colour -->
-    <ColorView IsVisible="{Binding ShowColor}" HorizontalAlignment="Stretch"
-               Color="{Binding EditColor, Mode=TwoWay}"/>
+    <!-- Single colour — breathing, or static on a single-zone light (e.g. the lightbar). -->
+    <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ShowSingleColor}">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="64" Text="Colour"/>
+      <ColorPicker Color="{Binding Color, Mode=TwoWay}"/>
+    </StackPanel>
 
     <!-- Brightness (always) -->
     <Grid ColumnDefinitions="64,*,44">
