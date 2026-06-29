@@ -55,3 +55,16 @@ public sealed record RgbModeInfo(string Name, bool HasColor, bool HasSpeed, obje
 
 /// <summary>A single labelled choice with a stable id (for dropdowns whose set is vendor-defined).</summary>
 public sealed record ChoiceOption(string Id, string DisplayName);
+
+/// <summary>Charge/discharge state of the battery.</summary>
+public enum BatteryState { Unknown, Charging, Discharging, Idle }
+
+/// <summary>Live battery readings. -1 means unknown/unsupported. <see cref="HealthPercent"/> is
+/// full-charge ÷ design capacity; <see cref="CycleCount"/> is often unsupported by the EC.</summary>
+public sealed record BatteryInfoSnapshot
+{
+    public int Percent { get; init; } = -1;
+    public BatteryState State { get; init; } = BatteryState.Unknown;
+    public int HealthPercent { get; init; } = -1;
+    public int CycleCount { get; init; } = -1;
+}

@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.BatteryView"
+             x:DataType="vm:BatteryViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="10">
+      <TextBlock Classes="section" Text="BATTERY"/>
+
+      <!-- Live: big charge %, state, then health / cycles as labelled rows -->
+      <StackPanel Spacing="6" IsVisible="{Binding ShowInfo}">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <TextBlock Classes="metric" Text="{Binding Charge}"/>
+          <TextBlock Classes="muted" VerticalAlignment="Bottom" Margin="0,0,0,4" Text="{Binding State}"/>
+        </StackPanel>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowHealth}">
+          <TextBlock Classes="muted" Text="Health"/>
+          <TextBlock Grid.Column="1" Text="{Binding Health}"/>
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowCycles}">
+          <TextBlock Classes="muted" Text="Charge cycles"/>
+          <TextBlock Grid.Column="1" Text="{Binding Cycles}"/>
+        </Grid>
+      </StackPanel>
+
+      <!-- Charge-limit toggle -->
+      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowLimit}" IsEnabled="{Binding Limit.IsEnabled}">
+        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Limit.Label}"/>
+        <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding Limit.IsOn, Mode=TwoWay}"/>
+      </Grid>
+
+      <!-- Calibration toggle -->
+      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowCalibration}" IsEnabled="{Binding Calibration.IsEnabled}"
+            ToolTip.Tip="{Binding Calibration.Tip}">
+        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Calibration.Label}"/>
+        <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding Calibration.IsOn, Mode=TwoWay}"/>
+      </Grid>
+    </StackPanel>
+  </Border>
+</UserControl>

@@ -11,6 +11,7 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly MonitorViewModel? _monitor;
     private readonly ProfilesViewModel? _profiles;
+    private readonly BatteryViewModel? _battery;
     private readonly Action _openLighting;
 
     public string DeviceName { get; }
@@ -33,18 +34,22 @@ public sealed partial class MainViewModel : ObservableObject
             Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile));
         if (device.FanControl is { } fc)
             Sections.Add(new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
+        if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null)
+            Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
         if (OptionsViewModel.TryCreate(device, a) is { } options)
             Sections.Add(options);
     }
 
     [RelayCommand] private void OpenLighting() => _openLighting();
 
-    public void Refresh(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable, SensorSnapshot s, string? status)
+    public void Refresh(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable,
+                        SensorSnapshot s, BatteryInfoSnapshot battery, string? status)
     {
         HasProfile = current != null;
         ProfileName = current?.DisplayName ?? "";
         _profiles?.Update(current, selectable);
         _monitor?.Update(s);
+        _battery?.Update(battery);
         if (status != null) Status = status;
     }
 }

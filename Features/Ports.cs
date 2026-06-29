@@ -41,6 +41,12 @@ public interface ILcdOverdrive
     bool Set(bool on);
 }
 
+/// <summary>Live battery telemetry (charge %, state, health, cycles). Read-only.</summary>
+public interface IBatteryInfo
+{
+    BatteryInfoSnapshot Read();
+}
+
 /// <summary>~80% battery charge limit (battery-health mode).</summary>
 public interface IBatteryChargeLimit
 {
@@ -132,6 +138,7 @@ public interface IDevice : IDisposable
     IFanControl?         FanControl         { get; }
     ISensors?            Sensors            { get; }
     ILcdOverdrive?       LcdOverdrive       { get; }
+    IBatteryInfo?        BatteryInfo        { get; }
     IBatteryChargeLimit? BatteryChargeLimit { get; }
     IBatteryCalibration? BatteryCalibration { get; }
     IUsbCharging?        UsbCharging        { get; }

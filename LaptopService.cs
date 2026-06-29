@@ -102,6 +102,8 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
     public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();
 
+    public BatteryInfoSnapshot ReadBatteryInfo() => device.BatteryInfo?.Read() ?? new BatteryInfoSnapshot();
+
     // ---- hardware toggles (return success; LastError holds the reason on failure) ----
 
     public bool SetBatteryLimit(bool on)       => Run(device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);

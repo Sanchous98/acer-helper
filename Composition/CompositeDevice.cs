@@ -12,6 +12,7 @@ public sealed class CompositeDevice : IDevice
     public IFanControl?         FanControl         { get; init; }
     public ISensors?            Sensors            { get; init; }
     public ILcdOverdrive?       LcdOverdrive       { get; init; }
+    public IBatteryInfo?        BatteryInfo        { get; init; }
     public IBatteryChargeLimit? BatteryChargeLimit { get; init; }
     public IBatteryCalibration? BatteryCalibration { get; init; }
     public IUsbCharging?        UsbCharging        { get; init; }

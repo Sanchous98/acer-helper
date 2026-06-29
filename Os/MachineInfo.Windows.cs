@@ -2,11 +2,10 @@ using System.Management;
 
 namespace AcerHelper.Os;
 
-/// <summary>Reads the machine's manufacturer and product name (for vendor/model detection).
-/// Windows: WMI Win32_ComputerSystemProduct in root\CIMV2.</summary>
-public static class MachineInfo
+// Windows source: WMI Win32_ComputerSystemProduct in root\CIMV2.
+public static partial class MachineInfo
 {
-    public static (string? Manufacturer, string? Product) Read()
+    public static partial (string? Manufacturer, string? Product) Read()
     {
         try
         {

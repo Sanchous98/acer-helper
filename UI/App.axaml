@@ -11,6 +11,7 @@
     <DataTemplate DataType="vm:MonitorViewModel"><views:MonitorView/></DataTemplate>
     <DataTemplate DataType="vm:ProfilesViewModel"><views:ProfilesView/></DataTemplate>
     <DataTemplate DataType="vm:FansViewModel"><views:FansView/></DataTemplate>
+    <DataTemplate DataType="vm:BatteryViewModel"><views:BatteryView/></DataTemplate>
     <DataTemplate DataType="vm:OptionsViewModel"><views:OptionsView/></DataTemplate>
   </Application.DataTemplates>
 

@@ -19,6 +19,7 @@ public static class GenericDevice
             VendorName    = "Generic",
             StatusMessage = status,
             PowerProfiles = profiles.Available ? profiles : null,
+            BatteryInfo   = BatteryInfo.TryCreate(),
             DisplayTint   = new DisplayTint(),
             Autostart     = new Autostart(),
             Clamshell     = clamshell.Supported ? clamshell : null,

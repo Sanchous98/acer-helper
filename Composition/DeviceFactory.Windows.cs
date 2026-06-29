@@ -1,31 +1,24 @@
 using AcerHelper.Os;
 using AcerHelper.Vendors.Acer;
-using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Composition;
 
-/// <summary>
-/// Detects the laptop on Windows and assembles an <see cref="IDevice"/> with the ports it
-/// supports (null = unsupported → the UI hides that section). Vendor detection is the Acer gaming
-/// WMI class; within Acer, the specific model (profiles, fan count, RGB layout) is selected from
-/// the DMI product name. Adding a vendor = another branch here plus its codecs.
-/// </summary>
-public static class DeviceFactory
+// Windows vendor detection: the Acer gaming WMI class is present only on Acer gaming models (and
+// only readable when elevated). Within Acer, only the un-probeable bits (display name + RGB layout)
+// come from the model quirks config; every other port below is probed. Adding a vendor = another
+// branch here plus its codecs.
+public static partial class DeviceFactory
 {
-    public static IDevice Create()
+    private static partial (IDevice? Device, string? Reason) CreateVendorDevice()
     {
-        // Vendor detection: the Acer gaming WMI class is present only on Acer gaming models
-        // (and only readable when elevated).
         var gaming = new WmiInvoker("AcerGamingFunction");
         if (!gaming.Available)
         {
-            string? status = gaming.LastError;
+            string? reason = gaming.LastError;
             gaming.Dispose();
-            return GenericDevice.Create(status);   // not an Acer gaming model (or WMI not accessible)
+            return (null, reason);   // not an Acer gaming model (or WMI not accessible) -> generic
         }
 
-        // Within Acer, only the un-probeable bits (display name + RGB layout) come from the model
-        // quirks config; everything else below is probed.
         var (_, product) = MachineInfo.Read();
         var model = AcerModels.Detect(product);
 
@@ -37,13 +30,14 @@ public static class DeviceFactory
         var backlight = new AcerKeyboardBacklight(apge);
         var lighting  = new AcerLighting(model.Zones, model.Lightbar);
 
-        return new CompositeDevice
+        var device = new CompositeDevice
         {
             VendorName    = model.Name,
             PowerProfiles = new AcerPowerProfiles(gaming),
             FanControl    = new AcerFanControl(gaming),
             Sensors       = new AcerSensors(gaming),
             LcdOverdrive  = new AcerLcdOverdrive(gaming),
+            BatteryInfo        = BatteryInfo.TryCreate(),
             BatteryChargeLimit = battery.Available ? new AcerBatteryChargeLimit(battery) : null,
             BatteryCalibration = battery.Available ? new AcerBatteryCalibration(battery) : null,
             UsbCharging       = usb.Supported ? usb : null,
@@ -55,6 +49,7 @@ public static class DeviceFactory
             Clamshell         = clamshell.Supported ? clamshell : null,
             Owned = [gaming, battery, apge, lighting, hotkeys, clamshell],
         };
+        return (device, null);
     }
 }
 

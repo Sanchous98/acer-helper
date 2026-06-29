@@ -43,7 +43,8 @@ internal sealed class AppController
             () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
             _svc.Settings.TurboToggles, b => _svc.SetTurboToggles(b),
             () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
-            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan));
+            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan,
+            d.BatteryInfo != null, BuildBatteryLimit(), BuildBatteryCalibration()));
         _main = new MainWindow { DataContext = _vm };
 
         _svc.ApplyStartupState();
@@ -98,22 +99,29 @@ internal sealed class AppController
     {
         var d = _svc.Device;
         var list = new List<OptionToggle>();
-        if (d.BatteryChargeLimit is { } limit)
-            list.Add(new OptionToggle("Battery charge limit (~80%)", true, limit.Get(),
-                v => RunHwSet(() => _svc.SetBatteryLimit(v), "Battery limit")));
         if (d.LcdOverdrive is { } lcd)
             list.Add(new OptionToggle("LCD overdrive", true, lcd.Get(),
                 v => RunHwSet(() => _svc.SetLcdOverdrive(v), "LCD overdrive")));
         if (d.KeyboardBacklight is { } kbd)
             list.Add(new OptionToggle("Keyboard backlight timeout", true, kbd.GetTimeout(),
                 v => RunHwSet(() => _svc.SetBacklightTimeout(v), "Backlight timeout")));
-        if (d.BatteryCalibration is { } cal)
-            // Supported=false: shown disabled until an async confirm dialog is added (avoids
-            // starting a multi-hour charge/discharge cycle on a single click). Logic kept ready.
-            list.Add(new OptionToggle("Battery calibration (full cycle)", false, cal.Get(),
-                v => RunHwSet(() => _svc.SetBatteryCalibration(v), "Battery calibration")));
         return list;
     }
+
+    // Battery toggles live in the Battery section (not generic Options).
+    private OptionToggle? BuildBatteryLimit()
+        => _svc.Device.BatteryChargeLimit is { } limit
+            ? new OptionToggle("Charge limit (~80%)", true, limit.Get(),
+                v => RunHwSet(() => _svc.SetBatteryLimit(v), "Battery limit"))
+            : null;
+
+    private OptionToggle? BuildBatteryCalibration()
+        // Supported=false: shown disabled until an async confirm dialog exists (avoids starting a
+        // multi-hour charge/discharge cycle on a single click). Logic kept ready.
+        => _svc.Device.BatteryCalibration is { } cal
+            ? new OptionToggle("Calibration (full cycle)", false, cal.Get(),
+                v => RunHwSet(() => _svc.SetBatteryCalibration(v), "Battery calibration"))
+            : null;
 
     private List<OptionChoice> BuildHardwareChoices()
     {
@@ -189,9 +197,10 @@ internal sealed class AppController
         var current = _svc.CurrentProfile();
         var selectable = _svc.SelectableProfiles();
         var sensors = _svc.ReadSensors();
+        var battery = _svc.ReadBatteryInfo();
         var status = _svc.Device.StatusMessage ?? string.Empty;
 
-        _vm.Refresh(current, selectable, sensors, status);
+        _vm.Refresh(current, selectable, sensors, battery, status);
         _tray.ToolTipText = "Acer Helper — " + (current?.DisplayName ?? "?");
         if (current != null) _tray.Icon = ProfileIcon(current);
 
