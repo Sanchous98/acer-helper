@@ -1,18 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
-using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
 
 /// <summary>The quick-settings flyout window. Layout/bindings live in MainWindow.axaml; this holds
 /// only the window behaviour: acrylic backdrop, light-dismiss on focus loss, and tray placement.
-/// The window is a fixed size (the side-drawer space is always reserved) so opening/closing the
-/// drawer is a pure render-transform slide that never resizes or moves the window — moving/resizing
-/// an acrylic window makes the DWM blur flicker. It is positioned once, when shown.</summary>
+/// Width is fixed; height auto-sizes to content. Opening a sub-page (Options/Lighting) slides an
+/// overlay over the main panel via a render transform, so the window never resizes or moves — that
+/// avoids the DWM-blur flicker and the blurred strip a wider window would show.</summary>
 public partial class MainWindow : Window
 {
     private Size _lastSize;
-    private MainViewModel? _vm;
 
     public MainWindow()
     {
@@ -21,20 +19,13 @@ public partial class MainWindow : Window
         // On Win11 the DWM blurs the desktop behind the transparent window.
         TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur];
 
-        // Anchor the bottom-right corner to the tray. The window size is constant in normal use, so
-        // this effectively runs once (at first layout); the drawer slide doesn't change the size.
+        // Re-anchor the bottom-right corner to the tray whenever the size changes. The sub-page slide
+        // is a transform (not a layout change), so this only runs on the rare content-height change.
         LayoutUpdated += (_, _) =>
         {
             if (Bounds.Size == _lastSize) return;
             _lastSize = Bounds.Size;
             Reanchor();
-        };
-
-        // While the drawer is closed its host is an empty transparent strip beside the panel; a click
-        // there should dismiss the flyout, just like clicking outside the window.
-        DrawerHost.PointerPressed += (_, _) =>
-        {
-            if (_vm is { IsDrawerOpen: false }) { LastDismissedUtc = DateTime.UtcNow; Hide(); }
         };
 
         Closing += (_, e) => { e.Cancel = true; Hide(); };
@@ -46,12 +37,6 @@ public partial class MainWindow : Window
             LastDismissedUtc = DateTime.UtcNow;
             Hide();
         };
-    }
-
-    protected override void OnDataContextChanged(EventArgs e)
-    {
-        base.OnDataContextChanged(e);
-        _vm = DataContext as MainViewModel;
     }
 
     /// <summary>Set just before we programmatically open another of our windows, so the focus change

@@ -46,9 +46,13 @@ public sealed class WmiInvoker : IDisposable
 
     // WMI marshals strictly: assigning a value whose .NET type doesn't match the parameter's declared
     // CIM type throws "Specified cast is not valid". Convert each value to its parameter's actual type
-    // first, so callers can pass any integer width without knowing the MOF signature.
-    private static object Coerce(ManagementBaseObject inp, string name, object value) =>
-        inp.Properties[name].Type switch
+    // first, so callers can pass any integer width without knowing the MOF signature. Array parameters
+    // (e.g. Acer's uint8[] reserved/buffer fields) are passed through as-is.
+    private static object Coerce(ManagementBaseObject inp, string name, object value)
+    {
+        PropertyData prop = inp.Properties[name];
+        if (prop.IsArray) return value;
+        return prop.Type switch
         {
             CimType.UInt8  => Convert.ToByte(value),
             CimType.SInt8  => Convert.ToSByte(value),
@@ -60,6 +64,7 @@ public sealed class WmiInvoker : IDisposable
             CimType.SInt64 => Convert.ToInt64(value),
             _              => value,
         };
+    }
 
     public void Dispose() => _obj?.Dispose();
 }
