@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Features;
 
 // The ubiquitous language of the app: features expressed as vendor- and OS-agnostic
 // value objects. Infrastructure maps its own encodings to/from these at the boundary.
@@ -26,13 +26,16 @@ public enum FanMode : byte
 /// <summary>Which fan controls a backend offers (Auto is always implied).</summary>
 public sealed record FanCapability(bool HasMax, bool HasCustom, bool HasGpuFan);
 
-/// <summary>Live sensor readings. A field of -1 means unavailable/unsupported.</summary>
-public struct SensorSnapshot
+/// <summary>One fan's live reading. <paramref name="Rpm"/> of -1 means the speed is unreadable.</summary>
+public readonly record struct FanReading(string Label, int Rpm);
+
+/// <summary>Live sensor readings. Temperatures of -1 mean unavailable/unsupported; <see cref="Fans"/>
+/// lists 0..N fans (a laptop typically has 1–3), each labelled, in display order.</summary>
+public sealed record SensorSnapshot
 {
-    public int CpuTempC;
-    public int GpuTempC;
-    public int CpuFanRpm;
-    public int GpuFanRpm;
+    public int CpuTempC { get; init; } = -1;
+    public int GpuTempC { get; init; } = -1;
+    public IReadOnlyList<FanReading> Fans { get; init; } = [];
 }
 
 /// <summary>Generic actions a special key can trigger. A backend's hotkey source maps its

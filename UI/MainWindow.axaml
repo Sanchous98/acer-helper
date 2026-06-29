@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+        x:Class="AcerHelper.UI.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Acer Helper" Width="384" CanResize="False" ShowInTaskbar="False"
+        SizeToContent="Height" WindowStartupLocation="Manual"
+        Topmost="True" SystemDecorations="None" Background="Transparent">
+
+  <!-- Win11 quick-settings flyout: frameless rounded acrylic body (the root Border tints the DWM
+       blur and is never black). Acrylic level + light-dismiss + placement live in code-behind. -->
+  <Border Classes="root">
+    <StackPanel Margin="14" Spacing="0">
+
+      <!-- Header: device name + current-profile accent chip -->
+      <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+        <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
+        <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
+            <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                       Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <!-- Capability sections — the framework: a collection rendered by the App.axaml DataTemplates -->
+      <ItemsControl ItemsSource="{Binding Sections}"/>
+
+      <!-- Footer: status text + optional Lighting button -->
+      <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,0">
+        <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
+        <Button Grid.Column="1" Classes="accent" Content="Lighting…" Padding="16,5"
+                IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
+      </Grid>
+
+    </StackPanel>
+  </Border>
+</Window>

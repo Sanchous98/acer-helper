@@ -1,4 +1,5 @@
 using Avalonia;
+using AcerHelper.UI;
 
 namespace AcerHelper;
 
@@ -14,7 +15,7 @@ internal static class Program
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
-    public static AppBuilder BuildAvaloniaApp()
+    private static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
                      .UsePlatformDetect()
                      .LogToTrace();

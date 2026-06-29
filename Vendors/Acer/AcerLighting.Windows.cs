@@ -25,7 +25,6 @@ public sealed class AcerLighting : ILighting, IDisposable
     private const byte KB_ALL_ZONES = 0x0F;
     private const byte LB_ZONE      = 0x01;
 
-    private readonly int _zones;
     private readonly HidDevice? _device;
     private HidStream? _stream;
 
@@ -33,7 +32,7 @@ public sealed class AcerLighting : ILighting, IDisposable
     /// lightbar exists. Presence of RGB itself is probed (the ENE device is found or not).</summary>
     public AcerLighting(int keyboardZones, bool hasLightbar)
     {
-        _zones = keyboardZones;
+        KeyboardZones = keyboardZones;
         LightbarEffects = hasLightbar ? RgbEffects.Lightbar.Select(e => e.ToModeInfo()).ToList() : [];
         try
         {
@@ -53,7 +52,7 @@ public sealed class AcerLighting : ILighting, IDisposable
 
     public IReadOnlyList<RgbModeInfo> KeyboardEffects { get; } = RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList();
     public IReadOnlyList<RgbModeInfo> LightbarEffects { get; }
-    public int KeyboardZones => _zones;
+    public int KeyboardZones { get; }
 
     public bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
     {

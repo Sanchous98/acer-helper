@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.FansView"
+             x:DataType="vm:FansViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="8">
+      <TextBlock Classes="section" Text="FANS"/>
+
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <RadioButton GroupName="fan" Content="Auto"   IsChecked="{Binding IsAuto, Mode=TwoWay}"/>
+        <RadioButton GroupName="fan" Content="Max"    IsChecked="{Binding IsMax, Mode=TwoWay}"    IsVisible="{Binding HasMax}"/>
+        <RadioButton GroupName="fan" Content="Custom" IsChecked="{Binding IsCustom, Mode=TwoWay}" IsVisible="{Binding HasCustom}"/>
+      </StackPanel>
+
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Classes="muted" Width="34" VerticalAlignment="Center" Text="CPU"/>
+        <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
+                IsEnabled="{Binding SlidersEnabled}" Value="{Binding Cpu, Mode=TwoWay}"/>
+        <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding CpuPct}"/>
+      </Grid>
+
+      <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasGpu}">
+        <TextBlock Classes="muted" Width="34" VerticalAlignment="Center" Text="GPU"/>
+        <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
+                IsEnabled="{Binding SlidersEnabled}" Value="{Binding Gpu, Mode=TwoWay}"/>
+        <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding GpuPct}"/>
+      </Grid>
+
+      <Button Content="Apply" HorizontalAlignment="Right" Padding="16,5" Command="{Binding ApplyCommand}"/>
+    </StackPanel>
+  </Border>
+</UserControl>

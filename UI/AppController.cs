@@ -6,8 +6,9 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using AcerHelper.UI.ViewModels;
 
-namespace AcerHelper;
+namespace AcerHelper.UI;
 
 /// <summary>Owns the tray icon, windows and the refresh loop. Talks only to the
 /// <see cref="LaptopService"/> (Application) and the device's feature ports (Domain).</summary>
@@ -19,6 +20,7 @@ internal sealed class AppController
     private readonly Dictionary<string, NativeMenuItem> _menuItems = new();
 
     private readonly MainWindow _main;
+    private readonly MainViewModel _vm;
     private readonly LightingWindow? _lighting;
     private readonly TrayIcon _tray;
     private readonly DispatcherTimer _timer;
@@ -33,23 +35,21 @@ internal sealed class AppController
 
         var d = _svc.Device;
         _lighting = d.Lighting != null ? new LightingWindow(d.Lighting) : null;
-        _main = new MainWindow(
-            d,
-            ApplyProfile, ApplyFan, ShowLighting,
+        _vm = new MainViewModel(d, new UiActions(
+            ApplyProfile, ApplyFan,
+            (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g),
+            ShowLighting,
             BuildHardwareToggles(), BuildHardwareChoices(),
-            () => d.Clamshell?.Enabled ?? false,
-            b => _svc.SetClamshell(b),
-            _svc.Settings.TurboToggles,
-            b => _svc.SetTurboToggles(b),
-            () => d.Autostart?.IsEnabled() ?? false,
-            b => _svc.SetAutostart(b),
-            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan,
-            (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g));
+            () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
+            _svc.Settings.TurboToggles, b => _svc.SetTurboToggles(b),
+            () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
+            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan));
+        _main = new MainWindow { DataContext = _vm };
 
         _svc.ApplyStartupState();
 
         _tray = new TrayIcon { ToolTipText = "Acer Helper", IsVisible = true, Icon = MakeIcon(Colors.Gray), Menu = BuildMenu() };
-        _tray.Clicked += (_, _) => ShowMain();
+        _tray.Clicked += (_, _) => ToggleMain();
         TrayIcon.SetIcons(Avalonia.Application.Current!, new TrayIcons { _tray });
 
         if (d.Hotkeys != null) d.Hotkeys.Pressed += OnHotkey;
@@ -68,7 +68,7 @@ internal sealed class AppController
         var profiles = _svc.Device.PowerProfiles?.All ?? [];
         foreach (var p in profiles)
         {
-            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = NativeMenuItemToggleType.CheckBox };
+            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = NativeMenuItemToggleType.Radio };
             item.Click += (_, _) => ApplyProfile(p);
             _menuItems[p.Id] = item;
             menu.Items.Add(item);
@@ -143,7 +143,9 @@ internal sealed class AppController
 
     private static int IndexOf(IReadOnlyList<int> list, int value)
     {
-        for (int i = 0; i < list.Count; i++) if (list[i] == value) return i;
+        for (var i = 0; i < list.Count; i++) 
+            if (list[i] == value) 
+                return i;
         return 0;
     }
 
@@ -189,7 +191,7 @@ internal sealed class AppController
         var sensors = _svc.ReadSensors();
         var status = _svc.Device.StatusMessage ?? string.Empty;
 
-        _main.RefreshState(current, selectable, sensors, status);
+        _vm.Refresh(current, selectable, sensors, status);
         _tray.ToolTipText = "Acer Helper — " + (current?.DisplayName ?? "?");
         if (current != null) _tray.Icon = ProfileIcon(current);
 
@@ -198,6 +200,15 @@ internal sealed class AppController
             kv.Value.IsChecked = current?.Id == kv.Key;
             kv.Value.IsEnabled = selectable.Any(p => p.Id == kv.Key);
         }
+    }
+
+    private void ToggleMain()
+    {
+        if (_main.IsVisible) { _main.Hide(); return; }
+        // If the flyout just light-dismissed itself because this very click moved focus off it,
+        // don't reopen it — otherwise the tray icon could never close the panel.
+        if ((DateTime.UtcNow - _main.LastDismissedUtc).TotalMilliseconds < 300) return;
+        ShowMain();
     }
 
     private void ShowMain()
@@ -209,6 +220,8 @@ internal sealed class AppController
 
     private void ShowLighting()
     {
+        // Opening our own window steals focus from the flyout; that's not a click "outside" it.
+        _main.SuppressDismiss = true;
         _lighting?.Show();
         _lighting?.Activate();
     }
@@ -224,7 +237,7 @@ internal sealed class AppController
 
     // ---- helpers ----
 
-    private void Notify(string text) => _main.SetStatus(text);
+    private void Notify(string text) => _vm.Status = text;
 
     private void RunHwSet(Func<bool> set, string what) => Task.Run(() =>
     {
@@ -250,7 +263,14 @@ internal sealed class AppController
         const int sz = 32;
         var wb = new WriteableBitmap(new PixelSize(sz, sz), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
         var px = new byte[sz * sz * 4];
-        for (var i = 0; i < sz * sz; i++) { int o = i * 4; px[o] = c.B; px[o + 1] = c.G; px[o + 2] = c.R; px[o + 3] = 255; }
+        for (var i = 0; i < sz * sz; i++)
+        {
+            var o = i * 4;
+            px[o] = c.B; 
+            px[o + 1] = c.G; 
+            px[o + 2] = c.R; 
+            px[o + 3] = 255;
+        }
         using (var fb = wb.Lock()) Marshal.Copy(px, 0, fb.Address, px.Length);
         using var ms = new MemoryStream();
         wb.Save(ms);

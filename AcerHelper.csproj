@@ -68,6 +68,8 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.2.3" />
+    <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="HidSharp" Version="2.1.0" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
   </ItemGroup>

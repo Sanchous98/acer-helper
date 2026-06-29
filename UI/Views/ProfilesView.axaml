@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.ProfilesView"
+             x:DataType="vm:ProfilesViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="8">
+      <TextBlock Classes="section" Text="PERFORMANCE"/>
+      <ItemsControl ItemsSource="{Binding Profiles}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ProfileButtonViewModel">
+            <Button Classes="seg" Classes.selected="{Binding IsSelected}"
+                    Content="{Binding Name}" Command="{Binding ApplyCommand}"
+                    IsEnabled="{Binding IsEnabled}"/>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+</UserControl>

@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:ui="clr-namespace:AcerHelper.UI"
+             x:Class="AcerHelper.UI.Views.MonitorView"
+             x:DataType="vm:MonitorViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="12">
+
+      <!-- Temperatures: each column hidden when the device doesn't report it. -->
+      <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowTemps}">
+        <StackPanel Spacing="1" IsVisible="{Binding ShowCpu}">
+          <TextBlock Classes="muted" Text="CPU"/>
+          <TextBlock Classes="metric" Text="{Binding CpuTemp}"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Spacing="1" IsVisible="{Binding ShowGpu}">
+          <TextBlock Classes="muted" Text="GPU"/>
+          <TextBlock Classes="metric" Text="{Binding GpuTemp}"/>
+        </StackPanel>
+      </Grid>
+
+      <!-- One row per fan (1–3): spinning glyph + label + RPM. -->
+      <ItemsControl ItemsSource="{Binding Fans}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="4"/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:FanViewModel">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ui:FanSpinner Rpm="{Binding RpmValue}" Blades="{DynamicResource AppMuted}"/>
+              <TextBlock Grid.Column="1" Classes="muted" Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding Label}"/>
+              <TextBlock Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding Rpm}"/>
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+    </StackPanel>
+  </Border>
+</UserControl>

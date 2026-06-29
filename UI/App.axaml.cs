@@ -3,7 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using AcerHelper.Composition;
 
-namespace AcerHelper;
+namespace AcerHelper.UI;
 
 public partial class App : Avalonia.Application
 {

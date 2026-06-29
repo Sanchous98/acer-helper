@@ -6,44 +6,35 @@ namespace AcerHelper;
 /// All orchestration (profile cycling/toggling, persistence of changes) lives here, never in
 /// the UI or in Infrastructure.
 /// </summary>
-public sealed class LaptopService : IDisposable
+public sealed class LaptopService(IDevice device, ISettingsStore store) : IDisposable
 {
-    private readonly IDevice _device;
-    private readonly ISettingsStore _store;
     private PerformanceProfile? _lastNonTurbo;
-
-    public LaptopService(IDevice device, ISettingsStore store)
-    {
-        _device = device;
-        _store = store;
-        Settings = store.Load();
-    }
 
     /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
-    public IDevice Device => _device;
-    public Settings Settings { get; }
+    public IDevice Device => device;
+    public Settings Settings { get; } = store.Load();
     public string? LastError { get; private set; }
 
-    public void Save() => _store.Save(Settings);
+    private void Save() => store.Save(Settings);
 
     /// <summary>Re-apply persisted state that the OS doesn't remember on its own.</summary>
     public void ApplyStartupState()
     {
-        if (Settings.Clamshell) _device.Clamshell?.SetEnabled(true);
-        if (Settings.Bluelight > 0) _device.DisplayTint?.Apply(Settings.Bluelight);
+        if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
+        if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
     }
 
     // ---- performance profiles ----
 
-    public PerformanceProfile? CurrentProfile() => _device.PowerProfiles?.Current();
+    public PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
 
     public IReadOnlyList<PerformanceProfile> SelectableProfiles() =>
-        _device.PowerProfiles?.Selectable() ?? [];
+        device.PowerProfiles?.Selectable() ?? [];
 
     public bool ApplyProfile(PerformanceProfile p)
     {
-        var pp = _device.PowerProfiles;
+        var pp = device.PowerProfiles;
         if (pp == null) return false;
         if (pp.Set(p)) return true;
         LastError = pp.LastError;
@@ -54,7 +45,7 @@ public sealed class LaptopService : IDisposable
     /// Returns the profile that was applied, or null.</summary>
     public PerformanceProfile? TogglePerformance()
     {
-        var pp = _device.PowerProfiles;
+        var pp = device.PowerProfiles;
         if (pp == null) return null;
 
         var cur = pp.Current();
@@ -75,7 +66,6 @@ public sealed class LaptopService : IDisposable
         var all = pp.All;
         if (all.Count == 0) return null;
         var sel = pp.Selectable();
-        bool Ok(PerformanceProfile p) => sel.Count == 0 || sel.Any(a => a.Id == p.Id);
 
         var start = 0;
         if (current != null)
@@ -87,13 +77,15 @@ public sealed class LaptopService : IDisposable
             if (Ok(cand)) return cand;
         }
         return current ?? all[0];
+
+        bool Ok(PerformanceProfile p) => sel.Count == 0 || sel.Any(a => a.Id == p.Id);
     }
 
     // ---- fans ----
 
     public bool ApplyFan(FanMode mode, byte cpu, byte gpu)
     {
-        var fc = _device.FanControl;
+        var fc = device.FanControl;
         if (fc == null) return false;
         var ok = mode == FanMode.Custom ? fc.SetCustomSpeeds(cpu, gpu) : fc.SetMode(mode);
         if (!ok) LastError = fc.LastError;
@@ -108,29 +100,28 @@ public sealed class LaptopService : IDisposable
         Save();
     }
 
-    public SensorSnapshot ReadSensors() =>
-        _device.Sensors?.Read() ?? new SensorSnapshot { CpuTempC = -1, GpuTempC = -1, CpuFanRpm = -1, GpuFanRpm = -1 };
+    public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();
 
     // ---- hardware toggles (return success; LastError holds the reason on failure) ----
 
-    public bool SetBatteryLimit(bool on)       => Run(_device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);
-    public bool SetBatteryCalibration(bool on) => Run(_device.BatteryCalibration, x => x.Set(on), x => x.LastError);
-    public bool SetLcdOverdrive(bool on)       => Run(_device.LcdOverdrive,       x => x.Set(on), x => x.LastError);
-    public bool SetUsbCharging(int level)      => Run(_device.UsbCharging,        x => x.Set(level), x => x.LastError);
-    public bool SetBacklightTimeout(bool on)   => Run(_device.KeyboardBacklight,  x => x.SetTimeout(on), x => x.LastError);
+    public bool SetBatteryLimit(bool on)       => Run(device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);
+    public bool SetBatteryCalibration(bool on) => Run(device.BatteryCalibration, x => x.Set(on), x => x.LastError);
+    public bool SetLcdOverdrive(bool on)       => Run(device.LcdOverdrive,       x => x.Set(on), x => x.LastError);
+    public bool SetUsbCharging(int level)      => Run(device.UsbCharging,        x => x.Set(level), x => x.LastError);
+    public bool SetBacklightTimeout(bool on)   => Run(device.KeyboardBacklight,  x => x.SetTimeout(on), x => x.LastError);
 
-    public bool SetAutostart(bool on) => _device.Autostart?.SetEnabled(on) ?? false;
+    public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 
     public void SetBlueLight(int level)
     {
-        _device.DisplayTint?.Apply(level);
+        device.DisplayTint?.Apply(level);
         Settings.Bluelight = level;
         Save();
     }
 
     public void SetClamshell(bool on)
     {
-        _device.Clamshell?.SetEnabled(on);
+        device.Clamshell?.SetEnabled(on);
         Settings.Clamshell = on;
         Save();
     }
@@ -141,7 +132,7 @@ public sealed class LaptopService : IDisposable
         Save();
     }
 
-    public void EvaluateClamshell() => _device.Clamshell?.Evaluate();
+    public void EvaluateClamshell() => device.Clamshell?.Evaluate();
 
     private bool Run<T>(T? svc, Func<T, bool> set, Func<T, string?> err) where T : class
     {
@@ -153,5 +144,5 @@ public sealed class LaptopService : IDisposable
         return ok;
     }
 
-    public void Dispose() => _device.Dispose();
+    public void Dispose() => device.Dispose();
 }

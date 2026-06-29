@@ -1,0 +1,118 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:views="clr-namespace:AcerHelper.UI.Views"
+             x:Class="AcerHelper.UI.App">
+
+  <!-- Capability section -> view map. This is the dashboard "framework": MainViewModel.Sections is a
+       collection of section view-models, and these templates render each one. A new feature/vendor
+       section = a new SectionViewModel + a DataTemplate here; the shell (MainWindow) is untouched. -->
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:MonitorViewModel"><views:MonitorView/></DataTemplate>
+    <DataTemplate DataType="vm:ProfilesViewModel"><views:ProfilesView/></DataTemplate>
+    <DataTemplate DataType="vm:FansViewModel"><views:FansView/></DataTemplate>
+    <DataTemplate DataType="vm:OptionsViewModel"><views:OptionsView/></DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <!-- Win11 geometry: in-page controls 4px, overlays/flyouts 8px (Avalonia defaults are 3/5). -->
+      <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
+      <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+
+      <!-- System accent (provided by the Fluent theme) as brushes: solid for the selected profile
+           and the chip text/dot, translucent for the chip background. -->
+      <SolidColorBrush x:Key="AccentBrush"     Color="{DynamicResource SystemAccentColor}" />
+      <SolidColorBrush x:Key="AccentSoftBrush" Color="{DynamicResource SystemAccentColor}" Opacity="0.15" />
+
+      <!-- Own, theme-aware brushes (the WinUI Card*/Layer*/TextFill* tokens don't exist in
+           Avalonia 11.2). Translucent so they layer over the acrylic backdrop like Win11. -->
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppAcrylicTint" Color="#E6F3F3F3" />
+          <SolidColorBrush x:Key="AppCard"        Color="#99FFFFFF" />
+          <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
+          <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppAcrylicTint" Color="#E62A2A2A" />
+          <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
+          <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+
+    <!-- Acrylic-tinted, rounded root surface (the flyout body). -->
+    <Style Selector="Border.root">
+      <Setter Property="Background" Value="{DynamicResource AppAcrylicTint}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <!-- A content card: a subtle translucent layer over the acrylic. -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource AppCard}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+      <Setter Property="Margin" Value="2,0,0,10" />
+    </Style>
+
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.metric">
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <!-- Performance-mode segmented button. Translucent grey surface keeps unselected segments
+         visible on the acrylic; the selected one is filled with the system accent in code. -->
+    <Style Selector="Button.seg">
+      <Setter Property="Background" Value="#1F808080" />
+      <Setter Property="BorderBrush" Value="#33808080" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="Padding" Value="2,8" />
+      <Setter Property="Margin" Value="3,0" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <!-- The active segment: filled with the system accent (toggled by the .selected class). -->
+    <Style Selector="Button.seg.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- Current-profile chip in the header: a faint accent pill with an accent dot + label. -->
+    <Style Selector="Border.chip">
+      <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </Application.Styles>
+</Application>

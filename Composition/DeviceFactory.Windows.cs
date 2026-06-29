@@ -1,5 +1,6 @@
 using AcerHelper.Os;
 using AcerHelper.Vendors.Acer;
+using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Composition;
 
@@ -20,7 +21,7 @@ public static class DeviceFactory
         {
             string? status = gaming.LastError;
             gaming.Dispose();
-            return BuildGeneric(status);
+            return GenericDevice.Create(status);   // not an Acer gaming model (or WMI not accessible)
         }
 
         // Within Acer, only the un-probeable bits (display name + RGB layout) come from the model
@@ -53,24 +54,6 @@ public static class DeviceFactory
             Autostart         = new Autostart(),
             Clamshell         = clamshell.Supported ? clamshell : null,
             Owned = [gaming, battery, apge, lighting, hotkeys, clamshell],
-        };
-    }
-
-    /// <summary>Generic Windows device (not an Acer gaming model, or WMI not accessible): the basics
-    /// any laptop has — OS power-mode profiles, blue-light, autostart, clamshell.</summary>
-    private static IDevice BuildGeneric(string? status)
-    {
-        var profiles = new OverlayPowerProfiles();
-        var clamshell = new Clamshell();
-        return new CompositeDevice
-        {
-            VendorName    = "Generic",
-            StatusMessage = status,
-            PowerProfiles = profiles.Available ? profiles : null,
-            DisplayTint   = new DisplayTint(),
-            Autostart     = new Autostart(),
-            Clamshell     = clamshell.Supported ? clamshell : null,
-            Owned = [clamshell],
         };
     }
 }

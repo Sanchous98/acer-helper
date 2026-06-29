@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace AcerHelper;
+namespace AcerHelper.UI;
 
 /// <summary>Lighting window: keyboard (all zones), per-zone, lightbar. Adapts to the device's
 /// advertised effects and zone count.</summary>
@@ -17,30 +17,31 @@ public sealed class LightingWindow : Window
         CanResize = false;
         ShowInTaskbar = false;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Topmost = true;   // float above other apps, like the main flyout (kept closable; no light-dismiss)
+
+        // Acrylic backdrop to match the main flyout (keeps its title bar so it stays closable).
+        Background = Brushes.Transparent;
+        TransparencyLevelHint = new[] { WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur };
 
         var root = new StackPanel { Margin = new Thickness(12), Spacing = 0 };
 
         if (lighting.KeyboardEffects.Count > 0)
-            root.Children.Add(DevicePanel("Keyboard (all zones)", lighting.KeyboardEffects,
+            root.Children.Add(DevicePanel("KEYBOARD", lighting.KeyboardEffects,
                 (e, c, b, s) => lighting.ApplyKeyboard(e, b, s, c)));
         if (lighting.KeyboardZones > 1)
             root.Children.Add(ZonePanel(lighting));
         if (lighting.LightbarEffects.Count > 0)
-            root.Children.Add(DevicePanel("Lightbar", lighting.LightbarEffects,
+            root.Children.Add(DevicePanel("LIGHTBAR", lighting.LightbarEffects,
                 (e, c, b, s) => lighting.ApplyLightbar(e, b, s, c)));
 
-        Content = root;
+        Content = new Border { Classes = { "root" }, Child = root };
         Closing += (_, e) => { e.Cancel = true; Hide(); };
     }
 
     private static Control Section(string header, Control content) => new Border
     {
-        BorderBrush = Brushes.Gray,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(10),
-        Margin = new Thickness(0, 0, 0, 8),
-        Child = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = header, FontWeight = FontWeight.SemiBold }, content } },
+        Classes = { "card" },
+        Child = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = header, Classes = { "section" } }, content } },
     };
 
     private static Control DevicePanel(string title, IReadOnlyList<RgbModeInfo> effects, Func<RgbModeInfo, AccentColor, byte, byte, bool> apply)
@@ -49,7 +50,7 @@ public sealed class LightingWindow : Window
         var picker = new ColorPicker { Color = Colors.Red };
         var bri = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 240, TickFrequency = 10 };
         var spd = new Slider { Minimum = 0, Maximum = 9, Value = 5, Width = 240 };
-        var applyBtn = new Button { Content = "Apply", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(12, 4, 12, 4) };
+        var applyBtn = new Button { Content = "Apply", Classes = { "accent" }, HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(16, 5, 16, 5) };
 
         void UpdateEnabled()
         {
@@ -95,7 +96,7 @@ public sealed class LightingWindow : Window
         }
 
         var bri = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 240, TickFrequency = 10 };
-        var applyBtn = new Button { Content = "Apply", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(12, 4, 12, 4) };
+        var applyBtn = new Button { Content = "Apply", Classes = { "accent" }, HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(16, 5, 16, 5) };
         applyBtn.Click += (_, _) =>
         {
             byte b = (byte)bri.Value;
@@ -107,6 +108,6 @@ public sealed class LightingWindow : Window
         };
 
         var content = new StackPanel { Spacing = 6, Children = { row, new TextBlock { Text = "Brightness" }, bri, applyBtn } };
-        return Section("Keyboard — per-zone (static)", content);
+        return Section("KEYBOARD ZONES", content);
     }
 }

@@ -114,10 +114,13 @@ public sealed class AcerSensors : ISensors
 
     public SensorSnapshot Read() => new()
     {
-        CpuTempC  = ReadSensor(SensorCpuTemp, word: false),
-        GpuTempC  = ReadSensor(SensorGpuTemp, word: false),
-        CpuFanRpm = ReadSensor(SensorCpuFan,  word: true),
-        GpuFanRpm = ReadSensor(SensorGpuFan,  word: true),
+        CpuTempC = ReadSensor(SensorCpuTemp, word: false),
+        GpuTempC = ReadSensor(SensorGpuTemp, word: false),
+        Fans =
+        [
+            new FanReading("CPU", ReadSensor(SensorCpuFan, word: true)),
+            new FanReading("GPU", ReadSensor(SensorGpuFan, word: true)),
+        ],
     };
 
     private int ReadSensor(uint sensorId, bool word)

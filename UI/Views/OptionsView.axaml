@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.OptionsView"
+             x:DataType="vm:OptionsViewModel">
+  <Border Classes="card">
+    <StackPanel Spacing="8">
+      <TextBlock Classes="section" Text="OPTIONS"/>
+      <ItemsControl ItemsSource="{Binding Rows}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="12"/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.DataTemplates>
+
+          <DataTemplate DataType="vm:ToggleRowViewModel" x:DataType="vm:ToggleRowViewModel">
+            <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="{Binding Tip}">
+              <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
+              <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding IsOn, Mode=TwoWay}"/>
+            </Grid>
+          </DataTemplate>
+
+          <DataTemplate DataType="vm:ChoiceRowViewModel" x:DataType="vm:ChoiceRowViewModel">
+            <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}">
+              <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
+              <ComboBox Grid.Column="1" MinWidth="110" VerticalAlignment="Center"
+                        ItemsSource="{Binding Options}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
+            </Grid>
+          </DataTemplate>
+
+        </ItemsControl.DataTemplates>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+</UserControl>
