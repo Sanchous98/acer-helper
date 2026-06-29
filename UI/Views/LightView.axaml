@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             x:Class="AcerHelper.UI.Views.LightView"
+             x:DataType="vm:LightViewModel">
+
+  <UserControl.Styles>
+    <!-- Zone selector: a row of colour swatches; the picked one gets an accent ring. -->
+    <Style Selector="ListBox.zones">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
+    </Style>
+    <Style Selector="ListBox.zones ListBoxItem">
+      <Setter Property="Margin" Value="3,0"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    </Style>
+    <Style Selector="Border.sw">
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="BorderThickness" Value="2"/>
+      <Setter Property="BorderBrush" Value="#40808080"/>
+    </Style>
+    <Style Selector="ListBox.zones ListBoxItem:selected Border.sw">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="12" Margin="0,8,0,0">
+
+    <!-- Effect picker (always present) -->
+    <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding EffectNames}"
+              SelectedIndex="{Binding SelectedEffectIndex, Mode=TwoWay}"/>
+
+    <!-- Zone selector — only when the effect is per-zone static on a multi-zone keyboard -->
+    <ListBox Classes="zones" IsVisible="{Binding ShowZones}"
+             ItemsSource="{Binding Zones}" SelectedIndex="{Binding SelectedZoneIndex, Mode=TwoWay}">
+      <ListBox.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ZoneColorViewModel">
+          <Border Classes="sw" Background="{Binding Fill}"/>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- Colour wheel — only when the effect honours a colour -->
+    <ColorView IsVisible="{Binding ShowColor}" HorizontalAlignment="Stretch"
+               Color="{Binding EditColor, Mode=TwoWay}"/>
+
+    <!-- Brightness (always) -->
+    <Grid ColumnDefinitions="64,*,44">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Brightness"/>
+      <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
+              Value="{Binding Brightness, Mode=TwoWay}"/>
+      <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
+                 Text="{Binding Brightness, StringFormat='{}{0:0}%'}"/>
+    </Grid>
+
+    <!-- Speed — only for effects that have a speed -->
+    <Grid ColumnDefinitions="64,*,44" IsVisible="{Binding HasSpeed}">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Speed"/>
+      <Slider Grid.Column="1" Minimum="0" Maximum="9" VerticalAlignment="Center"
+              Value="{Binding Speed, Mode=TwoWay}"/>
+      <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
+                 Text="{Binding Speed, StringFormat='{}{0:0}'}"/>
+    </Grid>
+
+  </StackPanel>
+</UserControl>

@@ -4,18 +4,27 @@
         xmlns:views="clr-namespace:AcerHelper.UI.Views"
         x:Class="AcerHelper.UI.LightingWindow"
         x:DataType="vm:LightingViewModel"
-        Title="Acer Helper — Lighting" Width="380" CanResize="False" ShowInTaskbar="False"
+        Title="Acer Helper — Lighting" Width="480" CanResize="False" ShowInTaskbar="False"
         SizeToContent="Height" WindowStartupLocation="CenterScreen"
         Topmost="True" Background="Transparent">
 
-  <!-- VM panel -> view map (local to this window): keyboard/lightbar use the device panel,
-       per-zone uses the zones panel. The shell just lists whatever panels the device exposed. -->
-  <Window.DataTemplates>
-    <DataTemplate DataType="vm:RgbDeviceViewModel"><views:RgbDeviceView/></DataTemplate>
-    <DataTemplate DataType="vm:RgbZonesViewModel"><views:RgbZonesView/></DataTemplate>
-  </Window.DataTemplates>
-
+  <!-- One tab per light the device actually exposes (keyboard / lightbar). Each tab's content is the
+       adaptive LightView. With a single light there is just one tab. -->
   <Border Classes="root">
-    <ItemsControl Margin="14" ItemsSource="{Binding Panels}"/>
+    <DockPanel Margin="14">
+      <TextBlock DockPanel.Dock="Top" Classes="h1" Margin="2,0,0,10" Text="Lighting"/>
+      <TabControl ItemsSource="{Binding Panels}" Padding="0">
+        <TabControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:LightViewModel">
+            <TextBlock Text="{Binding Title}"/>
+          </DataTemplate>
+        </TabControl.ItemTemplate>
+        <TabControl.ContentTemplate>
+          <DataTemplate x:DataType="vm:LightViewModel">
+            <views:LightView/>
+          </DataTemplate>
+        </TabControl.ContentTemplate>
+      </TabControl>
+    </DockPanel>
   </Border>
 </Window>
