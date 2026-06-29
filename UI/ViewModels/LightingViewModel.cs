@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using AcerHelper;
 using AcerHelper.Features;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -8,21 +9,25 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace AcerHelper.UI.ViewModels;
 
 /// <summary>The lighting drawer root: one panel per light (keyboard, lightbar), shown as tabs.
-/// Built from whatever the device's <see cref="ILighting"/> advertises.</summary>
+/// Built from whatever the device's <see cref="ILighting"/> advertises. Each panel loads its
+/// persisted state (the app is the source of truth), re-applies it to the device on startup, and
+/// saves changes back via <paramref name="save"/>.</summary>
 public sealed class LightingViewModel
 {
     public ObservableCollection<LightViewModel> Panels { get; } = [];
 
-    public LightingViewModel(ILighting lighting)
+    public LightingViewModel(ILighting lighting, Settings settings, Action save)
     {
         if (lighting.KeyboardEffects.Count > 0)
             Panels.Add(new LightViewModel("Keyboard", lighting.KeyboardEffects, lighting.KeyboardZones,
                 (e, c, b, s) => lighting.ApplyKeyboard(e, b, s, c),
-                (i, b, c) => lighting.ApplyKeyboardZone(i, b, c)));
+                (i, b, c) => lighting.ApplyKeyboardZone(i, b, c),
+                settings.Keyboard, save));
 
         if (lighting.LightbarEffects.Count > 0)
             Panels.Add(new LightViewModel("Lightbar", lighting.LightbarEffects, zones: 1,
-                (e, c, b, s) => lighting.ApplyLightbar(e, b, s, c), applyZone: null));
+                (e, c, b, s) => lighting.ApplyLightbar(e, b, s, c), applyZone: null,
+                settings.Lightbar, save));
     }
 }
 
@@ -37,6 +42,8 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly IReadOnlyList<RgbModeInfo> _effects;
     private readonly Action<RgbModeInfo, AccentColor, byte, byte> _applyAll;
     private readonly Action<int, byte, AccentColor>? _applyZone;
+    private readonly LightSettings _state;
+    private readonly Action _save;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _loading = true;
 
@@ -53,28 +60,42 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private double _speed = 5;
 
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
-                          Action<RgbModeInfo, AccentColor, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone)
+                          Action<RgbModeInfo, AccentColor, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
+                          LightSettings state, Action save)
     {
         Title = title;
         _effects = effects;
         _applyAll = applyAll;
         _applyZone = applyZone;
+        _state = state;
+        _save = save;
         EffectNames = effects.Select(e => e.Name).ToList();
+
+        // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
+        _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
+        _brightness = Math.Clamp(state.Brightness, 0, 100);
+        _speed = state.Speed;
+        _color = FromPacked(state.Color);
 
         if (applyZone != null && zones > 1)
         {
             Color[] def = { Colors.Red, Colors.Lime, Colors.Blue, Colors.Magenta };
             for (int i = 0; i < zones; i++)
             {
-                var z = new ZoneColorViewModel($"Zone {i + 1}", def[i % def.Length]);
+                Color c = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : def[i % def.Length];
+                var z = new ZoneColorViewModel($"Zone {i + 1}", c);
                 z.PropertyChanged += OnZoneChanged;
                 Zones.Add(z);
             }
         }
 
-        _debounce.Tick += (_, _) => { _debounce.Stop(); ApplyNow(); };
+        _debounce.Tick += (_, _) => { _debounce.Stop(); ApplyNow(); SaveState(); };
         UpdateColorMode();
         _loading = false;
+
+        // Re-apply on startup so the device matches the app — but only if the user has set it before,
+        // so a fresh install doesn't override whatever the firmware was showing.
+        if (state.Configured) ApplyNow();
     }
 
     partial void OnSelectedEffectIndexChanged(int value) { UpdateColorMode(); Schedule(); }
@@ -116,6 +137,20 @@ public sealed partial class LightViewModel : ObservableObject
         else
             _applyAll(Current, new AccentColor(Color.R, Color.G, Color.B), b, s);
     }
+
+    private void SaveState()
+    {
+        _state.Configured = true;
+        _state.EffectIndex = SelectedEffectIndex;
+        _state.Brightness = (int)Brightness;
+        _state.Speed = (int)Speed;
+        _state.Color = Pack(Color);
+        _state.ZoneColors = Zones.Select(z => Pack(z.Color)).ToArray();
+        _save();
+    }
+
+    private static Color FromPacked(int rgb) => Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+    private static int Pack(Color c) => (c.R << 16) | (c.G << 8) | c.B;
 }
 
 /// <summary>One keyboard zone's editable colour.</summary>

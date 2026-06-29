@@ -136,6 +136,10 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         Save();
     }
 
+    /// <summary>Persist the lighting state (the lighting view-models mutate <see cref="Settings"/>'s
+    /// LightSettings in place, then call this to write them out).</summary>
+    public void PersistLighting() => Save();
+
     public void EvaluateClamshell() => device.Clamshell?.Evaluate();
 
     private bool Run<T>(T? svc, Func<T, bool> set, Func<T, string?> err) where T : class

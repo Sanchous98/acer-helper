@@ -7,15 +7,19 @@
         SizeToContent="WidthAndHeight" WindowStartupLocation="Manual"
         Topmost="True" SystemDecorations="None" Background="Transparent">
 
-  <!-- Win11 quick-settings flyout: a frameless rounded acrylic body sized to its content. The main
-       quick panel sits on the right (anchored to the tray); Options/Lighting open as a side drawer
-       that slides out to its left. Acrylic level + light-dismiss + tray placement live in code-behind. -->
+  <!-- Win11 quick-settings flyout: a frameless rounded acrylic body. The main quick panel sits on the
+       right (anchored to the tray); Options/Lighting open as a side drawer to its left. The window is
+       a FIXED size (the drawer space is always reserved) and is positioned only once — the drawer
+       just slides its inner panel via a render transform, so opening/closing never resizes or moves
+       the window (resizing/moving an acrylic window makes the DWM blur flicker). -->
   <Grid ColumnDefinitions="Auto,Auto">
 
-    <!-- Side drawer (left): the host reserves the space (width set in code: 0 <-> 360); the inner
-         acrylic panel slides in/out via a render transform (see Border.drawerpanel). ClipToBounds
-         hides the panel while it's parked off to the right. -->
-    <Border x:Name="DrawerHost" Grid.Column="0" Width="0" ClipToBounds="True">
+    <!-- Side drawer (left): the host always reserves 360px; the inner acrylic panel slides in/out via
+         a render transform (see Border.drawerpanel), clipped while parked off to the right. While the
+         drawer is closed the host is an empty transparent strip — a click on it dismisses the flyout
+         (treated like a click outside). -->
+    <Border x:Name="DrawerHost" Grid.Column="0" Width="360" Margin="0,0,8,0"
+            Background="Transparent" ClipToBounds="True">
       <Border Classes="root drawerpanel" Classes.shown="{Binding IsDrawerOpen}" Width="360">
         <DockPanel Margin="14">
           <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,0,0,10">
