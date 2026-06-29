@@ -113,6 +113,14 @@
       <Setter Property="Foreground" Value="White" />
     </Style>
 
+    <!-- Win11 quick-settings style toggles: just the switch, no "On/Off" caption, and none of the
+         Fluent default ~154px MinWidth that would otherwise squeeze/clip labels in the columns. -->
+    <Style Selector="ToggleSwitch">
+      <Setter Property="OnContent" Value="" />
+      <Setter Property="OffContent" Value="" />
+      <Setter Property="MinWidth" Value="0" />
+    </Style>
+
     <!-- Current-profile chip in the header: a faint accent pill with an accent dot + label. -->
     <Style Selector="Border.chip">
       <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />

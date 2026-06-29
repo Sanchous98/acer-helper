@@ -10,6 +10,10 @@ public sealed partial class MonitorViewModel : SectionViewModel
 {
     public ObservableCollection<FanViewModel> Fans { get; } = [];
 
+    // Temps block + a couple of fan rows; estimated up front so column balancing isn't thrown off by
+    // the fan list still being empty at construction time.
+    public override double LayoutWeight => 2.8;
+
     [ObservableProperty] private string _cpuTemp = "—";
     [ObservableProperty] private string _gpuTemp = "—";
     [ObservableProperty] private bool _showCpu;

@@ -38,16 +38,17 @@ public sealed partial class MainViewModel : ObservableObject
         DeviceName = device.VendorName;
         ShowLighting = device.Lighting != null;
 
-        // Full-width, in glance order: live readouts, then the primary control surfaces.
-        if (device.Sensors != null)
-            PrimarySections.Add(_monitor = new MonitorViewModel());
+        // Full width on top: the control surfaces that genuinely need it (segmented modes, sliders).
         if (device.PowerProfiles is { } pp)
             PrimarySections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile));
         if (device.FanControl is { } fc)
             PrimarySections.Add(new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
 
-        // Compact settings stacks — paired into two columns when there's more than one.
+        // Compact readouts/settings — balanced into two columns (monitor + battery together roughly
+        // match the taller options list, so neither column is left with dead space).
         var secondary = new List<SectionViewModel>();
+        if (device.Sensors != null)
+            secondary.Add(_monitor = new MonitorViewModel());
         if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null)
             secondary.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
         if (OptionsViewModel.TryCreate(device, a) is { } options)
