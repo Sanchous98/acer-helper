@@ -1,9 +1,12 @@
 name: acer-helper
 
-# Builds the Acer Helper tray app (C# / .NET 10, Avalonia UI) as a STANDALONE
-# Native-AOT, self-contained .exe — no .NET runtime install needed on the target.
-# AOT native compilation must run on Windows (cross-OS AOT is unsupported); the
-# windows-2022 runner ships the MSVC toolchain (link.exe) AOT needs.
+# Builds the Acer Helper tray app (C# / .NET 10, Avalonia UI) as a STANDALONE,
+# self-contained, single-file .exe — no .NET runtime install needed on the target.
+#
+# JIT (not Native AOT) on purpose: the Acer features use System.Management (WMI), whose
+# COM/late-binding Native AOT does not support reliably — under AOT the WMI calls fail at
+# runtime and all Acer functionality is lost. JIT keeps WMI working. (csproj still carries
+# the AOT settings for later; re-enable by adding -p:PublishAot=true once WMI-AOT is verified.)
 
 on:
   push:
@@ -21,14 +24,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish (Native AOT, self-contained)
+      - name: Publish (self-contained single-file, JIT — WMI-safe)
         run: >
           dotnet publish AcerHelper.csproj
           -c Release
           -f net10.0-windows
           -r win-x64
           --self-contained true
-          -p:PublishAot=true
           -o publish
 
       - name: List output
@@ -38,6 +40,6 @@ jobs:
       - name: Upload standalone exe
         uses: actions/upload-artifact@v7
         with:
-          name: AcerHelper-aot-win-x64
+          name: AcerHelper-win-x64
           path: publish/AcerHelper.exe
           if-no-files-found: error
