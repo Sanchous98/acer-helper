@@ -31,7 +31,7 @@ public sealed class WmiInvoker : IDisposable
     public ulong Invoke(string method, string inParam, object inValue, string outParam)
     {
         using ManagementBaseObject inp = _obj!.GetMethodParameters(method);
-        inp[inParam] = inValue;
+        inp[inParam] = Coerce(inp, inParam, inValue);
         using ManagementBaseObject outp = _obj.InvokeMethod(method, inp, null);
         return Convert.ToUInt64(outp[outParam]);
     }
@@ -40,9 +40,26 @@ public sealed class WmiInvoker : IDisposable
     public ManagementBaseObject Invoke(string method, IReadOnlyDictionary<string, object> args)
     {
         using ManagementBaseObject inp = _obj!.GetMethodParameters(method);
-        foreach (var kv in args) inp[kv.Key] = kv.Value;
+        foreach (var kv in args) inp[kv.Key] = Coerce(inp, kv.Key, kv.Value);
         return _obj.InvokeMethod(method, inp, null);
     }
+
+    // WMI marshals strictly: assigning a value whose .NET type doesn't match the parameter's declared
+    // CIM type throws "Specified cast is not valid". Convert each value to its parameter's actual type
+    // first, so callers can pass any integer width without knowing the MOF signature.
+    private static object Coerce(ManagementBaseObject inp, string name, object value) =>
+        inp.Properties[name].Type switch
+        {
+            CimType.UInt8  => Convert.ToByte(value),
+            CimType.SInt8  => Convert.ToSByte(value),
+            CimType.UInt16 => Convert.ToUInt16(value),
+            CimType.SInt16 => Convert.ToInt16(value),
+            CimType.UInt32 => Convert.ToUInt32(value),
+            CimType.SInt32 => Convert.ToInt32(value),
+            CimType.UInt64 => Convert.ToUInt64(value),
+            CimType.SInt64 => Convert.ToInt64(value),
+            _              => value,
+        };
 
     public void Dispose() => _obj?.Dispose();
 }

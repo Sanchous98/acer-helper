@@ -123,23 +123,20 @@
       <Setter Property="MinWidth" Value="0" />
     </Style>
 
-    <!-- Side drawer: a clipping container whose width animates 0 <-> open. The inner acrylic panel is
-         fixed-width and right-aligned, so as the container grows the panel is revealed from the right
-         (it appears to slide out leftward from behind the main flyout). Width change drives the
-         window's auto-size; code-behind keeps the bottom-right corner anchored to the tray. -->
-    <Style Selector="Border.drawer">
-      <Setter Property="Width" Value="0" />
-      <Setter Property="Margin" Value="0" />
-      <Setter Property="ClipToBounds" Value="True" />
+    <!-- Side drawer: the inner acrylic panel slides via a render transform (composited, no window
+         resize) so the open/close is smooth. The outer host's width is set once in code (0 <-> 360)
+         to reserve/free the space; code-behind re-anchors the tray corner only on those two steps.
+         The panel starts shifted right (hidden behind the main flyout) and slides left into view. -->
+    <Style Selector="Border.drawerpanel">
+      <Setter Property="RenderTransform" Value="translateX(360px)" />
       <Setter Property="Transitions">
         <Transitions>
-          <DoubleTransition Property="Width" Duration="0:0:0.20" Easing="CubicEaseOut" />
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.20" Easing="CubicEaseOut" />
         </Transitions>
       </Setter>
     </Style>
-    <Style Selector="Border.drawer.open">
-      <Setter Property="Width" Value="360" />
-      <Setter Property="Margin" Value="0,0,8,0" />
+    <Style Selector="Border.drawerpanel.shown">
+      <Setter Property="RenderTransform" Value="translateX(0)" />
     </Style>
 
     <!-- Borderless icon button (drawer close). -->
