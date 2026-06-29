@@ -17,6 +17,8 @@ public sealed class AcerPowerProfiles : IPowerProfiles
     public AcerPowerProfiles(WmiInvoker gaming) => _wmi = gaming;
 
     public string? LastError { get; private set; }
+    // The profile enum is shared across the Acer gaming line; the available set is discovered live
+    // from the supported-mask below (not per-model).
     public IReadOnlyList<PerformanceProfile> All => AcerProfiles.All;
 
     public IReadOnlyList<PerformanceProfile> Selectable()
@@ -36,7 +38,7 @@ public sealed class AcerPowerProfiles : IPowerProfiles
         {
             ulong outv = _wmi.Invoke("GetGamingMiscSetting", "gmInput", IdxPlatformProfile, "gmOutput");
             if ((outv & 0xFF) != 0) { LastError = $"GetGamingMiscSetting status={(outv & 0xFF)}"; return null; }
-            return AcerProfiles.ToDomain((AcerProfile)((outv >> 8) & 0xFF));
+            return AcerProfiles.ToDomain((byte)((outv >> 8) & 0xFF));
         }
         catch (Exception ex) { LastError = ex.Message; return null; }
     }
@@ -45,7 +47,7 @@ public sealed class AcerPowerProfiles : IPowerProfiles
     {
         try
         {
-            ulong packed = IdxPlatformProfile | ((ulong)(byte)AcerProfiles.ToByte(profile) << 8);
+            ulong packed = IdxPlatformProfile | ((ulong)AcerProfiles.ToByte(profile) << 8);
             uint status = (uint)_wmi.Invoke("SetGamingMiscSetting", "gmInput", packed, "gmOutput");
             if ((status & 0xFF) != 0) { LastError = $"SetGamingMiscSetting status={(status & 0xFF)}"; return false; }
             return true;
@@ -65,6 +67,7 @@ public sealed class AcerFanControl : IFanControl
     public AcerFanControl(WmiInvoker gaming) => _wmi = gaming;
 
     public string? LastError { get; private set; }
+    // Modern Acer gaming is hardwired dual-fan (CPU + GPU); not a per-model axis.
     public FanCapability Capability => new(HasMax: true, HasCustom: true, HasGpuFan: true);
 
     public bool SetMode(FanMode mode)

@@ -44,10 +44,21 @@ One project, organised by module; **namespaces match the directories** (`AcerHel
 - **`Vendors/Acer/`** (`AcerHelper.Vendors.Acer`) — Acer feature implementations. There is **no
   separate platform layer**: the OS access is folded into the vendor implementation, split per OS
   by file name — `AcerGaming.Windows.cs` (WMI), and future `*.Linux.cs` (sysfs) sit side by side.
-- **`Os/`** (`AcerHelper.Os`) — genuinely vendor-agnostic OS services (blue-light gamma,
-  autostart, clamshell) + a small WMI helper, also split by `*.Windows.cs` / `*.Linux.cs`.
+  Within Acer, capabilities are **probed at runtime** (RGB device present? EC supported-profile
+  mask? nullable WMI getters?) — so most models work without an entry. Profiles (shared enum) and
+  fan topology (dual) are not per-model. The only un-probeable per-model bits — friendly name and
+  RGB layout (zone count, lightbar) — live in a config file **`acer-models.json`** (embedded
+  default + optional user override at `%AppData%/AcerHelper` / `~/.config/AcerHelper`), matched by
+  DMI product name via `AcerModels.Detect`. (Design validated against Linuwu-Sense and G-Helper:
+  probe-first, with a thin per-model quirks/override table.)
+- **`Os/`** (`AcerHelper.Os`) — genuinely vendor-agnostic OS services: **performance profiles via
+  standard OS APIs** (Windows power-mode overlay / Linux ACPI `platform_profile`), blue-light
+  gamma, autostart, clamshell + a small WMI helper, also split by `*.Windows.cs` / `*.Linux.cs`.
 - **`Composition/`** (`AcerHelper.Composition`) — `DeviceFactory.Windows.cs` / `DeviceFactory.Linux.cs`
-  detect the device and assemble an `IDevice`; `CompositeDevice`, `JsonSettingsStore`.
+  detect the device and assemble an `IDevice`; `CompositeDevice`, `JsonSettingsStore`. When no
+  vendor backend matches (a non-Acer laptop, or no elevation), it falls back to a **generic
+  device** offering those OS-standard basics — so the app is useful on any laptop. (Validated on a
+  Dell Latitude 5540 on Linux: shows the firmware's cool/quiet/balanced/performance profiles.)
 - **root** (`AcerHelper`) — the application use cases (`LaptopService`, `Settings`) and the
   Avalonia UI (tray + windows), capability-driven (binds to `Features` only).
 

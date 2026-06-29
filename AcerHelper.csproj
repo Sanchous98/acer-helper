@@ -40,6 +40,11 @@
     <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
   </ItemGroup>
 
+  <!-- Per-model Acer quirks DB (friendly name + RGB layout); loaded at runtime, user-overridable. -->
+  <ItemGroup>
+    <EmbeddedResource Include="acer-models.json" />
+  </ItemGroup>
+
   <!-- Default packaging: one compressed, self-extracting single-file .exe (JIT).
        Mutually exclusive with Native AOT, so disabled when PublishAot=true. -->
   <PropertyGroup Condition="'$(PublishAot)' != 'true'">

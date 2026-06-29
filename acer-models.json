@@ -1,0 +1,14 @@
+{
+  // Per-model Acer quirks that can't be probed at runtime: a friendly display name and the
+  // keyboard RGB layout (zone count + whether a lightbar exists). Everything else — which
+  // profiles exist, battery/USB/backlight/LCD-overdrive support, whether RGB is present at all —
+  // is detected by probing the hardware, so most models work without an entry here.
+  //
+  // "match" is a list of case-insensitive substrings tested against the DMI product name.
+  // Drop a copy of this file at %AppData%/AcerHelper/acer-models.json (or ~/.config/AcerHelper/)
+  // to add or correct a model without rebuilding; its entries are checked first.
+  "models": [
+    { "match": [ "AN18", "Nitro 18" ], "name": "Acer Nitro 18", "zones": 4, "lightbar": true }
+  ],
+  "default": { "name": "Acer", "zones": 4, "lightbar": true }
+}

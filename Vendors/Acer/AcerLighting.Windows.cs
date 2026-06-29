@@ -11,6 +11,8 @@ namespace AcerHelper.Vendors.Acer;
 /// </summary>
 public sealed class AcerLighting : ILighting, IDisposable
 {
+    // Standard Acer ENE keyboard controller. If a model ever uses a different id, add a probe;
+    // these have held across the Acer gaming line.
     private const int VID         = 0x0CF2;
     private const int PID         = 0x5130;
     private const int FEATURE_LEN = 11;
@@ -23,11 +25,16 @@ public sealed class AcerLighting : ILighting, IDisposable
     private const byte KB_ALL_ZONES = 0x0F;
     private const byte LB_ZONE      = 0x01;
 
+    private readonly int _zones;
     private readonly HidDevice? _device;
     private HidStream? _stream;
 
-    public AcerLighting()
+    /// <summary>Per-model RGB layout (from the quirks config): keyboard zone count and whether a
+    /// lightbar exists. Presence of RGB itself is probed (the ENE device is found or not).</summary>
+    public AcerLighting(int keyboardZones, bool hasLightbar)
     {
+        _zones = keyboardZones;
+        LightbarEffects = hasLightbar ? RgbEffects.Lightbar.Select(e => e.ToModeInfo()).ToList() : [];
         try
         {
             foreach (HidDevice d in DeviceList.Local.GetHidDevices(VID, PID))
@@ -35,7 +42,7 @@ public sealed class AcerLighting : ILighting, IDisposable
                 try { if (d.GetMaxFeatureReportLength() == FEATURE_LEN) { _device = d; break; } }
                 catch { /* skip interfaces we can't query */ }
             }
-            if (_device == null) LastError = "ENE lighting interface (0CF2:5130, 11-byte feature) not found.";
+            if (_device == null) LastError = $"ENE lighting interface ({VID:X4}:{PID:X4}, {FEATURE_LEN}-byte feature) not found.";
         }
         catch (Exception ex) { LastError = ex.Message; }
     }
@@ -45,8 +52,8 @@ public sealed class AcerLighting : ILighting, IDisposable
     public string? LastError { get; private set; }
 
     public IReadOnlyList<RgbModeInfo> KeyboardEffects { get; } = RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList();
-    public IReadOnlyList<RgbModeInfo> LightbarEffects { get; } = RgbEffects.Lightbar.Select(e => e.ToModeInfo()).ToList();
-    public int KeyboardZones => 4;
+    public IReadOnlyList<RgbModeInfo> LightbarEffects { get; }
+    public int KeyboardZones => _zones;
 
     public bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
     {
