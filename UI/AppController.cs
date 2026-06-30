@@ -276,8 +276,9 @@ internal sealed class AppController
             UpdateSidePanel();
     }
 
-    /// <summary>Show the side window matching the view-model and hide the other (no animation, no
-    /// content swap — each window keeps its own content).</summary>
+    /// <summary>Reconcile the side panels with the view-model, animated. Open fades/slides the panel
+    /// in; close fades/slides it out then hides; switching fades the old out, then the new in
+    /// (sequential, so the two translucent windows never overlap). Each window keeps its own content.</summary>
     private void UpdateSidePanel()
     {
         SidePanelWindow? want = null;
@@ -286,26 +287,43 @@ internal sealed class AppController
 
         if (ReferenceEquals(want, _shownWin)) return;
 
+        var old = _shownWin;
         _shownWin = want;
-        _main.SuppressDismiss = true;   // showing/hiding our own window isn't a click "outside"
 
-        // Hide whichever panel isn't wanted FIRST, so two translucent windows never overlap.
-        if (_optionsWin != null && !ReferenceEquals(_optionsWin, want)) _optionsWin.Hide();
-        if (_lightingWin != null && !ReferenceEquals(_lightingWin, want)) _lightingWin.Hide();
-
-        if (want != null) { PositionSide(want); want.Show(); }
-        else _main.Activate();   // closed -> focus back to the main flyout
+        if (old != null && want != null)
+            old.AnimateOut(() =>                                       // switch: out, then in
+            {
+                old.Hide();
+                if (ReferenceEquals(_shownWin, want)) ShowPanel(want); // skip if dismissed mid-switch
+            });
+        else if (want != null)
+            ShowPanel(want);                                           // open
+        else
+            old!.AnimateOut(() => { old.Hide(); _main.Activate(); });  // close
     }
 
-    /// <summary>Pin a side window to the main flyout's left edge with an 8px gap, matching its height.</summary>
+    private void ShowPanel(SidePanelWindow win)
+    {
+        PositionSide(win);
+        win.ResetForOpen();             // content invisible before Show -> no flash
+        _main.SuppressDismiss = true;   // showing our own window isn't a click "outside"
+        win.Show();
+        win.AnimateIn();                // chrome off, slide+fade in, then acrylic+shadow at rest
+    }
+
+    /// <summary>Pin a side window so its visible panel sits 8px left of the main flyout, top-aligned
+    /// and the same height. Both windows now carry an identical 20px shadow margin on every side, so
+    /// the panels align when the windows share a top-left and a height:
+    ///   main card left  = main.X + 20s ; side card right = side.X + (20 + 360)s
+    ///   want side right = main card left − 8s  ->  side.X = main.X − 368s ; side.Y = main.Y</summary>
     private void PositionSide(SidePanelWindow win)
     {
         var screen = _main.Screens.Primary ?? _main.Screens.All.FirstOrDefault();
         double s = screen?.Scaling ?? 1.0;
-        int wpx = (int)(360 * s);
-        int gapPx = (int)(8 * s);
-        win.Height = _main.Bounds.Height;
-        win.Position = new PixelPoint(_main.Position.X - wpx - gapPx, _main.Position.Y);
+        win.Height = _main.Bounds.Height;        // DIP; identical margins => inner panels match in height
+        win.Position = new PixelPoint(
+            _main.Position.X - (int)(368 * s),
+            _main.Position.Y);
     }
 
     /// <summary>Light-dismiss: if focus left the main flyout and both side panels, the user clicked
