@@ -9,7 +9,6 @@ public partial class ConfirmDialog : Window
     public ConfirmDialog()
     {
         InitializeComponent();
-        TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur];
         CancelButton.Click  += (_, _) => Close(false);
         ConfirmButton.Click += (_, _) => Close(true);
     }

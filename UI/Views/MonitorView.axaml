@@ -12,7 +12,7 @@
         <TextBlock Classes="muted" Text="CPU"/>
         <TextBlock Classes="metric" Text="{Binding CpuTemp}"/>
         <StackPanel Orientation="Horizontal" Spacing="7" Margin="0,6,0,0" IsVisible="{Binding ShowCpuFan}">
-          <ui:FanSpinner VerticalAlignment="Center" Blades="{DynamicResource AppMuted}"/>
+          <ui:FanSpinner VerticalAlignment="Center" Rpm="{Binding CpuFanRpm}" Blades="{DynamicResource AppMuted}"/>
           <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding CpuFan}"/>
         </StackPanel>
       </StackPanel>
@@ -21,7 +21,7 @@
         <TextBlock Classes="muted" Text="GPU"/>
         <TextBlock Classes="metric" Text="{Binding GpuTemp}"/>
         <StackPanel Orientation="Horizontal" Spacing="7" Margin="0,6,0,0" IsVisible="{Binding ShowGpuFan}">
-          <ui:FanSpinner VerticalAlignment="Center" Blades="{DynamicResource AppMuted}"/>
+          <ui:FanSpinner VerticalAlignment="Center" Rpm="{Binding GpuFanRpm}" Blades="{DynamicResource AppMuted}"/>
           <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding GpuFan}"/>
         </StackPanel>
       </StackPanel>

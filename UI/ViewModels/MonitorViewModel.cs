@@ -11,6 +11,8 @@ public sealed partial class MonitorViewModel : SectionViewModel
     [ObservableProperty] private string _gpuTemp = "—";
     [ObservableProperty] private string _cpuFan = "—";
     [ObservableProperty] private string _gpuFan = "—";
+    [ObservableProperty] private int _cpuFanRpm;    // drives the CPU FanSpinner
+    [ObservableProperty] private int _gpuFanRpm;    // drives the GPU FanSpinner
     [ObservableProperty] private bool _showCpu;
     [ObservableProperty] private bool _showGpu;
     [ObservableProperty] private bool _showCpuFan;
@@ -36,5 +38,7 @@ public sealed partial class MonitorViewModel : SectionViewModel
         ShowGpuFan = gpu is { Rpm: >= 0 };
         CpuFan = ShowCpuFan ? $"{cpu!.Value.Rpm} rpm" : "—";
         GpuFan = ShowGpuFan ? $"{gpu!.Value.Rpm} rpm" : "—";
+        CpuFanRpm = ShowCpuFan ? cpu!.Value.Rpm : 0;
+        GpuFanRpm = ShowGpuFan ? gpu!.Value.Rpm : 0;
     }
 }

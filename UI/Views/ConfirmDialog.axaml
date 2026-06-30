@@ -3,7 +3,8 @@
         x:Class="AcerHelper.UI.Views.ConfirmDialog"
         Title="Acer Helper" Width="380" SizeToContent="Height" CanResize="False"
         ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
-        Topmost="True" WindowDecorations="None" Background="Transparent">
+        Topmost="True" WindowDecorations="None" Background="Transparent"
+        TransparencyLevelHint="AcrylicBlur,Blur">
 
   <!-- Small frameless acrylic confirmation. Text + confirm-button caption are set in code-behind;
        buttons close the dialog with a bool result for ShowDialog<bool>. -->

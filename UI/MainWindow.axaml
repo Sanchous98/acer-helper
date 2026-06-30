@@ -1,50 +1,64 @@
-<Window xmlns="https://github.com/avaloniaui"
+<ui:FlyoutWindow xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+        xmlns:ui="clr-namespace:AcerHelper.UI"
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="Acer Nitro" Width="508" CanResize="False" ShowInTaskbar="False"
         SizeToContent="Height" WindowStartupLocation="Manual"
-        Topmost="True" WindowDecorations="None" Background="Transparent">
+        Topmost="True" WindowDecorations="None" Background="Transparent"
+        TransparencyLevelHint="Transparent">
 
-  <!-- Win11 quick-settings flyout. Fully app-painted (no DWM), same as the side panels: an
-       ExperimentalAcrylicBorder for the blur and a BoxShadow for the shadow. The 20px margin is room
-       for the shadow; the visible card is 468 wide. Placement/foregrounding live in code-behind. -->
-  <Border Margin="20"
+  <!-- Quick-settings flyout: one card, sized to content (no transparent padding => the WM's open
+       animation is centred on the card and there's no transparent area to swallow clicks). The
+       Options/Lighting drawer is a SEPARATE window (SidePanelWindow) to the left, so this window never
+       resizes. We animate the CONTENT (this Border), not the Window: it's shown at full size with the
+       content transparent, so KWin's one-shot map effect plays over nothing, then SlideFader reveals. -->
+  <!-- Backdrop fills the whole window (incl. the 20px transparent shadow margins around the card). A
+       click on it = a click in the dead zone outside the visible card => dismiss, like clicking outside
+       the flyout. Clicks on the card itself have a child as Source and are ignored (see code-behind). -->
+  <Panel x:Name="Backdrop" Background="Transparent">
+  <Border x:Name="Root" Width="468" Margin="20"
+          Background="{DynamicResource AppAcrylicTint}"
           CornerRadius="{DynamicResource OverlayCornerRadius}"
-          BoxShadow="0 4 16 0 #55000000">
-    <ExperimentalAcrylicBorder CornerRadius="{DynamicResource OverlayCornerRadius}"
-                               ClipToBounds="True"
-                               Material="{DynamicResource SidePanelAcrylic}">
-      <DockPanel Margin="14">
+          ClipToBounds="True"
+          BoxShadow="0 4 16 0 #55000000"
+          Opacity="0" RenderTransform="translateX(26px)">
+    <Border.Transitions>
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut"/>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" Easing="CubicEaseOut"/>
+      </Transitions>
+    </Border.Transitions>
+    <DockPanel Margin="14">
 
-        <!-- Header: device name + current-profile accent chip -->
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
-          <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
-          <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
-              <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
-                         Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
-            </StackPanel>
-          </Border>
-        </Grid>
-
-        <!-- Footer: status text + side-panel launch buttons -->
-        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
-          <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-            <Button Content="Options" Padding="14,5"
-                    IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
-            <Button Classes="accent" Content="Lighting" Padding="14,5"
-                    IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
+      <!-- Header: device name + current-profile accent chip -->
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+        <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
+        <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
+            <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                       Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
           </StackPanel>
-        </Grid>
+        </Border>
+      </Grid>
 
-        <!-- Body: capability sections, single full-width column. -->
-        <ItemsControl ItemsSource="{Binding Sections}"/>
+      <!-- Footer: status text + drawer launch buttons -->
+      <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
+        <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Content="Options" Padding="14,5"
+                  IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
+          <Button Classes="accent" Content="Lighting" Padding="14,5"
+                  IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
+        </StackPanel>
+      </Grid>
 
-      </DockPanel>
-    </ExperimentalAcrylicBorder>
+      <!-- Body: capability sections, single full-width column. -->
+      <ItemsControl ItemsSource="{Binding Sections}"/>
+
+    </DockPanel>
   </Border>
-</Window>
+  </Panel>
+</ui:FlyoutWindow>

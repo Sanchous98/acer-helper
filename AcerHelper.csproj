@@ -60,9 +60,11 @@
     <TrimmerRootAssembly Include="System.Management" />
   </ItemGroup>
 
-  <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux). Tmds.DBus.Protocol
-       is the ACTIVE Linux tray (D-Bus/StatusNotifierItem) transport, so its security pin
-       (advisory GHSA-xrw6-gwf8-vvr9, fixed in 0.21.0) matters most on Linux — keep it global. -->
+  <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux).
+       NOTE: do NOT pin Tmds.DBus.Protocol explicitly. It is Avalonia's Linux D-Bus transport
+       (tray/StatusNotifierItem, X11 IME), and Avalonia.Desktop must control its version — an
+       independent pin (e.g. 0.94.2) loads a Tmds where Avalonia's expected types moved, crashing
+       at X11 init with "Could not load type 'Tmds.DBus.Protocol.Connection'". Let it flow transitively. -->
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.0.5" />
     <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
@@ -71,7 +73,6 @@
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="HidSharp" Version="2.1.0" />
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
   </ItemGroup>
 
   <!-- Windows-only platform packages (WMI + power/display events). -->
