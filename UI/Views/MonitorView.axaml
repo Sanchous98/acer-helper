@@ -5,36 +5,27 @@
              x:Class="AcerHelper.UI.Views.MonitorView"
              x:DataType="vm:MonitorViewModel">
   <Border Classes="card">
-    <StackPanel Spacing="12">
+    <!-- CPU and GPU as two aligned columns; each: label, temperature, then fan speed. -->
+    <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowTemps}">
 
-      <!-- Temperatures: each column hidden when the device doesn't report it. -->
-      <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowTemps}">
-        <StackPanel Spacing="1" IsVisible="{Binding ShowCpu}">
-          <TextBlock Classes="muted" Text="CPU"/>
-          <TextBlock Classes="metric" Text="{Binding CpuTemp}"/>
+      <StackPanel Spacing="2" IsVisible="{Binding ShowCpu}">
+        <TextBlock Classes="muted" Text="CPU"/>
+        <TextBlock Classes="metric" Text="{Binding CpuTemp}"/>
+        <StackPanel Orientation="Horizontal" Spacing="7" Margin="0,6,0,0" IsVisible="{Binding ShowCpuFan}">
+          <ui:FanSpinner VerticalAlignment="Center" Blades="{DynamicResource AppMuted}"/>
+          <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding CpuFan}"/>
         </StackPanel>
-        <StackPanel Grid.Column="1" Spacing="1" IsVisible="{Binding ShowGpu}">
-          <TextBlock Classes="muted" Text="GPU"/>
-          <TextBlock Classes="metric" Text="{Binding GpuTemp}"/>
+      </StackPanel>
+
+      <StackPanel Grid.Column="1" Spacing="2" IsVisible="{Binding ShowGpu}">
+        <TextBlock Classes="muted" Text="GPU"/>
+        <TextBlock Classes="metric" Text="{Binding GpuTemp}"/>
+        <StackPanel Orientation="Horizontal" Spacing="7" Margin="0,6,0,0" IsVisible="{Binding ShowGpuFan}">
+          <ui:FanSpinner VerticalAlignment="Center" Blades="{DynamicResource AppMuted}"/>
+          <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding GpuFan}"/>
         </StackPanel>
-      </Grid>
+      </StackPanel>
 
-      <!-- One row per fan (1–3): spinning glyph + label + RPM. -->
-      <ItemsControl ItemsSource="{Binding Fans}">
-        <ItemsControl.ItemsPanel>
-          <ItemsPanelTemplate><StackPanel Spacing="4"/></ItemsPanelTemplate>
-        </ItemsControl.ItemsPanel>
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:FanViewModel">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-              <ui:FanSpinner Rpm="{Binding RpmValue}" Blades="{DynamicResource AppMuted}"/>
-              <TextBlock Grid.Column="1" Classes="muted" Margin="8,0,0,0" VerticalAlignment="Center" Text="{Binding Label}"/>
-              <TextBlock Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" Text="{Binding Rpm}"/>
-            </Grid>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-
-    </StackPanel>
+    </Grid>
   </Border>
 </UserControl>

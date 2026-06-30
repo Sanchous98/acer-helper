@@ -32,17 +32,18 @@
       <!-- Own, theme-aware brushes (the WinUI Card*/Layer*/TextFill* tokens don't exist in
            Avalonia 11.2). Translucent so they layer over the acrylic backdrop like Win11. -->
       <ResourceDictionary.ThemeDictionaries>
-        <!-- AppAcrylicTint is a LIGHT tint laid over the DWM acrylic backdrop (which supplies the
-             translucency/blur), so the windows behind stay visible. Raise its alpha for more tint /
-             less see-through, lower it for more. -->
+        <!-- AppAcrylicTint is the window's surface colour over the acrylic backdrop. It must stay
+             fairly opaque or text washes out over bright wallpapers/windows (a near-transparent tint
+             looks great on a dark desktop but breaks on a light one). ~85% keeps text readable on any
+             background while still letting blurred colour through. This alpha is the see-through knob. -->
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="AppAcrylicTint" Color="#40F3F3F3" />
+          <SolidColorBrush x:Key="AppAcrylicTint" Color="#D9F3F3F3" />
           <SolidColorBrush x:Key="AppCard"        Color="#40FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
           <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="AppAcrylicTint" Color="#402A2A2A" />
+          <SolidColorBrush x:Key="AppAcrylicTint" Color="#D92A2A2A" />
           <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
           <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />

@@ -286,13 +286,15 @@ internal sealed class AppController
 
         if (ReferenceEquals(want, _shownWin)) return;
 
-        var old = _shownWin;
         _shownWin = want;
         _main.SuppressDismiss = true;   // showing/hiding our own window isn't a click "outside"
 
+        // Hide whichever panel isn't wanted FIRST, so two translucent windows never overlap.
+        if (_optionsWin != null && !ReferenceEquals(_optionsWin, want)) _optionsWin.Hide();
+        if (_lightingWin != null && !ReferenceEquals(_lightingWin, want)) _lightingWin.Hide();
+
         if (want != null) { PositionSide(want); want.Show(); }
-        old?.Hide();
-        if (want == null) _main.Activate();   // closed -> focus back to the main flyout
+        else _main.Activate();   // closed -> focus back to the main flyout
     }
 
     /// <summary>Pin a side window to the main flyout's left edge with an 8px gap, matching its height.</summary>
