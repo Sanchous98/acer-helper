@@ -48,5 +48,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: AcerHelper-win-x64
-          path: publish/
+          # Whole folder (exe + native Skia/HarfBuzz/ANGLE DLLs), but drop debug symbols from the release.
+          path: |
+            publish/
+            !publish/**/*.pdb
           if-no-files-found: error
