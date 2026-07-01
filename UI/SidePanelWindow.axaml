@@ -3,7 +3,7 @@
         xmlns:ui="clr-namespace:AcerHelper.UI"
         x:Class="AcerHelper.UI.SidePanelWindow"
         Title="Acer Helper" Width="400" CanResize="False" ShowInTaskbar="False"
-        WindowStartupLocation="Manual" WindowDecorations="None" Background="Transparent"
+        WindowStartupLocation="Manual" WindowDecorations="None" Background="Black"
         Topmost="True" TransparencyLevelHint="Transparent">
 
   <!-- Options/Lighting drawer: a separate window to the left of the main flyout, sized to its own

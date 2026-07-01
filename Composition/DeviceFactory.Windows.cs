@@ -24,12 +24,15 @@ public static partial class DeviceFactory
         var model = AcerModels.Detect(product);
 
         var battery   = new WmiInvoker("BatteryControl");
+        // Probe which battery modes the firmware actually advertises (uFunctionList bits), so the toggles
+        // appear only when they'd really do something — not merely because the BatteryControl class exists.
+        var batModes  = battery.Available ? BatteryWmi.ReadStatus(battery, out _) : null;
         var apge      = new WmiInvoker("APGeAction");
         var hotkeys   = new AcerHotkeys();
         var clamshell = new Clamshell();
         var usb       = new AcerUsbCharging(apge);
         var backlight = new AcerKeyboardBacklight(apge);
-        var lighting  = new AcerLighting(model.Zones, model.Lightbar);
+        var lighting  = new AcerLighting(model.Zones, model.Lightbar, gaming);   // gaming WMI = brightness read-back
 
         var device = new CompositeDevice
         {
@@ -39,8 +42,8 @@ public static partial class DeviceFactory
             Sensors       = new AcerSensors(gaming),
             LcdOverdrive  = new AcerLcdOverdrive(gaming),
             BatteryInfo        = BatteryInfo.TryCreate(),
-            BatteryChargeLimit = battery.Available ? new AcerBatteryChargeLimit(battery) : null,
-            BatteryCalibration = battery.Available ? new AcerBatteryCalibration(battery) : null,
+            BatteryChargeLimit = batModes?.HealthAvail == true ? new AcerBatteryChargeLimit(battery) : null,
+            BatteryCalibration = batModes?.CalibAvail == true ? new AcerBatteryCalibration(battery) : null,
             UsbCharging       = usb.Supported ? usb : null,
             KeyboardBacklight = backlight.Supported ? backlight : null,
             Lighting          = lighting.Available ? lighting : null,   // RGB presence is probed

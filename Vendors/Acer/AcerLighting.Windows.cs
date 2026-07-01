@@ -1,4 +1,6 @@
+using System.Management;
 using AcerHelper.Features;
+using AcerHelper.Os;
 using HidSharp;
 
 namespace AcerHelper.Vendors.Acer;
@@ -26,7 +28,14 @@ public sealed class AcerLighting : ILighting, IDisposable
     private const byte KB_ALL_ZONES = 0x0F;
     private const byte LB_ZONE      = 0x01;
 
+    // GetGamingKBBacklight query selector + output layout (probed on the Nitro 18, method id 21):
+    //   in  gmInput  = 1 (0/2 return gmReturn=1 "unsupported")
+    //   out gmOutput = byte[15], gmReturn = 0 on success; gmOutput[2] is the brightness (0..100).
+    private const uint KbBacklightQuery = 1;
+    private const int  KbBrightnessByte = 2;
+
     private readonly HidDevice? _device;
+    private readonly WmiInvoker? _gaming;   // brightness read-back path (RGB itself is the write-only HID below)
     private HidStream? _stream;
 
     /// <summary>True if the ENE HID device was found (composition gate).</summary>
@@ -39,9 +48,10 @@ public sealed class AcerLighting : ILighting, IDisposable
 
     /// <summary>Per-model RGB layout (from the quirks config): keyboard zone count and whether a
     /// lightbar exists. Presence of RGB itself is probed (the ENE device is found or not).</summary>
-    public AcerLighting(int keyboardZones, bool hasLightbar)
+    public AcerLighting(int keyboardZones, bool hasLightbar, WmiInvoker? gaming = null)
     {
         KeyboardZones = keyboardZones;
+        _gaming = gaming;
         LightbarEffects = hasLightbar ? RgbEffects.Lightbar.Select(e => e.ToModeInfo()).ToList() : [];
         try
         {
@@ -96,6 +106,23 @@ public sealed class AcerLighting : ILighting, IDisposable
             return true;
         }
         catch (Exception ex) { LastError = ex.Message; return false; }
+    }
+
+    public int? ReadKeyboardBrightness()
+    {
+        if (_gaming is not { Available: true }) return null;
+        try
+        {
+            using ManagementBaseObject outp = _gaming.Invoke("GetGamingKBBacklight", new Dictionary<string, object>
+            {
+                ["gmInput"] = KbBacklightQuery,
+            });
+            if (Convert.ToByte(outp["gmReturn"]) != 0) return null;   // firmware reports the query unsupported
+            var data = (byte[])outp["gmOutput"];
+            if (data.Length <= KbBrightnessByte) return null;
+            return Math.Clamp(data[KbBrightnessByte], (byte)0, (byte)100);
+        }
+        catch (Exception ex) { LastError = ex.Message; return null; }
     }
 
     public void Dispose() => _stream?.Dispose();

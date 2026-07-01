@@ -92,6 +92,11 @@ public interface ILighting
     bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color);
     bool ApplyKeyboardZone(int zoneIndex, byte brightness, AccentColor color);
     bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, AccentColor color);
+
+    /// <summary>The keyboard backlight brightness the firmware currently reports (0..100), or null if it
+    /// can't be read. The RGB itself goes over a write-only HID controller, but the brightness the Fn keys
+    /// set is readable via the gaming WMI (GetGamingKBBacklight) — lets the UI sync to hardware changes.</summary>
+    int? ReadKeyboardBrightness();
 }
 
 /// <summary>Special keys, mapped to generic actions.</summary>

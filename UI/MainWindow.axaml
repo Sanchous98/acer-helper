@@ -6,7 +6,7 @@
         x:DataType="vm:MainViewModel"
         Title="Acer Nitro" Width="508" CanResize="False" ShowInTaskbar="False"
         SizeToContent="Height" WindowStartupLocation="Manual"
-        Topmost="True" WindowDecorations="None" Background="Transparent"
+        Topmost="True" WindowDecorations="None" Background="Black"
         TransparencyLevelHint="Transparent">
 
   <!-- Quick-settings flyout: one card, sized to content (no transparent padding => the WM's open
