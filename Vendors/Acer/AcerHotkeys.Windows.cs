@@ -26,6 +26,7 @@ public sealed class AcerHotkeys : IHotkeys
     {
         (0x0001, 0x06),   // keyboard (Nitro key scancode)
         (0x0088, 0x01),   // Acer vendor page (Turbo)
+        (0x000C, 0x01),   // Consumer Control (media / brightness keys — incl. keyboard-backlight key)
     };
 
     [StructLayout(LayoutKind.Sequential)]
@@ -59,6 +60,7 @@ public sealed class AcerHotkeys : IHotkeys
     private readonly IntPtr _hwnd;
 
     public event Action<HotkeyAction>? Pressed;
+    public event Action? InputActivity;
 
     public AcerHotkeys()
     {
@@ -89,6 +91,10 @@ public sealed class AcerHotkeys : IHotkeys
 
     private void OnRawInput(IntPtr lParam)
     {
+        // Any special-key/raw input (brightness key included) -> let listeners re-read out-of-band hardware
+        // state in real time. The mapped-hotkey decoding below still runs; this is an extra, cheaper signal.
+        InputActivity?.Invoke();
+
         uint hdr = (uint)(8 + 2 * IntPtr.Size);   // sizeof(RAWINPUTHEADER)
         uint size = 0;
         GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, hdr);

@@ -88,6 +88,11 @@ public interface IKeyboardBacklight
 public interface IHotkeys : IDisposable
 {
     event Action<HotkeyAction> Pressed;
+
+    /// <summary>Fires when any special-key / raw input is observed (not just the mapped hotkeys). Lets the
+    /// app react to out-of-band hardware changes in real time — e.g. re-read the keyboard backlight
+    /// brightness the moment the Fn brightness key is pressed, instead of polling.</summary>
+    event Action InputActivity;
 }
 
 /// <summary>Display blue-light reduction (gamma based). Level 0 = off.</summary>

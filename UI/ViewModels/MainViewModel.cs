@@ -71,6 +71,17 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);
 
+    /// <summary>True while the Lighting drawer is the one actually on screen. Cheap check the input-driven
+    /// brightness sync gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>
+    public bool IsLightingVisible => IsDrawerOpen && ReferenceEquals(DrawerContent, _lighting);
+
+    /// <summary>While the Lighting drawer is showing, re-read live keyboard brightness so the slider tracks
+    /// Fn-key changes. The read itself runs off the UI thread (see LightViewModel.SyncFromHardware).</summary>
+    public void SyncLightingIfVisible()
+    {
+        if (IsLightingVisible) _lighting?.Sync();
+    }
+
     private void OpenDrawer(string title, object? content)
     {
         if (content == null) return;

@@ -48,7 +48,14 @@ internal sealed class AppController
 
         _tray = new TrayController(d, ApplyProfile, _windows.ToggleMain, _windows.OpenMain, _windows.ShowLighting, ExitApp);
 
-        if (d.Hotkeys != null) d.Hotkeys.Pressed += OnHotkey;
+        // Real-time keyboard-brightness sync: the Fn brightness key raises raw input, so instead of polling we
+        // re-read on that input, while the Lighting panel is visible. The read is off-thread and self-
+        // coalescing, so no debounce is needed and the slider tracks each press immediately.
+        if (d.Hotkeys != null)
+        {
+            d.Hotkeys.Pressed += OnHotkey;
+            d.Hotkeys.InputActivity += OnInputActivity;
+        }
 
         Refresh();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -56,6 +63,14 @@ internal sealed class AppController
         _timer.Start();
 
         _windows.OpenMain();
+    }
+
+    // Any special-key input -> re-read keyboard brightness immediately (no debounce), but only while the
+    // Lighting panel is visible so normal typing does ZERO work here. The read is off-thread and coalesces
+    // back-to-back requests, so rapid presses track without piling up or blocking input.
+    private void OnInputActivity()
+    {
+        if (_vm.IsLightingVisible) _vm.SyncLightingIfVisible();
     }
 
     // ---- actions ----
@@ -145,6 +160,7 @@ internal sealed class AppController
         }
 
         _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
+        _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live while the Lighting panel is open
         _tray.Update(current, selectable);
     }
 

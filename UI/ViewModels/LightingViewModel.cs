@@ -74,6 +74,8 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action _save;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _loading;
+    private readonly object _readGate = new();   // guards the off-thread brightness read coalescing
+    private bool _reading, _readPending;
 
     public string Title { get; }
     public IReadOnlyList<string> EffectNames { get; }
@@ -131,7 +133,31 @@ public sealed partial class LightViewModel : ObservableObject
     /// apply/save. Called when the lighting panel is shown, to catch out-of-band Fn-key changes.</summary>
     public void SyncFromHardware()
     {
-        if (_readBrightness?.Invoke() is { } b) SyncBrightness(b);
+        var read = _readBrightness;
+        if (read == null) return;
+
+        // The read is a WMI/ACPI call (tens of ms, serialized behind the global WMI lock) — never on the UI
+        // thread or fast key input stutters. Off-thread + self-coalescing: at most one read in flight, with a
+        // single pending re-read, so a burst of presses tracks the latest value without queuing up.
+        lock (_readGate)
+        {
+            if (_reading) { _readPending = true; return; }
+            _reading = true;
+        }
+        Task.Run(() =>
+        {
+            while (true)
+            {
+                int? b;
+                try { b = read.Invoke(); } catch { b = null; }
+                if (b is { } v) Dispatcher.UIThread.Post(() => SyncBrightness(v));
+                lock (_readGate)
+                {
+                    if (!_readPending) { _reading = false; return; }
+                    _readPending = false;   // do one more pass to catch the latest
+                }
+            }
+        });
     }
 
     /// <summary>Point this panel at another mode's persisted state, reflect it in the UI (no persist), and
