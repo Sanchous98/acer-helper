@@ -5,9 +5,14 @@
              x:Class="AcerHelper.UI.Views.LightingView"
              x:DataType="vm:LightingViewModel">
 
-  <!-- One tab per light the device actually exposes (keyboard / lightbar). Each tab's content is the
-       adaptive LightView. With a single light there is just one tab. -->
+  <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
+       adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
+       content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so an
+       arbitrary zone count never clips. -->
   <TabControl ItemsSource="{Binding Panels}" Padding="0">
+    <TabControl.ItemsPanel>
+      <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+    </TabControl.ItemsPanel>
     <TabControl.ItemTemplate>
       <DataTemplate x:DataType="vm:LightViewModel">
         <TextBlock Text="{Binding Title}"/>

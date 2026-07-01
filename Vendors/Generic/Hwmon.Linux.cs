@@ -23,8 +23,7 @@ internal static class Hwmon
         var list = new List<Chip>();
         try
         {
-            foreach (var dir in Directory.EnumerateDirectories(Root))
-                list.Add(new Chip(dir, ReadText(Path.Combine(dir, "name")) ?? ""));
+            list.AddRange(Directory.EnumerateDirectories(Root).Select(dir => new Chip(dir, ReadText(Path.Combine(dir, "name")) ?? "")));
         }
         catch { /* no hwmon (unlikely) -> empty */ }
         list.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
@@ -58,9 +57,15 @@ internal static class Hwmon
         {
             var rpm = ReadInt(Path.Combine(dir, $"fan{i}_input"));
             var label = ReadText(Path.Combine(dir, $"fan{i}_label")) ?? "";
-            if (rpm == null) continue;
-            if (rpm <= 0 && label.Length == 0) continue;
-            fans.Add((i, label));
+            switch (rpm)
+            {
+                case null:
+                case <= 0 when label.Length == 0:
+                    continue;
+                default:
+                    fans.Add((i, label));
+                    break;
+            }
         }
         return fans;
     }
@@ -77,7 +82,7 @@ internal static class Hwmon
         {
             var fans = Fans(c.Path);
             if (fans.Count == 0) continue;
-            var labeled = fans.Any(f => f.Item2.Length > 0);
+            var labeled = fans.Any(f => f.Label.Length > 0);
             if (fans.Count > best.Count || (fans.Count == best.Count && labeled && !bestLabeled))
                 (bestDir, best, bestLabeled) = (c.Path, fans, labeled);
         }
@@ -172,16 +177,17 @@ internal sealed class HwmonSensors : ISensors
 
         var idx = fans.Select(f => f.Idx).ToArray();
         var labels = fans.Select((f, n) =>
-            string.IsNullOrWhiteSpace(f.Label) ? (fans.Count == 1 ? "Fan" : $"Fan {n + 1}") : f.Label).ToArray();
+            string.IsNullOrWhiteSpace(f.Label) ? fans.Count == 1 ? "Fan" : $"Fan {n + 1}" : f.Label).ToArray();
         return new HwmonSensors(fanDir, idx, labels, cpu, gpu);
     }
 
     public SensorSnapshot Read()
     {
         var fans = new List<FanReading>(_fanIdx.Length);
-        if (_fanDir != null)
-            for (var i = 0; i < _fanIdx.Length; i++)
-                fans.Add(new FanReading(_fanLabels[i], Hwmon.ReadInt(Path.Combine(_fanDir, $"fan{_fanIdx[i]}_input")) ?? -1));
+        if (_fanDir == null)
+            return new SensorSnapshot
+                { CpuTempC = Hwmon.Milli(_cpuTemp), GpuTempC = Hwmon.Milli(_gpuTemp), Fans = fans };
+        fans.AddRange(_fanIdx.Select((t, i) => new FanReading(_fanLabels[i], Hwmon.ReadInt(Path.Combine(_fanDir, $"fan{t}_input")) ?? -1)));
 
         return new SensorSnapshot { CpuTempC = Hwmon.Milli(_cpuTemp), GpuTempC = Hwmon.Milli(_gpuTemp), Fans = fans };
     }
@@ -248,5 +254,9 @@ internal sealed class HwmonFanControl : IFanControl, IDisposable
     }
 
     // Never leave a fan stuck in manual mode after we exit — hand control back to the firmware.
-    public void Dispose() { if (_engaged) try { Write(_enable, AutoMode); } catch { /* best effort */ } }
+    public void Dispose()
+    {
+        if (!_engaged) return;
+        try { Write(_enable, AutoMode); } catch { /* best effort */ }
+    }
 }

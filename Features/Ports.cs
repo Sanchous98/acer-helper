@@ -81,23 +81,8 @@ public interface IKeyboardBacklight
     bool SetTimeout(bool on);
 }
 
-/// <summary>Direct RGB control of the keyboard (zoned) and lightbar.</summary>
-public interface ILighting
-{
-    string? LastError { get; }
-    IReadOnlyList<RgbModeInfo> KeyboardEffects { get; }
-    IReadOnlyList<RgbModeInfo> LightbarEffects { get; }
-    int KeyboardZones { get; }
-
-    bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color);
-    bool ApplyKeyboardZone(int zoneIndex, byte brightness, AccentColor color);
-    bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, AccentColor color);
-
-    /// <summary>The keyboard backlight brightness the firmware currently reports (0..100), or null if it
-    /// can't be read. The RGB itself goes over a write-only HID controller, but the brightness the Fn keys
-    /// set is readable via the gaming WMI (GetGamingKBBacklight) — lets the UI sync to hardware changes.</summary>
-    int? ReadKeyboardBrightness();
-}
+// RGB lighting is modelled as a zone-based device (IRgbDevice, in Rgb.cs) rather than a fixed
+// keyboard+lightbar port, so the UI adapts to whatever zones the active controllers advertise.
 
 /// <summary>Special keys, mapped to generic actions.</summary>
 public interface IHotkeys : IDisposable
@@ -148,7 +133,7 @@ public interface IDevice : IDisposable
     IBatteryCalibration? BatteryCalibration { get; }
     IUsbCharging?        UsbCharging        { get; }
     IKeyboardBacklight?  KeyboardBacklight  { get; }
-    ILighting?           Lighting           { get; }
+    IRgbDevice?          Lighting           { get; }
     IHotkeys?            Hotkeys            { get; }
     IDisplayTint?        DisplayTint        { get; }
     IAutostart?          Autostart          { get; }

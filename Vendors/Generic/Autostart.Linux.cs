@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 // Run at login via a freedesktop autostart entry (~/.config/autostart/acer-helper.desktop).
 public sealed partial class Autostart

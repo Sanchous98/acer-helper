@@ -1,21 +1,24 @@
 using AcerHelper.Features;
+using AcerHelper.Vendors.Acer;
 using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Composition;
 
 /// <summary>
-/// Composition root. The shared flow is "try the OS's vendor backend; otherwise the generic device
-/// (carrying the reason the vendor backend was unavailable)". The vendor detection and wiring — the
-/// only OS-specific part — is supplied by <see cref="CreateVendorDevice"/> in DeviceFactory.*.cs.
+/// Composition root. Its ONLY job is to identify the machine (by DMI manufacturer, via
+/// <see cref="MachineInfo"/>) and pick the vendor device; everything else — transports, per-feature
+/// availability probing, port wiring — lives inside the vendor device itself (e.g. <see cref="AcerDevice"/>).
+/// Unknown vendors fall back to the plain <see cref="GenericDevice"/>. Adding a vendor = one more branch here.
 /// </summary>
-public static partial class DeviceFactory
+public static class DeviceFactory
 {
     public static IDevice Create()
     {
-        var (device, reason) = CreateVendorDevice();
-        return device ?? GenericDevice.Create(reason);
-    }
+        var (manufacturer, product) = MachineInfo.Read();
 
-    /// <summary>OS-specific: detect + assemble the vendor device, or <c>(null, reason)</c> if none matched.</summary>
-    private static partial (IDevice? Device, string? Reason) CreateVendorDevice();
+        if (manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true)
+            return new AcerDevice(product);
+
+        return new GenericDevice();
+    }
 }

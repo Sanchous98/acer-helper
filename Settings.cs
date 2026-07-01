@@ -14,10 +14,10 @@ public sealed class Settings
 
     public int Bluelight { get; set; }       // 0=off, 1=Low, 2=Medium, 3=High, 4=Long-use
 
-    // Last applied lighting (the app is the source of truth — the ENE controller is write-only and
-    // can't report its current state). Restored into the UI and re-applied to the device on startup.
-    public LightSettings Keyboard { get; set; } = new();
-    public LightSettings Lightbar { get; set; } = new();
+    // Last applied lighting, keyed by RGB zone name (the app is the source of truth — the controllers are
+    // largely write-only and can't report their current state). Restored into the UI and re-applied to the
+    // device on startup. A dictionary so it adapts to whatever zones the active device advertises.
+    public Dictionary<string, LightSettings> Lights { get; set; } = new();
 }
 
 /// <summary>One light's persisted state. Colours are packed 0xRRGGBB. <see cref="Configured"/> is

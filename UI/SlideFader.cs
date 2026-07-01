@@ -13,7 +13,7 @@ namespace AcerHelper.UI;
 /// Easing/duration live in XAML (the Border's <c>Transitions</c>: a DoubleTransition on Opacity + a
 /// TransformOperationsTransition on RenderTransform); this just flips the target values. <see cref="Out"/>
 /// fires <paramref name="done"/> after the fade so the caller can Hide() the window once it's invisible.</summary>
-internal sealed class SlideFader(Border root)
+internal sealed class SlideFader(Decorator root)
 {
     // Must match the XAML transition durations on the root Border.
     private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(180);

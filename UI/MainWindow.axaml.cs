@@ -4,23 +4,23 @@ using Avalonia.Controls;
 
 namespace AcerHelper.UI;
 
-/// <summary>The quick-settings flyout window — one card, sized to its content. The Options/Lighting
-/// drawer is a SEPARATE window (<see cref="SidePanelWindow"/>) to the left, so this window never resizes
-/// (resizing on X11 is async and races with repositioning => sideways jitter). This holds the window
-/// behaviour: tray placement and foregrounding (light-dismiss is coordinated by AppController).
+/// <summary>The one flyout window — a fixed-size "phone frame" holding an in-window navigation stack
+/// (Home / Options / Lighting push over each other; see MainWindow.axaml). It never resizes at runtime
+/// (resizing on X11 is async and races with repositioning => sideways jitter), so its anchored corner is
+/// set once on open. This holds the window behaviour: tray placement, foregrounding, and the card's
+/// open/close reveal; light-dismiss is coordinated by <see cref="FlyoutCoordinator"/>.
 ///
 /// Open/close = plain <see cref="Window.Show"/>/<see cref="Window.Hide"/>; the WM animates the map/unmap
 /// (KWin's Scale effect), but the card content starts transparent so that effect plays over nothing,
 /// then <see cref="SlideFader"/> reveals the content.</summary>
-public partial class MainWindow : FlyoutWindow
+public partial class MainWindow : Window
 {
-    private const int ShadowMargin = 20;   // matches the Root Border Margin (room for the BoxShadow)
-    private Size _lastSize;
+    private readonly SlideFader _fader;
 
     public bool IsOpen { get; private set; }
 
-    /// <summary>Set just before we programmatically open another of our windows (a side panel or the
-    /// calibration dialog) so the focus change isn't treated as a click "outside". One-shot.</summary>
+    /// <summary>Set just before we programmatically open another of our windows (the calibration dialog)
+    /// so the focus change isn't treated as a click "outside". One-shot.</summary>
     public bool SuppressDismiss { get; set; }
 
     /// <summary>When the flyout last hid itself. Lets a tray click toggle instead of reopening.</summary>
@@ -29,36 +29,20 @@ public partial class MainWindow : FlyoutWindow
     public MainWindow()
     {
         InitializeComponent();
-        InitFlyout(Root);
-
-        // Re-anchor the bottom-right corner to the tray when the content height changes (e.g. a wrapping
-        // status line). Width is fixed, so X never moves — only Y. Only while open.
-        LayoutUpdated += (_, _) =>
-        {
-            if (!IsOpen || Bounds.Size == _lastSize) return;
-            _lastSize = Bounds.Size;
-            Reanchor();
-        };
+        _fader = new SlideFader(Root);
 
         Closing += (_, e) => { e.Cancel = true; CloseFlyout(); };   // hide, never destroy
 
         // A click on the transparent shadow margin around the card (the Backdrop itself, not the card) is
-        // a click "outside" the flyout -> dismiss. EXCEPT the left margin while the drawer is open: that's
-        // the inner gap toward the drawer (between the two cards), not outside, so don't dismiss there.
+        // a click "outside" the flyout -> dismiss, like clicking outside it.
         Backdrop.PointerPressed += (_, e) =>
         {
-            if (!ReferenceEquals(e.Source, Backdrop)) return;
-            if (DrawerOpen && e.GetPosition(Backdrop).X < Root.Bounds.Left) return;
-            BackgroundClicked?.Invoke();
+            if (ReferenceEquals(e.Source, Backdrop)) BackgroundClicked?.Invoke();
         };
     }
 
     /// <summary>Raised when the user clicks the transparent margin around the card (outside the flyout).</summary>
     public event Action? BackgroundClicked;
-
-    /// <summary>True while the Options/Lighting drawer is open to the left, so the left shadow margin is
-    /// the inner gap (between the cards) rather than "outside" — clicks there must not dismiss.</summary>
-    public bool DrawerOpen { get; set; }
 
     public void MarkDismissed() => LastDismissedUtc = DateTime.UtcNow;
 
@@ -68,16 +52,16 @@ public partial class MainWindow : FlyoutWindow
     {
         IsOpen = true;
         if (!IsVisible) Show();
-        UpdateLayout();          // force a layout pass so Bounds.Height is real before we anchor
+        UpdateLayout();          // force a layout pass so Bounds is real before we anchor
         PositionNearTray();
-        AnimateIn();             // reveal content (after Show -> attached, so the transition fires)
+        _fader.In();             // reveal content (after Show -> attached, so the transition fires)
     }
 
     public void CloseFlyout()
     {
         if (!IsOpen) return;
         IsOpen = false;
-        AnimateOut(Hide);        // fade content out, then hide the (now transparent) window
+        _fader.Out(Hide);        // fade content out, then hide the (now transparent) window
     }
 
     private void PositionNearTray()

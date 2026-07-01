@@ -12,6 +12,11 @@
     <Version>0.14.0</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
+         ([GeneratedComInterface]) and raw VARIANT/SAFEARRAY pointers — needs unsafe. This is what makes
+         WMI Native-AOT-safe: System.Management uses classic (runtime-IL-stub) COM interop, which AOT
+         does not support. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- RID/self-contained are passed per publish so each TFM×OS resolves correctly:
          win-x64 (Native AOT) and linux-x64 (self-contained single-file). -->
   </PropertyGroup>
@@ -54,12 +59,6 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
-  <!-- Native AOT (Windows CI only — cross-OS native compilation is unsupported). Trimming is
-       implied; System.Management is reflection/COM heavy, so root it to keep WMI working. -->
-  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$(TargetFramework)' == 'net10.0-windows'">
-    <TrimmerRootAssembly Include="System.Management" />
-  </ItemGroup>
-
   <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux).
        NOTE: do NOT pin Tmds.DBus.Protocol explicitly. It is Avalonia's Linux D-Bus transport
        (tray/StatusNotifierItem, X11 IME), and Avalonia.Desktop must control its version — an
@@ -75,9 +74,9 @@
     <PackageReference Include="HidSharp" Version="2.1.0" />
   </ItemGroup>
 
-  <!-- Windows-only platform packages (WMI + power/display events). -->
+  <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
+       API directly (see Os/WbemInterop.Windows.cs) — NOT System.Management, which is not Native-AOT-safe. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-    <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
   </ItemGroup>
 

@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using AcerHelper.Features;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 /// <summary>
 /// Blue-light reduction as a display gamma adjustment (gdi32 SetDeviceGammaRamp on the primary

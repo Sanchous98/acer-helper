@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 // Start at logon via a Scheduled Task with "highest privileges" — so the elevated app launches
 // silently without a UAC prompt each logon. Needs admin (the app has it).

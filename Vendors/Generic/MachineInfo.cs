@@ -1,4 +1,4 @@
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 /// <summary>Reads the machine's manufacturer and product name (for vendor/model detection).
 /// The source is OS-specific — WMI on Windows, DMI sysfs on Linux — supplied by the partial

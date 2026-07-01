@@ -13,13 +13,13 @@ public static class AcerProfiles
     private sealed record Entry(byte Byte, string Name, ProfileKind Kind, AccentColor Accent);
 
     private static readonly Entry[] Table =
-    {
-        new(0x06, "Eco",         ProfileKind.Eco,         new(0x00, 0x89, 0x7B)),
-        new(0x00, "Quiet",       ProfileKind.Quiet,       new(0x42, 0x85, 0xF4)),
-        new(0x01, "Balanced",    ProfileKind.Balanced,    new(0x2E, 0x7D, 0x32)),
-        new(0x04, "Performance", ProfileKind.Performance, new(0xF5, 0x7C, 0x00)),
-        new(0x05, "Turbo",       ProfileKind.Turbo,       new(0xD3, 0x2F, 0x2F)),
-    };
+    [
+        new(0x06, "Eco",         ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        new(0x00, "Quiet",       ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        new(0x01, "Balanced",    ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        new(0x04, "Performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
+        new(0x05, "Turbo",       ProfileKind.Turbo,       new AccentColor(0xD3, 0x2F, 0x2F))
+    ];
 
     /// <summary>All standard profiles, display order.</summary>
     public static readonly IReadOnlyList<PerformanceProfile> All = Table.Select(Make).ToList();
@@ -38,8 +38,6 @@ public static class AcerProfiles
     public static IReadOnlyList<PerformanceProfile> FromMask(byte mask)
     {
         if (mask == 0) return All;
-        var list = new List<PerformanceProfile>();
-        foreach (var e in Table) if ((mask & (1 << e.Byte)) != 0) list.Add(Make(e));
-        return list;
+        return (from e in Table where (mask & (1 << e.Byte)) != 0 select Make(e)).ToList();
     }
 }

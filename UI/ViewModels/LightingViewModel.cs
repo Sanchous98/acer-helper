@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using AcerHelper;
 using AcerHelper.Features;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -8,44 +7,39 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
 
-/// <summary>The lighting drawer root: one panel per light (keyboard, lightbar), shown as tabs.
-/// Built from whatever the device's <see cref="ILighting"/> advertises. Each panel loads its
-/// persisted state (the app is the source of truth), re-applies it to the device on startup, and
-/// saves changes back via <paramref name="save"/>.</summary>
+/// <summary>The lighting drawer root: one panel per RGB zone the device advertises (keyboard, lightbar,
+/// or anything a future controller exposes), shown as tabs. Built generically from <see cref="IRgbDevice"/>
+/// — no fixed keyboard/lightbar assumptions. Each panel loads its persisted state (keyed by zone name; the
+/// app is the source of truth), re-applies it to the device on startup, and saves changes via
+/// <paramref name="save"/>.</summary>
 public sealed class LightingViewModel
 {
-    private readonly ILighting _lighting;
-    private readonly LightViewModel? _keyboard;
-
     public ObservableCollection<LightViewModel> Panels { get; } = [];
 
-    public LightingViewModel(ILighting lighting, Settings settings, Action save)
+    public LightingViewModel(IRgbDevice rgb, Settings settings, Action save)
     {
-        _lighting = lighting;
-
-        if (lighting.KeyboardEffects.Count > 0)
+        foreach (var zone in rgb.Zones)
         {
-            // Seed the keyboard brightness from what the firmware currently reports (Fn keys change it
-            // out-of-band), so the slider matches hardware instead of the last persisted value.
-            _keyboard = new LightViewModel("Keyboard", lighting.KeyboardEffects, lighting.KeyboardZones,
-                (e, c, b, s) => lighting.ApplyKeyboard(e, b, s, c),
-                (i, b, c) => lighting.ApplyKeyboardZone(i, b, c),
-                settings.Keyboard, save, lighting.ReadKeyboardBrightness());
-            Panels.Add(_keyboard);
-        }
+            if (zone.Effects.Count == 0) continue;
 
-        if (lighting.LightbarEffects.Count > 0)
-            Panels.Add(new LightViewModel("Lightbar", lighting.LightbarEffects, zones: 1,
-                (e, c, b, s) => lighting.ApplyLightbar(e, b, s, c), applyZone: null,
-                settings.Lightbar, save));
+            // Per-zone persisted state, created on first sight of the zone.
+            if (!settings.Lights.TryGetValue(zone.Name, out var state))
+                settings.Lights[zone.Name] = state = new LightSettings();
+
+            // Seed brightness from what the firmware currently reports (Fn keys change it out-of-band), so
+            // the slider matches hardware instead of the last persisted value; readBrightness also drives Sync.
+            Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
+                (e, c, b, s) => zone.ApplyEffect(e, b, s, c),
+                zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
+                state, save, zone.ReadBrightness));
+        }
     }
 
-    /// <summary>Re-read the live keyboard brightness and reflect it in the slider (no re-apply/save).
+    /// <summary>Re-read each zone's live brightness and reflect it in its slider (no re-apply/save).
     /// Call when the lighting panel is shown so it stays in sync with Fn-key changes.</summary>
     public void Sync()
     {
-        if (_keyboard != null && _lighting.ReadKeyboardBrightness() is int b)
-            _keyboard.SyncBrightness(b);
+        foreach (var panel in Panels) panel.SyncFromHardware();
     }
 }
 
@@ -60,10 +54,11 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly IReadOnlyList<RgbModeInfo> _effects;
     private readonly Action<RgbModeInfo, AccentColor, byte, byte> _applyAll;
     private readonly Action<int, byte, AccentColor>? _applyZone;
+    private readonly Func<int?>? _readBrightness;
     private readonly LightSettings _state;
     private readonly Action _save;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
-    private bool _loading = true;
+    private bool _loading;
 
     public string Title { get; }
     public IReadOnlyList<string> EffectNames { get; }
@@ -73,34 +68,35 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private bool _hasSpeed;
     [ObservableProperty] private bool _showSingleColor;
     [ObservableProperty] private bool _showZones;
-    [ObservableProperty] private Color _color = Colors.Red;
-    [ObservableProperty] private double _brightness = 100;
-    [ObservableProperty] private double _speed = 5;
+    [ObservableProperty] private Color _color;
+    [ObservableProperty] private double _brightness;
+    [ObservableProperty] private double _speed;
 
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
                           Action<RgbModeInfo, AccentColor, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
-                          LightSettings state, Action save, int? liveBrightness = null)
+                          LightSettings state, Action save, Func<int?>? readBrightness = null)
     {
         Title = title;
         _effects = effects;
         _applyAll = applyAll;
         _applyZone = applyZone;
+        _readBrightness = readBrightness;
         _state = state;
         _save = save;
         EffectNames = effects.Select(e => e.Name).ToList();
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
         _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
-        _brightness = Math.Clamp(liveBrightness ?? state.Brightness, 0, 100);   // hardware value wins if readable
+        _brightness = Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100);   // hardware value wins if readable
         _speed = state.Speed;
         _color = FromPacked(state.Color);
 
         if (applyZone != null && zones > 1)
         {
-            Color[] def = { Colors.Red, Colors.Lime, Colors.Blue, Colors.Magenta };
-            for (int i = 0; i < zones; i++)
+            Color[] def = [Colors.Red, Colors.Lime, Colors.Blue, Colors.Magenta];
+            for (var i = 0; i < zones; i++)
             {
-                Color c = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : def[i % def.Length];
+                var c = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : def[i % def.Length];
                 var z = new ZoneColorViewModel($"Zone {i + 1}", c);
                 z.PropertyChanged += OnZoneChanged;
                 Zones.Add(z);
@@ -116,9 +112,16 @@ public sealed partial class LightViewModel : ObservableObject
         if (state.Configured) ApplyNow();
     }
 
+    /// <summary>Re-read this zone's live brightness (if readable) and reflect it in the slider without an
+    /// apply/save. Called when the lighting panel is shown, to catch out-of-band Fn-key changes.</summary>
+    public void SyncFromHardware()
+    {
+        if (_readBrightness?.Invoke() is { } b) SyncBrightness(b);
+    }
+
     /// <summary>Reflect a hardware-reported brightness in the slider without triggering an apply/save
     /// (used to sync to Fn-key changes). The <c>_loading</c> guard makes OnBrightnessChanged a no-op.</summary>
-    public void SyncBrightness(int value)
+    private void SyncBrightness(int value)
     {
         value = Math.Clamp(value, 0, 100);
         if ((int)Brightness == value) return;
@@ -143,7 +146,7 @@ public sealed partial class LightViewModel : ObservableObject
     {
         var e = Current;
         HasSpeed = e.HasSpeed;
-        ShowZones = e.HasColor && !e.HasSpeed && Zones.Count > 1;   // static + multi-zone -> per-zone swatches
+        ShowZones = e is { HasColor: true, HasSpeed: false } && Zones.Count > 1;   // static + multi-zone -> per-zone swatches
         ShowSingleColor = e.HasColor && !ShowZones;                 // breathing / single-zone static -> one colour
     }
 
@@ -158,7 +161,7 @@ public sealed partial class LightViewModel : ObservableObject
     {
         byte b = (byte)Brightness, s = (byte)Speed;
         if (ShowZones && _applyZone != null)
-            for (int i = 0; i < Zones.Count; i++)
+            for (var i = 0; i < Zones.Count; i++)
             {
                 var c = Zones[i].Color;
                 _applyZone(i, b, new AccentColor(c.R, c.G, c.B));

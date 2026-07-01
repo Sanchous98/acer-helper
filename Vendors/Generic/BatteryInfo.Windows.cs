@@ -1,8 +1,7 @@
-using System.Management;
 using System.Runtime.InteropServices;
 using AcerHelper.Features;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 // Windows sources: GetSystemPowerStatus for charge %/state; the standard root\WMI smart-battery
 // classes for design/full capacity (health) and cycle count.
@@ -33,17 +32,10 @@ public sealed partial class BatteryInfo
 
     private static int WmiUint(string scope, string query, string property)
     {
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(scope, query);
-            foreach (ManagementBaseObject o in searcher.Get())
-            {
-                var v = o[property];
-                if (v != null) return Convert.ToInt32(v);
-            }
-        }
-        catch { /* class/property unsupported on this battery */ }
-        return -1;
+        using var session = WmiSession.Connect(scope, out _);
+        if (session == null) return -1;
+        using var row = session.QueryFirst(query, out _);   // class/property unsupported on this battery => null
+        return row == null ? -1 : row.GetInt(property);
     }
 
     [StructLayout(LayoutKind.Sequential)]

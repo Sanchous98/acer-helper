@@ -53,7 +53,14 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand] private void OpenOptions() => OpenDrawer("Options", _options);
-    [RelayCommand] private void OpenLighting() => OpenDrawer("Lighting", _lighting);
+
+    [RelayCommand]
+    private void OpenLighting()
+    {
+        _lighting?.Sync();   // re-read live keyboard brightness (Fn keys change it out-of-band) before showing
+        OpenDrawer("Lighting", _lighting);
+    }
+
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
     private void OpenDrawer(string title, object? content)

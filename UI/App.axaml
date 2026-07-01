@@ -41,18 +41,12 @@
           <SolidColorBrush x:Key="AppCard"        Color="#40FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
           <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
-          <!-- App-rendered acrylic for the side panels (fades with the window; no DWM). Tuned to match
-               the main flyout's DWM acrylic tone: TintOpacity/MaterialOpacity are the knobs. -->
-          <ExperimentalAcrylicMaterial x:Key="SidePanelAcrylic" BackgroundSource="Digger"
-              TintColor="#F3F3F3" TintOpacity="0.9" MaterialOpacity="0.78" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#CC2A2A2A" />
           <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
           <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />
-          <ExperimentalAcrylicMaterial x:Key="SidePanelAcrylic" BackgroundSource="Digger"
-              TintColor="#2A2A2A" TintOpacity="0.9" MaterialOpacity="0.78" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

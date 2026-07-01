@@ -1,6 +1,6 @@
 using AcerHelper.Features;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 /// <summary>
 /// Vendor-agnostic battery telemetry. The common logic — caching the slow-changing health and cycle

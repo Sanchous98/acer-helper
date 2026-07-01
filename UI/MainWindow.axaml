@@ -1,22 +1,40 @@
-<ui:FlyoutWindow xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
         xmlns:ui="clr-namespace:AcerHelper.UI"
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Acer Nitro" Width="508" CanResize="False" ShowInTaskbar="False"
-        SizeToContent="Height" WindowStartupLocation="Manual"
-        Topmost="True" WindowDecorations="None" Background="Black"
-        TransparencyLevelHint="Transparent">
+        Title="Acer Nitro" Width="508" Height="600" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="Manual" Topmost="True" WindowDecorations="None"
+        Background="Transparent" TransparencyLevelHint="Transparent">
 
-  <!-- Quick-settings flyout: one card, sized to content (no transparent padding => the WM's open
-       animation is centred on the card and there's no transparent area to swallow clicks). The
-       Options/Lighting drawer is a SEPARATE window (SidePanelWindow) to the left, so this window never
-       resizes. We animate the CONTENT (this Border), not the Window: it's shown at full size with the
-       content transparent, so KWin's one-shot map effect plays over nothing, then SlideFader reveals. -->
-  <!-- Backdrop fills the whole window (incl. the 20px transparent shadow margins around the card). A
-       click on it = a click in the dead zone outside the visible card => dismiss, like clicking outside
-       the flyout. Clicks on the card itself have a child as Source and are ignored (see code-behind). -->
+  <!-- Single flyout window with an in-window navigation stack (like a mobile app): one fixed-size
+       "phone frame" (never resizes at runtime => no X11 resize jitter), a static acrylic-tint card as
+       the background, and Home / Options / Lighting as pages that push over each other INSIDE it. The
+       drawer used to be a second window (parked behind the main one); now it's just VM state
+       (IsDrawerOpen) driving a content-level slide — the WM never sees a second map/unmap, and the
+       acrylic backdrop stays put while pages navigate on top of it. -->
+  <Window.Styles>
+    <!-- Push navigation: Home slides fully out to the left as the drawer page slides in from the right.
+         Both pages fill the card and translate by its width (468), so at every moment the visible area
+         shows exactly one page (no overlap => the shared acrylic reads continuously behind them). Driven
+         by the .pushed / .open classes bound to IsDrawerOpen; the Transitions animate the swap. -->
+    <Style Selector="Grid#HomePage">
+      <Setter Property="RenderTransform" Value="translateX(0)"/>
+    </Style>
+    <Style Selector="Grid#HomePage.pushed">
+      <Setter Property="RenderTransform" Value="translateX(-468px)"/>
+    </Style>
+    <Style Selector="Grid#DrawerPage">
+      <Setter Property="RenderTransform" Value="translateX(468px)"/>
+    </Style>
+    <Style Selector="Grid#DrawerPage.open">
+      <Setter Property="RenderTransform" Value="translateX(0)"/>
+    </Style>
+  </Window.Styles>
+
+  <!-- Backdrop fills the whole window incl. the 20px transparent shadow margin around the card. A click
+       on it (Source == Backdrop, i.e. the margin, not the card) is a click "outside" => dismiss. -->
   <Panel x:Name="Backdrop" Background="Transparent">
   <Border x:Name="Root" Width="468" Margin="20"
           Background="{DynamicResource AppAcrylicTint}"
@@ -24,41 +42,83 @@
           ClipToBounds="True"
           BoxShadow="0 4 16 0 #55000000"
           Opacity="0" RenderTransform="translateX(26px)">
+    <!-- The card's own open/close reveal (slide + fade), driven by SlideFader in code-behind. Separate
+         from the page-push transitions above (which move the pages inside this card). -->
     <Border.Transitions>
       <Transitions>
         <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut"/>
         <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" Easing="CubicEaseOut"/>
       </Transitions>
     </Border.Transitions>
-    <DockPanel Margin="14">
 
-      <!-- Header: device name + current-profile accent chip -->
-      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
-        <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
-        <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
-            <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
-                       Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
-          </StackPanel>
-        </Border>
+    <Panel>
+
+      <!-- ===== Home page ===== -->
+      <Grid x:Name="HomePage" Classes.pushed="{Binding IsDrawerOpen}">
+        <Grid.Transitions>
+          <Transitions>
+            <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.24" Easing="CubicEaseInOut"/>
+          </Transitions>
+        </Grid.Transitions>
+        <DockPanel Margin="14">
+
+          <!-- Header: device name + current-profile accent chip -->
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+            <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
+            <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
+                <TextBlock FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <!-- Footer: status text + drawer launch buttons -->
+          <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
+            <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+              <Button Content="Options" Padding="14,5"
+                      IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
+              <Button Classes="accent" Content="Lighting" Padding="14,5"
+                      IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
+            </StackPanel>
+          </Grid>
+
+          <!-- Body: capability sections, single full-width column, scrolls within the fixed frame. -->
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding Sections}"/>
+          </ScrollViewer>
+
+        </DockPanel>
       </Grid>
 
-      <!-- Footer: status text + drawer launch buttons -->
-      <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="2,12,2,0">
-        <TextBlock Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" Text="{Binding Status}"/>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <Button Content="Options" Padding="14,5"
-                  IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
-          <Button Classes="accent" Content="Lighting" Padding="14,5"
-                  IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
-        </StackPanel>
+      <!-- ===== Options / Lighting page (pushed over Home) ===== -->
+      <Grid x:Name="DrawerPage" Classes.open="{Binding IsDrawerOpen}">
+        <Grid.Transitions>
+          <Transitions>
+            <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.24" Easing="CubicEaseInOut"/>
+          </Transitions>
+        </Grid.Transitions>
+        <DockPanel Margin="14">
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,10">
+            <!-- Back points toward Home (to the left); vector so it's centred. -->
+            <Button x:Name="BackButton" Classes="icon" Command="{Binding CloseDrawerCommand}">
+              <Path Width="11" Height="10" Stretch="None"
+                    Stroke="{DynamicResource AppMuted}" StrokeThickness="1.6"
+                    StrokeLineCap="Round" StrokeJoin="Round"
+                    Data="M10,5 H1 M4.5,1.5 L1,5 L4.5,8.5"/>
+            </Button>
+            <TextBlock Grid.Column="1" Classes="h1" VerticalAlignment="Center" Margin="6,0,0,0"
+                       Text="{Binding DrawerTitle}"/>
+          </Grid>
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ContentControl Content="{Binding DrawerContent}"/>
+          </ScrollViewer>
+        </DockPanel>
       </Grid>
 
-      <!-- Body: capability sections, single full-width column. -->
-      <ItemsControl ItemsSource="{Binding Sections}"/>
-
-    </DockPanel>
+    </Panel>
   </Border>
   </Panel>
-</ui:FlyoutWindow>
+</Window>

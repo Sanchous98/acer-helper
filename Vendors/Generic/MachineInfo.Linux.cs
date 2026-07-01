@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace AcerHelper.Os;
+namespace AcerHelper.Vendors.Generic;
 
 // Linux source: the DMI attributes under /sys/class/dmi/id.
 public static partial class MachineInfo

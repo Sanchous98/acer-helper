@@ -1,12 +1,14 @@
 name: acer-helper
 
-# Builds the Acer Helper tray app (C# / .NET 10, Avalonia UI) as a STANDALONE,
-# self-contained, single-file .exe — no .NET runtime install needed on the target.
+# Builds the Acer Helper tray app (C# / .NET 10, Avalonia UI) as a STANDALONE, self-contained,
+# Native AOT .exe — no .NET runtime install needed on the target, no JIT warm-up.
 #
-# JIT (not Native AOT) on purpose: the Acer features use System.Management (WMI), whose
-# COM/late-binding Native AOT does not support reliably — under AOT the WMI calls fail at
-# runtime and all Acer functionality is lost. JIT keeps WMI working. (csproj still carries
-# the AOT settings for later; re-enable by adding -p:PublishAot=true once WMI-AOT is verified.)
+# Native AOT is safe here: WMI is reached via source-generated COM interop ([GeneratedComInterface],
+# raw VARIANT/SAFEARRAY), NOT System.Management — whose classic runtime-IL-stub COM interop AOT
+# cannot do. The AOT analyzer is clean (dotnet build -p:EnableAotAnalyzer=true -> 0 IL30xx), and
+# Avalonia compiled bindings + CommunityToolkit.Mvvm source-gen are trim/AOT-safe. The windows-2022
+# runner ships the MSVC C++ toolchain that the ILC compiler needs to link the native image.
+# (Setting PublishAot=true also disables single-file packaging — they're mutually exclusive; see csproj.)
 
 on:
   push:
@@ -24,13 +26,14 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish (self-contained single-file, JIT — WMI-safe)
+      - name: Publish (self-contained, Native AOT)
         run: >
           dotnet publish AcerHelper.csproj
           -c Release
           -f net10.0-windows
           -r win-x64
           --self-contained true
+          -p:PublishAot=true
           -o publish
 
       - name: List output
