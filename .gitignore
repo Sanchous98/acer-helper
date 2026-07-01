@@ -1,3 +1,6 @@
 .idea
 bin
 obj
+
+# Rider per-user solution settings (machine-local; must never be committed)
+*.DotSettings.user
