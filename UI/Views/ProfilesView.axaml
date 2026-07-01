@@ -3,7 +3,7 @@
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
              x:Class="AcerHelper.UI.Views.ProfilesView"
              x:DataType="vm:ProfilesViewModel">
-  <Border Classes="card">
+  <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="8">
       <TextBlock Classes="section" Text="PERFORMANCE"/>
       <ItemsControl ItemsSource="{Binding Profiles}">
@@ -18,6 +18,12 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+
+      <!-- Turbo shown as a switch layered over the selected base profile ("Turbo key toggles Turbo"). -->
+      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowTurboSwitch}" Margin="2,2,2,0">
+        <TextBlock Text="Turbo" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <ToggleSwitch Grid.Column="1" IsChecked="{Binding TurboOn, Mode=TwoWay}" IsEnabled="{Binding TurboEnabled}"/>
+      </Grid>
     </StackPanel>
-  </Border>
+  </ExperimentalAcrylicBorder>
 </UserControl>

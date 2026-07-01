@@ -27,7 +27,7 @@
       <!-- System accent (provided by the Fluent theme) as brushes: solid for the selected profile
            and the chip text/dot, translucent for the chip background. -->
       <SolidColorBrush x:Key="AccentBrush"     Color="{DynamicResource SystemAccentColor}" />
-      <SolidColorBrush x:Key="AccentSoftBrush" Color="{DynamicResource SystemAccentColor}" Opacity="0.15" />
+      <SolidColorBrush x:Key="AccentSoftBrush" Color="{DynamicResource SystemAccentColor}" Opacity="0.28" />
 
       <!-- Own, theme-aware brushes (the WinUI Card*/Layer*/TextFill* tokens don't exist in
            Avalonia 11.2). Translucent so they layer over the acrylic backdrop like Win11. -->
@@ -41,12 +41,25 @@
           <SolidColorBrush x:Key="AppCard"        Color="#40FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
           <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
+          <!-- Neutral control surfaces (segmented buttons, icon-button hover), theme-aware so they read
+               as subtle raised controls on either theme. Rest / hover-or-pressed. -->
+          <SolidColorBrush x:Key="AppControl"      Color="#18000000" />
+          <SolidColorBrush x:Key="AppControlHover" Color="#28000000" />
+          <!-- Section-card acrylic. Theme-aware + a fairly dominant tint so the card keeps its tone (and
+               text contrast) on ANY wallpaper — a near-transparent tint looks great on a matching desktop
+               but washes out over the opposite one. TintOpacity/MaterialOpacity are the see-through knobs. -->
+          <ExperimentalAcrylicMaterial x:Key="CardMaterial" BackgroundSource="Digger"
+              TintColor="#FCFCFC" TintOpacity="0.6" MaterialOpacity="0.5"/>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#CC2A2A2A" />
           <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
           <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />
+          <SolidColorBrush x:Key="AppControl"      Color="#22FFFFFF" />
+          <SolidColorBrush x:Key="AppControlHover" Color="#33FFFFFF" />
+          <ExperimentalAcrylicMaterial x:Key="CardMaterial" BackgroundSource="Digger"
+              TintColor="#141414" TintOpacity="0.8" MaterialOpacity="0.6"/>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
@@ -75,6 +88,11 @@
       <Setter Property="Padding" Value="12" />
       <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
+    <Style Selector="ExperimentalAcrylicBorder.card">
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
 
     <Style Selector="TextBlock.section">
       <Setter Property="FontSize" Value="11" />
@@ -98,11 +116,11 @@
       <Setter Property="FontSize" Value="12" />
     </Style>
 
-    <!-- Performance-mode segmented button. Translucent grey surface keeps unselected segments
-         visible on the acrylic; the selected one is filled with the system accent in code. -->
+    <!-- Performance-mode segmented button. Neutral control surface (theme-aware token) keeps unselected
+         segments visible on the acrylic; the selected one is filled with the system accent. -->
     <Style Selector="Button.seg">
-      <Setter Property="Background" Value="#1F808080" />
-      <Setter Property="BorderBrush" Value="#33808080" />
+      <Setter Property="Background" Value="{DynamicResource AppControl}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
       <Setter Property="Padding" Value="2,8" />
@@ -113,10 +131,31 @@
       <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
-    <!-- The active segment: filled with the system accent (toggled by the .selected class). -->
-    <Style Selector="Button.seg.selected">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    <!-- The active segment: filled with the mode's OWN signature colour, bound per-item from the view-model,
+         so the selected mode reads at a glance rather than every mode sharing the one system accent. -->
+    <Style Selector="Button.seg.selected" x:DataType="vm:ProfileButtonViewModel">
+      <Setter Property="Background" Value="{Binding SelectedBrush}" />
       <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.seg:pointerover" x:DataType="vm:ProfileButtonViewModel">
+      <Setter Property="Background" Value="{Binding HoverBrush}" />
+    </Style>
+    <Style Selector="Button.seg:pressed" x:DataType="vm:ProfileButtonViewModel">
+      <Setter Property="Background" Value="{Binding PressedBrush}" />
+    </Style>
+    <Style Selector="Button.seg.selected:pointerover" x:DataType="vm:ProfileButtonViewModel">
+      <Setter Property="Background" Value="{Binding SelectedBrush}" />
+    </Style>
+    <Style Selector="Button.seg.selected:pressed" x:DataType="vm:ProfileButtonViewModel">
+      <Setter Property="Background" Value="{Binding SelectedBrush}" />
+    </Style>
+    <Style Selector="Button.seg:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{TemplateBinding Background}" />
+      <Setter Property="TextBlock.Foreground" Value="{TemplateBinding Foreground}" />
+    </Style>
+    <Style Selector="Button.seg:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{TemplateBinding Background}" />
+      <Setter Property="TextBlock.Foreground" Value="{TemplateBinding Foreground}" />
     </Style>
 
     <!-- Win11 quick-settings style toggles: just the switch, no "On/Off" caption, and none of the
@@ -147,15 +186,18 @@
       <Setter Property="CornerRadius" Value="6" />
     </Style>
     <Style Selector="Button.icon:pointerover /template/ ContentPresenter">
-      <Setter Property="Background" Value="#1F808080" />
+      <Setter Property="Background" Value="{DynamicResource AppControl}" />
     </Style>
     <Style Selector="Button.icon:pressed /template/ ContentPresenter">
-      <Setter Property="Background" Value="#33808080" />
+      <Setter Property="Background" Value="{DynamicResource AppControlHover}" />
     </Style>
 
-    <!-- Current-profile chip in the header: a faint accent pill with an accent dot + label. -->
+    <!-- Current-profile chip in the header: an accent pill with an accent dot + label. A thin accent
+         border + a stronger fill keep it legible on the dark acrylic header. -->
     <Style Selector="Border.chip">
       <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="Padding" Value="8,3" />
       <Setter Property="VerticalAlignment" Value="Center" />

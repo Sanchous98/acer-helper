@@ -4,7 +4,7 @@
              xmlns:ui="clr-namespace:AcerHelper.UI"
              x:Class="AcerHelper.UI.Views.MonitorView"
              x:DataType="vm:MonitorViewModel">
-  <Border Classes="card">
+  <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <!-- CPU and GPU as two aligned columns; each: label, temperature, then fan speed. -->
     <Grid ColumnDefinitions="*,*" IsVisible="{Binding ShowTemps}">
 
@@ -25,7 +25,6 @@
           <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding GpuFan}"/>
         </StackPanel>
       </StackPanel>
-
     </Grid>
-  </Border>
+  </ExperimentalAcrylicBorder>
 </UserControl>

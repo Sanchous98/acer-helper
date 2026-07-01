@@ -14,12 +14,15 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     {
         var d = svc.Device;
         var list = new List<OptionToggle>();
+        // LCD overdrive's write (SetGamingProfile) returns a status byte, so it self-confirms — no readback
+        // (a second EC transaction the user hears as a second "click").
         if (d.LcdOverdrive is { } lcd)
             list.Add(new OptionToggle("LCD overdrive", true, lcd.Get(),
-                v => RunHwSet(() => svc.SetLcdOverdrive(v), "LCD overdrive")));
+                v => RunSet(() => svc.SetLcdOverdrive(v), "LCD overdrive")));
+        // Keyboard-backlight timeout uses SetFunction, which returns nothing about the result -> read back.
         if (d.KeyboardBacklight is { } kbd)
             list.Add(new OptionToggle("Keyboard backlight timeout", true, kbd.GetTimeout(),
-                v => RunHwSet(() => svc.SetBacklightTimeout(v), "Backlight timeout")));
+                v => RunSet(() => svc.SetBacklightTimeout(v), "Backlight timeout"), Read: kbd.GetTimeout));
         return list;
     }
 
@@ -34,7 +37,8 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             var names = levels.Select(l => l == 0 ? "Off" : $"{l}%").ToList();
             int idx = IndexOf(levels, usb.Get());
             list.Add(new OptionChoice("USB charging when off:", true, names, idx,
-                i => RunHwSet(() => svc.SetUsbCharging(levels[i]), "USB charging")));
+                i => RunSet(() => svc.SetUsbCharging(levels[i]), "USB charging"),
+                Read: () => IndexOf(levels, usb.Get())));
         }
 
         if (d.DisplayTint is { } tint && tint.Levels > 0)
@@ -53,18 +57,22 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public OptionToggle? BatteryLimit()
         => svc.Device.BatteryChargeLimit is { } limit
             ? new OptionToggle("Charge limit (~80%)", true, limit.Get(),
-                v => RunHwSet(() => svc.SetBatteryLimit(v), "Battery limit"))
+                v => RunSet(() => svc.SetBatteryLimit(v), "Battery limit"), Read: limit.Get)
             : null;
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
     public OptionToggle? BatteryCalibration()
         => svc.Device.BatteryCalibration is { } cal
             ? new OptionToggle("Calibration (full cycle)", true, cal.Get(),
-                v => RunHwSet(() => svc.SetBatteryCalibration(v), "Battery calibration"),
-                ConfirmAsync: confirmCalibration)
+                v => RunSet(() => svc.SetBatteryCalibration(v), "Battery calibration"),
+                Read: cal.Get, ConfirmAsync: confirmCalibration)
             : null;
 
-    private void RunHwSet(Func<bool> set, string what) => Task.Run(() =>
+    // Apply one hardware set and report failure. Called on the row's serial worker thread (see HwSerial):
+    // the row already serializes a control's writes + readback and runs them off the UI thread, and the WMI
+    // layer serializes across controls, so this just runs the set inline and posts any error to the UI. The
+    // row's own readback is what corrects the switch when a write silently doesn't take.
+    private void RunSet(Func<bool> set, string what)
     {
         bool ok;
         try { ok = set(); }
@@ -72,7 +80,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (ok) return;
         var e = svc.LastError;
         Dispatcher.UIThread.Post(() => notify($"{what} failed{(e != null ? $": {e}" : "")}"));
-    });
+    }
 
     private static int IndexOf(IReadOnlyList<int> list, int value)
     {

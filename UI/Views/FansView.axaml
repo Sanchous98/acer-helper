@@ -3,7 +3,7 @@
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
              x:Class="AcerHelper.UI.Views.FansView"
              x:DataType="vm:FansViewModel">
-  <Border Classes="card">
+  <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="8">
       <TextBlock Classes="section" Text="FANS"/>
 
@@ -27,5 +27,5 @@
         <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding GpuPct}"/>
       </Grid>
     </StackPanel>
-  </Border>
+  </ExperimentalAcrylicBorder>
 </UserControl>

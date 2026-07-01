@@ -16,6 +16,17 @@ internal sealed class WmiSession : IDisposable
     private const int WBEM_FLAG_FORWARD_ONLY = 0x20;
     private const int WBEM_INFINITE = -1;
 
+    // Serializes every WMI transaction process-wide. The Acer ACPI-WMI methods talk to ONE embedded
+    // controller, which does not tolerate overlapping calls: a background set (a toggle) firing while the
+    // 3-second poll is mid-burst of sensor/profile reads would intermittently be rejected by the EC — the
+    // switch moved but the hardware didn't ("sometimes doesn't apply / rolls back"). Every QueryFirst /
+    // InvokeMethod takes this lock, so at most one EC transaction is ever in flight. Monitor is re-entrant,
+    // so InvokeMethod's own call to QueryFirst (to fetch the instance) doesn't self-deadlock. Static, so it
+    // spans all sessions/threads/classes (gaming, battery, APGe all hit the same EC). Each call still holds
+    // it only for its own transaction (released in between), so reads and writes just interleave, never
+    // overlap; the ~ms of blocking on the UI-thread poll is negligible.
+    private static readonly object Gate = new();
+
     private readonly IWbemServices _svc;
 
     private WmiSession(IWbemServices svc) => _svc = svc;
@@ -69,25 +80,28 @@ internal sealed class WmiSession : IDisposable
     /// method call and for plain data queries (Win32_*, smart-battery classes).</summary>
     public WmiObject? QueryFirst(string wql, out string? error)
     {
-        error = null;
-        nint bLang = 0, bQuery = 0;
-        try
+        lock (Gate)
         {
-            bLang = Wbem.SysAllocString("WQL");
-            bQuery = Wbem.SysAllocString(wql);
-            var hr = _svc.ExecQuery(bLang, bQuery, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-                0, out var en);
-            if (hr < 0 || en == null) { error = Hr("ExecQuery", hr); return null; }
+            error = null;
+            nint bLang = 0, bQuery = 0;
             try
             {
-                hr = en.Next(WBEM_INFINITE, 1, out var obj, out var returned);
-                if (hr < 0 || returned == 0 || obj == null) return null;   // no rows
-                return new WmiObject(obj);
+                bLang = Wbem.SysAllocString("WQL");
+                bQuery = Wbem.SysAllocString(wql);
+                var hr = _svc.ExecQuery(bLang, bQuery, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                    0, out var en);
+                if (hr < 0 || en == null) { error = Hr("ExecQuery", hr); return null; }
+                try
+                {
+                    hr = en.Next(WBEM_INFINITE, 1, out var obj, out var returned);
+                    if (hr < 0 || returned == 0 || obj == null) return null;   // no rows
+                    return new WmiObject(obj);
+                }
+                finally { (en as IDisposable)?.Dispose(); }
             }
-            finally { (en as IDisposable)?.Dispose(); }
+            catch (Exception ex) { error = ex.Message; return null; }
+            finally { if (bLang != 0) Wbem.SysFreeString(bLang); if (bQuery != 0) Wbem.SysFreeString(bQuery); }
         }
-        catch (Exception ex) { error = ex.Message; return null; }
-        finally { if (bLang != 0) Wbem.SysFreeString(bLang); if (bQuery != 0) Wbem.SysFreeString(bQuery); }
     }
 
     /// <summary>Invoke a method on the (single) instance of <paramref name="className"/>, mirroring what
@@ -97,18 +111,28 @@ internal sealed class WmiSession : IDisposable
     public WmiObject? InvokeMethod(string className, string method,
         IReadOnlyDictionary<string, object>? args, out string? error)
     {
+        lock (Gate)   // one EC transaction at a time (re-entrant: the QueryFirst below re-takes it safely)
+        {
+        // The method's in-parameter signature comes from the CLASS definition — IWbemClassObject::GetMethod
+        // is invalid on an instance (returns an error), which silently aborted every method call. The
+        // instance is still needed for its __PATH, which ExecMethod runs against.
         using var instance = QueryFirst($"SELECT * FROM {className}", out error);
         if (instance == null) { error ??= $"No instance of {className}"; return null; }
 
-        nint bMethod = 0, bPath = 0;
-        WmiObject? inParams = null;
+        nint bClass = 0, bMethod = 0, bPath = 0;
+        WmiObject? classObj = null, inParams = null;
         try
         {
             var path = instance.GetString("__PATH");
             if (string.IsNullOrEmpty(path)) { error = "instance has no __PATH"; return null; }
 
+            bClass = Wbem.SysAllocString(className);
+            var hr = _svc.GetObject(bClass, 0, 0, out var classRaw, 0);
+            if (hr < 0 || classRaw == null) { error = Hr("GetObject(class)", hr); return null; }
+            classObj = new WmiObject(classRaw);
+
             bMethod = Wbem.SysAllocString(method);
-            var hr = instance.Raw.GetMethod(bMethod, 0, out var inSig, out var outSig);
+            hr = classObj.Raw.GetMethod(bMethod, 0, out var inSig, out var outSig);
             (outSig as IDisposable)?.Dispose();
             if (hr < 0) { error = Hr("GetMethod", hr); return null; }
 
@@ -129,15 +153,18 @@ internal sealed class WmiSession : IDisposable
             bPath = Wbem.SysAllocString(path);
             hr = _svc.ExecMethod(bPath, bMethod, 0, 0, inParams?.Raw, out var outObj, 0);
             if (hr >= 0 && outObj != null) return new WmiObject(outObj);
-            error = Hr("ExecMethod", hr); 
+            error = Hr("ExecMethod", hr);
             return null;
         }
         catch (Exception ex) { error = ex.Message; return null; }
         finally
         {
+            classObj?.Dispose();
             inParams?.Dispose();
+            if (bClass != 0) Wbem.SysFreeString(bClass);
             if (bMethod != 0) Wbem.SysFreeString(bMethod);
             if (bPath != 0) Wbem.SysFreeString(bPath);
+        }
         }
     }
 
@@ -192,12 +219,39 @@ public sealed class WmiObject : IDisposable
         finally { Clear(ref v); }
     }
 
-    /// <summary>Set an in-parameter. Scalars go in as VT_I4 (WMI coerces to the property's real CIM type);
-    /// byte arrays go in as a SAFEARRAY of VT_UI1, which Acer's firmware blocks expect (uReserved[], etc.).</summary>
+    /// <summary>Set an in-parameter, matching the property's real CIM type. Byte arrays go in as a SAFEARRAY
+    /// of VT_UI1 (Acer's firmware blocks expect uint8[] — uReserved[], etc.). 64-bit CIM integers must be a
+    /// VT_BSTR decimal string (WMI's representation — a VT_I4/VT_UI8 there is silently rejected, which is what
+    /// broke every Set*/Get* with a UInt64 gmInput/gmOutput). Everything else goes in as VT_I4, which WMI
+    /// coerces to the property's 8/16/32-bit type.</summary>
     public void PutValue(string name, object value)
     {
-        if (value is byte[] arr) PutBytes(name, arr);
-        else PutU32(name, Convert.ToUInt32(value));
+        if (value is byte[] arr) { PutBytes(name, arr); return; }
+
+        ulong u = Convert.ToUInt64(value);
+        int cim = GetCimType(name);
+        if (cim is Wbem.CIM_UINT64 or Wbem.CIM_SINT64) PutBstr(name, u.ToString());
+        else PutU32(name, (uint)u);
+    }
+
+    /// <summary>The property's declared CIM type (needed to pick the right VARIANT shape for a 64-bit int).</summary>
+    private unsafe int GetCimType(string name)
+    {
+        var bn = Wbem.SysAllocString(name);
+        Variant v = default;
+        int type = 0;
+        try { Raw.Get(bn, 0, (nint)(&v), (nint)(&type), 0); }
+        finally { Clear(ref v); Wbem.SysFreeString(bn); }
+        return type;
+    }
+
+    private unsafe void PutBstr(string name, string s)
+    {
+        var bn = Wbem.SysAllocString(name);
+        var bs = Wbem.SysAllocString(s);
+        var v = new Variant { vt = Wbem.VT_BSTR, ptrVal = bs };
+        try { Raw.Put(bn, 0, (nint)(&v), 0); }
+        finally { Wbem.SysFreeString(bs); Wbem.SysFreeString(bn); }
     }
 
     private unsafe void PutU32(string name, uint value)
@@ -254,8 +308,19 @@ public sealed class WmiObject : IDisposable
         Wbem.VT_I8 => (ulong)v.llVal,
         Wbem.VT_UI8 => v.ullVal,
         Wbem.VT_BOOL => v.iVal != 0 ? 1UL : 0UL,
+        // WMI returns 64-bit CIM integers (CIM_UINT64/SINT64) as a decimal BSTR, never VT_UI8. Parse it.
+        Wbem.VT_BSTR => ParseBstr(v.ptrVal),
         _ => 0UL,
     };
+
+    private static ulong ParseBstr(nint bstr)
+    {
+        if (bstr == 0) return 0;
+        var s = Marshal.PtrToStringBSTR(bstr);
+        if (string.IsNullOrEmpty(s)) return 0;
+        if (ulong.TryParse(s, out var u)) return u;
+        return long.TryParse(s, out var l) ? unchecked((ulong)l) : 0;   // negative sint64 -> reinterpret
+    }
 
     public void Dispose() => (Raw as IDisposable)?.Dispose();
 }

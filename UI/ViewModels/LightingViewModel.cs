@@ -16,15 +16,18 @@ public sealed class LightingViewModel
 {
     public ObservableCollection<LightViewModel> Panels { get; } = [];
 
-    public LightingViewModel(IRgbDevice rgb, Settings settings, Action save)
+    /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
+    /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
+    /// via <see cref="Reload"/>.</summary>
+    public LightingViewModel(IRgbDevice rgb, Dictionary<string, LightSettings> lights, Action save)
     {
         foreach (var zone in rgb.Zones)
         {
             if (zone.Effects.Count == 0) continue;
 
-            // Per-zone persisted state, created on first sight of the zone.
-            if (!settings.Lights.TryGetValue(zone.Name, out var state))
-                settings.Lights[zone.Name] = state = new LightSettings();
+            // Per-zone state for the current mode, created on first sight of the zone.
+            if (!lights.TryGetValue(zone.Name, out var state))
+                lights[zone.Name] = state = new LightSettings();
 
             // Seed brightness from what the firmware currently reports (Fn keys change it out-of-band), so
             // the slider matches hardware instead of the last persisted value; readBrightness also drives Sync.
@@ -41,6 +44,18 @@ public sealed class LightingViewModel
     {
         foreach (var panel in Panels) panel.SyncFromHardware();
     }
+
+    /// <summary>Rebind every panel to a different mode's per-zone state and re-apply it (called when the
+    /// performance mode changes, so each mode carries its own lighting).</summary>
+    public void Reload(Dictionary<string, LightSettings> lights)
+    {
+        foreach (var panel in Panels)
+        {
+            if (!lights.TryGetValue(panel.Title, out var state))
+                lights[panel.Title] = state = new LightSettings();
+            panel.Rebind(state);
+        }
+    }
 }
 
 /// <summary>
@@ -55,7 +70,7 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action<RgbModeInfo, AccentColor, byte, byte> _applyAll;
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly Func<int?>? _readBrightness;
-    private readonly LightSettings _state;
+    private LightSettings _state;   // swapped by Rebind when the performance mode changes
     private readonly Action _save;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _loading;
@@ -117,6 +132,23 @@ public sealed partial class LightViewModel : ObservableObject
     public void SyncFromHardware()
     {
         if (_readBrightness?.Invoke() is { } b) SyncBrightness(b);
+    }
+
+    /// <summary>Point this panel at another mode's persisted state, reflect it in the UI (no persist), and
+    /// re-apply it to the device if that mode was configured. Called when the performance mode changes.</summary>
+    public void Rebind(LightSettings state)
+    {
+        _state = state;
+        _loading = true;
+        SelectedEffectIndex = _effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, _effects.Count - 1) : 0;
+        Brightness = Math.Clamp(state.Brightness, 0, 100);
+        Speed = state.Speed;
+        Color = FromPacked(state.Color);
+        for (var i = 0; i < Zones.Count; i++)
+            Zones[i].Color = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : Zones[i].Color;
+        UpdateColorMode();
+        _loading = false;
+        if (state.Configured) ApplyNow();
     }
 
     /// <summary>Reflect a hardware-reported brightness in the slider without triggering an apply/save

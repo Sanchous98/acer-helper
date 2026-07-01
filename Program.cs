@@ -19,5 +19,8 @@ internal static class Program
         => AppBuilder.Configure<App>()
                      .UsePlatformDetect()
                      .LogToTrace()
-                     .With(new Win32PlatformOptions());
+                     .With(new Win32PlatformOptions
+                     {
+                         WinUICompositionBackdropCornerRadius = 12f
+                     });
 }

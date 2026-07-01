@@ -1,12 +1,11 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
-        xmlns:ui="clr-namespace:AcerHelper.UI"
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Acer Nitro" Width="508" Height="600" CanResize="False" ShowInTaskbar="False"
+        Title="Acer Nitro" Width="468" SizeToContent="WidthAndHeight" CanResize="False" ShowInTaskbar="False"
         WindowStartupLocation="Manual" Topmost="True" WindowDecorations="None"
-        Background="Transparent" TransparencyLevelHint="Transparent">
+        Background="Transparent" TransparencyLevelHint="AcrylicBlur,Blur,Transparent">
 
   <!-- Single flyout window with an in-window navigation stack (like a mobile app): one fixed-size
        "phone frame" (never resizes at runtime => no X11 resize jitter), a static acrylic-tint card as
@@ -36,20 +35,13 @@
   <!-- Backdrop fills the whole window incl. the 20px transparent shadow margin around the card. A click
        on it (Source == Backdrop, i.e. the margin, not the card) is a click "outside" => dismiss. -->
   <Panel x:Name="Backdrop" Background="Transparent">
-  <Border x:Name="Root" Width="468" Margin="20"
+  <Border x:Name="Root" Width="468"
           Background="{DynamicResource AppAcrylicTint}"
           CornerRadius="{DynamicResource OverlayCornerRadius}"
           ClipToBounds="True"
-          BoxShadow="0 4 16 0 #55000000"
-          Opacity="0" RenderTransform="translateX(26px)">
-    <!-- The card's own open/close reveal (slide + fade), driven by SlideFader in code-behind. Separate
-         from the page-push transitions above (which move the pages inside this card). -->
-    <Border.Transitions>
-      <Transitions>
-        <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut"/>
-        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" Easing="CubicEaseOut"/>
-      </Transitions>
-    </Border.Transitions>
+          BoxShadow="0 4 16 0 #55000000">
+    <!-- No open/close reveal on the window itself (it shows/hides instantly); only the in-window page-push
+         transitions below (Home <-> drawer) animate. -->
 
     <Panel>
 

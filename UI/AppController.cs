@@ -19,6 +19,7 @@ internal sealed class AppController
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
+    private string? _lastModeKey;   // performance mode we last applied per-mode presets for
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc)
     {
@@ -26,20 +27,22 @@ internal sealed class AppController
         _svc = svc;
 
         var d = _svc.Device;
-        var lighting = d.Lighting != null ? new LightingViewModel(d.Lighting, _svc.Settings, _svc.PersistLighting) : null;
+        var lighting = d.Lighting != null ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting) : null;
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
+        var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         _vm = new MainViewModel(d, new UiActions(
-            ApplyProfile, ApplyFan,
+            ApplyProfile, SetTurbo, ApplyFan,
             (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g),
             opts.Toggles(), opts.Choices(),
             () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
-            _svc.Settings.TurboToggles, b => _svc.SetTurboToggles(b),
+            _svc.Settings.TurboToggles, SetTurboToggles,
             () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
-            _svc.Settings.FanMode, _svc.Settings.CpuFan, _svc.Settings.GpuFan,
+            fan0.Mode, fan0.Cpu, fan0.Gpu,
             d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration()),
             lighting);
 
         _windows = new FlyoutCoordinator(_vm);
+        _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
 
         _svc.ApplyStartupState();
 
@@ -60,6 +63,21 @@ internal sealed class AppController
     private void ApplyProfile(PerformanceProfile p)
     {
         if (!_svc.ApplyProfile(p)) Notify("Failed to set " + p.DisplayName + Err(_svc.LastError));
+        Refresh();
+    }
+
+    // Turbo used as a switch (the "Turbo toggles" mode).
+    private void SetTurbo(bool on)
+    {
+        if (!_svc.SetTurbo(on)) Notify("Turbo failed" + Err(_svc.LastError));
+        Refresh();
+    }
+
+    // Flipping "Turbo key toggles Turbo" reshapes the Performance section (Turbo becomes a switch), so
+    // persist it and refresh immediately rather than waiting for the poll.
+    private void SetTurboToggles(bool on)
+    {
+        _svc.SetTurboToggles(on);
         Refresh();
     }
 
@@ -101,20 +119,32 @@ internal sealed class AppController
         if (_windows.IsMainOpen) _windows.HideAll();
         else _windows.OpenMain();
     }
-
+    
     // ---- refresh ----
 
     private void Refresh()
     {
         _svc.EvaluateClamshell();
 
+        var battery = _svc.ReadBatteryInfo();
+        _svc.SyncPowerSource(battery);   // re-apply the per-source remembered mode on AC<->battery change
+
         var current = _svc.CurrentProfile();
         var selectable = _svc.SelectableProfiles();
         var sensors = _svc.ReadSensors();
-        var battery = _svc.ReadBatteryInfo();
         var status = _svc.Device.StatusMessage ?? string.Empty;
 
-        _vm.Refresh(current, selectable, sensors, battery, status);
+        // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
+        // lighting presets to the hardware and reflect them in the UI.
+        var modeKey = _svc.CurrentModeKey();
+        if (modeKey != _lastModeKey)
+        {
+            _lastModeKey = modeKey;
+            if (_svc.ApplyModeFan() is { } fan) _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu);
+            _vm.ReloadLighting(_svc.LightsForCurrentMode());
+        }
+
+        _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
         _tray.Update(current, selectable);
     }
 

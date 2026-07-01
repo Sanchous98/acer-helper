@@ -46,8 +46,12 @@ internal static partial class Wbem
         VT_I1 = 16, VT_UI1 = 17, VT_UI2 = 18, VT_UI4 = 19, VT_I8 = 20, VT_UI8 = 21, VT_INT = 22,
         VT_UINT = 23, VT_ARRAY = 0x2000;
 
-    // ---- CIMTYPE (for IWbemClassObject::Put) ----
+    // ---- CIMTYPE (for IWbemClassObject::Get/Put) ----
     internal const int CIM_UINT8 = 17;
+    // WMI marshals 64-bit CIM integers as VT_BSTR (decimal string) in VARIANTs — not VT_UI8/VT_I8. So a
+    // property of these types must be read by parsing the string and written by passing a VT_BSTR.
+    internal const int CIM_SINT64 = 20;
+    internal const int CIM_UINT64 = 21;
 
     // ComWrappers instance that turns a raw COM pointer into a callable RCW for our [GeneratedComInterface]
     // types. UniqueInstance RCWs are IDisposable, so we release the underlying COM reference deterministically.
@@ -126,7 +130,8 @@ internal partial interface IWbemServices
     [PreserveSig] int OpenNamespace();            // slot 3  (placeholder)
     [PreserveSig] int CancelAsyncCall();          // slot 4  (placeholder)
     [PreserveSig] int QueryObjectSink();          // slot 5  (placeholder)
-    [PreserveSig] int GetObject();                // slot 6  (placeholder)
+    [PreserveSig] int GetObject(nint strObjectPath, int lFlags, nint pCtx,
+        out IWbemClassObject? ppObject, nint ppCallResult);   // slot 6 — fetch a class definition (for GetMethod)
     [PreserveSig] int GetObjectAsync();           // slot 7  (placeholder)
     [PreserveSig] int PutClass();                 // slot 8  (placeholder)
     [PreserveSig] int PutClassAsync();            // slot 9  (placeholder)

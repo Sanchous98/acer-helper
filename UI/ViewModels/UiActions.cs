@@ -6,6 +6,7 @@ namespace AcerHelper.UI.ViewModels;
 /// value so construction stays tidy. Built by <see cref="AppController"/>.</summary>
 public sealed record UiActions(
     Action<PerformanceProfile> ApplyProfile,
+    Action<bool> SetTurbo,
     Action<FanMode, byte, byte> ApplyFan,
     Action<int, int, int> PersistFan,
     IReadOnlyList<OptionToggle> HwToggles,

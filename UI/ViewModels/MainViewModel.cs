@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using AcerHelper;
 using AcerHelper.Features;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,6 +15,7 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly MonitorViewModel? _monitor;
     private readonly ProfilesViewModel? _profiles;
+    private readonly FansViewModel? _fans;
     private readonly BatteryViewModel? _battery;
     private readonly OptionsViewModel? _options;
     private readonly LightingViewModel? _lighting;
@@ -42,9 +44,9 @@ public sealed partial class MainViewModel : ObservableObject
         if (device.Sensors != null)
             Sections.Add(_monitor = new MonitorViewModel());
         if (device.PowerProfiles is { } pp)
-            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile));
+            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile, a.TurboToggles, a.SetTurbo));
         if (device.FanControl is { } fc)
-            Sections.Add(new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
+            Sections.Add(_fans = new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
         if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null)
             Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
 
@@ -63,6 +65,12 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
+    /// <summary>Reflect a mode's fan preset in the fan section (called when the performance mode changes).</summary>
+    public void ReloadFans(int mode, int cpu, int gpu) => _fans?.Load(mode, cpu, gpu);
+
+    /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
+    public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);
+
     private void OpenDrawer(string title, object? content)
     {
         if (content == null) return;
@@ -74,11 +82,12 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     public void Refresh(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable,
+                        bool turboToggles, PerformanceProfile? baseProfile,
                         SensorSnapshot s, BatteryInfoSnapshot battery, string? status)
     {
         HasProfile = current != null;
         ProfileName = current?.DisplayName ?? "";
-        _profiles?.Update(current, selectable);
+        _profiles?.Update(current, selectable, turboToggles, baseProfile);
         _monitor?.Update(s);
         _battery?.Update(battery);
         if (status != null) Status = status;

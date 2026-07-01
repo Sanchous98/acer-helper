@@ -11,7 +11,7 @@ public sealed partial class FansViewModel : SectionViewModel
     private readonly Action<FanMode, byte, byte> _apply;
     private readonly Action<int, int, int> _persist;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
-    private readonly bool _loading;
+    private bool _loading;
 
     public bool HasMax { get; }
     public bool HasCustom { get; }
@@ -55,6 +55,22 @@ public sealed partial class FansViewModel : SectionViewModel
     partial void OnIsCustomChanged(bool value) { SlidersEnabled = value; if (value) ApplyIfLive(); }
     partial void OnCpuChanged(double value) { CpuPct = $"{(int)value}%"; Debounce(); }
     partial void OnGpuChanged(double value) { GpuPct = $"{(int)value}%"; Debounce(); }
+
+    /// <summary>Reflect a mode's saved fan preset in the UI without triggering an apply/persist (the
+    /// hardware was already set by the service on the mode switch). The <c>_loading</c> guard neuters the
+    /// OnXxxChanged hooks.</summary>
+    public void Load(int mode, int cpu, int gpu)
+    {
+        _loading = true;
+        Cpu = Math.Clamp(cpu, 0, 100);
+        Gpu = Math.Clamp(gpu, 0, 100);
+        var m = (FanMode)mode;
+        IsMax = m == FanMode.Max && HasMax;
+        IsCustom = m == FanMode.Custom && HasCustom;
+        IsAuto = !IsMax && !IsCustom;
+        SlidersEnabled = IsCustom;
+        _loading = false;
+    }
 
     private FanMode Mode() => IsMax ? FanMode.Max : IsCustom ? FanMode.Custom : FanMode.Auto;
     private void ApplyIfLive() { if (!_loading) ApplyNow(); }

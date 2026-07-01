@@ -71,7 +71,7 @@
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.0.5" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="HidSharp" Version="2.1.0" />
+    <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
@@ -79,5 +79,4 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
   </ItemGroup>
-
 </Project>

@@ -3,7 +3,7 @@
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
              x:Class="AcerHelper.UI.Views.BatteryView"
              x:DataType="vm:BatteryViewModel">
-  <Border Classes="card">
+  <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="10">
       <TextBlock Classes="section" Text="BATTERY"/>
 
@@ -36,5 +36,5 @@
         <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding Calibration.IsOn, Mode=TwoWay}"/>
       </Grid>
     </StackPanel>
-  </Border>
+  </ExperimentalAcrylicBorder>
 </UserControl>
