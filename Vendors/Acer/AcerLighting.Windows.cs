@@ -27,6 +27,7 @@ public sealed class AcerLighting : ILighting, IDisposable
     private const byte FLAG_EFFECT  = 0x02;
     private const byte KB_ALL_ZONES = 0x0F;
     private const byte LB_ZONE      = 0x01;
+    private const byte FULL_BRIGHT  = 0x64;   // 100%; the lightbar ignores the HID brightness byte
 
     // GetGamingKBBacklight query selector + output layout (probed on the Nitro 18, method id 21):
     //   in  gmInput  = 1 (0/2 return gmReturn=1 "unsupported")
@@ -81,7 +82,19 @@ public sealed class AcerLighting : ILighting, IDisposable
     public bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
     {
         var e = (RgbEffect)effect.Handle;
-        return Send(TGT_LIGHTBAR, e.ModeByte, e.IsEffect, brightness, speed, color, LB_ZONE);
+        // The lightbar's firmware ignores the HID brightness byte (verified: no impl — ours, the OpenRGB
+        // plugin, or Acer's own service — can dim it via that byte). So emulate brightness by scaling the
+        // colour channels and send full brightness. Works for colour modes (Static/Breathing); self-cycling
+        // effects (Neon/Wave) generate their own colours in firmware and can't be dimmed this way.
+        return Send(TGT_LIGHTBAR, e.ModeByte, e.IsEffect, FULL_BRIGHT, speed, Scale(color, brightness), LB_ZONE);
+    }
+
+    /// <summary>Emulate brightness (0..100) by scaling the RGB channels — for devices/targets that ignore
+    /// the hardware brightness byte (the lightbar).</summary>
+    private static AccentColor Scale(AccentColor c, byte brightness)
+    {
+        int b = Math.Clamp((int)brightness, 0, 100);
+        return new AccentColor((byte)(c.R * b / 100), (byte)(c.G * b / 100), (byte)(c.B * b / 100));
     }
 
     private bool Send(byte target, byte modeByte, bool isEffect, byte brightness, byte speed, AccentColor color, byte zoneMask)
