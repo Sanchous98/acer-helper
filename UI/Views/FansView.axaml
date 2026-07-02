@@ -13,19 +13,28 @@
         <RadioButton GroupName="fan" Content="Custom" IsChecked="{Binding IsCustom, Mode=TwoWay}" IsVisible="{Binding HasCustom}"/>
       </StackPanel>
 
-      <Grid ColumnDefinitions="Auto,*,Auto">
+      <!-- CPU: fixed slider (disabled when its curve is on) + a Curve button that opens the modal graph. -->
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
         <TextBlock Classes="muted" Width="34" VerticalAlignment="Center" Text="CPU"/>
         <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
-                IsEnabled="{Binding SlidersEnabled}" Value="{Binding Cpu, Mode=TwoWay}"/>
+                IsEnabled="{Binding CpuSliderEnabled}" Value="{Binding Cpu, Mode=TwoWay}"/>
         <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding CpuPct}"/>
+        <Button Grid.Column="3" Content="Curve" Padding="10,4" Margin="8,0,0,0"
+                IsVisible="{Binding HasCustom}" IsEnabled="{Binding CurveEnabled}"
+                Classes.accent="{Binding CpuUseCurve}" Command="{Binding OpenCpuCurveCommand}"/>
       </Grid>
 
-      <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasGpu}">
+      <!-- GPU (only if a second fan exists). -->
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" IsVisible="{Binding HasGpu}">
         <TextBlock Classes="muted" Width="34" VerticalAlignment="Center" Text="GPU"/>
         <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
-                IsEnabled="{Binding SlidersEnabled}" Value="{Binding Gpu, Mode=TwoWay}"/>
+                IsEnabled="{Binding GpuSliderEnabled}" Value="{Binding Gpu, Mode=TwoWay}"/>
         <TextBlock Grid.Column="2" Width="42" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding GpuPct}"/>
+        <Button Grid.Column="3" Content="Curve" Padding="10,4" Margin="8,0,0,0"
+                IsVisible="{Binding HasCustom}" IsEnabled="{Binding CurveEnabled}"
+                Classes.accent="{Binding GpuUseCurve}" Command="{Binding OpenGpuCurveCommand}"/>
       </Grid>
+
     </StackPanel>
   </ExperimentalAcrylicBorder>
 </UserControl>

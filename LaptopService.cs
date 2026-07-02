@@ -183,34 +183,111 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
     // ---- fans ----
 
+    /// <summary>Fixed temperature anchors (°C) the emulated fan curve is defined at; a curve is one duty% per
+    /// anchor, per fan. Kept in sync with the UI (FansViewModel).</summary>
+    public static readonly int[] FanCurveAnchors = [50, 60, 70, 80, 90];
+    private static readonly int[] DefaultCurve   = [30, 45, 60, 80, 100];
+
+    private int _curveCpu = -1, _curveGpu = -1;   // last duty% the curve loop applied (for hysteresis)
+
     public bool ApplyFan(FanMode mode, byte cpu, byte gpu)
     {
         var fc = device.FanControl;
         if (fc == null) return false;
-        var ok = mode == FanMode.Custom ? fc.SetCustomSpeeds(cpu, gpu) : fc.SetMode(mode);
+        bool ok;
+        if (mode == FanMode.Custom)
+        {
+            // The EC honours a manual speed only once the fan is in CUSTOM behaviour; setting the speed alone
+            // (without switching behaviour out of Auto) is silently ignored. So put the fans in custom mode
+            // first, then push the speeds. (Both Custom and the emulated curve go through here.)
+            fc.SetMode(FanMode.Custom);
+            ok = fc.SetCustomSpeeds(cpu, gpu);
+        }
+        else ok = fc.SetMode(mode);
         if (!ok) LastError = fc.LastError;
         return ok;
     }
 
-    /// <summary>Save the fan selection for the CURRENT performance mode.</summary>
-    public void PersistFan(FanMode mode, byte cpu, byte gpu)
+    /// <summary>The stored preset for the current mode, created on first write (user is configuring it).</summary>
+    private FanPreset StoredFan()
     {
-        Settings.FanPresets[CurrentModeKey()] = new FanPreset { Mode = (int)mode, Cpu = cpu, Gpu = gpu };
-        Save();
+        var key = CurrentModeKey();
+        if (!Settings.FanPresets.TryGetValue(key, out var f)) Settings.FanPresets[key] = f = new FanPreset();
+        return f;
     }
 
-    /// <summary>The fan preset for the current mode, or defaults (Auto) if none is saved yet.</summary>
+    /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
+    /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
+    /// fixed speed set here (see <see cref="ApplyCustom"/>).</summary>
+    public void SetFan(FanMode mode, byte cpu, byte gpu)
+    {
+        var f = StoredFan();
+        f.Mode = (int)mode; f.Cpu = cpu; f.Gpu = gpu;
+        _curveCpu = _curveGpu = -1;
+        Save();
+        if (mode == FanMode.Custom) ApplyCustom(ReadSensors());
+        else ApplyFan(mode, cpu, gpu);
+    }
+
+    /// <summary>Turn one fan's curve on/off and store its points, for the CURRENT mode, then apply now.</summary>
+    public void SetFanCurve(bool gpu, bool use, int[] points)
+    {
+        var f = StoredFan();
+        if (gpu) { f.GpuUseCurve = use; f.GpuCurve = points; }
+        else     { f.CpuUseCurve = use; f.CpuCurve = points; }
+        _curveCpu = _curveGpu = -1;
+        Save();
+        ApplyCustom(ReadSensors());
+    }
+
+    /// <summary>The fan preset for the current mode, or defaults if none is saved yet (not stored).</summary>
     public FanPreset CurrentFan()
         => Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) ? f : new FanPreset();
 
-    /// <summary>Apply the current mode's saved fan preset to the hardware (called on a mode change). Returns
-    /// the applied preset so the UI can reflect it, or null if this mode has no saved preset — then the fans
-    /// are left as they are (we can't read the current fan mode back to seed one).</summary>
+    /// <summary>Apply the current mode's saved fan preset on a mode change. Auto/Max are pushed immediately;
+    /// Custom is left to <see cref="ApplyCustom"/> (the refresh loop) so per-fan curves track temperature.
+    /// Returns the preset so the UI reflects it, or null if this mode has none (fans left untouched).</summary>
     public FanPreset? ApplyModeFan()
     {
         if (!Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f)) return null;
-        ApplyFan((FanMode)f.Mode, (byte)f.Cpu, (byte)f.Gpu);
+        _curveCpu = _curveGpu = -1;
+        if ((FanMode)f.Mode != FanMode.Custom) ApplyFan((FanMode)f.Mode, (byte)f.Cpu, (byte)f.Gpu);
         return f;
+    }
+
+    /// <summary>Drive the fans in Custom mode: each fan uses its curve value (mapped from the live temp) when
+    /// its curve is on, otherwise its fixed speed. Applied with a deadband so the fans don't hunt. A no-op
+    /// outside Custom mode. Called every refresh (reuses the already-read sensors — no extra hardware access).</summary>
+    public void ApplyCustom(SensorSnapshot s)
+    {
+        if (device.FanControl == null ||
+            !Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) || (FanMode)f.Mode != FanMode.Custom)
+        { _curveCpu = _curveGpu = -1; return; }
+
+        int cpu = f.CpuUseCurve ? EvalCurve(f.CpuCurve, s.CpuTempC, _curveCpu) : Math.Clamp(f.Cpu, 0, 100);
+        int gpu = f.GpuUseCurve ? EvalCurve(f.GpuCurve, s.GpuTempC, _curveGpu) : Math.Clamp(f.Gpu, 0, 100);
+
+        if (_curveCpu >= 0 && Math.Abs(cpu - _curveCpu) < 4 && Math.Abs(gpu - _curveGpu) < 4) return;   // deadband
+
+        if (ApplyFan(FanMode.Custom, (byte)cpu, (byte)gpu)) { _curveCpu = cpu; _curveGpu = gpu; }
+    }
+
+    /// <summary>Interpolate a duty% for <paramref name="temp"/> from the per-anchor curve (linear between
+    /// anchors, flat beyond the ends). Unknown temperature (-1) holds the last value (or the idle duty).</summary>
+    private static int EvalCurve(int[] duties, int temp, int fallback)
+    {
+        var a = FanCurveAnchors;
+        if (duties == null || duties.Length < a.Length) duties = DefaultCurve;
+        if (temp < 0)      return fallback >= 0 ? fallback : Math.Clamp(duties[0], 0, 100);
+        if (temp <= a[0])  return Math.Clamp(duties[0], 0, 100);
+        if (temp >= a[^1]) return Math.Clamp(duties[^1], 0, 100);
+        for (int i = 1; i < a.Length; i++)
+            if (temp <= a[i])
+            {
+                int d0 = duties[i - 1], d1 = duties[i];
+                return Math.Clamp(d0 + (d1 - d0) * (temp - a[i - 1]) / (a[i] - a[i - 1]), 0, 100);
+            }
+        return Math.Clamp(duties[^1], 0, 100);
     }
 
     // ---- lighting (per-mode) ----

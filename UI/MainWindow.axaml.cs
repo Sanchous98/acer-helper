@@ -30,6 +30,11 @@ public partial class MainWindow : Window
 
         Closing += (_, e) => { e.Cancel = true; CloseFlyout(); };   // hide, never destroy
 
+        // The window is SizeToContent, so switching to a taller page (e.g. the fan Curve editor) grows it.
+        // It's anchored by its top-left, so growth would push the bottom off-screen — re-anchor on every size
+        // change while open so the bottom-right corner stays put (the window grows upward instead).
+        SizeChanged += (_, _) => { if (IsOpen) Reanchor(); };
+
         // A click on the transparent shadow margin around the card (the Backdrop itself, not the card) is
         // a click "outside" the flyout -> dismiss, like clicking outside it.
         Backdrop.PointerPressed += (_, e) =>
@@ -122,6 +127,10 @@ public partial class MainWindow : Window
 
     private IntPtr _mouseHook;
     private LowLevelMouseProc? _mouseProc;   // keep the delegate alive so the GC can't collect the callback
+
+    /// <summary>Suspend/resume the outside-click watch — used while we show our own modal (the fan-curve
+    /// editor) so interacting with it isn't treated as a click "outside" that dismisses the flyout.</summary>
+    public void SetOutsideWatch(bool on) { if (on) StartOutsideWatch(); else StopOutsideWatch(); }
 
     private void StartOutsideWatch()
     {

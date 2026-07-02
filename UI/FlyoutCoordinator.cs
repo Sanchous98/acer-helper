@@ -52,6 +52,16 @@ internal sealed class FlyoutCoordinator
         _vm.OpenLightingCommand.Execute(null);
     }
 
+    /// <summary>Modal fan-curve editor over the flyout. Suspends light-dismiss (focus steal + the global
+    /// mouse-hook) so dragging in the dialog doesn't hide the flyout; restores it on close.</summary>
+    public async Task EditFanCurveAsync(FanCurveDialogViewModel vm)
+    {
+        _main.SuppressDismiss = true;
+        _main.SetOutsideWatch(false);
+        try { await Views.FanCurveWindow.ShowAsync(_main, vm); }
+        finally { _main.SetOutsideWatch(true); }
+    }
+
     /// <summary>Shown over the flyout for battery calibration. Steals focus (not a click "outside").</summary>
     public Task<bool> ConfirmCalibrationAsync()
     {

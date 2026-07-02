@@ -38,13 +38,13 @@ internal sealed class AppController
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
         var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         _vm = new MainViewModel(d, new UiActions(
-            ApplyProfile, SetTurbo, ApplyFan,
-            (m, c, g) => _svc.PersistFan((FanMode)m, (byte)c, (byte)g),
+            ApplyProfile, SetTurbo, SetFan, SetFanCurve, ShowFanCurve,
             opts.Toggles(), opts.Choices(),
             () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
             _svc.Settings.TurboToggles, SetTurboToggles,
             () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
             fan0.Mode, fan0.Cpu, fan0.Gpu,
+            fan0.CpuUseCurve, fan0.GpuUseCurve, fan0.CpuCurve, fan0.GpuCurve,
             d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             lighting);
 
@@ -153,11 +153,13 @@ internal sealed class AppController
         Refresh();
     }
 
-    private void ApplyFan(FanMode mode, byte cpu, byte gpu)
-    {
-        if (!_svc.ApplyFan(mode, cpu, gpu)) Notify("Fans failed" + Err(_svc.LastError));
-        Refresh();
-    }
+    // Fan mode + fixed speeds (and, in Custom, per-fan curves) are applied and persisted by the service. No
+    // Refresh() here: nothing in the shared UI/tray depends on fan state, and this fires on every debounced
+    // slider/curve drag — a full refresh each time would spam WMI reads.
+    private void SetFan(FanMode mode, byte cpu, byte gpu) => _svc.SetFan(mode, cpu, gpu);
+    private void SetFanCurve(bool gpu, bool use, int[] points) => _svc.SetFanCurve(gpu, use, points);
+
+    private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
 
     private Task<bool> ConfirmCalibrationAsync() => _windows.ConfirmCalibrationAsync();
 
@@ -212,9 +214,12 @@ internal sealed class AppController
         if (modeKey != _lastModeKey)
         {
             _lastModeKey = modeKey;
-            if (_svc.ApplyModeFan() is { } fan) _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu);
+            if (_svc.ApplyModeFan() is { } fan)
+                _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu, fan.CpuUseCurve, fan.GpuUseCurve, fan.CpuCurve, fan.GpuCurve);
             _vm.ReloadLighting(_svc.LightsForCurrentMode());
         }
+
+        _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
 
         _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
         _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live while the Lighting panel is open

@@ -55,7 +55,9 @@ public sealed partial class MainViewModel : ObservableObject
         if (device.PowerProfiles is { } pp)
             Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile, a.TurboToggles, a.SetTurbo));
         if (device.FanControl is { } fc)
-            Sections.Add(_fans = new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
+            Sections.Add(_fans = new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit,
+                a.CpuUseCurveInit, a.GpuUseCurveInit, a.CpuCurveInit, a.GpuCurveInit,
+                a.SetFan, a.SetFanCurve, a.ShowFanCurve));
         if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null || a.BatteryChargeMode != null)
             Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration, a.BatteryChargeMode));
 
@@ -94,7 +96,8 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
     /// <summary>Reflect a mode's fan preset in the fan section (called when the performance mode changes).</summary>
-    public void ReloadFans(int mode, int cpu, int gpu) => _fans?.Load(mode, cpu, gpu);
+    public void ReloadFans(int mode, int cpu, int gpu, bool cpuUseCurve, bool gpuUseCurve, int[] cpuCurve, int[] gpuCurve)
+        => _fans?.Load(mode, cpu, gpu, cpuUseCurve, gpuUseCurve, cpuCurve, gpuCurve);
 
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);

@@ -1,0 +1,27 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+        xmlns:views="clr-namespace:AcerHelper.UI.Views"
+        x:Class="AcerHelper.UI.Views.FanCurveWindow"
+        x:DataType="vm:FanCurveDialogViewModel"
+        Title="Acer Helper" Width="460" SizeToContent="Height" CanResize="False"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        Topmost="True" WindowDecorations="None" Background="Transparent"
+        TransparencyLevelHint="AcrylicBlur,Blur">
+
+  <!-- Modal fan-curve editor over the flyout. Drag points on the graph; "Follow curve" makes the fan use it. -->
+  <Border Classes="root">
+    <StackPanel Margin="18" Spacing="12">
+      <TextBlock Classes="h1" Text="{Binding Title}"/>
+
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="muted" VerticalAlignment="Center" Text="Follow curve"/>
+        <ToggleSwitch Grid.Column="1" IsChecked="{Binding UseCurve, Mode=TwoWay}"/>
+      </Grid>
+
+      <views:FanCurveEditor Height="200" Points="{Binding Points}"/>
+
+      <Button x:Name="CloseButton" Classes="accent" Content="Done" Padding="16,5" HorizontalAlignment="Right"/>
+    </StackPanel>
+  </Border>
+</Window>

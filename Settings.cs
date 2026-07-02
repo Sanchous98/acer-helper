@@ -49,12 +49,23 @@ public sealed class ProfileMemory
     public bool Turbo { get; set; }
 }
 
-/// <summary>A performance mode's remembered fan selection: mode (1=Auto/2=Max/3=Custom) + custom speeds.</summary>
+/// <summary>A performance mode's remembered fan selection: mode (1=Auto/2=Max/3=Custom) + custom speeds.
+/// When <see cref="Curve"/> is on, the app ignores the fixed speeds and instead drives Custom speeds from a
+/// duty% curve at fixed temperature anchors (Acer has no native fan curves — this emulates them via the
+/// sensor loop; anchors live in LaptopService). <see cref="CpuCurve"/>/<see cref="GpuCurve"/> hold one duty%
+/// per anchor; empty = use the built-in default ramp.</summary>
 public sealed class FanPreset
 {
     public int Mode { get; set; } = 1;
     public int Cpu  { get; set; } = 70;
     public int Gpu  { get; set; } = 70;
+
+    // Per-fan curve (only meaningful in Custom mode): when UseCurve is on for a fan, the app drives that
+    // fan's Custom speed from its curve (duty% per temperature anchor) instead of the fixed speed above.
+    public bool  CpuUseCurve { get; set; }
+    public bool  GpuUseCurve { get; set; }
+    public int[] CpuCurve    { get; set; } = [];
+    public int[] GpuCurve    { get; set; } = [];
 }
 
 /// <summary>A performance mode's remembered lighting: per-RGB-zone state, keyed by zone name.</summary>
