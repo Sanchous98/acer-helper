@@ -27,6 +27,9 @@ public sealed partial class AcerDevice
         if (rgb.Zones.Count > 0) { var dev = new RgbDevice(rgb); Lighting = dev; Own(dev); }
         else rgb.Dispose();
 
+        // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden).
+        if (AcerHotkeys.TryCreate() is { } keys) Own(Hotkeys = keys);
+
         var senseDir = FirstExistingDir($"{LinuwuRoot}/predator_sense", $"{LinuwuRoot}/nitro_sense");
         if (senseDir == null)
         {

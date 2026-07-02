@@ -27,7 +27,15 @@ ACTION=="add|change", SUBSYSTEM=="platform-profile", \
 
 # Acer Linuwu-Sense control nodes (fan_speed, battery_limiter/calibration, lcd_override, usb_charging,
 # backlight_timeout). They exist only while the module is loaded — often well after boot — so udev, not
-# tmpfiles; "bind" fires when the driver attaches. Some module builds already grant their own group here
-# (e.g. root:linuwu_sense); this just adds wheel-based access for the rest.
-ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
+# tmpfiles; "bind" fires when the driver attaches, "change" lets `udevadm trigger` apply this live on
+# install. Some module builds already grant their own group here (e.g. root:linuwu_sense); this just adds
+# wheel-based access for the rest.
+ACTION=="add|bind|change", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
   RUN+="/bin/sh -c 'chgrp -R wheel /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null; chmod -R g+rw /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null'"
+
+# Nitro key (the NitroSense launcher key): atkbd delivers it on the AT keyboard as KEY_PRESENTATION, and
+# the app reads it from evdev. /dev/input/event* is root:input, so tag the keyboard with "uaccess" — an
+# ACL for the ACTIVE local session only (tighter than the input group: no background/remote sessions).
+# Note this lets session apps read this keyboard's events; scoped to Acer machines via DMI.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="AT Translated Set 2 keyboard", \
+  ATTR{[dmi/id]sys_vendor}=="Acer*", TAG+="uaccess"

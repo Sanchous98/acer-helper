@@ -16,12 +16,29 @@ public static class HardwareAccess
         "/usr/lib/udev/rules.d/60-acer-helper.rules",   // where the RPM puts it
     ];
 
-    /// <summary>True when we should offer "Grant hardware access": Linux, rules not already installed, and
-    /// the bundled rule files are present (i.e. running from the AppImage/publish, not a rules-less build).</summary>
+    /// <summary>True when we should offer "Grant hardware access": Linux, the bundled rule files are present
+    /// (i.e. running from the AppImage/publish, not a rules-less build), and no installed copy matches them —
+    /// covering both "never installed" and "installed by an older version" (rules evolve with the app; the
+    /// pkexec install is idempotent).</summary>
     public static bool RulesNeeded()
-        => OperatingSystem.IsLinux()
-           && !RuleLocations.Any(File.Exists)
-           && Bundled("60-acer-helper.rules") != null && Bundled("acer-helper.conf") != null;
+    {
+        if (!OperatingSystem.IsLinux()) return false;
+        var rule = Bundled("60-acer-helper.rules");
+        var conf = Bundled("acer-helper.conf");
+        if (rule == null || conf == null) return false;
+        return !RuleLocations.Any(loc => SameContent(loc, rule))
+               || !SameContent("/etc/tmpfiles.d/acer-helper.conf", conf);
+    }
+
+    private static bool SameContent(string installed, string bundled)
+    {
+        try
+        {
+            return File.Exists(installed) &&
+                   File.ReadAllBytes(installed).AsSpan().SequenceEqual(File.ReadAllBytes(bundled));
+        }
+        catch { return false; }
+    }
 
     /// <summary>Install the bundled rules into /etc via one pkexec prompt and apply them live. Runs the
     /// blocking pkexec call — call it off the UI thread.</summary>
@@ -47,7 +64,8 @@ public static class HardwareAccess
                 $"install -m0644 '{stagedRule}' /etc/udev/rules.d/60-acer-helper.rules && " +
                 $"install -m0644 '{stagedConf}' /etc/tmpfiles.d/acer-helper.conf && " +
                 "udevadm control --reload-rules && " +
-                "udevadm trigger --subsystem-match=power_supply --subsystem-match=leds --subsystem-match=platform-profile && " +
+                "udevadm trigger --subsystem-match=power_supply --subsystem-match=leds --subsystem-match=platform-profile " +
+                "--subsystem-match=platform --subsystem-match=input && " +
                 "systemd-tmpfiles --create /etc/tmpfiles.d/acer-helper.conf";
 
             var psi = new ProcessStartInfo("pkexec") { UseShellExecute = false };
