@@ -13,6 +13,7 @@ public partial class GenericDevice
         DisplayTint = new DisplayTint();
 
         var clamshell = new Clamshell();
-        if (clamshell.Supported) { Clamshell = clamshell; Own(clamshell); }
+        if (!clamshell.Supported) return;
+        Clamshell = clamshell; Own(clamshell);
     }
 }

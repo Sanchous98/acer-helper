@@ -3,7 +3,7 @@ using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Vendors.Acer;
 
-// Windows: create the Acer transports (WMI) and wire the generic feature holders (AcerControls.cs) to the
+// Windows: create the Acer transports (WMI) and wire the generic feature holders (DelegatePorts.cs) to the
 // per-feature encoding methods below. All the Acer-on-Windows encoding lives here (indices, bit-packing,
 // magic values) as named methods + a few WMI call helpers; there are no per-feature classes. If the gaming
 // WMI isn't accessible (not elevated) we keep the inherited generic ports and say why. RGB is assembled from
@@ -30,21 +30,21 @@ public sealed partial class AcerDevice
         }
 
         // Profiles + sensors: Acer's WMI is the richer/only source on Windows -> override the generic ones.
-        PowerProfiles = new AcerPowerProfiles(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
-        Sensors       = new AcerSensors(ReadSensors);
-        FanControl    = new AcerFan(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        LcdOverdrive  = new AcerFlag(GetLcd, SetLcd);
+        PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
+        Sensors       = new SensorsPort(ReadSensors);
+        FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
+        LcdOverdrive  = new FlagPort(GetLcd, SetLcd);
 
         Own(_battery = new WmiInvoker("BatteryControl"));
         var bm = _battery.Available ? BatteryWmi.ReadStatus(_battery, out _) : null;
-        if (bm?.HealthAvail == true) BatteryChargeLimit = new AcerFlag(GetChargeLimit, SetChargeLimit);
-        if (bm?.CalibAvail  == true) BatteryCalibration = new AcerFlag(GetCalibration, SetCalibration);
+        if (bm?.HealthAvail == true) BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
+        if (bm?.CalibAvail  == true) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
 
         Own(_apge = new WmiInvoker("APGeAction"));
         if (_apge.Available && UsbDecode(UiGet(_apge, UsbQuery)) >= 0)
-            UsbCharging = new AcerChoice([0, 10, 20, 30], GetUsb, SetUsb);
+            UsbCharging = new ChoicePort(UsbLevels, GetUsb, SetUsb);
         var bl = _apge.Available ? UiGet(_apge, BlQuery) : ulong.MaxValue;
-        if (bl is BlGetOn or BlGetOff) KeyboardBacklight = new AcerFlag(GetBacklight, SetBacklight);
+        if (bl is BlGetOn or BlGetOff) KeyboardBacklight = new FlagPort(GetBacklight, SetBacklight);
 
         var rgb = new EneHidController(_model.Zones, _model.Lightbar, ReadKbBrightness);
         if (rgb.Zones.Count > 0) { var dev = new RgbDevice(rgb); Lighting = dev; Own(dev); }
@@ -99,8 +99,12 @@ public sealed partial class AcerDevice
     private (bool, string?) SetCalibration(bool on) => BatteryWmi.SetControl(_battery, BatteryWmi.CalibrationMode, on);
 
     // ---- USB charging / keyboard-backlight timeout (APGeAction) ----
-    private int GetUsb() => Math.Max(0, UsbDecode(UiGet(_apge, UsbQuery)));
-    private (bool, string?) SetUsb(int level) => UiSet(_apge, level switch { 10 => UsbAt10, 20 => UsbAt20, 30 => UsbAt30, _ => UsbOff });
+    // Ids are the battery-threshold percentages ("0" = off): charging stops once the battery drops there.
+    private static readonly ChoiceOption[] UsbLevels =
+        [new("0", "Off"), new("10", "10%"), new("20", "20%"), new("30", "30%")];
+
+    private string? GetUsb() => Math.Max(0, UsbDecode(UiGet(_apge, UsbQuery))).ToString();
+    private (bool, string?) SetUsb(string id) => UiSet(_apge, id switch { "10" => UsbAt10, "20" => UsbAt20, "30" => UsbAt30, _ => UsbOff });
     private bool GetBacklight() => UiGet(_apge, BlQuery) == BlGetOn;
     private (bool, string?) SetBacklight(bool on) => UiSet(_apge, on ? BlSetOn : BlSetOff);
 

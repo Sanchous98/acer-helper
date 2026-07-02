@@ -47,7 +47,7 @@ public static class AcerModels
     public static AcerModel Detect(string? product)
     {
         var cfg = Load();
-        string p = product ?? string.Empty;
+        var p = product ?? string.Empty;
         foreach (var m in cfg.Models)
             if (m.Match.Any(s => !string.IsNullOrEmpty(s) && p.Contains(s, StringComparison.OrdinalIgnoreCase)))
                 return m;
@@ -67,7 +67,7 @@ public static class AcerModels
         try
         {
             var asm = Assembly.GetExecutingAssembly();
-            string? res = asm.GetManifestResourceNames()
+            var res = asm.GetManifestResourceNames()
                 .FirstOrDefault(n => n.EndsWith("acer-models.json", StringComparison.OrdinalIgnoreCase));
             if (res == null) return null;
             using var stream = asm.GetManifestResourceStream(res);
@@ -84,7 +84,7 @@ public static class AcerModels
     {
         try
         {
-            string path = Path.Combine(
+            var path = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "AcerHelper", "acer-models.json");
             if (!File.Exists(path)) return;

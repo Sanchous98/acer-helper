@@ -15,6 +15,19 @@ public sealed class SysfsInvoker(string baseDir)
     /// <summary>Whether a specific node exists (a feature is only offered when its file is present).</summary>
     public bool Has(string file) => File.Exists(Path.Combine(baseDir, file));
 
+    /// <summary>Whether the node exists AND this process may write it (probe-open; nothing is written —
+    /// sysfs attrs only act on an actual write). Gate features whose whole point is the write on this, so
+    /// the UI never offers a control that fails "permission denied" on every use.</summary>
+    public bool CanWrite(string file)
+    {
+        try
+        {
+            using var _ = new FileStream(Path.Combine(baseDir, file), FileMode.Open, FileAccess.Write);
+            return true;
+        }
+        catch { return false; }
+    }
+
     public string? Read(string file)
     {
         try

@@ -15,4 +15,5 @@ public sealed record UiActions(
     bool TurboToggles, Action<bool> SetTurboToggles,
     Func<bool> AutostartEnabled, Action<bool> SetAutostart,
     int FanModeInit, int CpuFanInit, int GpuFanInit,
-    bool HasBatteryInfo, OptionToggle? BatteryLimit, OptionToggle? BatteryCalibration);
+    bool HasBatteryInfo, OptionToggle? BatteryLimit, OptionToggle? BatteryCalibration,
+    OptionChoice? BatteryChargeMode);

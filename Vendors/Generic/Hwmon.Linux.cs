@@ -138,10 +138,9 @@ internal static class Hwmon
 
     private static string? ByExactLabel(string dir, string label)
     {
-        foreach (var i in Channels(dir, "temp*_label", "temp", "_label"))
-            if (string.Equals(ReadText(Path.Combine(dir, $"temp{i}_label")), label, StringComparison.OrdinalIgnoreCase))
-                return Path.Combine(dir, $"temp{i}_input");
-        return null;
+        return (from i in Channels(dir, "temp*_label", "temp", "_label") 
+            where string.Equals(ReadText(Path.Combine(dir, $"temp{i}_label")), label, StringComparison.OrdinalIgnoreCase) 
+            select Path.Combine(dir, $"temp{i}_input")).FirstOrDefault();
     }
 
     private static string? ByLabelContains(string dir, string sub)
@@ -210,15 +209,12 @@ internal sealed class HwmonFanControl : IFanControl, IDisposable
 
     public static HwmonFanControl? TryCreate()
     {
-        foreach (var c in Hwmon.Chips())
-            foreach (var n in Hwmon.Channels(c.Path, "pwm*_enable", "pwm", "_enable"))
-            {
-                var enable = Path.Combine(c.Path, $"pwm{n}_enable");
-                var pwm = Path.Combine(c.Path, $"pwm{n}");
-                if (File.Exists(pwm) && Hwmon.CanWrite(enable) && Hwmon.CanWrite(pwm))
-                    return new HwmonFanControl(enable, pwm);
-            }
-        return null;
+        return (from c in Hwmon.Chips() 
+            from n in Hwmon.Channels(c.Path, "pwm*_enable", "pwm", "_enable") 
+            let enable = Path.Combine(c.Path, $"pwm{n}_enable") 
+            let pwm = Path.Combine(c.Path, $"pwm{n}") 
+            where File.Exists(pwm) && Hwmon.CanWrite(enable) && Hwmon.CanWrite(pwm) 
+            select new HwmonFanControl(enable, pwm)).FirstOrDefault();
     }
 
     // A generic PWM channel is a single controllable fan -> one speed slider, no separate GPU fan.

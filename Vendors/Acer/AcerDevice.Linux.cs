@@ -4,7 +4,7 @@ using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Vendors.Acer;
 
-// Linux: create the Linuwu-Sense sysfs transport and wire the generic feature holders (AcerControls.cs) to
+// Linux: create the Linuwu-Sense sysfs transport and wire the generic feature holders (DelegatePorts.cs) to
 // the per-feature encoding methods below. All the Acer-on-Linux encoding lives here (node names + trivial
 // formats). If the module isn't loaded we keep the inherited generic ports and say why. Profiles come from
 // platform_profile (the full Acer firmware set) rather than the PPD collapse; sensors stay generic hwmon.
@@ -33,17 +33,19 @@ public sealed partial class AcerDevice
             return;   // keep the inherited generic ports (+ any RGB wired above)
         }
 
+        // The full Acer BIOS profile set — but only when this process can actually switch it (root/udev);
+        // otherwise the generic polkit-authorised PPD port stays (working beats richer-but-broken).
         var profiles = new SysfsPowerProfiles();
-        if (profiles.Available) PowerProfiles = profiles;
+        if (profiles is { Available: true, Writable: true }) PowerProfiles = profiles;
 
         _sense = new SysfsInvoker(senseDir);
         if (_sense.Has("fan_speed"))
-            FanControl = new AcerFan(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        if (_sense.Has("lcd_override"))        LcdOverdrive       = new AcerFlag(GetLcd, SetLcd);
-        if (_sense.Has("battery_limiter"))     BatteryChargeLimit = new AcerFlag(GetChargeLimit, SetChargeLimit);
-        if (_sense.Has("battery_calibration")) BatteryCalibration = new AcerFlag(GetCalibration, SetCalibration);
-        if (_sense.Has("backlight_timeout"))   KeyboardBacklight  = new AcerFlag(GetBacklight, SetBacklight);
-        if (_sense.Has("usb_charging"))        UsbCharging        = new AcerChoice([0, 10, 20, 30], GetUsb, SetUsb);
+            FanControl = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
+        if (_sense.Has("lcd_override"))        LcdOverdrive       = new FlagPort(GetLcd, SetLcd);
+        if (_sense.Has("battery_limiter"))     BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
+        if (_sense.Has("battery_calibration")) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
+        if (_sense.Has("backlight_timeout"))   KeyboardBacklight  = new FlagPort(GetBacklight, SetBacklight);
+        if (_sense.Has("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
     }
 
     // ---- fans ("0" = auto, "100,100" = max, "cpu,gpu" = custom) ----
@@ -74,10 +76,18 @@ public sealed partial class AcerDevice
     
     private (bool, string?) SetBacklight(bool on) => Wr("backlight_timeout", on ? ON : OFF);
 
-    // ---- USB charging (0 / 10 / 20 / 30) ----
-    private int GetUsb() => int.TryParse(_sense.Read("usb_charging"), out var v) ? v : 0;
-    
-    private (bool, string?) SetUsb(int level) => Wr("usb_charging", level.ToString());
+    // ---- USB charging (ids = battery-threshold percentages, "0" = off) ----
+    private static readonly ChoiceOption[] UsbLevels = 
+    [
+        new("0", "Off"), 
+        new("10", "10%"), 
+        new("20", "20%"), 
+        new("30", "30%")
+    ];
+
+    private string GetUsb() => int.TryParse(_sense.Read("usb_charging"), out var v) ? v.ToString() : "0";
+
+    private (bool, string?) SetUsb(string id) => Wr("usb_charging", id);
 
     private (bool, string?) Wr(string node, string value)
     {

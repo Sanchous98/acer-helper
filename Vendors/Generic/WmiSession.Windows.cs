@@ -25,7 +25,7 @@ internal sealed class WmiSession : IDisposable
     // spans all sessions/threads/classes (gaming, battery, APGe all hit the same EC). Each call still holds
     // it only for its own transaction (released in between), so reads and writes just interleave, never
     // overlap; the ~ms of blocking on the UI-thread poll is negligible.
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
 
     private readonly IWbemServices _svc;
 
@@ -113,58 +113,58 @@ internal sealed class WmiSession : IDisposable
     {
         lock (Gate)   // one EC transaction at a time (re-entrant: the QueryFirst below re-takes it safely)
         {
-        // The method's in-parameter signature comes from the CLASS definition — IWbemClassObject::GetMethod
-        // is invalid on an instance (returns an error), which silently aborted every method call. The
-        // instance is still needed for its __PATH, which ExecMethod runs against.
-        using var instance = QueryFirst($"SELECT * FROM {className}", out error);
-        if (instance == null) { error ??= $"No instance of {className}"; return null; }
+            // The method's in-parameter signature comes from the CLASS definition — IWbemClassObject::GetMethod
+            // is invalid on an instance (returns an error), which silently aborted every method call. The
+            // instance is still needed for its __PATH, which ExecMethod runs against.
+            using var instance = QueryFirst($"SELECT * FROM {className}", out error);
+            if (instance == null) { error ??= $"No instance of {className}"; return null; }
 
-        nint bClass = 0, bMethod = 0, bPath = 0;
-        WmiObject? classObj = null, inParams = null;
-        try
-        {
-            var path = instance.GetString("__PATH");
-            if (string.IsNullOrEmpty(path)) { error = "instance has no __PATH"; return null; }
-
-            bClass = Wbem.SysAllocString(className);
-            var hr = _svc.GetObject(bClass, 0, 0, out var classRaw, 0);
-            if (hr < 0 || classRaw == null) { error = Hr("GetObject(class)", hr); return null; }
-            classObj = new WmiObject(classRaw);
-
-            bMethod = Wbem.SysAllocString(method);
-            hr = classObj.Raw.GetMethod(bMethod, 0, out var inSig, out var outSig);
-            (outSig as IDisposable)?.Dispose();
-            if (hr < 0) { error = Hr("GetMethod", hr); return null; }
-
-            if (inSig != null)
+            nint bClass = 0, bMethod = 0, bPath = 0;
+            WmiObject? classObj = null, inParams = null;
+            try
             {
-                try
+                var path = instance.GetString("__PATH");
+                if (string.IsNullOrEmpty(path)) { error = "instance has no __PATH"; return null; }
+
+                bClass = Wbem.SysAllocString(className);
+                var hr = _svc.GetObject(bClass, 0, 0, out var classRaw, 0);
+                if (hr < 0 || classRaw == null) { error = Hr("GetObject(class)", hr); return null; }
+                classObj = new WmiObject(classRaw);
+
+                bMethod = Wbem.SysAllocString(method);
+                hr = classObj.Raw.GetMethod(bMethod, 0, out var inSig, out var outSig);
+                (outSig as IDisposable)?.Dispose();
+                if (hr < 0) { error = Hr("GetMethod", hr); return null; }
+
+                if (inSig != null)
                 {
-                    hr = inSig.SpawnInstance(0, out var inInst);
-                    if (hr < 0 || inInst == null) { error = Hr("SpawnInstance", hr); return null; }
-                    inParams = new WmiObject(inInst);
+                    try
+                    {
+                        hr = inSig.SpawnInstance(0, out var inInst);
+                        if (hr < 0 || inInst == null) { error = Hr("SpawnInstance", hr); return null; }
+                        inParams = new WmiObject(inInst);
+                    }
+                    finally { (inSig as IDisposable)?.Dispose(); }
+
+                    if (args != null)
+                        foreach (var kv in args) inParams.PutValue(kv.Key, kv.Value);
                 }
-                finally { (inSig as IDisposable)?.Dispose(); }
 
-                if (args != null)
-                    foreach (var kv in args) inParams.PutValue(kv.Key, kv.Value);
+                bPath = Wbem.SysAllocString(path);
+                hr = _svc.ExecMethod(bPath, bMethod, 0, 0, inParams?.Raw, out var outObj, 0);
+                if (hr >= 0 && outObj != null) return new WmiObject(outObj);
+                error = Hr("ExecMethod", hr);
+                return null;
             }
-
-            bPath = Wbem.SysAllocString(path);
-            hr = _svc.ExecMethod(bPath, bMethod, 0, 0, inParams?.Raw, out var outObj, 0);
-            if (hr >= 0 && outObj != null) return new WmiObject(outObj);
-            error = Hr("ExecMethod", hr);
-            return null;
-        }
-        catch (Exception ex) { error = ex.Message; return null; }
-        finally
-        {
-            classObj?.Dispose();
-            inParams?.Dispose();
-            if (bClass != 0) Wbem.SysFreeString(bClass);
-            if (bMethod != 0) Wbem.SysFreeString(bMethod);
-            if (bPath != 0) Wbem.SysFreeString(bPath);
-        }
+            catch (Exception ex) { error = ex.Message; return null; }
+            finally
+            {
+                classObj?.Dispose();
+                inParams?.Dispose();
+                if (bClass != 0) Wbem.SysFreeString(bClass);
+                if (bMethod != 0) Wbem.SysFreeString(bMethod);
+                if (bPath != 0) Wbem.SysFreeString(bPath);
+            }
         }
     }
 
@@ -219,14 +219,16 @@ public sealed class WmiObject : IDisposable
         finally { Clear(ref v); }
     }
 
-    /// <summary>Set an in-parameter, matching the property's real CIM type. Byte arrays go in as a SAFEARRAY
-    /// of VT_UI1 (Acer's firmware blocks expect uint8[] — uReserved[], etc.). 64-bit CIM integers must be a
-    /// VT_BSTR decimal string (WMI's representation — a VT_I4/VT_UI8 there is silently rejected, which is what
-    /// broke every Set*/Get* with a UInt64 gmInput/gmOutput). Everything else goes in as VT_I4, which WMI
-    /// coerces to the property's 8/16/32-bit type.</summary>
+    /// <summary>Set an in-parameter, matching the property's real CIM type. Strings go in as VT_BSTR
+    /// (CIM_STRING parameters — e.g. Dell's BIOSAttributeInterface AttributeName/AttributeValue). Byte
+    /// arrays go in as a SAFEARRAY of VT_UI1 (Acer's firmware blocks expect uint8[] — uReserved[], etc.).
+    /// 64-bit CIM integers must be a VT_BSTR decimal string (WMI's representation — a VT_I4/VT_UI8 there is
+    /// silently rejected, which is what broke every Set*/Get* with a UInt64 gmInput/gmOutput). Everything
+    /// else goes in as VT_I4, which WMI coerces to the property's 8/16/32-bit type.</summary>
     public void PutValue(string name, object value)
     {
         if (value is byte[] arr) { PutBytes(name, arr); return; }
+        if (value is string s) { PutBstr(name, s); return; }
 
         ulong u = Convert.ToUInt64(value);
         int cim = GetCimType(name);

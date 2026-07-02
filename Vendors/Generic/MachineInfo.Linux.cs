@@ -10,7 +10,13 @@ public static partial class MachineInfo
 
     private static string? ReadFile(string path)
     {
-        try { return File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
-        catch { return null; }
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

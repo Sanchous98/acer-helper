@@ -1,0 +1,23 @@
+# AcerHelper — grant the "wheel" group write access to the laptop-control sysfs knobs, so the app runs
+# UNPRIVILEGED (it never needs to be launched as root). These knobs are root-only by default; the app hides
+# any control it can't actually operate, so without this file the Dell/generic firmware controls stay hidden.
+#
+# Install: packaging/install-permissions.sh (or copy to /etc/udev/rules.d/ and
+#          `udevadm control --reload && udevadm trigger`). Members of "wheel" can already sudo, so granting
+#          them these specific writes adds no meaningful privilege. Edit "wheel" to another group if desired.
+#
+# udev sets MODE/GROUP on device NODES, not on the sysfs ATTRIBUTE files we need, so we chgrp+chmod the
+# specific attributes via RUN (the pattern TLP and the battery-health tools use). %p is the device's devpath.
+
+# Battery charge mode + custom charge thresholds (power_supply; Dell dell-laptop / dell-wmi-ddv, kernel 6.12+)
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-9]", \
+  RUN+="/bin/sh -c 'for f in charge_types charge_control_start_threshold charge_control_end_threshold; do chgrp wheel /sys%p/$f 2>/dev/null && chmod g+w /sys%p/$f 2>/dev/null; done'"
+
+# Keyboard backlight (kernel LED class): brightness + auto-off timeout
+ACTION=="add|change", SUBSYSTEM=="leds", KERNEL=="*kbd_backlight", \
+  RUN+="/bin/sh -c 'for f in brightness stop_timeout; do chgrp wheel /sys%p/$f 2>/dev/null && chmod g+w /sys%p/$f 2>/dev/null; done'"
+
+# Performance/thermal profile (kernel platform-profile class, 6.14+; the /sys/firmware alias is handled by
+# the tmpfiles.d companion for older kernels)
+ACTION=="add|change", SUBSYSTEM=="platform-profile", \
+  RUN+="/bin/sh -c 'chgrp wheel /sys%p/profile 2>/dev/null && chmod g+w /sys%p/profile 2>/dev/null'"

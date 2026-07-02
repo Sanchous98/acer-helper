@@ -229,11 +229,15 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
     // ---- hardware toggles (return success; LastError holds the reason on failure) ----
 
-    public bool SetBatteryLimit(bool on)       => Run(device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);
-    public bool SetBatteryCalibration(bool on) => Run(device.BatteryCalibration, x => x.Set(on), x => x.LastError);
-    public bool SetLcdOverdrive(bool on)       => Run(device.LcdOverdrive,       x => x.Set(on), x => x.LastError);
-    public bool SetUsbCharging(int level)      => Run(device.UsbCharging,        x => x.Set(level), x => x.LastError);
-    public bool SetBacklightTimeout(bool on)   => Run(device.KeyboardBacklight,  x => x.SetTimeout(on), x => x.LastError);
+    public bool SetBatteryLimit(bool on)         => Run(device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);
+    public bool SetBatteryCalibration(bool on)   => Run(device.BatteryCalibration, x => x.Set(on), x => x.LastError);
+    public bool SetBatteryChargeMode(string id)  => Run(device.BatteryChargeMode,  x => x.Set(id), x => x.LastError);
+    public bool SetLcdOverdrive(bool on)         => Run(device.LcdOverdrive,       x => x.Set(on), x => x.LastError);
+    public bool SetUsbCharging(string id)        => Run(device.UsbCharging,        x => x.Set(id), x => x.LastError);
+    public bool SetBacklightTimeout(bool on)     => Run(device.KeyboardBacklight,  x => x.SetTimeout(on), x => x.LastError);
+    public bool SetKeyboardTimeout(string id)    => Run(device.KeyboardBacklightTimeout, x => x.Set(id), x => x.LastError);
+    public bool SetKeyboardBrightness(int level) => Run(device.KeyboardBrightness, x => x.Set(level), x => x.LastError);
+    public bool SetFnLock(bool on)               => Run(device.FnLock,             x => x.Set(on), x => x.LastError);
 
     public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 

@@ -4,23 +4,27 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace AcerHelper.UI.ViewModels;
 
 /// <summary>Battery section: live charge %/state + health and cycle count (when the battery reports
-/// them), plus the charge-limit and calibration toggles where the device supports them. Info is
-/// pushed in by <see cref="Update"/> on each refresh.</summary>
+/// them), plus whichever charging controls the device exposes — the charge-mode dropdown (e.g. Dell
+/// Adaptive/Express/Custom) and the charge-limit and calibration toggles. Info is pushed in by
+/// <see cref="Update"/> on each refresh.</summary>
 public sealed partial class BatteryViewModel : SectionViewModel
 {
-    public BatteryViewModel(bool hasInfo, OptionToggle? limit, OptionToggle? calibration)
+    public BatteryViewModel(bool hasInfo, OptionToggle? limit, OptionToggle? calibration, OptionChoice? chargeMode)
     {
         ShowInfo = hasInfo;
         if (limit != null) Limit = new ToggleRowViewModel(limit);
         if (calibration != null) Calibration = new ToggleRowViewModel(calibration);
+        if (chargeMode != null) Mode = new ChoiceRowViewModel(chargeMode);
     }
 
     public bool ShowInfo { get; }
 
     public ToggleRowViewModel? Limit { get; }
     public ToggleRowViewModel? Calibration { get; }
+    public ChoiceRowViewModel? Mode { get; }
     public bool ShowLimit => Limit != null;
     public bool ShowCalibration => Calibration != null;
+    public bool ShowMode => Mode != null;
 
     [ObservableProperty] private string _charge = "—";
     [ObservableProperty] private string _state = "";

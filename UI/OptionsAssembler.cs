@@ -23,6 +23,9 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.KeyboardBacklight is { } kbd)
             list.Add(new OptionToggle("Keyboard backlight timeout", true, kbd.GetTimeout(),
                 v => RunSet(() => svc.SetBacklightTimeout(v), "Backlight timeout"), Read: kbd.GetTimeout));
+        if (d.FnLock is { } fn)
+            list.Add(new OptionToggle("Fn lock", true, fn.Get(),
+                v => RunSet(() => svc.SetFnLock(v), "Fn lock"), Read: fn.Get));
         return list;
     }
 
@@ -34,11 +37,23 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.UsbCharging is { } usb)
         {
             var levels = usb.Levels;
-            var names = levels.Select(l => l == 0 ? "Off" : $"{l}%").ToList();
-            int idx = IndexOf(levels, usb.Get());
-            list.Add(new OptionChoice("USB charging when off:", true, names, idx,
-                i => RunSet(() => svc.SetUsbCharging(levels[i]), "USB charging"),
+            var names = levels.Select(l => l.DisplayName).ToList();
+            list.Add(new OptionChoice("USB charging when off:", true, names, IndexOf(levels, usb.Get()),
+                i => RunSet(() => svc.SetUsbCharging(levels[i].Id), "USB charging"),
                 Read: () => IndexOf(levels, usb.Get())));
+        }
+
+        // Keyboard-backlight brightness is a LIGHTING control -> it lives in the Lighting window
+        // (LightingViewModel.Backlight), not here. See AppController.
+
+        // Keyboard-backlight auto-off delay (duration dropdown, where the hardware exposes a set of delays).
+        if (d.KeyboardBacklightTimeout is { } to)
+        {
+            var opts = to.Options;
+            var names = opts.Select(o => o.DisplayName).ToList();
+            list.Add(new OptionChoice("Keyboard backlight timeout:", true, names, IndexOf(opts, to.Get()),
+                i => RunSet(() => svc.SetKeyboardTimeout(opts[i].Id), "Backlight timeout"),
+                Read: () => IndexOf(opts, to.Get())));
         }
 
         if (d.DisplayTint is { } tint && tint.Levels > 0)
@@ -53,7 +68,19 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         return list;
     }
 
-    // Battery toggles live in the Battery section (not generic Options).
+    // Battery controls live in the Battery section (not generic Options).
+
+    /// <summary>Vendor battery charging strategy (e.g. Dell Adaptive/Express/Custom) as a dropdown.</summary>
+    public OptionChoice? BatteryChargeMode()
+    {
+        if (svc.Device.BatteryChargeMode is not { } mode) return null;
+        var modes = mode.Modes;
+        var names = modes.Select(m => m.DisplayName).ToList();
+        return new OptionChoice("Charge mode", true, names, IndexOf(modes, mode.Get()),
+            i => RunSet(() => svc.SetBatteryChargeMode(modes[i].Id), "Charge mode"),
+            Read: () => IndexOf(modes, mode.Get()));
+    }
+
     public OptionToggle? BatteryLimit()
         => svc.Device.BatteryChargeLimit is { } limit
             ? new OptionToggle("Charge limit (~80%)", true, limit.Get(),
@@ -82,10 +109,10 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         Dispatcher.UIThread.Post(() => notify($"{what} failed{(e != null ? $": {e}" : "")}"));
     }
 
-    private static int IndexOf(IReadOnlyList<int> list, int value)
+    private static int IndexOf(IReadOnlyList<ChoiceOption> list, string? id)
     {
         for (var i = 0; i < list.Count; i++)
-            if (list[i] == value)
+            if (list[i].Id == id)
                 return i;
         return 0;
     }

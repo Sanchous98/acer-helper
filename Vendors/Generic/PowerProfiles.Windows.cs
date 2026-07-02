@@ -16,11 +16,11 @@ public sealed class OverlayPowerProfiles : IPowerProfiles
     private static readonly Guid Performance  = new("ded574b5-45a0-4f42-8737-46345c09c238");
 
     private static readonly (Guid g, string name, ProfileKind kind, AccentColor accent)[] Table =
-    {
-        (Efficiency,  "Best efficiency",  ProfileKind.Eco,         new(0x00, 0x89, 0x7B)),
-        (Balanced,    "Balanced",         ProfileKind.Balanced,    new(0x2E, 0x7D, 0x32)),
-        (Performance, "Best performance", ProfileKind.Performance, new(0xF5, 0x7C, 0x00)),
-    };
+    [
+        (Efficiency,  "Best efficiency",  ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        (Balanced,    "Balanced",         ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        (Performance, "Best performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00))
+    ];
 
     [DllImport("powrprof.dll")] private static extern uint PowerGetEffectiveOverlayScheme(out Guid scheme);
     [DllImport("powrprof.dll")] private static extern uint PowerSetActiveOverlayScheme(Guid scheme);
@@ -54,9 +54,9 @@ public sealed class OverlayPowerProfiles : IPowerProfiles
     {
         try
         {
-            uint r = PowerSetActiveOverlayScheme(Guid.Parse(profile.Id));
-            if (r != 0) { LastError = $"PowerSetActiveOverlayScheme={r}"; return false; }
-            return true;
+            var r = PowerSetActiveOverlayScheme(Guid.Parse(profile.Id));
+            if (r == 0) return true;
+            LastError = $"PowerSetActiveOverlayScheme={r}"; return false;
         }
         catch (Exception ex) { LastError = ex.Message; return false; }
     }

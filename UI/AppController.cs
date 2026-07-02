@@ -27,7 +27,12 @@ internal sealed class AppController
         _svc = svc;
 
         var d = _svc.Device;
-        var lighting = d.Lighting != null ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting) : null;
+        // The Lighting window hosts RGB zones AND/OR a plain (non-RGB) keyboard-backlight brightness control,
+        // so it opens whenever the device has either.
+        var lighting = d.Lighting != null || d.KeyboardBrightness != null
+            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
+                                    d.KeyboardBrightness, _svc.SetKeyboardBrightness)
+            : null;
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
         var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         _vm = new MainViewModel(d, new UiActions(
@@ -38,7 +43,7 @@ internal sealed class AppController
             _svc.Settings.TurboToggles, SetTurboToggles,
             () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
             fan0.Mode, fan0.Cpu, fan0.Gpu,
-            d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration()),
+            d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             lighting);
 
         _windows = new FlyoutCoordinator(_vm);

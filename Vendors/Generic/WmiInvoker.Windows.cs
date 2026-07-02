@@ -41,7 +41,7 @@ public sealed class WmiInvoker : IDisposable
     /// The returned object is an in-process copy, so it stays valid after this session closes.</summary>
     public WmiObject? Invoke(string method, IReadOnlyDictionary<string, object> args)
     {
-        using var session = WmiSession.Connect(Namespace, out string? e);
+        using var session = WmiSession.Connect(Namespace, out var e);
         if (session == null) { LastError = e; return null; }
         var outp = session.InvokeMethod(_className, method, args, out e);
         LastError = e;

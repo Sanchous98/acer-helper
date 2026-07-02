@@ -63,14 +63,27 @@ public interface IBatteryCalibration
     bool Set(bool on);
 }
 
-/// <summary>USB charging while the laptop is powered off (threshold level).</summary>
+/// <summary>Vendor battery charging strategy — a named mode, not a bare threshold (e.g. Dell:
+/// Adaptive / Express charge / Primarily AC / Standard / Custom). The mode set is what the firmware
+/// actually advertises on this machine.</summary>
+public interface IBatteryChargeMode
+{
+    string? LastError { get; }
+    IReadOnlyList<ChoiceOption> Modes { get; }
+    /// <summary>The active mode's id, or null if it can't be read.</summary>
+    string? Get();
+    bool Set(string id);
+}
+
+/// <summary>USB charging while the laptop is powered off. Levels are vendor-defined labelled choices
+/// (Acer: Off/10%/20%/30% battery threshold; Dell PowerShare: Off/On).</summary>
 public interface IUsbCharging
 {
     string? LastError { get; }
-    /// <summary>Selectable thresholds, e.g. 0 (off), 10, 20, 30 (percent).</summary>
-    IReadOnlyList<int> Levels { get; }
-    int Get();
-    bool Set(int level);
+    IReadOnlyList<ChoiceOption> Levels { get; }
+    /// <summary>The active level's id, or null if it can't be read.</summary>
+    string? Get();
+    bool Set(string id);
 }
 
 /// <summary>Keyboard backlight auto-off timeout.</summary>
@@ -79,6 +92,35 @@ public interface IKeyboardBacklight
     string? LastError { get; }
     bool GetTimeout();
     bool SetTimeout(bool on);
+}
+
+/// <summary>Plain (non-RGB) keyboard-backlight brightness in discrete hardware levels, 0 = off
+/// (e.g. Dell: 0..2 = Off/Dim/Bright). RGB keyboards expose brightness via <see cref="IRgbDevice"/> instead.</summary>
+public interface IKeyboardBrightness
+{
+    string? LastError { get; }
+    int MaxLevel { get; }
+    int Get();
+    bool Set(int level);
+}
+
+/// <summary>Keyboard-backlight auto-off delay as a duration choice (5s / 30s / 1m / 5m …), for hardware
+/// where the timeout is a fixed set of durations rather than a plain on/off (e.g. the Dell LED stop_timeout).
+/// Ids are the exact strings the hardware accepts and reports back.</summary>
+public interface IKeyboardBacklightTimeout
+{
+    string? LastError { get; }
+    IReadOnlyList<ChoiceOption> Options { get; }
+    string? Get();
+    bool Set(string id);
+}
+
+/// <summary>Fn-key lock: whether the F-row defaults to its secondary (media/hardware) functions.</summary>
+public interface IFnLock
+{
+    string? LastError { get; }
+    bool Get();
+    bool Set(bool on);
 }
 
 // RGB lighting is modelled as a zone-based device (IRgbDevice, in Rgb.cs) rather than a fixed
@@ -136,8 +178,12 @@ public interface IDevice : IDisposable
     IBatteryInfo?        BatteryInfo        { get; }
     IBatteryChargeLimit? BatteryChargeLimit { get; }
     IBatteryCalibration? BatteryCalibration { get; }
+    IBatteryChargeMode?  BatteryChargeMode  { get; }
     IUsbCharging?        UsbCharging        { get; }
     IKeyboardBacklight?  KeyboardBacklight  { get; }
+    IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; }
+    IKeyboardBrightness? KeyboardBrightness { get; }
+    IFnLock?             FnLock             { get; }
     IRgbDevice?          Lighting           { get; }
     IHotkeys?            Hotkeys            { get; }
     IDisplayTint?        DisplayTint        { get; }

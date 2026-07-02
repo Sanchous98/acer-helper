@@ -28,6 +28,7 @@ public partial class GenericDevice
 
         // Standard-Linux extras (no vendor tool needed):
         BatteryChargeLimit = SysfsChargeLimit.TryCreate();   // charge_control_end_threshold (many laptops)
+        KeyboardBrightness = SysfsKbdBacklight.TryCreate(); // plain kbd backlight via kernel LED class
 
         var tint = new DisplayTint();                        // X11 gamma blue-light (null-op on Wayland)
         if (tint.Available) DisplayTint = tint;

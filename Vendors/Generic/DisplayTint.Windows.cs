@@ -11,13 +11,13 @@ namespace AcerHelper.Vendors.Generic;
 public sealed class DisplayTint : IDisplayTint
 {
     private static readonly (double R, double B)[] Scale =
-    {
+    [
         (1.00, 1.00),   // 0 Off
         (1.00, 0.85),   // 1 Low
         (1.00, 0.70),   // 2 Medium
         (1.00, 0.60),   // 3 High
-        (1.06, 0.50),   // 4 Long-use
-    };
+        (1.06, 0.50)    // 4 Long-use
+    ];
 
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -27,21 +27,21 @@ public sealed class DisplayTint : IDisplayTint
 
     public bool Apply(int level)
     {
-        int lvl = Math.Clamp(level, 0, Scale.Length - 1);
-        bool on = lvl > 0;
-        double rScale = Scale[lvl].R;
-        double bScale = Scale[lvl].B;
+        var lvl = Math.Clamp(level, 0, Scale.Length - 1);
+        var on = lvl > 0;
+        var rScale = Scale[lvl].R;
+        var bScale = Scale[lvl].B;
 
-        ushort[] ramp = new ushort[3 * 256];
-        for (int i = 0; i < 256; i++)
+        var ramp = new ushort[3 * 256];
+        for (var i = 0; i < 256; i++)
         {
-            ushort linear = (ushort)Math.Min(i * 257, 65535);
+            var linear = (ushort)Math.Min(i * 257, 65535);
             ramp[i]       = on ? (ushort)Math.Min(i * 256 * rScale, 65535) : linear;   // R
             ramp[256 + i] = on ? (ushort)(i * 256)                          : linear;   // G
             ramp[512 + i] = on ? (ushort)(i * 256 * bScale)                 : linear;   // B
         }
 
-        IntPtr dc = GetDC(IntPtr.Zero);
+        var dc = GetDC(IntPtr.Zero);
         if (dc == IntPtr.Zero) return false;
         try { return SetDeviceGammaRamp(dc, ramp); }
         finally { ReleaseDC(IntPtr.Zero, dc); }

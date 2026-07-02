@@ -12,7 +12,7 @@ namespace AcerHelper.Vendors.Generic;
 /// works without root. Preferred over raw sysfs; the composition root falls back to
 /// <see cref="SysfsPowerProfiles"/> when this isn't present.
 /// </summary>
-public sealed class PpdPowerProfiles : IPowerProfiles
+public sealed partial class PpdPowerProfiles : IPowerProfiles
 {
     private const string Bus   = "net.hadess.PowerProfiles";
     private const string Obj   = "/net/hadess/PowerProfiles";
@@ -20,10 +20,10 @@ public sealed class PpdPowerProfiles : IPowerProfiles
 
     public PpdPowerProfiles()
     {
-        var (code, outp) = Busctl("get-property", Bus, Obj, Iface, "Profiles");
+        var (code, outp) = Busctl.Call("get-property", Bus, Obj, Iface, "Profiles");
         if (code != 0) { All = []; Available = false; return; }
         // payload: ... "Profile" s "power-saver" "Driver" s "tuned" "Profile" s "balanced" ...
-        All = Regex.Matches(outp, "\"Profile\"\\s+s\\s+\"([^\"]+)\"")
+        All = ProfileRegex().Matches(outp)
                    .Select(m => ToProfile(m.Groups[1].Value)).ToList();
         Available = All.Count > 0;
     }
@@ -35,24 +35,24 @@ public sealed class PpdPowerProfiles : IPowerProfiles
 
     public PerformanceProfile? Current()
     {
-        var (code, outp) = Busctl("get-property", Bus, Obj, Iface, "ActiveProfile");
+        var (code, outp) = Busctl.Call("get-property", Bus, Obj, Iface, "ActiveProfile");
         if (code != 0) return null;
-        var m = Regex.Match(outp, "\"([^\"]+)\"");
+        var m = CurrentProfileRegex().Match(outp);
         if (!m.Success) return null;
-        string id = m.Groups[1].Value;
+        var id = m.Groups[1].Value;
         return All.FirstOrDefault(p => p.Id == id) ?? ToProfile(id);
     }
 
     public bool Set(PerformanceProfile profile)
     {
-        var (code, outp) = Busctl("set-property", Bus, Obj, Iface, "ActiveProfile", "s", profile.Id);
+        var (code, outp) = Busctl.Call("set-property", Bus, Obj, Iface, "ActiveProfile", "s", profile.Id);
         if (code != 0) LastError = outp;
         return code == 0;
     }
 
     private static PerformanceProfile ToProfile(string id)
     {
-        (string name, ProfileKind kind, AccentColor accent) = id switch
+        var (name, kind, accent) = id switch
         {
             "power-saver" => ("Power saver", ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
             "balanced"    => ("Balanced",    ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
@@ -62,7 +62,18 @@ public sealed class PpdPowerProfiles : IPowerProfiles
         return new PerformanceProfile(id, name, kind, accent);
     }
 
-    private static (int code, string output) Busctl(params string[] args)
+    [GeneratedRegex("\"Profile\"\\s+s\\s+\"([^\"]+)\"")]
+    private static partial Regex ProfileRegex();
+    [GeneratedRegex("\"([^\"]+)\"")]
+    private static partial Regex CurrentProfileRegex();
+}
+
+/// <summary>Thin system-bus <c>busctl</c> runner shared by the D-Bus-backed Linux services
+/// (power-profiles-daemon, UPower keyboard backlight). D-Bus services are polkit/at-console
+/// authorised, so these work without root — preferred over root-only sysfs writes.</summary>
+internal static class Busctl
+{
+    public static (int code, string output) Call(params string[] args)
     {
         try
         {
@@ -70,7 +81,7 @@ public sealed class PpdPowerProfiles : IPowerProfiles
             psi.ArgumentList.Add("--system");
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi)!;
-            string o = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            var o = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
             p.WaitForExit(4000);
             return (p.ExitCode, o);
         }
@@ -90,22 +101,35 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
 
     public SysfsPowerProfiles()
     {
-        string? choices = Read(ChoicesPath);
+        var choices = Read(ChoicesPath);
         All = choices == null
             ? []
             : choices.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                      .Select(ToProfile).ToList();
         Available = All.Count > 0;
+        Writable = Available && CanWrite(ProfilePath);
     }
 
     public bool Available { get; }
+
+    /// <summary>Whether this process can actually SWITCH profiles — the node is normally root-only, so a
+    /// vendor should only prefer this over the polkit-authorised PPD when this is true (a richer profile
+    /// list whose writes all fail is worse than a shorter working one).</summary>
+    public bool Writable { get; }
+
+    // Probe write permission without writing (sysfs attrs don't act until an actual write happens).
+    private static bool CanWrite(string path)
+    {
+        try { using var _ = new FileStream(path, FileMode.Open, FileAccess.Write); return true; }
+        catch { return false; }
+    }
     public string? LastError { get; private set; }
     public IReadOnlyList<PerformanceProfile> All { get; }
     public IReadOnlyList<PerformanceProfile> Selectable() => All;
 
     public PerformanceProfile? Current()
     {
-        string? cur = Read(ProfilePath);
+        var cur = Read(ProfilePath);
         if (cur == null) return null;
         return All.FirstOrDefault(p => p.Id == cur) ?? ToProfile(cur);
     }
@@ -118,7 +142,7 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
 
     private static PerformanceProfile ToProfile(string choice)
     {
-        (string name, ProfileKind kind, AccentColor accent) = choice switch
+        var (name, kind, accent) = choice switch
         {
             "low-power"            => ("Low power",            ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
             "quiet"                => ("Quiet",                ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),

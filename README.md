@@ -80,6 +80,43 @@ dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self
 dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishSingleFile=true -o publish-linux
 ```
 
+## Install (Linux)
+
+CI builds an **RPM** (`linux-rpm` job / `packaging/acer-helper.spec`). It bundles the binary plus the udev +
+tmpfiles rules that grant the `wheel` group write access to the root-only control nodes (battery charge
+mode, keyboard backlight, thermal profile, Dell BIOS attributes), so the app runs **unprivileged**.
+
+```
+# Traditional Fedora (dnf): %post reloads udev + tmpfiles, effective immediately.
+sudo dnf install ./acer-helper-*.rpm
+
+# Atomic Fedora (Silverblue/Kinoite/uBlue — rpm-ostree): layer it, then reboot to apply.
+rpm-ostree install ./acer-helper-*.rpm && systemctl reboot   # uninstall: rpm-ostree uninstall acer-helper
+```
+
+On atomic systems the RPM's `%post` runs in the compose chroot (no live system), so it no-ops and the rules
+take effect on the reboot rpm-ostree needs anyway (udev + systemd-tmpfiles run at boot). To apply the rules
+**immediately, without layering or reboot**, drop them into the writable `/etc` (it overrides `/usr` and
+survives ostree updates):
+
+```
+sudo install -m0644 packaging/60-acer-helper.rules /etc/udev/rules.d/
+sudo install -m0644 packaging/acer-helper.conf     /etc/tmpfiles.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger \
+     --subsystem-match=power_supply --subsystem-match=leds --subsystem-match=platform-profile
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/acer-helper.conf
+```
+
+Build the RPM locally (needs `rpm-build` + `systemd-rpm-macros`):
+
+```
+V=$(grep -oPm1 '(?<=<Version>)[^<]+' AcerHelper.csproj)
+mkdir -p ~/rpmbuild/SOURCES && rm -f publish-linux/*.pdb
+tar -czf ~/rpmbuild/SOURCES/acer-helper-$V-linux-x64.tar.gz -C publish-linux .
+cp packaging/{60-acer-helper.rules,acer-helper.conf,acer-helper.desktop} ~/rpmbuild/SOURCES/
+rpmbuild -bb --define "appversion $V" packaging/acer-helper.spec
+```
+
 ## Roadmap
 
 - Linux hardware backend — Acer via Linuwu-Sense sysfs, evdev hotkeys, X/Wayland gamma, logind clamshell

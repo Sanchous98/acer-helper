@@ -8,8 +8,6 @@ public static partial class MachineInfo
         using var session = WmiSession.Connect(@"root\CIMV2", out _);
         if (session == null) return (null, null);
         using var row = session.QueryFirst("SELECT Vendor, Name FROM Win32_ComputerSystemProduct", out _);
-        if (row == null) 
-            return (null, null);
-        return (row.GetString("Vendor")?.Trim(), row.GetString("Name")?.Trim());
+        return row == null ? (null, null) : (row.GetString("Vendor")?.Trim(), row.GetString("Name")?.Trim());
     }
 }

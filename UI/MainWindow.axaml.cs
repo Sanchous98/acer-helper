@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         if (!IsVisible) Show();
         UpdateLayout();          // force a layout pass so Bounds is real before we anchor
         Reanchor();
+        ApplyRoundedBlur();      // Linux/X11 (KDE): round the KWin blur to the card; elided on Windows
 
         // Grab focus AFTER the window is mapped, not synchronously inside Open(): doing it in the same call
         // as Show() loses the race (the HWND isn't ready to take foreground yet), so a hotkey-opened flyout
@@ -66,6 +67,9 @@ public partial class MainWindow : Window
         StopOutsideWatch();
         Hide();                  // hide instantly (no fade-out)
     }
+
+    // Rounds the KWin blur region to the card on Linux/X11 (see MainWindow.Linux.cs); elided on Windows.
+    partial void ApplyRoundedBlur();
 
     private void Reanchor()
     {

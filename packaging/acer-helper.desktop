@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Acer Helper
+GenericName=Laptop hardware control
+Comment=Control laptop performance profiles, fans, battery, and keyboard lighting
+Exec=acer-helper
+Icon=acer-helper
+Terminal=false
+Categories=Utility;System;Settings;HardwareSettings;
+Keywords=laptop;fan;battery;profile;backlight;rgb;acer;dell;

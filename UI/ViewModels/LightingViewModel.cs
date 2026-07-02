@@ -16,12 +16,20 @@ public sealed class LightingViewModel
 {
     public ObservableCollection<LightViewModel> Panels { get; } = [];
 
+    /// <summary>The plain (non-RGB) keyboard-backlight brightness control, shown when the device has a plain
+    /// backlight and NO RGB zones — then, per design, brightness is the only lighting setting.</summary>
+    public BacklightViewModel? Backlight { get; }
+
+    public bool HasZones => Panels.Count > 0;
+    public bool HasBacklight => Backlight != null;
+
     /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
     /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
-    /// via <see cref="Reload"/>.</summary>
-    public LightingViewModel(IRgbDevice rgb, Dictionary<string, LightSettings> lights, Action save)
+    /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.</summary>
+    public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights, Action save,
+                             IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null)
     {
-        foreach (var zone in rgb.Zones)
+        foreach (var zone in rgb?.Zones ?? [])
         {
             if (zone.Effects.Count == 0) continue;
 
@@ -36,13 +44,20 @@ public sealed class LightingViewModel
                 zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
                 state, save, zone.ReadBrightness));
         }
+
+        // A non-RGB keyboard backlight: brightness is the ONLY control (an RGB keyboard's brightness is
+        // per-zone, so it's shown only when there are no zones).
+        if (Panels.Count == 0 && backlight != null && applyBacklight != null)
+            Backlight = new BacklightViewModel(backlight, applyBacklight);
     }
 
-    /// <summary>Re-read each zone's live brightness and reflect it in its slider (no re-apply/save).
-    /// Call when the lighting panel is shown so it stays in sync with Fn-key changes.</summary>
+    /// <summary>Re-read live brightness (each RGB zone's, and the plain backlight's) and reflect it in the
+    /// slider (no re-apply/save). Call when the lighting panel is shown so it stays in sync with Fn-key
+    /// changes.</summary>
     public void Sync()
     {
         foreach (var panel in Panels) panel.SyncFromHardware();
+        Backlight?.SyncFromHardware();
     }
 
     /// <summary>Rebind every panel to a different mode's per-zone state and re-apply it (called when the
@@ -248,4 +263,73 @@ public sealed partial class ZoneColorViewModel(string label, Color color) : Obse
 {
     public string Label { get; } = label;
     [ObservableProperty] private Color _color = color;
+}
+
+/// <summary>A plain (non-RGB) keyboard backlight: discrete brightness levels only. The slider snaps to the
+/// hardware's steps (<see cref="MaxLevel"/>; e.g. Dell 0..2 Off/Dim/Bright) — arbitrary values aren't
+/// possible, so it exposes tick stops rather than a free 0-100 range. Applies off the UI thread (serialized)
+/// and snaps back to the value the hardware actually took.</summary>
+public sealed partial class BacklightViewModel : ObservableObject
+{
+    private readonly IKeyboardBrightness _port;
+    private readonly Func<int, bool> _apply;
+    private readonly HwSerial _hw = new();
+    private int _desired;
+    private bool _syncing;
+
+    public int MaxLevel { get; }
+    public IReadOnlyList<string> Names { get; }
+
+    [ObservableProperty] private double _level;
+    [ObservableProperty] private string _levelName = "";
+
+    public BacklightViewModel(IKeyboardBrightness port, Func<int, bool> apply)
+    {
+        _port = port;
+        _apply = apply;
+        MaxLevel = port.MaxLevel;
+        Names = NamesFor(MaxLevel);
+        _level = Math.Clamp(port.Get(), 0, MaxLevel);
+        _desired = (int)_level;
+        UpdateName();
+    }
+
+    partial void OnLevelChanged(double value)
+    {
+        UpdateName();
+        if (_syncing) return;   // change came from a readback snap-back, not the user
+        var lvl = Math.Clamp((int)Math.Round(value), 0, MaxLevel);
+        _desired = lvl;
+        _hw.Enqueue(() =>
+        {
+            _apply(lvl);
+            var actual = _port.Get();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (lvl != _desired || actual == (int)Level) return;   // superseded, or already matches
+                _syncing = true; Level = actual; _syncing = false; UpdateName();
+            });
+        });
+    }
+
+    /// <summary>Re-read the live level (Fn key changed it) and reflect it without applying.</summary>
+    public void SyncFromHardware() => _hw.Enqueue(() =>
+    {
+        var actual = _port.Get();
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (actual == (int)Level) return;
+            _syncing = true; Level = actual; _syncing = false; UpdateName();
+        });
+    });
+
+    private void UpdateName() => LevelName = Names[Math.Clamp((int)Math.Round(Level), 0, Names.Count - 1)];
+
+    private static IReadOnlyList<string> NamesFor(int max) => max switch
+    {
+        1 => ["Off", "On"],
+        2 => ["Off", "Dim", "Bright"],
+        3 => ["Off", "Low", "Medium", "High"],
+        _ => [.. Enumerable.Range(0, max + 1).Select(i => i == 0 ? "Off" : i.ToString())],
+    };
 }

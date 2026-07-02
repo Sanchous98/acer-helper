@@ -5,23 +5,38 @@
              x:Class="AcerHelper.UI.Views.LightingView"
              x:DataType="vm:LightingViewModel">
 
-  <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
-       adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
-       content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so an
-       arbitrary zone count never clips. -->
-  <TabControl ItemsSource="{Binding Panels}" Padding="0">
-    <TabControl.ItemsPanel>
-      <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
-    </TabControl.ItemsPanel>
-    <TabControl.ItemTemplate>
-      <DataTemplate x:DataType="vm:LightViewModel">
-        <TextBlock Text="{Binding Title}"/>
-      </DataTemplate>
-    </TabControl.ItemTemplate>
-    <TabControl.ContentTemplate>
-      <DataTemplate x:DataType="vm:LightViewModel">
-        <views:LightView/>
-      </DataTemplate>
-    </TabControl.ContentTemplate>
-  </TabControl>
+  <StackPanel Spacing="12">
+
+    <!-- Plain (non-RGB) keyboard backlight: brightness is the ONLY control. The levels are discrete hardware
+         steps, so the slider snaps to tick stops (Off/Dim/Bright) rather than a free 0-100 range. -->
+    <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasBacklight}" Margin="0,4,0,0">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="Brightness"/>
+      <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding Backlight.MaxLevel}"
+              TickFrequency="1" IsSnapToTickEnabled="True" TickPlacement="BottomRight"
+              Value="{Binding Backlight.Level, Mode=TwoWay}"/>
+      <TextBlock Grid.Column="2" VerticalAlignment="Center" Width="56" TextAlignment="Right"
+                 Text="{Binding Backlight.LevelName}"/>
+    </Grid>
+
+    <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
+         adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
+         content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so
+         an arbitrary zone count never clips. -->
+    <TabControl ItemsSource="{Binding Panels}" Padding="0" IsVisible="{Binding HasZones}">
+      <TabControl.ItemsPanel>
+        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+      </TabControl.ItemsPanel>
+      <TabControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:LightViewModel">
+          <TextBlock Text="{Binding Title}"/>
+        </DataTemplate>
+      </TabControl.ItemTemplate>
+      <TabControl.ContentTemplate>
+        <DataTemplate x:DataType="vm:LightViewModel">
+          <views:LightView/>
+        </DataTemplate>
+      </TabControl.ContentTemplate>
+    </TabControl>
+
+  </StackPanel>
 </UserControl>

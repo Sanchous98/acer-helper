@@ -47,8 +47,8 @@ public sealed partial class MainViewModel : ObservableObject
             Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile, a.TurboToggles, a.SetTurbo));
         if (device.FanControl is { } fc)
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit, a.ApplyFan, a.PersistFan));
-        if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null)
-            Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration));
+        if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null || a.BatteryChargeMode != null)
+            Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration, a.BatteryChargeMode));
 
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a);

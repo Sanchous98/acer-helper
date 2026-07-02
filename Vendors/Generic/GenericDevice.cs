@@ -23,8 +23,12 @@ public partial class GenericDevice : IDevice
     public IBatteryInfo?        BatteryInfo        { get; protected set; }
     public IBatteryChargeLimit? BatteryChargeLimit { get; protected set; }
     public IBatteryCalibration? BatteryCalibration { get; protected set; }
+    public IBatteryChargeMode?  BatteryChargeMode  { get; protected set; }
     public IUsbCharging?        UsbCharging        { get; protected set; }
     public IKeyboardBacklight?  KeyboardBacklight  { get; protected set; }
+    public IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; protected set; }
+    public IKeyboardBrightness? KeyboardBrightness { get; protected set; }
+    public IFnLock?             FnLock             { get; protected set; }
     public IRgbDevice?          Lighting           { get; protected set; }
     public IHotkeys?            Hotkeys            { get; protected set; }
     public IDisplayTint?        DisplayTint        { get; protected set; }

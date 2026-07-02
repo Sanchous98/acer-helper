@@ -1,5 +1,6 @@
 using AcerHelper.Features;
 using AcerHelper.Vendors.Acer;
+using AcerHelper.Vendors.Dell;
 using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Composition;
@@ -18,6 +19,9 @@ public static class DeviceFactory
 
         if (manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true)
             return new AcerDevice(product);
+
+        if (manufacturer?.Contains("Dell", StringComparison.OrdinalIgnoreCase) == true)   // "Dell Inc."
+            return new DellDevice(product);
 
         return new GenericDevice();
     }
