@@ -14,21 +14,34 @@ namespace AcerHelper.UI;
 internal sealed class TrayController : IDisposable
 {
     private readonly TrayIcon _tray;
+    private readonly NativeMenu _menu;
     private readonly Dictionary<string, WindowIcon> _icons = new();
     private readonly Dictionary<string, NativeMenuItem> _menuItems = new();
+    private NativeMenuItem? _updateItem;
 
     public TrayController(IDevice device, Action<PerformanceProfile> applyProfile,
                           Action toggleMain, Action openMain, Action showLighting, Action exit)
     {
+        _menu = BuildMenu(device, applyProfile, openMain, showLighting, exit);
         _tray = new TrayIcon
         {
             ToolTipText = "Acer Helper",
             IsVisible = true,
             Icon = MakeIcon(Colors.Gray),
-            Menu = BuildMenu(device, applyProfile, openMain, showLighting, exit),
+            Menu = _menu,
         };
         _tray.Clicked += (_, _) => toggleMain();
         TrayIcon.SetIcons(Avalonia.Application.Current!, new TrayIcons { _tray });
+    }
+
+    /// <summary>Add an "update available" item at the top of the menu (once), opening the download page.</summary>
+    public void SetUpdate(string label, Action open)
+    {
+        if (_updateItem != null) return;
+        _updateItem = new NativeMenuItem { Header = label };
+        _updateItem.Click += (_, _) => open();
+        _menu.Items.Insert(0, _updateItem);
+        _menu.Items.Insert(1, new NativeMenuItemSeparator());
     }
 
     /// <summary>Reflect the current profile in the tooltip, icon and the menu's radio state.</summary>

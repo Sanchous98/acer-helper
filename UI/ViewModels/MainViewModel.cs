@@ -30,6 +30,15 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _status = "";
 
+    // Update banner (set once by AppController's startup GitHub-Releases check).
+    private Action? _openUpdate;
+    [ObservableProperty] private bool _updateAvailable;
+    [ObservableProperty] private string _updateLabel = "";
+
+    // "Grant hardware access" banner (Linux/AppImage: install the udev rules via pkexec; set at startup).
+    private Action? _grantAccess;
+    [ObservableProperty] private bool _needsHardwareAccess;
+
     // Side drawer: a single host that shows either the Options or the Lighting content.
     [ObservableProperty] private object? _drawerContent;
     [ObservableProperty] private string _drawerTitle = "";
@@ -53,6 +62,25 @@ public sealed partial class MainViewModel : ObservableObject
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a);
     }
+
+    /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
+    public void SetUpdate(string version, Action open)
+    {
+        _openUpdate = open;
+        UpdateLabel = $"Update available: v{version}";
+        UpdateAvailable = true;
+    }
+
+    [RelayCommand] private void OpenUpdate() => _openUpdate?.Invoke();
+
+    /// <summary>Show the "grant hardware access" banner (Linux install of the udev rules via pkexec).</summary>
+    public void SetHardwareAccessNeeded(Action grant)
+    {
+        _grantAccess = grant;
+        NeedsHardwareAccess = true;
+    }
+
+    [RelayCommand] private void GrantHardwareAccess() => _grantAccess?.Invoke();
 
     [RelayCommand] private void OpenOptions() => OpenDrawer("Options", _options);
 

@@ -55,6 +55,18 @@
         </Grid.Transitions>
         <DockPanel Margin="14">
 
+          <!-- Update banner: shown only when the startup GitHub-Releases check found a newer version;
+               clicking opens the release download page (notify-only, no auto-install). -->
+          <Button DockPanel.Dock="Top" Classes="accent" HorizontalAlignment="Stretch" Margin="2,0,2,10"
+                  IsVisible="{Binding UpdateAvailable}" Command="{Binding OpenUpdateCommand}"
+                  Content="{Binding UpdateLabel}"/>
+
+          <!-- "Grant hardware access" banner: Linux/AppImage only, when the udev rules aren't installed —
+               one click runs a pkexec install so the root-only controls become writable. -->
+          <Button DockPanel.Dock="Top" HorizontalAlignment="Stretch" Margin="2,0,2,10"
+                  IsVisible="{Binding NeedsHardwareAccess}" Command="{Binding GrantHardwareAccessCommand}"
+                  Content="Grant hardware access…"/>
+
           <!-- Header: device name + current-profile accent chip -->
           <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
             <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>

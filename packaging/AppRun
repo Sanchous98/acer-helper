@@ -1,0 +1,6 @@
+#!/bin/sh
+# AppImage entrypoint. The self-contained single-file AcerHelper binary sits at the AppDir root next to this
+# script (and the bundled udev rules the in-app "Grant hardware access" action installs via pkexec). $APPDIR
+# is exported by the AppImage runtime; the app reads its bundled files from there / AppContext.BaseDirectory.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/AcerHelper" "$@"

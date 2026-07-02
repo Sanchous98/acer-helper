@@ -95,30 +95,30 @@ wix build packaging\AcerHelper.wxs -arch x64 -d Version=0.14.0 -d PublishDir=pub
 
 ## Install (Linux)
 
-CI builds an **RPM** (`linux-rpm` job / `packaging/acer-helper.spec`). It bundles the binary plus the udev +
-tmpfiles rules that grant the `wheel` group write access to the root-only control nodes (battery charge
-mode, keyboard backlight, thermal profile, Dell BIOS attributes), so the app runs **unprivileged**.
+Two channels, both built by the `linux` workflow (`packaging/`):
+
+**AppImage — recommended (portable, self-updating).** Download `AcerHelper-x86_64.AppImage`, make it
+executable, run. It lives in your home dir — so on **immutable Fedora** (Silverblue/Kinoite/uBlue) it needs
+no rpm-ostree layering or reboot — and it **self-updates**: the in-app update check downloads the new
+AppImage and replaces it in place. On first run it offers a one-click **"Grant hardware access"** (a single
+pkexec/polkit password prompt) that installs the udev/tmpfiles rules so the root-only controls become
+writable — a portable binary can't ship system files itself, so this is the one privileged step.
 
 ```
-# Traditional Fedora (dnf): %post reloads udev + tmpfiles, effective immediately.
-sudo dnf install ./acer-helper-*.rpm
-
-# Atomic Fedora (Silverblue/Kinoite/uBlue — rpm-ostree): layer it, then reboot to apply.
-rpm-ostree install ./acer-helper-*.rpm && systemctl reboot   # uninstall: rpm-ostree uninstall acer-helper
+chmod +x AcerHelper-x86_64.AppImage && ./AcerHelper-x86_64.AppImage
 ```
 
-On atomic systems the RPM's `%post` runs in the compose chroot (no live system), so it no-ops and the rules
-take effect on the reboot rpm-ostree needs anyway (udev + systemd-tmpfiles run at boot). To apply the rules
-**immediately, without layering or reboot**, drop them into the writable `/etc` (it overrides `/usr` and
-survives ostree updates):
+**RPM — native (bundles the rules).** For a traditional package install; the udev/tmpfiles rules ship
+inside the package (no "grant access" step):
 
 ```
-sudo install -m0644 packaging/60-acer-helper.rules /etc/udev/rules.d/
-sudo install -m0644 packaging/acer-helper.conf     /etc/tmpfiles.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger \
-     --subsystem-match=power_supply --subsystem-match=leds --subsystem-match=platform-profile
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/acer-helper.conf
+sudo dnf install ./acer-helper-*.rpm                           # traditional Fedora — applies immediately
+rpm-ostree install ./acer-helper-*.rpm && systemctl reboot     # atomic Fedora — applies on reboot
 ```
+
+NOTE: a locally-layered RPM is **not** auto-updated by `rpm-ostree upgrade` (there's no repo to pull from) —
+you'd re-layer a newer file by hand, so for hands-off updates on immutable systems prefer the AppImage. (A
+COPR repo would make `rpm-ostree upgrade` track the RPM; not set up.)
 
 Build the RPM locally (needs `rpm-build` + `systemd-rpm-macros`):
 

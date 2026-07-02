@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AcerHelper.Features;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
@@ -16,6 +17,7 @@ internal sealed class AppController
     private readonly FlyoutCoordinator _windows;
     private readonly TrayController _tray;
     private readonly DispatcherTimer _timer;
+    private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
@@ -68,6 +70,56 @@ internal sealed class AppController
         _timer.Start();
 
         _windows.OpenMain();
+
+        _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
+
+        // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
+        if (HardwareAccess.RulesNeeded())
+            _vm.SetHardwareAccessNeeded(() => _ = GrantHardwareAccessAsync());
+    }
+
+    // ---- update check + apply ----
+
+    private async Task CheckForUpdatesAsync()
+    {
+        var info = await _updates.CheckAsync();
+        if (info == null) return;   // current / offline / no releases -> nothing shown
+
+        // Running as an AppImage with an .AppImage asset -> self-replace in place; otherwise open the page.
+        var asset = AppImageUpdater.IsAppImage ? AppImageUpdater.PickAsset(info.Assets) : null;
+        Action act = asset != null
+            ? () => _ = SelfUpdateAsync(asset.Url)
+            : () => OpenUrl(info.Url);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _vm.SetUpdate(info.Version, act);
+            _tray.SetUpdate($"Update available: v{info.Version}", act);
+        });
+    }
+
+    private async Task SelfUpdateAsync(string assetUrl)
+    {
+        Notify("Downloading update…");
+        var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
+        if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
+        else Notify("Update failed" + Err(err));
+    }
+
+    private async Task GrantHardwareAccessAsync()
+    {
+        var (ok, err) = await Task.Run(() => { var r = HardwareAccess.Install(out var e); return (r, e); });
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ok) { _vm.NeedsHardwareAccess = false; Notify("Hardware access granted — restart to use the unlocked controls."); }
+            else Notify("Grant access failed" + Err(err));
+        });
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { using (Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })) { } }
+        catch { /* no handler / blocked -> ignore */ }
     }
 
     // Any special-key input -> re-read keyboard brightness immediately (no debounce), but only while the

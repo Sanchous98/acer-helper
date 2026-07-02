@@ -19,6 +19,8 @@ jobs:
   build:
     name: AcerHelper.exe + MSI
     runs-on: windows-2022
+    permissions:
+      contents: write        # create/attach to the GitHub Release on a version tag
     steps:
       - uses: actions/checkout@v7
 
@@ -65,3 +67,11 @@ jobs:
           name: AcerHelper-Setup
           path: AcerHelper-Setup.msi
           if-no-files-found: error
+
+      # On a version tag (v*), publish the MSI to the GitHub Release for that tag — this is the feed the
+      # in-app update check (UpdateChecker) reads. The Linux workflow appends the RPM to the same release.
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AcerHelper-Setup.msi
