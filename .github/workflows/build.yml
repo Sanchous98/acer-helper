@@ -84,9 +84,11 @@ jobs:
       - uses: actions/checkout@v7
 
       # Native AOT needs a C toolchain + zlib to link the native image; the runtime needs ICU; curl fetches
-      # appimagetool. (clang is .NET's documented AOT compiler; zlib-devel for the link.)
+      # appimagetool; `file` is REQUIRED by appimagetool to inspect the AppDir (the minimal fedora container
+      # omits it — it aborts with "file command is missing but required"). (clang is .NET's documented AOT
+      # compiler; zlib-devel for the link.)
       - name: Install build deps
-        run: dnf -y install clang zlib-devel libicu tar gzip findutils curl
+        run: dnf -y install clang zlib-devel libicu tar gzip findutils curl file
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
