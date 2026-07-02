@@ -25,6 +25,11 @@ public sealed partial class Autostart
                     "Type=Application\n" +
                     "Name=Acer Helper\n" +
                     $"Exec=\"{ExePath}\"\n" +
+                    "Terminal=false\n" +
+                    // Tray app with only a skip-taskbar flyout: without this the login launch-feedback lingers
+                    // as a stray taskbar icon (never cleared by a normal window mapping). See acer-helper.desktop.
+                    "StartupNotify=false\n" +
+                    "StartupWMClass=AcerHelper\n" +
                     "X-GNOME-Autostart-enabled=true\n");
             }
             else if (File.Exists(DesktopFile))

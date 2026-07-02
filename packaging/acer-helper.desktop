@@ -6,5 +6,10 @@ Comment=Control laptop performance profiles, fans, battery, and keyboard lightin
 Exec=acer-helper
 Icon=acer-helper
 Terminal=false
+# Tray app: its only window is a skip-taskbar flyout, so the desktop's launch-feedback would never be
+# cleared by a "real" window mapping and would linger as a stray taskbar icon. Disable it, and pin the
+# WM class so any launcher association resolves to this app rather than a spurious generic entry.
+StartupNotify=false
+StartupWMClass=AcerHelper
 Categories=Utility;System;Settings;HardwareSettings;
 Keywords=laptop;fan;battery;profile;backlight;rgb;acer;dell;
