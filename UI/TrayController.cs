@@ -1,10 +1,9 @@
-using System.Runtime.InteropServices;
+using System.Globalization;
 using AcerHelper.Features;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 
 namespace AcerHelper.UI;
 
@@ -88,22 +87,27 @@ internal sealed class TrayController : IDisposable
         return _icons[p.Id] = MakeIcon(c);
     }
 
+    // The tray icon is the app's rounded-square "A" badge (matching packaging/acer-helper.png), tinted with the
+    // active profile's accent colour on a TRANSPARENT background — so the tray shows a real, alpha-clipped icon
+    // that still colour-codes the profile, rather than the old flat, fully-opaque block (which read as a broken
+    // placeholder in Windows/Linux-SNI trays). Drawn via the same Skia render path as the UI (Native-AOT-safe),
+    // at 64px so trays downscale it crisply.
     private static WindowIcon MakeIcon(Color c)
     {
-        const int sz = 32;
-        var wb = new WriteableBitmap(new PixelSize(sz, sz), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        var px = new byte[sz * sz * 4];
-        for (var i = 0; i < sz * sz; i++)
+        const int sz = 64;
+        const double inset = sz * 0.06;   // small transparent margin so the rounded corners are visible
+        const double radius = sz * 0.24;  // corner radius, proportional to the app icon's badge
+        var rtb = new RenderTargetBitmap(new PixelSize(sz, sz), new Vector(96, 96));
+        using (var ctx = rtb.CreateDrawingContext())
         {
-            var o = i * 4;
-            px[o] = c.B;
-            px[o + 1] = c.G;
-            px[o + 2] = c.R;
-            px[o + 3] = 255;
+            ctx.DrawRectangle(new SolidColorBrush(c), null,
+                new Rect(inset, inset, sz - 2 * inset, sz - 2 * inset), radius, radius);
+            var a = new FormattedText("A", CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.Bold), sz * 0.62, Brushes.White);
+            ctx.DrawText(a, new Point((sz - a.Width) / 2, (sz - a.Height) / 2));
         }
-        using (var fb = wb.Lock()) Marshal.Copy(px, 0, fb.Address, px.Length);
         using var ms = new MemoryStream();
-        wb.Save(ms);
+        rtb.Save(ms);
         ms.Position = 0;
         return new WindowIcon(ms);
     }
