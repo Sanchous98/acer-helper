@@ -4,8 +4,9 @@
         x:Class="AcerHelper.UI.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="Acer Nitro" Width="468" SizeToContent="WidthAndHeight" CanResize="False" ShowInTaskbar="False"
-        WindowStartupLocation="Manual" Topmost="True" WindowDecorations="None"
-        Background="Transparent" TransparencyLevelHint="AcrylicBlur,Blur,Transparent">
+        WindowStartupLocation="Manual" Topmost="True" WindowDecorations="None" 
+        ExtendClientAreaToDecorationsHint="True"
+        Background="Transparent" TransparencyLevelHint="AcrylicBlur,Transparent">
 
   <!-- Single flyout window with an in-window navigation stack (like a mobile app): one fixed-size
        "phone frame" (never resizes at runtime => no X11 resize jitter), a static acrylic-tint card as

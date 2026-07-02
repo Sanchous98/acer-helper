@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Windows installer (MSI) for AcerHelper — the counterpart to the Linux RPM. Harvests the self-contained
+     Native-AOT publish output (AcerHelper.exe + the native Skia/HarfBuzz/ANGLE DLLs) into Program Files,
+     adds a Start-menu shortcut, and supports clean upgrades/uninstall. Built by WiX 5 in the windows.yml CI
+     job (WiX cannot build on Linux, so it's Windows-only there):
+       wix build packaging/AcerHelper.wxs -arch x64 -d Version=<ver> -d PublishDir=publish -o AcerHelper-Setup.msi
+     perMachine -> the installer elevates (UAC); the app also self-elevates at runtime (app.manifest
+     requireAdministrator) for the Acer WMI. Autostart stays an in-app toggle, so the installer skips it. -->
+<?ifndef Version ?><?define Version = "0.0.0" ?><?endif?>
+<?ifndef PublishDir ?><?define PublishDir = "publish" ?><?endif?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Acer Helper"
+           Manufacturer="Andrea Palladio"
+           Version="$(var.Version)"
+           UpgradeCode="7c3a9e2e-6b1d-4f5a-9c2e-1a2b3c4d5e6f"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main" Title="Acer Helper">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <!-- The whole publish tree (exe + native DLLs) -> %ProgramFiles%\AcerHelper. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AcerHelper" />
+    </StandardDirectory>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <!-- Start-menu shortcut. A per-machine install can't use an HKCU KeyPath, so anchor the component to an
+         HKLM registry value. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="9d4b1f8a-2c3e-4a6b-8d1f-0e9a8b7c6d5e">
+        <Shortcut Id="AppStartMenu" Name="Acer Helper"
+                  Target="[INSTALLFOLDER]AcerHelper.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="Software\AcerHelper" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+  </Package>
+</Wix>

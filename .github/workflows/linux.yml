@@ -1,0 +1,57 @@
+name: linux
+
+# Linux build: a self-contained single-file binary packaged as an RPM that ALSO ships the udev/tmpfiles
+# permission rules (packaging/), so installing the package grants the app unprivileged access to the
+# root-only laptop-control sysfs knobs — no hand-run scripts. Built in a Fedora container for rpmbuild +
+# the systemd-rpm-macros the spec uses.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  rpm:
+    name: RPM (with udev rules)
+    runs-on: ubuntu-latest
+    container: fedora:41
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-dotnet downloads the SDK; the .NET runtime needs ICU. rpm-build + systemd-rpm-macros give
+      # rpmbuild and the %{_udevrulesdir}/%{_tmpfilesdir} macros the spec uses.
+      - name: Install build deps
+        run: dnf -y install rpm-build systemd-rpm-macros libicu tar gzip findutils
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (self-contained single-file, JIT)
+        run: >
+          dotnet publish AcerHelper.csproj
+          -c Release
+          -f net10.0
+          -r linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -o publish-linux
+
+      - name: Assemble RPM sources
+        run: |
+          VER=$(grep -oPm1 '(?<=<Version>)[^<]+' AcerHelper.csproj)
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          mkdir -p ~/rpmbuild/SOURCES
+          rm -f publish-linux/*.pdb
+          tar -czf ~/rpmbuild/SOURCES/acer-helper-"$VER"-linux-x64.tar.gz -C publish-linux .
+          cp packaging/60-acer-helper.rules packaging/acer-helper.conf packaging/acer-helper.desktop ~/rpmbuild/SOURCES/
+
+      - name: Build RPM
+        run: rpmbuild -bb --define "appversion $VER" packaging/acer-helper.spec
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v7
+        with:
+          name: acer-helper-rpm
+          path: ~/rpmbuild/RPMS/*/*.rpm
+          if-no-files-found: error

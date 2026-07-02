@@ -68,9 +68,10 @@ vendor = a new set of files under `Vendors/`; adding an OS = `*.Linux.cs` siblin
 
 ## Build
 
-The project multi-targets `net10.0-windows` (full Acer/Windows) and `net10.0` (portable; Linux
-backend is currently mostly stubs). CI (GitHub Actions, `acer-helper` workflow) produces a single
-self-contained Native-AOT `AcerHelper.exe` on a Windows runner. Locally:
+The project multi-targets `net10.0-windows` (full Acer/Windows) and `net10.0` (portable; Acer,
+Dell and generic Linux backends). CI (GitHub Actions, `acer-helper` workflow) produces a
+self-contained Native-AOT `AcerHelper.exe` + a Windows installer on a Windows runner, and an RPM
+on a Fedora runner. Locally:
 
 ```
 # Windows (Native AOT — must run on Windows)
@@ -78,6 +79,18 @@ dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self
 
 # Linux (self-contained single-file, JIT)
 dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishSingleFile=true -o publish-linux
+```
+
+## Install (Windows)
+
+The `windows` workflow builds an **MSI** (`packaging/AcerHelper.wxs`, WiX) from the publish folder — run
+`AcerHelper-Setup.msi` to install to Program Files with a Start-menu shortcut + uninstaller (admin
+elevation prompt; the app self-elevates at runtime too). WiX only builds on Windows, so build it there:
+
+```
+dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self-contained true -p:PublishAot=true -o publish
+dotnet tool install --global wix --version 5.0.2
+wix build packaging\AcerHelper.wxs -arch x64 -d Version=0.14.0 -d PublishDir=publish -o AcerHelper-Setup.msi
 ```
 
 ## Install (Linux)
