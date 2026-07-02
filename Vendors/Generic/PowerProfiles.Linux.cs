@@ -96,18 +96,50 @@ internal static class Busctl
 /// </summary>
 public sealed class SysfsPowerProfiles : IPowerProfiles
 {
-    private const string ProfilePath = "/sys/firmware/acpi/platform_profile";
-    private const string ChoicesPath = "/sys/firmware/acpi/platform_profile_choices";
+    // Two kernel interfaces expose platform profiles: the ACPI alias (all kernels; a write fans out to
+    // every registered handler) and per-handler class nodes (6.14+). The alias is frequently left
+    // root-only — it appears only when a handler registers, which for EC modules like Linuwu-Sense is
+    // after the boot-time tmpfiles pass — while the class nodes trigger a udev event on registration, so
+    // a udev rule can grant group access reliably; the vendor handler also carries the firmware's full
+    // profile list. Hence: prefer whichever source this process can actually write.
+    private const string LegacyProfile = "/sys/firmware/acpi/platform_profile";
+    private const string LegacyChoices = "/sys/firmware/acpi/platform_profile_choices";
+    private const string ClassRoot     = "/sys/class/platform-profile";
+
+    private readonly string _profilePath;
 
     public SysfsPowerProfiles()
     {
-        var choices = Read(ChoicesPath);
+        (_profilePath, var choicesPath) = PickSource();
+        var choices = Read(choicesPath);
         All = choices == null
             ? []
             : choices.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                      .Select(ToProfile).ToList();
         Available = All.Count > 0;
-        Writable = Available && CanWrite(ProfilePath);
+        Writable = Available && CanWrite(_profilePath);
+    }
+
+    private static (string Profile, string Choices) PickSource()
+    {
+        if (CanWrite(LegacyProfile)) return (LegacyProfile, LegacyChoices);
+        (string, string)? best = null;
+        var bestCount = 0;
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(ClassRoot))   // one dir per handler
+            {
+                var profile = Path.Combine(dir, "profile");
+                var choices = Path.Combine(dir, "choices");
+                if (!CanWrite(profile)) continue;
+                // Several handlers may coexist (e.g. amd-pmf + the vendor EC): the richest choice list is
+                // the vendor's own, which is the set worth showing.
+                var count = Read(choices)?.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+                if (count > bestCount) (best, bestCount) = ((profile, choices), count);
+            }
+        }
+        catch { /* class absent (pre-6.14 kernel) */ }
+        return best ?? (LegacyProfile, LegacyChoices);
     }
 
     public bool Available { get; }
@@ -129,14 +161,14 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
 
     public PerformanceProfile? Current()
     {
-        var cur = Read(ProfilePath);
+        var cur = Read(_profilePath);
         if (cur == null) return null;
         return All.FirstOrDefault(p => p.Id == cur) ?? ToProfile(cur);
     }
 
     public bool Set(PerformanceProfile profile)
     {
-        try { File.WriteAllText(ProfilePath, profile.Id); return true; }
+        try { File.WriteAllText(_profilePath, profile.Id); return true; }
         catch (Exception ex) { LastError = ex.Message; return false; }
     }
 

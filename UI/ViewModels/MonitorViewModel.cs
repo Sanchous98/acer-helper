@@ -33,6 +33,13 @@ public sealed partial class MonitorViewModel : SectionViewModel
             if (cpu is null && f.Label?.Contains("CPU") == true) cpu = f;
             if (gpu is null && f.Label?.Contains("GPU") == true) gpu = f;
         }
+        // Many EC drivers expose the fans unlabelled (e.g. linuwu_sense) — when labels identify neither,
+        // fall back to the near-universal laptop layout: fan 1 cools the CPU, fan 2 the GPU.
+        if (cpu is null && gpu is null && s.Fans.Count >= 1)
+        {
+            cpu = s.Fans[0];
+            gpu = s.Fans.Count >= 2 ? s.Fans[1] : null;
+        }
 
         ShowCpuFan = cpu is { Rpm: >= 0 };
         ShowGpuFan = gpu is { Rpm: >= 0 };

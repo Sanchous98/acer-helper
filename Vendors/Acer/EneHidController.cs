@@ -1,17 +1,17 @@
 using AcerHelper.Features;
-using HidSharp;
 
 namespace AcerHelper.Vendors.Acer;
 
 // Cross-platform RGB controller: the ENE HID device (VID 0x0CF2 / PID 0x5130, 11-byte feature report id
-// 0xA4) — the same controller OpenRGB drives. USB HID is OS-agnostic (HidSharp uses the Win32 HID API on
-// Windows and hidraw on Linux), so this ONE class serves both platforms — no per-OS split; the packets are
-// identical. It IS the transport (finds the device, sends feature reports) AND the Acer packet codec, and it
-// exposes its physical regions as RgbZone bricks: "Keyboard" (multi sub-zone) and, on models that have it,
-// "Lightbar". Keyboard brightness read-back isn't on this HID interface — it's the gaming WMI's job (Windows
-// only) — so that reader is injected by AcerDevice (null on Linux). Lazily opens the stream; IDisposable.
-// NOTE (Linux): reaching hidraw without root needs a udev rule, else enumeration succeeds but SetFeature fails.
-internal sealed class EneHidController : IRgbController
+// 0xA4) — the same controller OpenRGB drives. The packets are identical on every OS; only the transport
+// differs, so this file is the Acer packet codec + zone model, and the per-OS partials supply the three
+// transport hooks (OpenTransport/SetFeature/Dispose): EneHidController.Windows.cs uses HidSharp (Win32 HID
+// API), EneHidController.Linux.cs talks to hidraw directly — HidSharp's Linux enumeration only sees USB
+// HID, and on several models (e.g. Nitro AN18-61) this controller hangs off HID-over-I2C. It exposes its
+// physical regions as RgbZone bricks: "Keyboard" (multi sub-zone) and, on models that have it, "Lightbar".
+// Keyboard brightness read-back isn't on this HID interface — it's the gaming WMI's job (Windows only) —
+// so that reader is injected by AcerDevice (null on Linux). Lazily opens the stream; IDisposable.
+internal sealed partial class EneHidController : IRgbController
 {
     private const int VID = 0x0CF2, PID = 0x5130, FeatureLen = 11;
 
@@ -19,14 +19,11 @@ internal sealed class EneHidController : IRgbController
     private const byte ReportId = 0xA4, TgtKeyboard = 0x21, TgtLightbar = 0x65,
                        FlagStatic = 0x01, FlagEffect = 0x02, KbAllZones = 0x0F, LbZone = 0x01, FullBright = 0x64;
 
-    private readonly HidDevice? _device;
-    private HidStream? _stream;
     private readonly List<RgbZone> _zones = [];
 
     public EneHidController(int keyboardZones, bool hasLightbar, Func<int?>? readKeyboardBrightness)
     {
-        _device = FindDevice();
-        if (_device == null) return;   // no ENE interface -> no zones -> composition skips lighting
+        if (!OpenTransport()) return;   // no ENE interface -> no zones -> composition skips lighting
 
         _zones.Add(new RgbZone("Keyboard", keyboardZones,
             RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList(),
@@ -58,16 +55,8 @@ internal sealed class EneHidController : IRgbController
     }
 
     private bool Send(byte target, byte mode, bool isEffect, byte brightness, byte speed, AccentColor c, byte zoneMask)
-    {
-        if (_device == null) return false;
-        try
-        {
-            (_stream ??= _device.Open()).SetFeature([ReportId, target, mode, brightness, isEffect ? speed : (byte)0,
-                                                     isEffect ? FlagEffect : FlagStatic, c.R, c.G, c.B, zoneMask, 0x00]);
-            return true;
-        }
-        catch { return false; }
-    }
+        => SetFeature([ReportId, target, mode, brightness, isEffect ? speed : (byte)0,
+                       isEffect ? FlagEffect : FlagStatic, c.R, c.G, c.B, zoneMask, 0x00]);
 
     private static AccentColor Scale(AccentColor c, byte brightness)
     {
@@ -75,17 +64,8 @@ internal sealed class EneHidController : IRgbController
         return new AccentColor((byte)(c.R * b / 100), (byte)(c.G * b / 100), (byte)(c.B * b / 100));
     }
 
-    private static HidDevice? FindDevice()
-    {
-        try
-        {
-            foreach (var d in DeviceList.Local.GetHidDevices(VID, PID))
-                try { if (d.GetMaxFeatureReportLength() == FeatureLen) return d; }
-                catch { /* skip interfaces we can't query */ }
-        }
-        catch { /* no device */ }
-        return null;
-    }
-
-    public void Dispose() => _stream?.Dispose();
+    // ---- transport, per-OS (found device? / send one feature report / release) ----
+    private partial bool OpenTransport();
+    private partial bool SetFeature(byte[] report);
+    public partial void Dispose();
 }

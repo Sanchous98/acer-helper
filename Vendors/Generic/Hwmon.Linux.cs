@@ -156,9 +156,9 @@ internal static class Hwmon
 /// CPU/GPU temperatures where the corresponding drivers are present.</summary>
 internal sealed class HwmonSensors : ISensors
 {
-    private readonly string? _fanDir;
-    private readonly int[] _fanIdx;
-    private readonly string[] _fanLabels;
+    private string? _fanDir;
+    private int[] _fanIdx;
+    private string[] _fanLabels;
     private readonly string? _cpuTemp;
     private readonly string? _gpuTemp;
 
@@ -174,21 +174,31 @@ internal sealed class HwmonSensors : ISensors
         var gpu = Hwmon.GpuTempPath(chips);
         if (fanDir == null && cpu == null && gpu == null) return null;
 
-        var idx = fans.Select(f => f.Idx).ToArray();
-        var labels = fans.Select((f, n) =>
-            string.IsNullOrWhiteSpace(f.Label) ? fans.Count == 1 ? "Fan" : $"Fan {n + 1}" : f.Label).ToArray();
-        return new HwmonSensors(fanDir, idx, labels, cpu, gpu);
+        return new HwmonSensors(fanDir, fans.Select(f => f.Idx).ToArray(), Labels(fans), cpu, gpu);
     }
+
+    private static string[] Labels(List<(int Idx, string Label)> fans)
+        => fans.Select((f, n) =>
+            string.IsNullOrWhiteSpace(f.Label) ? fans.Count == 1 ? "Fan" : $"Fan {n + 1}" : f.Label).ToArray();
 
     public SensorSnapshot Read()
     {
+        // EC sensor drivers can register after we probe (linuwu_sense's hwmon appeared a second after app
+        // start on the AN18-61) — while we have no fan source, keep re-scanning; the tree is tiny.
+        if (_fanDir == null) ReprobeFans();
+
         var fans = new List<FanReading>(_fanIdx.Length);
-        if (_fanDir == null)
-            return new SensorSnapshot
-                { CpuTempC = Hwmon.Milli(_cpuTemp), GpuTempC = Hwmon.Milli(_gpuTemp), Fans = fans };
-        fans.AddRange(_fanIdx.Select((t, i) => new FanReading(_fanLabels[i], Hwmon.ReadInt(Path.Combine(_fanDir, $"fan{t}_input")) ?? -1)));
+        if (_fanDir != null)
+            fans.AddRange(_fanIdx.Select((t, i) => new FanReading(_fanLabels[i], Hwmon.ReadInt(Path.Combine(_fanDir, $"fan{t}_input")) ?? -1)));
 
         return new SensorSnapshot { CpuTempC = Hwmon.Milli(_cpuTemp), GpuTempC = Hwmon.Milli(_gpuTemp), Fans = fans };
+    }
+
+    private void ReprobeFans()
+    {
+        var (fanDir, fans) = Hwmon.BestFanSource(Hwmon.Chips());
+        if (fanDir != null)
+            (_fanDir, _fanIdx, _fanLabels) = (fanDir, fans.Select(f => f.Idx).ToArray(), Labels(fans));
     }
 }
 

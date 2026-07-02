@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.15.0</Version>
+    <Version>0.16.0</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -59,14 +59,14 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
-  <!-- HidSharp (the RGB HID transport) reflects internally and isn't trim-annotated (warning IL2104 under
-       AOT). Root the whole assembly when AOT-publishing so trimming can't strip its hidraw (Linux) / Win32
-       HID backends and silently break RGB. Applies to both TFMs' AOT builds. -->
-  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+  <!-- HidSharp (the Windows RGB HID transport) reflects internally and isn't trim-annotated (warning
+       IL2104 under AOT). Root the whole assembly when AOT-publishing so trimming can't strip its Win32
+       HID backend and silently break RGB. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' And '$(TargetFramework)' == 'net10.0-windows'">
     <TrimmerRootAssembly Include="HidSharp" />
   </ItemGroup>
 
-  <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux).
+  <!-- Cross-platform packages.
        NOTE: do NOT pin Tmds.DBus.Protocol explicitly. It is Avalonia's Linux D-Bus transport
        (tray/StatusNotifierItem, X11 IME), and Avalonia.Desktop must control its version — an
        independent pin (e.g. 0.94.2) loads a Tmds where Avalonia's expected types moved, crashing
@@ -78,12 +78,14 @@
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.0.5" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
-       API directly (see Os/WbemInterop.Windows.cs) — NOT System.Management, which is not Native-AOT-safe. -->
+       API directly (see Os/WbemInterop.Windows.cs) — NOT System.Management, which is not Native-AOT-safe.
+       HidSharp only serves the Windows RGB transport — Linux talks to hidraw directly
+       (EneHidController.Linux.cs), because HidSharp's Linux enumeration misses HID-over-I2C devices. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
+    <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 </Project>

@@ -8,16 +8,26 @@
 #
 # udev sets MODE/GROUP on device NODES, not on the sysfs ATTRIBUTE files we need, so we chgrp+chmod the
 # specific attributes via RUN (the pattern TLP and the battery-health tools use). %p is the device's devpath.
+# NB: a literal "$" in a RUN value must be written "$$" — a bare "$f" is an unknown substitution and udev
+# rejects the whole rule ("invalid substitution type"; udevadm verify catches it).
 
 # Battery charge mode + custom charge thresholds (power_supply; Dell dell-laptop / dell-wmi-ddv, kernel 6.12+)
 ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-9]", \
-  RUN+="/bin/sh -c 'for f in charge_types charge_control_start_threshold charge_control_end_threshold; do chgrp wheel /sys%p/$f 2>/dev/null && chmod g+w /sys%p/$f 2>/dev/null; done'"
+  RUN+="/bin/sh -c 'for f in charge_types charge_control_start_threshold charge_control_end_threshold; do chgrp wheel /sys%p/$$f 2>/dev/null && chmod g+w /sys%p/$$f 2>/dev/null; done'"
 
 # Keyboard backlight (kernel LED class): brightness + auto-off timeout
 ACTION=="add|change", SUBSYSTEM=="leds", KERNEL=="*kbd_backlight", \
-  RUN+="/bin/sh -c 'for f in brightness stop_timeout; do chgrp wheel /sys%p/$f 2>/dev/null && chmod g+w /sys%p/$f 2>/dev/null; done'"
+  RUN+="/bin/sh -c 'for f in brightness stop_timeout; do chgrp wheel /sys%p/$$f 2>/dev/null && chmod g+w /sys%p/$$f 2>/dev/null; done'"
 
-# Performance/thermal profile (kernel platform-profile class, 6.14+; the /sys/firmware alias is handled by
-# the tmpfiles.d companion for older kernels)
+# Performance/thermal profile (kernel platform-profile class, 6.14+). Also fix the legacy ACPI alias here:
+# it appears only when the first handler registers, and EC modules often load after the boot tmpfiles pass,
+# so the tmpfiles.d companion misses it (kept there for pre-6.14 kernels, where there is no class event).
 ACTION=="add|change", SUBSYSTEM=="platform-profile", \
-  RUN+="/bin/sh -c 'chgrp wheel /sys%p/profile 2>/dev/null && chmod g+w /sys%p/profile 2>/dev/null'"
+  RUN+="/bin/sh -c 'chgrp wheel /sys%p/profile 2>/dev/null && chmod g+w /sys%p/profile 2>/dev/null; chgrp wheel /sys/firmware/acpi/platform_profile 2>/dev/null && chmod g+w /sys/firmware/acpi/platform_profile 2>/dev/null'"
+
+# Acer Linuwu-Sense control nodes (fan_speed, battery_limiter/calibration, lcd_override, usb_charging,
+# backlight_timeout). They exist only while the module is loaded — often well after boot — so udev, not
+# tmpfiles; "bind" fires when the driver attaches. Some module builds already grant their own group here
+# (e.g. root:linuwu_sense); this just adds wheel-based access for the rest.
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
+  RUN+="/bin/sh -c 'chgrp -R wheel /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null; chmod -R g+rw /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null'"

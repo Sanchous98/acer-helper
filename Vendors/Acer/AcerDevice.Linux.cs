@@ -8,7 +8,8 @@ namespace AcerHelper.Vendors.Acer;
 // the per-feature encoding methods below. All the Acer-on-Linux encoding lives here (node names + trivial
 // formats). If the module isn't loaded we keep the inherited generic ports and say why. Profiles come from
 // platform_profile (the full Acer firmware set) rather than the PPD collapse; sensors stay generic hwmon.
-// RGB reuses the cross-platform EneHidController brick (ENE USB-HID via hidraw — same device as Windows).
+// RGB reuses the cross-platform EneHidController brick (same ENE device and packets as Windows; here it is
+// reached via raw hidraw — on recent models it's HID-over-I2C, not USB).
 public sealed partial class AcerDevice
 {
     private const string OFF = "0";
@@ -19,7 +20,7 @@ public sealed partial class AcerDevice
 
     partial void InitVendor()
     {
-        // RGB is the ENE USB-HID controller — the very same device (and packets) as on Windows, reached via
+        // RGB is the ENE HID controller — the very same device (and packets) as on Windows, reached via
         // hidraw. It's independent of Linuwu-Sense (a WMI/EC driver, not the HID interface), so wire it first
         // regardless of whether the sysfs module is loaded. No brightness read-back here (that's gaming WMI).
         var rgb = new EneHidController(_model.Zones, _model.Lightbar, readKeyboardBrightness: null);
@@ -39,19 +40,33 @@ public sealed partial class AcerDevice
         if (profiles is { Available: true, Writable: true }) PowerProfiles = profiles;
 
         _sense = new SysfsInvoker(senseDir);
-        if (_sense.Has("fan_speed"))
+
+        // The nodes are 0660 root:<module group> — existing but unusable to us means EVERY control would
+        // fail silently, so gate each port on write access and say what to do (a group added to /etc/group
+        // only reaches NEW login sessions).
+        string[] nodes = ["fan_speed", "lcd_override", "battery_limiter", "battery_calibration", "backlight_timeout", "usb_charging"];
+        if (nodes.Any(_sense.Has) && !nodes.Any(Usable))
+        {
+            StatusMessage = "Linuwu-Sense is loaded but its files aren't accessible — add your user to the module's group (or install the udev rule) and log in again.";
+            return;
+        }
+
+        if (Usable("fan_speed"))
             FanControl = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        if (_sense.Has("lcd_override"))        LcdOverdrive       = new FlagPort(GetLcd, SetLcd);
-        if (_sense.Has("battery_limiter"))     BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
-        if (_sense.Has("battery_calibration")) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
-        if (_sense.Has("backlight_timeout"))   KeyboardBacklight  = new FlagPort(GetBacklight, SetBacklight);
-        if (_sense.Has("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
+        if (Usable("lcd_override"))        LcdOverdrive       = new FlagPort(GetLcd, SetLcd);
+        if (Usable("battery_limiter"))     BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
+        if (Usable("battery_calibration")) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
+        if (Usable("backlight_timeout"))   KeyboardBacklight  = new FlagPort(GetBacklight, SetBacklight);
+        if (Usable("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
     }
 
-    // ---- fans ("0" = auto, "100,100" = max, "cpu,gpu" = custom) ----
+    private bool Usable(string node) => _sense.Has(node) && _sense.CanWrite(node);
+
+    // ---- fans ("0,0" = auto, "100,100" = max, "cpu,gpu" = custom) ----
     private (bool, string?) SetFanMode(FanMode m) => m switch
     {
-        FanMode.Auto => Wr("fan_speed", "0"),
+        // The driver parses a "cpu,gpu" pair — a bare "0" is rejected with EINVAL (verified on AN18-61).
+        FanMode.Auto => Wr("fan_speed", "0,0"),
         FanMode.Max  => Wr("fan_speed", "100,100"),
         _            => (true, null)   // Custom is applied by SetCustomSpeeds
     };
