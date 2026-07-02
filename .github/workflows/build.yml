@@ -1,0 +1,135 @@
+name: build
+
+# One workflow, two jobs that run IN PARALLEL (GitHub parallelises jobs; steps within a job are sequential):
+#   • windows — Native-AOT AcerHelper.exe + a WiX MSI installer
+#   • linux   — Native-AOT binary packaged as a self-updating AppImage
+# Both are Native AOT (analyzer clean, 0 IL30xx on both TFMs). Each job attaches its artifact to the GitHub
+# Release on a v* tag (the feed the in-app update check + AppImage self-update read). They stay separate jobs
+# (not one matrix) because WiX only builds on Windows and the AppImage/AOT-link uses a Fedora container.
+#
+# AOT is safe here: WMI via source-generated COM interop ([GeneratedComInterface], raw VARIANT/SAFEARRAY),
+# NOT System.Management (classic COM interop AOT can't do); HidSharp is rooted (TrimmerRootAssembly) so RGB
+# survives trimming. WiX 5 is pinned to avoid the paid OSMF-EULA that WiX 6/7 require.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: AcerHelper.exe + MSI
+    runs-on: windows-2022
+    permissions:
+      contents: write        # create/attach to the GitHub Release on a version tag
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (self-contained, Native AOT)
+        run: >
+          dotnet publish AcerHelper.csproj
+          -c Release
+          -f net10.0-windows
+          -r win-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o publish
+
+      # Native AOT + Avalonia is NOT single-file: Skia/HarfBuzz/ANGLE ship as native DLLs next to the exe
+      # (libSkiaSharp.dll, libHarfBuzzSharp.dll, av_libGLESv2.dll, libEGL.dll, …). The exe P/Invokes them, so
+      # the whole folder is the artifact; drop the .pdb.
+      - name: Upload standalone app
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcerHelper-win-x64
+          path: |
+            publish/
+            !publish/**/*.pdb
+          if-no-files-found: error
+
+      # Installer: WiX MSI (packaging/AcerHelper.wxs) — harvests publish/ into Program Files + a Start-menu
+      # shortcut + uninstaller. Version read from the csproj.
+      - name: Build MSI (WiX)
+        shell: pwsh
+        run: |
+          Remove-Item publish\*.pdb -ErrorAction SilentlyContinue
+          dotnet tool install --global wix --version 5.0.2
+          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)').Groups[1].Value
+          wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d PublishDir=publish -o AcerHelper-Setup.msi
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcerHelper-Setup
+          path: AcerHelper-Setup.msi
+          if-no-files-found: error
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AcerHelper-Setup.msi
+
+  linux:
+    name: AppImage (Native AOT)
+    runs-on: ubuntu-latest
+    container: fedora:41
+    permissions:
+      contents: write        # attach the AppImage to the GitHub Release on a version tag
+    steps:
+      - uses: actions/checkout@v7
+
+      # Native AOT needs a C toolchain + zlib to link the native image; the runtime needs ICU; curl fetches
+      # appimagetool. (clang is .NET's documented AOT compiler; zlib-devel for the link.)
+      - name: Install build deps
+        run: dnf -y install clang zlib-devel libicu tar gzip findutils curl
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (self-contained, Native AOT)
+        run: >
+          dotnet publish AcerHelper.csproj
+          -c Release
+          -f net10.0
+          -r linux-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o publish-linux
+
+      # AppImage: bundle the whole AOT output (native AcerHelper + libSkiaSharp.so / libHarfBuzzSharp.so —
+      # not single-file, like the Windows AOT publish; drop the .dbg/.pdb) plus the udev rules (installed on
+      # first run via the in-app pkexec). appimagetool with --appimage-extract-and-run (no FUSE in the container).
+      - name: Build AppImage
+        run: |
+          rm -f publish-linux/*.dbg publish-linux/*.pdb
+          AD=AcerHelper.AppDir
+          mkdir -p "$AD"
+          cp -a publish-linux/. "$AD/"
+          chmod +x "$AD/AcerHelper"
+          install -m0755 packaging/AppRun "$AD/AppRun"
+          cp packaging/acer-helper.desktop "$AD/"
+          cp packaging/acer-helper.png "$AD/"
+          cp packaging/60-acer-helper.rules packaging/acer-helper.conf "$AD/"
+          curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$AD" AcerHelper-x86_64.AppImage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcerHelper-AppImage
+          path: AcerHelper-x86_64.AppImage
+          if-no-files-found: error
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AcerHelper-x86_64.AppImage

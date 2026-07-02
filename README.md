@@ -69,16 +69,16 @@ vendor = a new set of files under `Vendors/`; adding an OS = `*.Linux.cs` siblin
 ## Build
 
 The project multi-targets `net10.0-windows` (full Acer/Windows) and `net10.0` (portable; Acer,
-Dell and generic Linux backends). CI (GitHub Actions, `acer-helper` workflow) produces a
-self-contained Native-AOT `AcerHelper.exe` + a Windows installer on a Windows runner, and an RPM
-on a Fedora runner. Locally:
+Dell and generic Linux backends). CI (the `build` workflow — two parallel jobs) produces Native-AOT
+artifacts per OS: an `AcerHelper.exe` + WiX MSI on a Windows runner, and a self-updating AppImage in
+a Fedora container. Both are Native AOT. Locally:
 
 ```
 # Windows (Native AOT — must run on Windows)
 dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self-contained true -p:PublishAot=true -o publish
 
-# Linux (self-contained single-file, JIT)
-dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishSingleFile=true -o publish-linux
+# Linux (Native AOT — needs clang + zlib-devel to link)
+dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishAot=true -o publish-linux
 ```
 
 ## Install (Windows)
@@ -95,9 +95,7 @@ wix build packaging\AcerHelper.wxs -arch x64 -d Version=0.14.0 -d PublishDir=pub
 
 ## Install (Linux)
 
-Two channels, both built by the `linux` workflow (`packaging/`):
-
-**AppImage — recommended (portable, self-updating).** Download `AcerHelper-x86_64.AppImage`, make it
+The `build` workflow produces a Native-AOT **AppImage** (`AcerHelper-x86_64.AppImage`). Download it, make it
 executable, run. It lives in your home dir — so on **immutable Fedora** (Silverblue/Kinoite/uBlue) it needs
 no rpm-ostree layering or reboot — and it **self-updates**: the in-app update check downloads the new
 AppImage and replaces it in place. On first run it offers a one-click **"Grant hardware access"** (a single
@@ -108,27 +106,9 @@ writable — a portable binary can't ship system files itself, so this is the on
 chmod +x AcerHelper-x86_64.AppImage && ./AcerHelper-x86_64.AppImage
 ```
 
-**RPM — native (bundles the rules).** For a traditional package install; the udev/tmpfiles rules ship
-inside the package (no "grant access" step):
-
-```
-sudo dnf install ./acer-helper-*.rpm                           # traditional Fedora — applies immediately
-rpm-ostree install ./acer-helper-*.rpm && systemctl reboot     # atomic Fedora — applies on reboot
-```
-
-NOTE: a locally-layered RPM is **not** auto-updated by `rpm-ostree upgrade` (there's no repo to pull from) —
-you'd re-layer a newer file by hand, so for hands-off updates on immutable systems prefer the AppImage. (A
-COPR repo would make `rpm-ostree upgrade` track the RPM; not set up.)
-
-Build the RPM locally (needs `rpm-build` + `systemd-rpm-macros`):
-
-```
-V=$(grep -oPm1 '(?<=<Version>)[^<]+' AcerHelper.csproj)
-mkdir -p ~/rpmbuild/SOURCES && rm -f publish-linux/*.pdb
-tar -czf ~/rpmbuild/SOURCES/acer-helper-$V-linux-x64.tar.gz -C publish-linux .
-cp packaging/{60-acer-helper.rules,acer-helper.conf,acer-helper.desktop} ~/rpmbuild/SOURCES/
-rpmbuild -bb --define "appversion $V" packaging/acer-helper.spec
-```
+Build the AppImage locally: `dotnet publish … -p:PublishAot=true -o publish-linux` (above), assemble an
+AppDir (the publish output + `packaging/{AppRun,acer-helper.desktop,acer-helper.png,60-acer-helper.rules,acer-helper.conf}`),
+then `appimagetool AcerHelper.AppDir AcerHelper-x86_64.AppImage`.
 
 ## Roadmap
 

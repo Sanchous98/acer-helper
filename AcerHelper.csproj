@@ -59,6 +59,13 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
+  <!-- HidSharp (the RGB HID transport) reflects internally and isn't trim-annotated (warning IL2104 under
+       AOT). Root the whole assembly when AOT-publishing so trimming can't strip its hidraw (Linux) / Win32
+       HID backends and silently break RGB. Applies to both TFMs' AOT builds. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <TrimmerRootAssembly Include="HidSharp" />
+  </ItemGroup>
+
   <!-- Cross-platform packages. HidSharp is cross-platform (hidraw on Linux).
        NOTE: do NOT pin Tmds.DBus.Protocol explicitly. It is Avalonia's Linux D-Bus transport
        (tray/StatusNotifierItem, X11 IME), and Avalonia.Desktop must control its version — an
