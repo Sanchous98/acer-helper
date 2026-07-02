@@ -175,10 +175,25 @@ public sealed partial class LightViewModel : ObservableObject
         });
     }
 
-    /// <summary>Point this panel at another mode's persisted state, reflect it in the UI (no persist), and
-    /// re-apply it to the device if that mode was configured. Called when the performance mode changes.</summary>
+    /// <summary>Point this panel at another mode's persisted state, reflect it in the UI, and re-apply it to
+    /// the device. Called when the performance mode changes. Unlike startup, this ALWAYS applies: the app is
+    /// already actively driving the lighting, so leaving the previous mode's colours on the device would be
+    /// wrong (this is why e.g. the lightbar seemed "stuck" when switching to a mode it wasn't set in). A mode
+    /// never configured yet inherits the look we're leaving (and remembers it), so the switch stays coherent
+    /// instead of snapping to a bare default.</summary>
     public void Rebind(LightSettings state)
     {
+        if (!state.Configured)
+        {
+            state.EffectIndex = SelectedEffectIndex;
+            state.Brightness  = (int)Brightness;
+            state.Speed       = (int)Speed;
+            state.Color       = Pack(Color);
+            state.ZoneColors  = Zones.Select(z => Pack(z.Color)).ToArray();
+            state.Configured  = true;
+            _save();
+        }
+
         _state = state;
         _loading = true;
         SelectedEffectIndex = _effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, _effects.Count - 1) : 0;
@@ -189,7 +204,7 @@ public sealed partial class LightViewModel : ObservableObject
             Zones[i].Color = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : Zones[i].Color;
         UpdateColorMode();
         _loading = false;
-        if (state.Configured) ApplyNow();
+        ApplyNow();
     }
 
     /// <summary>Reflect a hardware-reported brightness in the slider without triggering an apply/save

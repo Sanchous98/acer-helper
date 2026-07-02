@@ -17,11 +17,14 @@ internal sealed class AppController
     private readonly FlyoutCoordinator _windows;
     private readonly TrayController _tray;
     private readonly DispatcherTimer _timer;
+    private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
+    private int _lightReapplyLeft;                     // remaining re-apply ticks
     private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
-    private string? _lastModeKey;   // performance mode we last applied per-mode presets for
+    private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
+    private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc)
     {
@@ -50,6 +53,7 @@ internal sealed class AppController
 
         _windows = new FlyoutCoordinator(_vm);
         _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
+        _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
 
         _svc.ApplyStartupState();
 
@@ -63,6 +67,18 @@ internal sealed class AppController
             d.Hotkeys.Pressed += OnHotkey;
             d.Hotkeys.InputActivity += OnInputActivity;
         }
+
+        // Acer firmware repaints the lightbar with its own per-profile colour when the performance profile
+        // changes — ONCE, a moment AFTER our WMI profile set (confirmed: a manual colour set afterwards
+        // sticks). So a single re-apply races the firmware and can land too early. Instead re-apply the mode's
+        // lighting several times over the next few seconds; whenever the firmware's repaint lands, the next
+        // tick overrides it and it then stays.
+        _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _lightReapply.Tick += (_, _) =>
+        {
+            _vm.ReloadLighting(_svc.LightsForCurrentMode());
+            if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
+        };
 
         Refresh();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -219,6 +235,17 @@ internal sealed class AppController
             _vm.ReloadLighting(_svc.LightsForCurrentMode());
         }
 
+        // The firmware repaints the lightbar on any HARDWARE profile change — including base<->Turbo, which
+        // shares its base's preset KEY (so the block above wouldn't fire). Trigger the re-apply on the real
+        // profile id so Turbo is covered too.
+        var profileId = current?.Id ?? "";
+        if (profileId != _lastProfileId)
+        {
+            _lastProfileId = profileId;
+            _lightReapplyLeft = 8;                          // ~8×400ms ≈ 3s of re-applies to beat the firmware repaint
+            _lightReapply.Stop(); _lightReapply.Start();
+        }
+
         _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
 
         _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
@@ -229,6 +256,7 @@ internal sealed class AppController
     private void ExitApp()
     {
         _timer.Stop();
+        _lightReapply.Stop();
         _tray.Dispose();
         _svc.Dispose();
         _desktop.Shutdown();

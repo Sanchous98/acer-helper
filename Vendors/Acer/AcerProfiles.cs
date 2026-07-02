@@ -30,8 +30,8 @@ public static class AcerProfiles
 
     public static PerformanceProfile ToDomain(byte b)
     {
-        foreach (var e in Table) if (e.Byte == b) return Make(e);
-        return new PerformanceProfile(b.ToString(), $"0x{b:X2}", ProfileKind.Other);
+        var e = Table.ToList().Find(e => e.Byte == b);
+        return e == null ? new PerformanceProfile(b.ToString(), $"0x{b:X2}", ProfileKind.Other) : Make(e);
     }
 
     public static byte ToByte(PerformanceProfile p) => byte.Parse(p.Id);

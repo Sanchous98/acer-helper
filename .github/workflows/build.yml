@@ -59,7 +59,9 @@ jobs:
           Remove-Item publish\*.pdb -ErrorAction SilentlyContinue
           dotnet tool install --global wix --version 5.0.2
           $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)').Groups[1].Value
-          wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d PublishDir=publish -o AcerHelper-Setup.msi
+          # Absolute PublishDir: WiX resolves a relative <Files Include> against the .wxs folder (packaging\),
+          # not the repo root, so a bare "publish" harvested nothing -> an empty ~32 KB MSI.
+          wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d "PublishDir=$PWD\publish" -o AcerHelper-Setup.msi
 
       - name: Upload MSI
         uses: actions/upload-artifact@v7
