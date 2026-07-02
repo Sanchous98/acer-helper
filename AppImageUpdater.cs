@@ -32,9 +32,12 @@ public static class AppImageUpdater
         try
         {
             using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
-            await using (var src = await http.GetStreamAsync(assetUrl, ct))   // GitHub asset URL 302s to a CDN; HttpClient follows
-            await using (var dst = File.Create(tmp))
-                await src.CopyToAsync(dst, ct);
+            {
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("AcerHelper-update");   // some GitHub endpoints 403 UA-less
+                await using (var src = await http.GetStreamAsync(assetUrl, ct))   // GitHub asset URL 302s to a CDN; HttpClient follows
+                await using (var dst = File.Create(tmp))
+                    await src.CopyToAsync(dst, ct);
+            }
 
             if (OperatingSystem.IsLinux())
                 File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
