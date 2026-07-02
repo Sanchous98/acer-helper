@@ -37,7 +37,7 @@ public sealed partial class AcerDevice
         // The full Acer BIOS profile set — but only when this process can actually switch it (root/udev);
         // otherwise the generic polkit-authorised PPD port stays (working beats richer-but-broken).
         var profiles = new SysfsPowerProfiles();
-        if (profiles is { Available: true, Writable: true }) PowerProfiles = profiles;
+        if (profiles is { Available: true, Writable: true }) PowerProfiles = new BatteryGatedProfiles(profiles);
 
         _sense = new SysfsInvoker(senseDir);
 
@@ -61,6 +61,39 @@ public sealed partial class AcerDevice
     }
 
     private bool Usable(string node) => _sense.Has(node) && _sense.CanWrite(node);
+
+    // The EC rejects everything except balanced/low-power while on battery (EOPNOTSUPP straight from the
+    // driver — verified on AN18-61), mirroring the Windows supported-mask behaviour (Turbo drops out when
+    // unplugged). Grey those profiles out rather than letting every click fail.
+    private sealed class BatteryGatedProfiles(SysfsPowerProfiles inner) : IPowerProfiles
+    {
+        private static readonly string[] BatterySafe = ["balanced", "low-power"];
+
+        public string? LastError => inner.LastError;
+        public IReadOnlyList<PerformanceProfile> All => inner.All;
+        public PerformanceProfile? Current() => inner.Current();
+        public bool Set(PerformanceProfile profile) => inner.Set(profile);
+
+        public IReadOnlyList<PerformanceProfile> Selectable()
+            => OnAc() ? inner.Selectable() : inner.Selectable().Where(p => BatterySafe.Contains(p.Id)).ToList();
+
+        // AC = any Mains-class power supply reporting online; no Mains node at all -> assume AC.
+        private static bool OnAc()
+        {
+            try
+            {
+                var mainsSeen = false;
+                foreach (var d in Directory.EnumerateDirectories("/sys/class/power_supply"))
+                {
+                    if (Hwmon.ReadText(Path.Combine(d, "type")) != "Mains") continue;
+                    mainsSeen = true;
+                    if (Hwmon.ReadText(Path.Combine(d, "online")) == "1") return true;
+                }
+                return !mainsSeen;
+            }
+            catch { return true; }
+        }
+    }
 
     // ---- fans ("0,0" = auto, "100,100" = max, "cpu,gpu" = custom) ----
     private (bool, string?) SetFanMode(FanMode m) => m switch
