@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.17.0</Version>
+    <Version>0.17.1</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -77,7 +77,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.0.5" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
@@ -85,7 +85,7 @@
        HidSharp only serves the Windows RGB transport — Linux talks to hidraw directly
        (EneHidController.Linux.cs), because HidSharp's Linux enumeration misses HID-over-I2C devices. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 </Project>
