@@ -101,11 +101,14 @@ internal sealed class AppController
         var info = await _updates.CheckAsync();
         if (info == null) return;   // current / offline / no releases -> nothing shown
 
-        // Running as an AppImage with an .AppImage asset -> self-replace in place; otherwise open the page.
-        var asset = AppImageUpdater.IsAppImage ? AppImageUpdater.PickAsset(info.Assets) : null;
-        Action act = asset != null
-            ? () => _ = SelfUpdateAsync(asset.Url)
-            : () => OpenUrl(info.Url);
+        // Real self-update where we can: the Windows MSI install upgrades in place via msiexec; a Linux
+        // AppImage self-replaces. Anything else (portable/dev run, RPM, missing asset) opens the release page.
+        var msi = WindowsUpdater.IsSupported ? WindowsUpdater.PickAsset(info.Assets) : null;
+        var appImage = AppImageUpdater.IsAppImage ? AppImageUpdater.PickAsset(info.Assets) : null;
+        Action act =
+            msi != null      ? () => _ = SelfUpdateWindowsAsync(msi.Url) :
+            appImage != null ? () => _ = SelfUpdateAsync(appImage.Url) :
+                               () => OpenUrl(info.Url);
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -120,6 +123,19 @@ internal sealed class AppController
         var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
         if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
         else Notify("Update failed" + Err(err));
+    }
+
+    // Windows: download the MSI, then hand off to the detached msiexec helper and quit so the exe unlocks —
+    // the helper upgrades in place and relaunches us.
+    private async Task SelfUpdateWindowsAsync(string assetUrl)
+    {
+        Notify("Downloading update…");
+        var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
+        if (!ok) { Notify("Update failed" + Err(res)); return; }
+
+        Notify("Installing update…");
+        if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
+        else Notify("Update failed");
     }
 
     private async Task GrantHardwareAccessAsync()

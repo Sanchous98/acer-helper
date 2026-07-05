@@ -5,10 +5,13 @@ using System.Text.Json.Serialization;
 
 namespace AcerHelper;
 
-/// <summary>Checks GitHub Releases for a newer version. NOTIFY-ONLY: it returns the release so the UI can
-/// point the user at the download page (the MSI/RPM) — it does not download or install anything. Any failure
-/// (offline, rate-limited, no releases yet, parse error) degrades silently to "no update". Runs off the UI
-/// thread; a fresh <see cref="HttpClient"/> per check (called once at startup, so cost is irrelevant).</summary>
+/// <summary>Checks GitHub Releases for a newer version and returns it (version + page URL + downloadable
+/// assets). It does NOT download or install — that's delegated to the platform self-updaters
+/// (<see cref="WindowsUpdater"/> for the MSI, <see cref="AppImageUpdater"/> for the Linux AppImage), which
+/// pick the matching asset off <see cref="UpdateInfo.Assets"/>; when neither applies the UI opens the page.
+/// Any failure (offline, rate-limited, no releases yet, parse error) degrades silently to "no update". Runs
+/// off the UI thread; a fresh <see cref="HttpClient"/> per check (called once at startup, so cost is
+/// irrelevant).</summary>
 public sealed class UpdateChecker
 {
     private const string LatestReleaseApi = "https://api.github.com/repos/Sanchous98/acer-helper/releases/latest";
