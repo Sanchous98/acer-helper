@@ -37,26 +37,32 @@ internal sealed partial class EneHidController : IRgbController
 
     public IReadOnlyList<RgbZone> Zones => _zones;
 
-    private bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
+    private bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, byte direction, AccentColor color)
     {
         var e = (RgbEffect)effect.Handle;
-        return Send(TgtKeyboard, e.ModeByte, e.IsEffect, brightness, speed, color, KbAllZones);
+        return Send(TgtKeyboard, e.ModeByte, e.IsEffect, brightness, speed, Dir(e, direction), color, KbAllZones);
     }
 
     private bool ApplyKeyboardZone(int zoneIndex, byte brightness, AccentColor color)
-        => Send(TgtKeyboard, RgbEffects.StaticModeByte, isEffect: false, brightness, speed: 0, color, (byte)(1 << zoneIndex));
+        => Send(TgtKeyboard, RgbEffects.StaticModeByte, isEffect: false, brightness, speed: 0, FlagStatic, color, (byte)(1 << zoneIndex));
 
-    private bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
+    private bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, byte direction, AccentColor color)
     {
         var e = (RgbEffect)effect.Handle;
         // The lightbar ignores the HID brightness byte, so emulate brightness by scaling the colour and send
         // full brightness (works for colour modes; self-cycling effects generate their own colours).
-        return Send(TgtLightbar, e.ModeByte, e.IsEffect, FullBright, speed, Scale(color, brightness), LbZone);
+        return Send(TgtLightbar, e.ModeByte, e.IsEffect, FullBright, speed, Dir(e, direction), Scale(color, brightness), LbZone);
     }
 
-    private bool Send(byte target, byte mode, bool isEffect, byte brightness, byte speed, AccentColor c, byte zoneMask)
+    // Report byte[5] is the effect DIRECTION. For a directional effect (e.g. Wave) it's the user's choice
+    // (1/2); otherwise it's the mode default the firmware expects — 0x02 for animated effects, 0x01 for static.
+    private static byte Dir(RgbEffect e, byte direction)
+        => e.HasDirection ? (direction is 1 or 2 ? direction : FlagStatic)
+                          : (e.IsEffect ? FlagEffect : FlagStatic);
+
+    private bool Send(byte target, byte mode, bool isEffect, byte brightness, byte speed, byte direction, AccentColor c, byte zoneMask)
         => SetFeature([ReportId, target, mode, brightness, isEffect ? speed : (byte)0,
-                       isEffect ? FlagEffect : FlagStatic, c.R, c.G, c.B, zoneMask, 0x00]);
+                       direction, c.R, c.G, c.B, zoneMask, 0x00]);
 
     private static AccentColor Scale(AccentColor c, byte brightness)
     {

@@ -40,7 +40,7 @@ public sealed class LightingViewModel
             // Seed brightness from what the firmware currently reports (Fn keys change it out-of-band), so
             // the slider matches hardware instead of the last persisted value; readBrightness also drives Sync.
             Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
-                (e, c, b, s) => zone.ApplyEffect(e, b, s, c),
+                (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
                 zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
                 state, save, zone.ReadBrightness));
         }
@@ -82,7 +82,7 @@ public sealed class LightingViewModel
 public sealed partial class LightViewModel : ObservableObject
 {
     private readonly IReadOnlyList<RgbModeInfo> _effects;
-    private readonly Action<RgbModeInfo, AccentColor, byte, byte> _applyAll;
+    private readonly Action<RgbModeInfo, AccentColor, byte, byte, byte> _applyAll;   // (effect, colour, brightness, speed, direction)
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly Func<int?>? _readBrightness;
     private LightSettings _state;   // swapped by Rebind when the performance mode changes
@@ -98,6 +98,8 @@ public sealed partial class LightViewModel : ObservableObject
 
     [ObservableProperty] private int _selectedEffectIndex;
     [ObservableProperty] private bool _hasSpeed;
+    [ObservableProperty] private bool _hasDirection;
+    [ObservableProperty] private bool _reverseDirection;   // false => byte[5]=1, true => byte[5]=2
     [ObservableProperty] private bool _showSingleColor;
     [ObservableProperty] private bool _showZones;
     [ObservableProperty] private Color _color;
@@ -105,7 +107,7 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private double _speed;
 
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
-                          Action<RgbModeInfo, AccentColor, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
+                          Action<RgbModeInfo, AccentColor, byte, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
                           LightSettings state, Action save, Func<int?>? readBrightness = null)
     {
         Title = title;
@@ -121,6 +123,7 @@ public sealed partial class LightViewModel : ObservableObject
         _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
         _brightness = Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100);   // hardware value wins if readable
         _speed = state.Speed;
+        _reverseDirection = state.Direction == 2;
         _color = FromPacked(state.Color);
 
         if (applyZone != null && zones > 1)
@@ -188,6 +191,7 @@ public sealed partial class LightViewModel : ObservableObject
             state.EffectIndex = SelectedEffectIndex;
             state.Brightness  = (int)Brightness;
             state.Speed       = (int)Speed;
+            state.Direction   = ReverseDirection ? 2 : 1;
             state.Color       = Pack(Color);
             state.ZoneColors  = Zones.Select(z => Pack(z.Color)).ToArray();
             state.Configured  = true;
@@ -199,6 +203,7 @@ public sealed partial class LightViewModel : ObservableObject
         SelectedEffectIndex = _effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, _effects.Count - 1) : 0;
         Brightness = Math.Clamp(state.Brightness, 0, 100);
         Speed = state.Speed;
+        ReverseDirection = state.Direction == 2;
         Color = FromPacked(state.Color);
         for (var i = 0; i < Zones.Count; i++)
             Zones[i].Color = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : Zones[i].Color;
@@ -222,6 +227,7 @@ public sealed partial class LightViewModel : ObservableObject
     partial void OnColorChanged(Color value) => Schedule();
     partial void OnBrightnessChanged(double value) => Schedule();
     partial void OnSpeedChanged(double value) => Schedule();
+    partial void OnReverseDirectionChanged(bool value) => Schedule();
 
     private void OnZoneChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -234,6 +240,7 @@ public sealed partial class LightViewModel : ObservableObject
     {
         var e = Current;
         HasSpeed = e.HasSpeed;
+        HasDirection = e.HasDirection;
         ShowZones = e is { HasColor: true, HasSpeed: false } && Zones.Count > 1;   // static + multi-zone -> per-zone swatches
         ShowSingleColor = e.HasColor && !ShowZones;                 // breathing / single-zone static -> one colour
     }
@@ -247,7 +254,7 @@ public sealed partial class LightViewModel : ObservableObject
 
     private void ApplyNow()
     {
-        byte b = (byte)Brightness, s = (byte)Speed;
+        byte b = (byte)Brightness, s = (byte)Speed, d = (byte)(ReverseDirection ? 2 : 1);
         if (ShowZones && _applyZone != null)
             for (var i = 0; i < Zones.Count; i++)
             {
@@ -255,7 +262,7 @@ public sealed partial class LightViewModel : ObservableObject
                 _applyZone(i, b, new AccentColor(c.R, c.G, c.B));
             }
         else
-            _applyAll(Current, new AccentColor(Color.R, Color.G, Color.B), b, s);
+            _applyAll(Current, new AccentColor(Color.R, Color.G, Color.B), b, s, d);
     }
 
     private void SaveState()
@@ -264,6 +271,7 @@ public sealed partial class LightViewModel : ObservableObject
         _state.EffectIndex = SelectedEffectIndex;
         _state.Brightness = (int)Brightness;
         _state.Speed = (int)Speed;
+        _state.Direction = ReverseDirection ? 2 : 1;
         _state.Color = Pack(Color);
         _state.ZoneColors = Zones.Select(z => Pack(z.Color)).ToArray();
         _save();

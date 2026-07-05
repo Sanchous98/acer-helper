@@ -3,16 +3,17 @@ using AcerHelper.Features;
 namespace AcerHelper.Vendors.Acer;
 
 /// <summary>One lighting mode of the ENE controller (verified on Acer Nitro 18).</summary>
-public sealed class RgbEffect(string name, byte modeByte, bool isEffect, bool hasColor, bool hasSpeed)
+public sealed class RgbEffect(string name, byte modeByte, bool isEffect, bool hasColor, bool hasSpeed, bool hasDirection = false)
 {
     public string Name     { get; } = name;
     public byte   ModeByte { get; } = modeByte;
     public bool   IsEffect { get; } = isEffect; // true => effect flag (0x02) + speed; false => static (0x01)
     public bool   HasColor { get; } = hasColor; // honours the chosen colour
     public bool   HasSpeed { get; } = hasSpeed;
+    public bool   HasDirection { get; } = hasDirection; // directional effect (Wave): report byte[5] = 1 or 2
 
     /// <summary>Project to the vendor-neutral descriptor the UI binds to (this effect is the opaque handle).</summary>
-    public RgbModeInfo ToModeInfo() => new(Name, HasColor, HasSpeed, this);
+    public RgbModeInfo ToModeInfo() => new(Name, HasColor, HasSpeed, this, HasDirection);
 
     public override string ToString() => Name;
 }
@@ -38,7 +39,7 @@ public static class RgbEffects
         new("Static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
         new("Breathing", BREATHING, isEffect: true,  hasColor: true,  hasSpeed: true),
         new("Neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Wave",      WAVE,      isEffect: true,  hasColor: false, hasSpeed: true),
+        new("Wave",      WAVE,      isEffect: true,  hasColor: false, hasSpeed: true, hasDirection: true),
         new("Shifting",  SHIFTING,  isEffect: true,  hasColor: false, hasSpeed: true),
         new("Zoom",      ZOOM,      isEffect: true,  hasColor: false, hasSpeed: true),
         new("Meteor",    METEOR,    isEffect: true,  hasColor: false, hasSpeed: true),

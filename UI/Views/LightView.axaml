@@ -49,5 +49,13 @@
                  Text="{Binding Speed, StringFormat='{}{0:0}'}"/>
     </Grid>
 
+    <!-- Direction — only for directional effects (e.g. Wave) -->
+    <Grid ColumnDefinitions="64,*" IsVisible="{Binding HasDirection}">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Direction"/>
+      <ToggleSwitch Grid.Column="1" HorizontalAlignment="Left"
+                    IsChecked="{Binding ReverseDirection, Mode=TwoWay}"
+                    OffContent="Normal" OnContent="Reversed"/>
+    </Grid>
+
   </StackPanel>
 </UserControl>

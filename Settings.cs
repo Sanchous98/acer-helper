@@ -37,6 +37,7 @@ public sealed class LightSettings
     public int EffectIndex { get; set; }
     public int Brightness  { get; set; } = 100;
     public int Speed       { get; set; } = 5;
+    public int Direction   { get; set; } = 1;   // directional effects (Wave): 1 or 2
     public int Color       { get; set; } = 0xFF0000;
     public int[] ZoneColors { get; set; } = [];
 }

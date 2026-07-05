@@ -14,7 +14,7 @@ public sealed class RgbZone(
     string name,
     int subZones,
     IReadOnlyList<RgbModeInfo> effects,
-    Func<RgbModeInfo, byte, byte, AccentColor, bool> applyEffect,
+    Func<RgbModeInfo, byte, byte, byte, AccentColor, bool> applyEffect,   // (effect, brightness, speed, direction, colour)
     Func<int, byte, AccentColor, bool>? applySubZone = null,
     Func<int?>? readBrightness = null)
 {
@@ -25,8 +25,8 @@ public sealed class RgbZone(
     /// <summary>True when the zone exposes per-sub-zone colours (multi-zone + a sub-zone applier).</summary>
     public bool HasSubZones => applySubZone != null && subZones > 1;
 
-    public bool ApplyEffect(RgbModeInfo effect, byte brightness, byte speed, AccentColor color)
-        => applyEffect(effect, brightness, speed, color);
+    public bool ApplyEffect(RgbModeInfo effect, byte brightness, byte speed, byte direction, AccentColor color)
+        => applyEffect(effect, brightness, speed, direction, color);
 
     public bool ApplySubZone(int index, byte brightness, AccentColor color)
         => applySubZone?.Invoke(index, brightness, color) ?? false;

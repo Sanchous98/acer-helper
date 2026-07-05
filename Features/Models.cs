@@ -51,7 +51,7 @@ public enum HotkeyAction
 /// <summary>A lighting effect/mode the UI can present, with its capability flags. The
 /// vendor-specific encoding (mode byte, effect flag, …) is carried opaquely in
 /// <paramref name="Handle"/> and resolved back by the owning lighting backend.</summary>
-public sealed record RgbModeInfo(string Name, bool HasColor, bool HasSpeed, object Handle);
+public sealed record RgbModeInfo(string Name, bool HasColor, bool HasSpeed, object Handle, bool HasDirection = false);
 
 /// <summary>A single labelled choice with a stable id (for dropdowns whose set is vendor-defined).</summary>
 public sealed record ChoiceOption(string Id, string DisplayName);
