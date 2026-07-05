@@ -8,8 +8,16 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // single instance
-        using var mutex = new Mutex(true, "AcerHelper_SingleInstance_8F1C", out bool isNew);
+        // Lightweight background mode: just listen for the Nitro key and launch the full UI on demand,
+        // without loading Avalonia. Started at logon by the autostart task. Runs its own loop and returns.
+        if (Array.IndexOf(args, "--watch") >= 0)
+        {
+            Watcher.Run();
+            return;
+        }
+
+        // single instance (the watcher checks this same name to know if the UI is already up)
+        using var mutex = new Mutex(true, Watcher.UiMutexName, out bool isNew);
         if (!isNew)
         {
             // Another instance holds the lock. This also happens for a moment during a self-update RESTART:

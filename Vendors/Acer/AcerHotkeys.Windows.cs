@@ -9,7 +9,7 @@ namespace AcerHelper.Vendors.Acer;
 /// platform layer. Turbo = HID report 04 85 (usage page 0x0088); Nitro = keyboard scancode E0 75.
 /// Must be constructed on the UI thread so the Avalonia message loop dispatches WM_INPUT.
 /// </summary>
-public sealed class AcerHotkeys : IHotkeys
+public sealed partial class AcerHotkeys : IHotkeys
 {
     private const int  WM_INPUT        = 0x00FF;
     private const uint RID_INPUT       = 0x10000003;
@@ -43,7 +43,9 @@ public sealed class AcerHotkeys : IHotkeys
         public string? lpszMenuName; public string lpszClassName; public IntPtr hIconSm;
     }
 
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    // Classic DllImport (not LibraryImport): WNDCLASSEX carries a delegate + string fields, which the
+    // LibraryImport source generator can't marshal (SYSLIB1051). Runtime/AOT marshalling handles it.
+    [DllImport("user32.dll", EntryPoint = "RegisterClassExW", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern ushort RegisterClassExW(ref WNDCLASSEX c);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateWindowExW(uint exStyle, string className, string windowName, uint style,
@@ -78,7 +80,7 @@ public sealed class AcerHotkeys : IHotkeys
         if (_hwnd == IntPtr.Zero) return;
 
         var rid = new RAWINPUTDEVICE[Listen.Length];
-        for (int i = 0; i < Listen.Length; i++)
+        for (var i = 0; i < Listen.Length; i++)
             rid[i] = new RAWINPUTDEVICE { usagePage = Listen[i].page, usage = Listen[i].usage, flags = RIDEV_INPUTSINK, target = _hwnd };
         RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
     }
@@ -95,22 +97,22 @@ public sealed class AcerHotkeys : IHotkeys
         // state in real time. The mapped-hotkey decoding below still runs; this is an extra, cheaper signal.
         InputActivity?.Invoke();
 
-        uint hdr = (uint)(8 + 2 * IntPtr.Size);   // sizeof(RAWINPUTHEADER)
+        var hdr = (uint)(8 + 2 * IntPtr.Size);   // sizeof(RAWINPUTHEADER)
         uint size = 0;
         GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, hdr);
         if (size == 0) return;
 
-        IntPtr buf = Marshal.AllocHGlobal((int)size);
+        var buf = Marshal.AllocHGlobal((int)size);
         try
         {
             if (GetRawInputData(lParam, RID_INPUT, buf, ref size, hdr) == unchecked((uint)-1)) return;
-            int type = Marshal.ReadInt32(buf, 0);
-            int off  = (int)hdr;
+            var type = Marshal.ReadInt32(buf, 0);
+            var off  = (int)hdr;
 
             if (type == RIM_TYPEKEYBOARD)
             {
-                ushort make  = (ushort)Marshal.ReadInt16(buf, off + 0);
-                ushort flags = (ushort)Marshal.ReadInt16(buf, off + 2);
+                var make  = (ushort)Marshal.ReadInt16(buf, off + 0);
+                var flags = (ushort)Marshal.ReadInt16(buf, off + 2);
                 if (make == NITRO_MAKECODE && (flags & RI_KEY_E0) != 0 && (flags & RI_KEY_BREAK) == 0)
                     Pressed?.Invoke(HotkeyAction.ToggleWindow);
                 return;
@@ -118,13 +120,13 @@ public sealed class AcerHotkeys : IHotkeys
 
             if (type != RIM_TYPEHID) return;
 
-            int sizeHid = Marshal.ReadInt32(buf, off);
-            int count   = Marshal.ReadInt32(buf, off + 4);
+            var sizeHid = Marshal.ReadInt32(buf, off);
+            var count   = Marshal.ReadInt32(buf, off + 4);
             if (sizeHid < 1 || count < 1) return;
 
-            int dataOff = off + 8;
-            byte b0 = Marshal.ReadByte(buf, dataOff);
-            byte b1 = sizeHid > 1 ? Marshal.ReadByte(buf, dataOff + 1) : (byte)0;
+            var dataOff = off + 8;
+            var b0 = Marshal.ReadByte(buf, dataOff);
+            var b1 = sizeHid > 1 ? Marshal.ReadByte(buf, dataOff + 1) : (byte)0;
             if (b0 == TURBO_B0 && b1 == TURBO_B1) Pressed?.Invoke(HotkeyAction.TogglePerformance);
         }
         finally { Marshal.FreeHGlobal(buf); }
