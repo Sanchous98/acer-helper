@@ -153,7 +153,10 @@ public partial class MainWindow : Window
         {
             int x = Marshal.ReadInt32(lParam);       // MSLLHOOKSTRUCT.pt.x (screen px, offset 0)
             int y = Marshal.ReadInt32(lParam, 4);    //                 .pt.y (offset 4)
-            if (IsOpen && !PointInWindow(x, y))
+            // "Outside" means outside EVERYTHING we own. Avalonia opens dropdowns/pickers (the colour picker,
+            // combo boxes, tooltips) as separate popup HWNDs that can extend past the main window — a click
+            // there must NOT dismiss. Treat any HWND belonging to our process as "inside".
+            if (IsOpen && !PointInWindow(x, y) && !PointInOurProcess(x, y))
                 Dispatcher.UIThread.Post(() => BackgroundClicked?.Invoke());
         }
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
@@ -168,9 +171,24 @@ public partial class MainWindow : Window
         return px >= p.X && px < p.X + w && py >= p.Y && py < p.Y + h;
     }
 
+    // Does the click land on a window owned by THIS process (main window OR any Avalonia popup — colour
+    // picker, combo dropdown, tooltip)? Those popups are separate top-level HWNDs, so the main-window rect
+    // check alone misses them and a click there would wrongly dismiss the flyout.
+    private static bool PointInOurProcess(int px, int py)
+    {
+        var hwnd = WindowFromPoint(new POINT { X = px, Y = py });
+        if (hwnd == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(hwnd, out var pid);
+        return pid == GetCurrentProcessId();
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
     [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandleW(string? lpModuleName);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
 }
