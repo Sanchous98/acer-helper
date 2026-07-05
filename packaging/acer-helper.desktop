@@ -11,5 +11,5 @@ Terminal=false
 # WM class so any launcher association resolves to this app rather than a spurious generic entry.
 StartupNotify=false
 StartupWMClass=AcerHelper
-Categories=Utility;System;Settings;HardwareSettings;
+Categories=Settings;HardwareSettings;
 Keywords=laptop;fan;battery;profile;backlight;rgb;acer;dell;

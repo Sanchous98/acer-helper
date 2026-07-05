@@ -1,0 +1,16 @@
+# Normalise text line endings on commit. The Linux packaging files below MUST stay LF-only: appimagetool
+# rejects a .desktop with CR ("file contains at least one line ending with a carriage return"), and a shell
+# script (AppRun) with CRLF fails at exec ("#!/bin/sh\r" -> bad interpreter). Without this, a commit from a
+# Windows checkout reintroduces CRLF and breaks the Linux AppImage build.
+* text=auto
+
+# Linux packaging — force LF regardless of platform.
+packaging/AppRun            text eol=lf
+packaging/*.desktop         text eol=lf
+packaging/*.rules           text eol=lf
+packaging/*.conf            text eol=lf
+*.sh                        text eol=lf
+
+# Windows scripts — keep CRLF.
+*.cmd                       text eol=crlf
+*.bat                       text eol=crlf
