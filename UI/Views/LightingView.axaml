@@ -18,6 +18,14 @@
                  Text="{Binding Backlight.LevelName}"/>
     </Grid>
 
+    <!-- The lightbar has no independent software state: the firmware paints it (and the keyboard) with the
+         performance profile's palette on every switch. On (default) = leave it to the firmware, so it shows its
+         per-profile colour seamlessly (no flash) and gets no tab; off = it becomes a normal zone (custom
+         colour/effects) at the cost of that brief palette flash on each profile switch. -->
+    <CheckBox Content="Lightbar follows performance profile"
+              IsChecked="{Binding FollowsProfile, Mode=TwoWay}"
+              IsVisible="{Binding ShowFollowsProfile}"/>
+
     <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
          adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
          content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so

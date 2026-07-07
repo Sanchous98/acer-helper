@@ -140,11 +140,11 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         if (baseP == null) return;
         pp.Set(baseP);                                                // set directly: don't rewrite the slot
 
-        if (slot.Turbo && Settings.TurboToggles)
-        {
-            var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
-            if (turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id)) pp.Set(turbo);
-        }
+        if (!slot.Turbo || !Settings.TurboToggles) return;
+        
+        var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
+        if (turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id)) 
+            pp.Set(turbo);
     }
 
     /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
@@ -341,6 +341,14 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     /// <summary>Persist the lighting state (the lighting view-models mutate <see cref="Settings"/>'s
     /// LightSettings in place, then call this to write them out).</summary>
     public void PersistLighting() => Save();
+
+    /// <summary>Read a vendor-specific device flag from the neutral <see cref="Settings.DeviceSettings"/> bag
+    /// (the key is owned by the backend, e.g. Vendors/Acer). Missing key -> <paramref name="fallback"/>.</summary>
+    public bool GetDeviceFlag(string key, bool fallback)
+        => Settings.DeviceSettings.TryGetValue(key, out var v) ? v == "1" : fallback;
+
+    /// <summary>Set a vendor-specific device flag and persist.</summary>
+    public void SetDeviceFlag(string key, bool on) { Settings.DeviceSettings[key] = on ? "1" : "0"; Save(); }
 
     public void EvaluateClamshell() => device.Clamshell?.Evaluate();
 

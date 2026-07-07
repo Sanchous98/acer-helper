@@ -24,13 +24,15 @@ internal static partial class Watcher
     {
         // one watcher per session
         using var wmutex = new Mutex(true, WatcherMutexName, out bool isNew);
-        if (!isNew) return;
+        Log($"watch start (isNew={isNew}, pid={Environment.ProcessId}, exe={Environment.ProcessPath})");
+        if (!isNew) { Log("another watcher already running -> exit"); return; }
 
         var last = DateTime.MinValue;
 
         // AcerHotkeys creates the HWND_MESSAGE window + RawInput registration on THIS thread; the pump below
         // feeds it. Keep it alive for the whole loop.
         using var keys = new AcerHotkeys();
+        Log("hotkeys created, entering message loop");
         keys.Pressed += action =>
         {
             if (action != HotkeyAction.ToggleWindow) return;   // only the Nitro key concerns the watcher
@@ -39,8 +41,10 @@ internal static partial class Watcher
             if ((now - last).TotalMilliseconds < 600) return;   // debounce (the key can repeat)
             last = now;
 
+            var running = UiRunning();
+            Log($"Nitro pressed. UiRunning={running} -> {(running ? "yield to UI" : "launch UI")}");
             // If the UI is already up, its own hotkey listener toggles the window — don't launch a 2nd instance.
-            if (!UiRunning()) LaunchUi();
+            if (!running) LaunchUi();
         };
 
         // Standard Win32 message pump; exits if the window posts WM_QUIT (it won't, so this runs for the
@@ -50,5 +54,6 @@ internal static partial class Watcher
             TranslateMessage(ref msg);
             DispatchMessageW(ref msg);
         }
+        Log("message loop exited");
     }
 }

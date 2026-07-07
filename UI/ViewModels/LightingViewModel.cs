@@ -12,7 +12,7 @@ namespace AcerHelper.UI.ViewModels;
 /// — no fixed keyboard/lightbar assumptions. Each panel loads its persisted state (keyed by zone name; the
 /// app is the source of truth), re-applies it to the device on startup, and saves changes via
 /// <paramref name="save"/>.</summary>
-public sealed class LightingViewModel
+public sealed partial class LightingViewModel : ObservableObject
 {
     public ObservableCollection<LightViewModel> Panels { get; } = [];
 
@@ -23,32 +23,72 @@ public sealed class LightingViewModel
     public bool HasZones => Panels.Count > 0;
     public bool HasBacklight => Backlight != null;
 
+    // Zones the firmware already paints per performance-profile (the Acer lightbar). While FollowsProfile is on
+    // we build no panel for them and never send them anything, so the firmware's per-profile palette shows
+    // seamlessly (no flash). See docs/lighting-an18-61.md.
+    private readonly IReadOnlyList<RgbZone> _followZones;
+    private readonly Action _save;
+    private readonly Action<bool> _saveFollowsProfile;
+    private Dictionary<string, LightSettings> _lights;   // current performance mode's per-zone state (swapped by Reload)
+
+    /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
+    public bool ShowFollowsProfile => _followZones.Count > 0;
+
+    /// <summary>When on (default), follow-capable zones (the lightbar) are left to the firmware — their
+    /// per-profile palette colour, flash-free — and get no panel. When off they become normal user-controlled
+    /// zones (custom colour/effects), at the cost of a brief palette flash on each profile switch.</summary>
+    [ObservableProperty] private bool _followsProfile;
+
     /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
     /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
     /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.</summary>
     public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights, Action save,
+                             bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null)
     {
-        foreach (var zone in rgb?.Zones ?? [])
-        {
-            if (zone.Effects.Count == 0) continue;
+        _lights = lights;
+        _save = save;
+        _saveFollowsProfile = saveFollowsProfile;
+        _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
 
-            // Per-zone state for the current mode, created on first sight of the zone.
-            if (!lights.TryGetValue(zone.Name, out var state))
-                lights[zone.Name] = state = new LightSettings();
+        var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
+        _followZones = zones.Where(z => z.CanFollowProfile).ToList();
 
-            // Seed brightness from what the firmware currently reports (Fn keys change it out-of-band), so
-            // the slider matches hardware instead of the last persisted value; readBrightness also drives Sync.
-            Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
-                (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
-                zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
-                state, save, zone.ReadBrightness));
-        }
+        // Build a panel per zone — but skip follow-capable zones while syncing (they're left to the firmware).
+        foreach (var zone in zones)
+            if (!(zone.CanFollowProfile && _followsProfile))
+                BuildPanel(zone);
 
         // A non-RGB keyboard backlight: brightness is the ONLY control (an RGB keyboard's brightness is
         // per-zone, so it's shown only when there are no zones).
         if (Panels.Count == 0 && backlight != null && applyBacklight != null)
             Backlight = new BacklightViewModel(backlight, applyBacklight);
+    }
+
+    // Build a panel for one zone, bound to the current mode's per-zone state (created on first sight). Seeds
+    // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness also drives Sync.
+    private void BuildPanel(RgbZone zone)
+    {
+        if (!_lights.TryGetValue(zone.Name, out var state))
+            _lights[zone.Name] = state = new LightSettings();
+        Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
+            (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
+            zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
+            state, _save, zone.ReadBrightness));
+    }
+
+    // Flip the switch live: turning it OFF builds the follow-capable panels (each applies the mode's stored
+    // colour); turning it ON drops them so we stop driving those zones (the firmware repaints them to the
+    // profile palette on the next switch). Persist the choice either way.
+    partial void OnFollowsProfileChanged(bool value)
+    {
+        foreach (var z in _followZones)
+        {
+            var panel = Panels.FirstOrDefault(p => p.Title == z.Name);
+            if (value) { if (panel != null) Panels.Remove(panel); }   // hand the zone back to the firmware palette
+            else if (panel == null) BuildPanel(z);                    // take it over as a user-driven zone
+        }
+        _saveFollowsProfile(value);
     }
 
     /// <summary>Re-read live brightness (each RGB zone's, and the plain backlight's) and reflect it in the
@@ -64,6 +104,7 @@ public sealed class LightingViewModel
     /// performance mode changes, so each mode carries its own lighting).</summary>
     public void Reload(Dictionary<string, LightSettings> lights)
     {
+        _lights = lights;   // keep for BuildPanel when the follow switch is flipped mid-mode
         foreach (var panel in Panels)
         {
             if (!lights.TryGetValue(panel.Title, out var state))
@@ -217,6 +258,12 @@ public sealed partial class LightViewModel : ObservableObject
     private void SyncBrightness(int value)
     {
         value = Math.Clamp(value, 0, 100);
+        // A read-back of 0 while the app is driving a non-zero brightness is spurious: the OPMODE profile-flash
+        // (follows-profile mode) zeroes the EC's keyboard-brightness register even though the keyboard is lit by
+        // the STATIC re-apply — and that register stays 0 until the next firmware switch-flash, incl. across a
+        // follows-profile ON->OFF flip. Ignore it so the slider isn't snapped to 0 (and left stuck there). The
+        // app's stored brightness is authoritative; a genuine Fn-key dim shows up as a non-zero change and syncs.
+        if (value == 0 && Brightness > 0) return;
         if ((int)Brightness == value) return;
         _loading = true;
         Brightness = value;

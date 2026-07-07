@@ -11,8 +11,12 @@ public readonly record struct AccentColor(byte R, byte G, byte B);
 public enum ProfileKind { Quiet, Eco, Balanced, Performance, Turbo, Other }
 
 /// <summary>A performance/platform profile, as the app sees it. <paramref name="Id"/> is an
-/// opaque, stable key the owning backend understands (e.g. an Acer EC byte).</summary>
-public sealed record PerformanceProfile(string Id, string DisplayName, ProfileKind Kind, AccentColor? Accent = null);
+/// opaque, stable key the owning backend understands (e.g. an Acer EC byte). <paramref name="FlashColor"/>
+/// is the fixed colour the firmware paints the "operating mode" indicator (lightbar + keyboard flash) for
+/// this profile — used to reproduce the per-profile lightbar colour when it follows the profile; null if
+/// the backend has no such palette.</summary>
+public sealed record PerformanceProfile(string Id, string DisplayName, ProfileKind Kind,
+                                        AccentColor? Accent = null, AccentColor? FlashColor = null);
 
 /// <summary>Fan behaviour. Values are arbitrary to the app; a backend maps them to its own
 /// encoding. (They coincide with Acer's WMI values, and are persisted in settings.)</summary>

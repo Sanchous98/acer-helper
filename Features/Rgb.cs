@@ -16,11 +16,18 @@ public sealed class RgbZone(
     IReadOnlyList<RgbModeInfo> effects,
     Func<RgbModeInfo, byte, byte, byte, AccentColor, bool> applyEffect,   // (effect, brightness, speed, direction, colour)
     Func<int, byte, AccentColor, bool>? applySubZone = null,
-    Func<int?>? readBrightness = null)
+    Func<int?>? readBrightness = null,
+    bool canFollowProfile = false)
 {
     public string Name => name;
     public int SubZones => subZones;
     public IReadOnlyList<RgbModeInfo> Effects => effects;
+
+    /// <summary>True for a zone the firmware already paints per performance-profile (the Acer lightbar). Such a
+    /// zone can be left entirely to the firmware — showing its per-profile palette colour seamlessly — instead
+    /// of being user-driven; the app exposes a single "follows performance profile" switch for these zones and,
+    /// while it's on, does not build a panel for them or send them anything.</summary>
+    public bool CanFollowProfile => canFollowProfile;
 
     /// <summary>True when the zone exposes per-sub-zone colours (multi-zone + a sub-zone applier).</summary>
     public bool HasSubZones => applySubZone != null && subZones > 1;
@@ -43,6 +50,16 @@ public sealed class RgbZone(
 public interface IRgbDevice
 {
     IReadOnlyList<RgbZone> Zones { get; }
+
+    /// <summary>Paint the device's "operating mode" indicator (a global flash across the lit surfaces) with a
+    /// colour, if any controller supports it. Used to reproduce the per-performance-profile lightbar colour on
+    /// a profile switch (the firmware only accepts its per-profile palette here). Returns false if unsupported.</summary>
+    bool SetProfileFlash(AccentColor color);
+
+    /// <summary>The settings key under which the "follows performance profile" preference for a profile-indicator
+    /// zone is stored, or null if the device has none. The key string is owned by the backend (opaque here), so
+    /// the flag stays vendor-scoped while the app plumbing (LaptopService.GetDeviceFlag) stays generic.</summary>
+    string? ProfileFollowKey { get; }
 }
 
 /// <summary>A hardware RGB transport brick that produces the zones it can drive. One per transport (ENE HID
@@ -51,6 +68,14 @@ public interface IRgbDevice
 public interface IRgbController : IDisposable
 {
     IReadOnlyList<RgbZone> Zones { get; }
+
+    /// <summary>Paint the "operating mode" indicator colour (see <see cref="IRgbDevice.SetProfileFlash"/>).
+    /// Default: unsupported (controllers without a profile indicator don't override this).</summary>
+    bool SetProfileFlash(AccentColor color) => false;
+
+    /// <summary>Settings key for this controller's "follows performance profile" preference (see
+    /// <see cref="IRgbDevice.ProfileFollowKey"/>); null when it has no profile-indicator zone.</summary>
+    string? ProfileFollowKey => null;
 }
 
 /// <summary>Assembles an <see cref="IRgbDevice"/> from one or more controllers by concatenating their zones,
@@ -58,6 +83,15 @@ public interface IRgbController : IDisposable
 public sealed class RgbDevice(params IRgbController[] controllers) : IRgbDevice, IDisposable
 {
     public IReadOnlyList<RgbZone> Zones { get; } = controllers.SelectMany(c => c.Zones).ToList();
+
+    public bool SetProfileFlash(AccentColor color)
+    {
+        var ok = false;
+        foreach (var c in controllers) ok |= c.SetProfileFlash(color);
+        return ok;
+    }
+
+    public string? ProfileFollowKey => controllers.Select(c => c.ProfileFollowKey).FirstOrDefault(k => k != null);
 
     public void Dispose()
     {

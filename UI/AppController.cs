@@ -19,6 +19,7 @@ internal sealed class AppController
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
+    private readonly LightingViewModel? _lighting;     // kept so the re-apply can drive the profile-follow lightbar
     private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
@@ -32,10 +33,34 @@ internal sealed class AppController
         _svc = svc;
 
         var d = _svc.Device;
+
+        // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
+        // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting a
+        // couple of times right after the switch — whichever tick lands after the repaint overrides it and it
+        // then stays. (Only user-driven zones are re-applied; a "follows profile" lightbar has no panel and is
+        // left as the firmware's palette. The palette flash itself is firmware and can't be suppressed.)
+        // Created up front so the follows-profile toggle lambda below can safely start it.
+        _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _lightReapply.Tick += (_, _) =>
+        {
+            ApplyFollowLighting();
+            if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
+        };
+
         // The Lighting window hosts RGB zones AND/OR a plain (non-RGB) keyboard-backlight brightness control,
         // so it opens whenever the device has either.
-        var lighting = d.Lighting != null || d.KeyboardBrightness != null
+        // The "follows performance profile" flag is vendor-scoped: its key is owned by the backend (the Acer
+        // lightbar) and surfaced through the neutral IRgbDevice port, so the app persists it via the generic
+        // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
+        var followKey = d.Lighting?.ProfileFollowKey;
+        _lighting = d.Lighting != null || d.KeyboardBrightness != null
             ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
+                                    followKey != null && _svc.GetDeviceFlag(followKey, true),
+                                    // On flip: persist the flag, then kick the re-apply so the lightbar repaints
+                                    // now (ON -> this profile's palette; OFF -> its custom colour) instead of
+                                    // waiting for the next switch. Safe: _lightReapply is created just above.
+                                    v => { if (followKey != null) _svc.SetDeviceFlag(followKey, v);
+                                           _lightReapplyLeft = 2; _lightReapply.Stop(); _lightReapply.Start(); },
                                     d.KeyboardBrightness, _svc.SetKeyboardBrightness)
             : null;
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
@@ -49,13 +74,17 @@ internal sealed class AppController
             fan0.Mode, fan0.Cpu, fan0.Gpu,
             fan0.CpuUseCurve, fan0.GpuUseCurve, fan0.CpuCurve, fan0.GpuCurve,
             d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
-            lighting);
+            _lighting);
 
         _windows = new FlyoutCoordinator(_vm);
         _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
 
         _svc.ApplyStartupState();
+
+        // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
+        // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch.
+        ApplyFollowLighting();
 
         _tray = new TrayController(d, ApplyProfile, _windows.ToggleMain, _windows.OpenMain, _windows.ShowLighting, ExitApp);
 
@@ -67,18 +96,6 @@ internal sealed class AppController
             d.Hotkeys.Pressed += OnHotkey;
             d.Hotkeys.InputActivity += OnInputActivity;
         }
-
-        // Acer firmware repaints the lightbar with its own per-profile colour when the performance profile
-        // changes — ONCE, a moment AFTER our WMI profile set (confirmed: a manual colour set afterwards
-        // sticks). So a single re-apply races the firmware and can land too early. Instead re-apply the mode's
-        // lighting several times over the next few seconds; whenever the firmware's repaint lands, the next
-        // tick overrides it and it then stays.
-        _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        _lightReapply.Tick += (_, _) =>
-        {
-            _vm.ReloadLighting(_svc.LightsForCurrentMode());
-            if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
-        };
 
         Refresh();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -251,14 +268,17 @@ internal sealed class AppController
             _vm.ReloadLighting(_svc.LightsForCurrentMode());
         }
 
-        // The firmware repaints the lightbar on any HARDWARE profile change — including base<->Turbo, which
-        // shares its base's preset KEY (so the block above wouldn't fire). Trigger the re-apply on the real
-        // profile id so Turbo is covered too.
+        // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block above
+        // won't fire) repaint the lighting. Do it IMMEDIATELY — a following lightbar must show the NEW profile's
+        // palette at once, otherwise the previous colour lingers for a beat and looks like a stray flash of the
+        // old colour (NitroSense flips it the instant the profile changes). Then repeat a couple of times to
+        // catch any late firmware repaint.
         var profileId = current?.Id ?? "";
         if (profileId != _lastProfileId)
         {
             _lastProfileId = profileId;
-            _lightReapplyLeft = 8;                          // ~8×400ms ≈ 3s of re-applies to beat the firmware repaint
+            ApplyFollowLighting();
+            _lightReapplyLeft = 2;
             _lightReapply.Stop(); _lightReapply.Start();
         }
 
@@ -267,6 +287,17 @@ internal sealed class AppController
         _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
         _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live while the Lighting panel is open
         _tray.Update(current, selectable);
+    }
+
+    // Repaint after a profile change/toggle. First paint the new profile's palette on a follow-lightbar (a GLOBAL
+    // write that also flashes the keyboard), then re-apply the per-zone colours so the keyboard settles back to
+    // its own custom colour on top. Called immediately on a switch (so the lightbar flips at once, no lingering
+    // old colour) and repeated by _lightReapply as a safety net against a late firmware repaint.
+    private void ApplyFollowLighting()
+    {
+        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _svc.CurrentProfile()?.FlashColor is { } flash)
+            _svc.Device.Lighting?.SetProfileFlash(flash);
+        _vm.ReloadLighting(_svc.LightsForCurrentMode());
     }
 
     private void ExitApp()

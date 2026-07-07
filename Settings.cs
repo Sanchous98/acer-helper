@@ -26,6 +26,12 @@ public sealed class Settings
     // the controllers are largely write-only and can't report their state — so this is restored on startup
     // and on mode switch.
     public Dictionary<string, LightPreset> LightPresets { get; set; } = new();
+
+    // Vendor-specific device flags, keyed by an opaque string the owning backend defines (e.g. Acer's lightbar
+    // "follows performance profile"). Kept as a neutral bag so Settings stays vendor-agnostic — on different
+    // hardware the unused keys just sit inert. The key + its meaning live in the backend (Vendors/*); access
+    // via LaptopService.GetDeviceFlag / SetDeviceFlag.
+    public Dictionary<string, string> DeviceSettings { get; set; } = new();
 }
 
 /// <summary>One light's persisted state. Colours are packed 0xRRGGBB. <see cref="Configured"/> is
