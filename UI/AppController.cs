@@ -20,6 +20,7 @@ internal sealed class AppController
     private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
     private readonly LightingViewModel? _lighting;     // kept so the re-apply can drive the profile-follow lightbar
+    private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
     private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
@@ -101,6 +102,15 @@ internal sealed class AppController
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
+
+        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake.
+        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLightingOnResume));
+        _resume.Start();
+
+        // Heal a stale run-at-logon entry from an older build (one that launched the full UI instead of the
+        // lightweight --watch watcher, so the Nitro key did nothing when the app was closed). Best-effort, off
+        // the UI thread; only touches the entry if it already points at this exe (see Autostart.EnsureCurrent).
+        _ = Task.Run(() => { try { d.Autostart?.EnsureCurrent(); } catch { /* best-effort */ } });
 
         _windows.OpenMain();
 
@@ -300,10 +310,21 @@ internal sealed class AppController
         _vm.ReloadLighting(_svc.LightsForCurrentMode());
     }
 
+    // Wake from sleep/hibernation clears the EC's RGB, so re-drive the current mode's lighting via the same path
+    // as a profile switch (palette flash for a follow-lightbar + per-zone re-apply). Uses more retries than a
+    // switch because the HID/EC can take a second or two to be ready after a hibernation resume.
+    private void ReapplyLightingOnResume()
+    {
+        ApplyFollowLighting();
+        _lightReapplyLeft = 6;
+        _lightReapply.Stop(); _lightReapply.Start();
+    }
+
     private void ExitApp()
     {
         _timer.Stop();
         _lightReapply.Stop();
+        _resume.Dispose();
         _tray.Dispose();
         _svc.Dispose();
         _desktop.Shutdown();

@@ -121,6 +121,11 @@ Governed by a single vendor-scoped flag, "Lightbar follows performance profile" 
 
 Implementation: `AppController.ApplyFollowLighting` sends `IRgbDevice.SetProfileFlash(profile.FlashColor)` then
 re-applies the per-zone colours, called the instant a profile change is seen (+ a couple of safety re-applies).
+Sleep/hibernate clears the EC's RGB state, so the same re-apply runs on wake too (`ResumeWatcher` →
+`AppController.ReapplyLightingOnResume`; Windows `SystemEvents.PowerModeChanged`/`Resume`, more retries as the
+HID/EC can be slow to wake). The keyboard-brightness read-back (`GetGamingKBBacklight`) is unreliable right
+after an OPMODE flash — it reports 0 while the keyboard is lit — so the UI ignores a 0 read-back while it is
+driving a non-zero brightness (`LightViewModel.SyncBrightness`).
 Colour order on the wire is mode-dependent — **R,G,B** for arbitrary-colour writes (keyboard STATIC, lightbar),
 **B,G,R** for the OPMODE profile-flash whitelist (see the `A4` layout note above). On Linux the identical `A4`
 report goes via

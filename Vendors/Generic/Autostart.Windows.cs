@@ -19,6 +19,20 @@ public sealed partial class Autostart
             ? Run($"/create /tn \"{TaskName}\" /tr \"\\\"{ExePath}\\\" --watch\" /sc onlogon /rl highest /f").exit == 0
             : Run($"/delete /tn \"{TaskName}\" /f").exit == 0;
 
+    // Heal a stale logon task in place: older builds (or the installer) registered the task WITHOUT --watch, so
+    // at logon it launched the full UI instead of the lightweight watcher — meaning the Nitro key did nothing
+    // when the app was closed. IsEnabled() only checks the task exists, so such a task is never refreshed. Here
+    // we re-register it, but ONLY when it already points at THIS exe and is just missing --watch — so running a
+    // different build (e.g. a dev build) can't hijack autostart to its own path.
+    public void EnsureCurrent()
+    {
+        var (exit, output) = Run($"/query /tn \"{TaskName}\" /fo LIST /v");
+        if (exit != 0) return;   // not registered -> user hasn't enabled autostart; don't create it unasked
+        if (output.Contains(ExePath, StringComparison.OrdinalIgnoreCase)
+            && !output.Contains("--watch", StringComparison.OrdinalIgnoreCase))
+            SetEnabled(true);   // same exe, missing --watch -> re-create with the current command (/f overwrites)
+    }
+
     private static (int exit, string output) Run(string args)
     {
         try
