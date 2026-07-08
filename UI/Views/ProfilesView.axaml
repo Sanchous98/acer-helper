@@ -3,9 +3,28 @@
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
              x:Class="AcerHelper.UI.Views.ProfilesView"
              x:DataType="vm:ProfilesViewModel">
+  <UserControl.Styles>
+    <!-- Hidden-but-reserved: the Turbo switch keeps its layout footprint while the "Turbo key toggles Turbo"
+         option is off, so flipping the option never changes the section height (and thus the fixed window's). -->
+    <Style Selector="ToggleSwitch.ghost">
+      <Setter Property="Opacity" Value="0"/>
+      <Setter Property="IsHitTestVisible" Value="False"/>
+      <Setter Property="IsTabStop" Value="False"/>
+    </Style>
+  </UserControl.Styles>
   <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="8">
-      <TextBlock Classes="section" Text="PERFORMANCE"/>
+      <!-- Section header. The Turbo switch ("Turbo key toggles Turbo") lives here, right-aligned, INSTEAD of as
+           a separate row below: its height is always reserved (the .ghost style keeps it laid out but invisible
+           when the option is off), so toggling the option never changes the section — and thus the SizeToContent
+           window's — height. While the option is off, Turbo is instead one of the segment buttons below. -->
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Classes="section" Text="PERFORMANCE" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="Turbo" FontWeight="SemiBold" VerticalAlignment="Center"
+                   Margin="0,0,8,0" IsVisible="{Binding ShowTurboSwitch}"/>
+        <ToggleSwitch Grid.Column="2" VerticalAlignment="Center" Classes.ghost="{Binding !ShowTurboSwitch}"
+                      IsChecked="{Binding TurboOn, Mode=TwoWay}" IsEnabled="{Binding TurboEnabled}"/>
+      </Grid>
       <ItemsControl ItemsSource="{Binding Profiles}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
@@ -18,12 +37,6 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
-
-      <!-- Turbo shown as a switch layered over the selected base profile ("Turbo key toggles Turbo"). -->
-      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowTurboSwitch}" Margin="2,2,2,0">
-        <TextBlock Text="Turbo" FontWeight="SemiBold" VerticalAlignment="Center"/>
-        <ToggleSwitch Grid.Column="1" IsChecked="{Binding TurboOn, Mode=TwoWay}" IsEnabled="{Binding TurboEnabled}"/>
-      </Grid>
     </StackPanel>
   </ExperimentalAcrylicBorder>
 </UserControl>
