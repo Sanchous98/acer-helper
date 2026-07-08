@@ -82,6 +82,15 @@ All 5 render regardless of the current profile; custom colours (magenta/cyan/ora
   firmware; the *timing and which palette colour* are software. So the residual amber flicker during the switch
   transition can be minimised but not fully removed (NitroSense has the same brief transition).
 
+## Effects: which honour a chosen colour
+
+Only **Static** (`A4 21 02`) paints an arbitrary chosen colour. **Breathing** (`A4 04`) and every other animated
+effect **cycle the firmware's own built-in palette and ignore the colour bytes** — there is no single-colour
+breathing on this controller. Verified on AN18-61: mode `0x04` cycles regardless of the colour bytes, regardless
+of byte[5] (`0x01` vs `0x02`), and even after pre-seeding the zone colour with a Static write and then switching
+to Breathing. So in `RgbEffects` only Static is `hasColor:true`; Breathing/Neon/Wave/… are `hasColor:false` (the
+UI shows no colour picker for them).
+
 ## Where the palette lives (BIOS ruled out)
 
 The whitelist is enforced **inside the ENE controller firmware** (the reject/accept happens when the

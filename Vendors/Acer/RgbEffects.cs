@@ -33,11 +33,13 @@ public static class RgbEffects
     private const byte METEOR    = 0x0A;
     private const byte TWINKLING = 0x0B;
 
-    // Keyboard: Static + Breathing honour colour; the rest cycle their own colours.
+    // Keyboard: only Static honours the chosen colour. Breathing and the rest cycle the firmware's own palette
+    // — mode 0x04 ignores the colour bytes (verified on AN18-61: byte[5]=0x01/0x02, and pre-seeding a static
+    // colour then switching, all still cycle), so Breathing is hasColor:false — no colour picker that does nothing.
     public static readonly RgbEffect[] Keyboard =
     [
         new("Static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
-        new("Breathing", BREATHING, isEffect: true,  hasColor: true,  hasSpeed: true),
+        new("Breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
         new("Neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true),
         new("Wave",      WAVE,      isEffect: true,  hasColor: false, hasSpeed: true, hasDirection: true),
         new("Shifting",  SHIFTING,  isEffect: true,  hasColor: false, hasSpeed: true),
@@ -46,11 +48,12 @@ public static class RgbEffects
         new("Twinkling", TWINKLING, isEffect: true,  hasColor: false, hasSpeed: true)
     ];
 
-    // Lightbar (single zone): Static + Breathing honour colour, Neon cycles. Spatial effects do nothing.
+    // Lightbar (single zone): only Static honours the chosen colour. Breathing (mode 0x04, see Keyboard) and
+    // Neon cycle the built-in palette. Spatial effects do nothing.
     public static readonly RgbEffect[] Lightbar =
     [
         new("Static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
-        new("Breathing", BREATHING, isEffect: true,  hasColor: true,  hasSpeed: true),
+        new("Breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
         new("Neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true)
     ];
 }
