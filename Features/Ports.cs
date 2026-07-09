@@ -151,10 +151,9 @@ public interface IAutostart
     bool IsEnabled();
     bool SetEnabled(bool enable);
 
-    /// <summary>Re-register the run-at-logon entry if it exists but is out of date (e.g. an older build's launch
-    /// command — before the lightweight <c>--watch</c> watcher — so the Nitro key did nothing while the app was
-    /// closed). No-op if autostart isn't enabled or the entry is already current. Called at startup so an
-    /// in-place upgrade heals its own stale entry.</summary>
+    /// <summary>Re-register the run-at-logon entry if it exists but is out of date (an older build's launch
+    /// command), so an in-place upgrade migrates to the current definition. No-op if autostart isn't enabled or
+    /// the entry is already current. Called at startup.</summary>
     void EnsureCurrent() { }
 }
 

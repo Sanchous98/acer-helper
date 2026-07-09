@@ -5,19 +5,15 @@ namespace AcerHelper;
 
 internal static class Program
 {
+    // Single-instance guard: only one live app at a time. Autostart relaunches the app periodically (Task
+    // Scheduler is its watchdog) and a manual launch can race a self-update restart — both must no-op while a
+    // live instance holds this.
+    private const string SingleInstanceMutex = "AcerHelper_SingleInstance_8F1C";
+
     [STAThread]
     public static void Main(string[] args)
     {
-        // Lightweight background mode: just listen for the Nitro key and launch the full UI on demand,
-        // without loading Avalonia. Started at logon by the autostart task. Runs its own loop and returns.
-        if (Array.IndexOf(args, "--watch") >= 0)
-        {
-            Watcher.Run();
-            return;
-        }
-
-        // single instance (the watcher checks this same name to know if the UI is already up)
-        using var mutex = new Mutex(true, Watcher.UiMutexName, out bool isNew);
+        using var mutex = new Mutex(true, SingleInstanceMutex, out bool isNew);
         if (!isNew)
         {
             // Another instance holds the lock. This also happens for a moment during a self-update RESTART:

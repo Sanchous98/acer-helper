@@ -28,12 +28,17 @@ internal sealed class AppController
     private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
 
-    public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc)
+    public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
     {
         _desktop = desktop;
         _svc = svc;
 
         var d = _svc.Device;
+
+        // Re-apply persisted device state (clamshell keep-awake, blue-light tint) NOW, before the option
+        // view-models below read it — otherwise the "Stay awake when lid closed" toggle captures the pre-startup
+        // default (off) and shows off after every restart even though the setting is persisted (Settings.Clamshell).
+        _svc.ApplyStartupState();
 
         // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
         // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting a
@@ -81,8 +86,6 @@ internal sealed class AppController
         _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
 
-        _svc.ApplyStartupState();
-
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch.
         ApplyFollowLighting();
@@ -107,12 +110,15 @@ internal sealed class AppController
         _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLightingOnResume));
         _resume.Start();
 
-        // Heal a stale run-at-logon entry from an older build (one that launched the full UI instead of the
-        // lightweight --watch watcher, so the Nitro key did nothing when the app was closed). Best-effort, off
-        // the UI thread; only touches the entry if it already points at this exe (see Autostart.EnsureCurrent).
+        // Heal a stale run-at-logon entry from an older build (wrong launch command) so an in-place upgrade
+        // migrates to the current definition. Best-effort, off the UI thread; only touches the entry if it
+        // points at this exe (see Autostart.EnsureCurrent). The task itself is the watchdog (it relaunches us if
+        // killed), so there's no separate watcher process to keep alive.
         _ = Task.Run(() => { try { d.Autostart?.EnsureCurrent(); } catch { /* best-effort */ } });
 
-        _windows.OpenMain();
+        // Autostart (--startup) runs us resident in the tray — don't pop the flyout on every logon. The window is
+        // still created (shown lazily) and opens on demand via the tray icon or the Nitro key.
+        if (!startMinimized) _windows.OpenMain();
 
         _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
 

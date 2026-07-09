@@ -24,7 +24,7 @@ public sealed partial class Autostart
                     "[Desktop Entry]\n" +
                     "Type=Application\n" +
                     "Name=Acer Helper\n" +
-                    $"Exec=\"{ExePath}\"\n" +
+                    $"Exec=\"{ExePath}\" {AppArgs.Startup}\n" +
                     "Terminal=false\n" +
                     // Tray app with only a skip-taskbar flyout: without this the login launch-feedback lingers
                     // as a stray taskbar icon (never cleared by a normal window mapping). See acer-helper.desktop.
