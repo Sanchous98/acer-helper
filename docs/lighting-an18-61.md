@@ -131,7 +131,7 @@ Governed by a single vendor-scoped flag, "Lightbar follows performance profile" 
 Implementation: `AppController.ApplyFollowLighting` sends `IRgbDevice.SetProfileFlash(profile.FlashColor)` then
 re-applies the per-zone colours, called the instant a profile change is seen (+ a couple of safety re-applies).
 Sleep/hibernate clears the EC's RGB state, so the same re-apply runs on wake too (`ResumeWatcher` →
-`AppController.ReapplyLightingOnResume`; Windows `SystemEvents.PowerModeChanged`/`Resume`, more retries as the
+`AppController.ReapplyLighting`; Windows `SystemEvents.PowerModeChanged`/`Resume`, more retries as the
 HID/EC can be slow to wake). The keyboard-brightness read-back (`GetGamingKBBacklight`) is unreliable right
 after an OPMODE flash — it reports 0 while the keyboard is lit — so the UI ignores a 0 read-back while it is
 driving a non-zero brightness (`LightViewModel.SyncBrightness`).
@@ -139,3 +139,18 @@ Colour order on the wire is mode-dependent — **R,G,B** for arbitrary-colour wr
 **B,G,R** for the OPMODE profile-flash whitelist (see the `A4` layout note above). On Linux the identical `A4`
 report goes via
 `ioctl(HIDIOCSFEATURE)` / write to `/dev/hidrawN` for the `enek5130` device — no Acer services needed.
+
+## Clamshell keep-awake: blank the backlight while the lid is shut
+
+When "Stay awake when lid closed" (clamshell) is enabled the machine stays on with the lid shut, but the
+keyboard/lightbar are then hidden — pointless light + heat. So while clamshell is enabled the app blanks the
+backlight on lid-close and restores it on lid-open. `LidWatcher` (Windows: a hidden top-level window +
+`RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE)`; a message-only `HWND_MESSAGE` window does **not**
+receive `WM_POWERBROADCAST`, hence a real window) raises open/closed; `AppController.OnLidChanged` (gated on
+`Clamshell.Enabled`) calls `IRgbDevice.Blank()` on close and `ReapplyLighting()` on open. `Blank()` darkens the
+keyboard with a STATIC write at brightness 0 (the STATIC path honours the brightness byte — unlike the OPMODE
+flash, which merely zeroes the WMI read-back register while the keyboard stays lit) and the lightbar with a black
+STATIC colour (`A4 65`, since the lightbar ignores the brightness byte). It writes hardware only — the stored
+per-zone state is untouched, so lid-open restores the exact previous look. When clamshell is off a lid-close just
+sleeps the machine, so the lid handler no-ops and the normal resume re-apply handles the wake. Linux is a no-op
+(clamshell keep-awake itself is unsupported there — see `Clamshell.Linux.cs`).

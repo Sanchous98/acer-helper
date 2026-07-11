@@ -21,12 +21,14 @@ internal sealed class AppController
     private int _lightReapplyLeft;                     // remaining re-apply ticks
     private readonly LightingViewModel? _lighting;     // kept so the re-apply can drive the profile-follow lightbar
     private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
+    private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
     private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
+    private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
     {
@@ -107,8 +109,15 @@ internal sealed class AppController
         _timer.Start();
 
         // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake.
-        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLightingOnResume));
+        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLighting));
         _resume.Start();
+
+        // In clamshell (keep-awake) mode the machine stays on with the lid shut, but the backlight is then hidden —
+        // so blank it while the lid is closed and restore it on open. Gated on clamshell being enabled (see
+        // OnLidChanged): without it a lid-close just sleeps the machine and the backlight is moot (restored by the
+        // resume re-apply above). The watcher fires on its message thread, so marshal to the UI thread here.
+        _lid = new LidWatcher(open => Dispatcher.UIThread.Post(() => OnLidChanged(open)));
+        _lid.Start();
 
         // Heal a stale run-at-logon entry from an older build (wrong launch command) so an in-place upgrade
         // migrates to the current definition. Best-effort, off the UI thread; only touches the entry if it
@@ -281,7 +290,8 @@ internal sealed class AppController
             _lastModeKey = modeKey;
             if (_svc.ApplyModeFan() is { } fan)
                 _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu, fan.CpuUseCurve, fan.GpuUseCurve, fan.CpuCurve, fan.GpuCurve);
-            _vm.ReloadLighting(_svc.LightsForCurrentMode());
+            if (BacklightHidden) _svc.Device.Lighting?.Blank();   // don't light a hidden keyboard on a mode change under a shut lid
+            else _vm.ReloadLighting(_svc.LightsForCurrentMode());
         }
 
         // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block above
@@ -311,26 +321,46 @@ internal sealed class AppController
     // old colour) and repeated by _lightReapply as a safety net against a late firmware repaint.
     private void ApplyFollowLighting()
     {
+        if (BacklightHidden) { _svc.Device.Lighting?.Blank(); return; }   // lid shut in clamshell mode -> keep it dark
         if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _svc.CurrentProfile()?.FlashColor is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
         _vm.ReloadLighting(_svc.LightsForCurrentMode());
     }
 
-    // Wake from sleep/hibernation clears the EC's RGB, so re-drive the current mode's lighting via the same path
-    // as a profile switch (palette flash for a follow-lightbar + per-zone re-apply). Uses more retries than a
-    // switch because the HID/EC can take a second or two to be ready after a hibernation resume.
-    private void ReapplyLightingOnResume()
+    // Re-drive the current mode's lighting via the same path as a profile switch (palette flash for a follow-
+    // lightbar + per-zone re-apply). Used on wake from sleep/hibernation (the firmware drops the EC's RGB) and on
+    // lid-open in clamshell mode (we blanked it on lid-close). Uses more retries than a switch because the HID/EC
+    // can take a second or two to be ready after a hibernation resume.
+    private void ReapplyLighting()
     {
         ApplyFollowLighting();
         _lightReapplyLeft = 6;
         _lightReapply.Stop(); _lightReapply.Start();
     }
 
+    // Lid opened/closed while clamshell keep-awake is enabled: shut -> blank the (now hidden) backlight without
+    // touching the app's stored per-zone state; opened -> restore the current mode's lighting. Ignored when
+    // clamshell is off — a lid-close then sleeps the machine, and the backlight is re-applied on resume instead.
+    // Posted to the UI thread by the lid watcher, so all HID writes stay serialized with the rest of the app.
+    private void OnLidChanged(bool open)
+    {
+        _lidShut = !open;   // remembered so a repaint (profile/mode/power change) under a shut lid re-blanks (see BacklightHidden)
+        if (_svc.Device.Clamshell?.Enabled != true) return;
+        if (open) ReapplyLighting();
+        else _svc.Device.Lighting?.Blank();
+    }
+
+    // True while the backlight must stay dark: the lid is shut AND clamshell keep-awake is on, so the machine runs
+    // with a hidden keyboard/lightbar. Every repaint path checks this, so a profile/mode/power-source change under
+    // a closed lid re-blanks instead of lighting the (hidden) keyboard back up until the lid is next opened.
+    private bool BacklightHidden => _lidShut && _svc.Device.Clamshell?.Enabled == true;
+
     private void ExitApp()
     {
         _timer.Stop();
         _lightReapply.Stop();
         _resume.Dispose();
+        _lid.Dispose();
         _tray.Dispose();
         _svc.Dispose();
         _desktop.Shutdown();

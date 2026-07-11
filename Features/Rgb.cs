@@ -56,6 +56,12 @@ public interface IRgbDevice
     /// a profile switch (the firmware only accepts its per-profile palette here). Returns false if unsupported.</summary>
     bool SetProfileFlash(AccentColor color);
 
+    /// <summary>Turn every controllable zone off (brightness 0). Used to blank a backlight that's hidden — e.g.
+    /// the lid is shut but the machine stays awake in clamshell (keep-awake) mode — without disturbing the app's
+    /// stored per-zone state; restore by re-applying the current mode's lighting. Returns false if no controller
+    /// supports it.</summary>
+    bool Blank();
+
     /// <summary>The settings key under which the "follows performance profile" preference for a profile-indicator
     /// zone is stored, or null if the device has none. The key string is owned by the backend (opaque here), so
     /// the flag stays vendor-scoped while the app plumbing (LaptopService.GetDeviceFlag) stays generic.</summary>
@@ -73,6 +79,10 @@ public interface IRgbController : IDisposable
     /// Default: unsupported (controllers without a profile indicator don't override this).</summary>
     bool SetProfileFlash(AccentColor color) => false;
 
+    /// <summary>Turn every zone this controller drives off (see <see cref="IRgbDevice.Blank"/>). Default:
+    /// unsupported (no-op) — controllers that can blank their zones override this.</summary>
+    bool Blank() => false;
+
     /// <summary>Settings key for this controller's "follows performance profile" preference (see
     /// <see cref="IRgbDevice.ProfileFollowKey"/>); null when it has no profile-indicator zone.</summary>
     string? ProfileFollowKey => null;
@@ -86,9 +96,12 @@ public sealed class RgbDevice(params IRgbController[] controllers) : IRgbDevice,
 
     public bool SetProfileFlash(AccentColor color)
     {
-        var ok = false;
-        foreach (var c in controllers) ok |= c.SetProfileFlash(color);
-        return ok;
+        return controllers.Aggregate(false, (current, c) => current | c.SetProfileFlash(color));
+    }
+
+    public bool Blank()
+    {
+        return controllers.Aggregate(false, (current, c) => current | c.Blank());
     }
 
     public string? ProfileFollowKey => controllers.Select(c => c.ProfileFollowKey).FirstOrDefault(k => k != null);

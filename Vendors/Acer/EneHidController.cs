@@ -67,6 +67,20 @@ internal sealed partial class EneHidController : IRgbController
     public bool SetProfileFlash(AccentColor color)
         => SetFeature([ReportId, TgtKeyboard, OpMode, 0x00, 0x00, FlagEffect, color.B, color.G, color.R, KbAllZones, 0x00]);
 
+    // Turn every zone off — blanks the backlight while it's hidden under a shut lid in clamshell (keep-awake)
+    // mode; the app restores it by re-applying the current mode's lighting on lid-open. The keyboard honours the
+    // brightness byte, so a STATIC write at brightness 0 darkens it; the lightbar ignores that byte (see
+    // ApplyLightbar), so it's darkened with a black STATIC colour instead. A follows-profile lightbar (no panel)
+    // is included too — its palette is repainted from the profile flash on the restore. Doesn't touch stored state.
+    public bool Blank()
+    {
+        var off = new AccentColor(0, 0, 0);
+        var ok = Send(TgtKeyboard, RgbEffects.StaticModeByte, isEffect: false, brightness: 0, speed: 0, FlagStatic, off, KbAllZones);
+        if (_zones.Any(z => z.CanFollowProfile))   // model has a lightbar
+            ok |= Send(TgtLightbar, RgbEffects.StaticModeByte, isEffect: false, FullBright, speed: 0, FlagStatic, off, LbAllZones);
+        return ok;
+    }
+
     private bool ApplyLightbar(RgbModeInfo effect, byte brightness, byte speed, byte direction, AccentColor color)
     {
         var e = (RgbEffect)effect.Handle;
