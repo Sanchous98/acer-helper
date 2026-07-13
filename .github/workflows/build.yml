@@ -33,7 +33,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)').Groups[1].Value
+          # Anchor on </Version> so we match ONLY the real element, not the literal "<Version>" that appears in
+          # this file's own explanatory comments.
+          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
           $tag = '${{ github.ref_name }}'.TrimStart('v')
           if ($ver -ne $tag) { throw "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging." }
           Write-Host "OK: tag matches <Version> = $ver"
@@ -72,7 +74,8 @@ jobs:
         run: |
           Remove-Item publish\*.pdb -ErrorAction SilentlyContinue
           dotnet tool install --global wix --version 5.0.2
-          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)').Groups[1].Value
+          # Anchor on </Version> so a "<Version>" mention in a csproj comment can't be picked up instead.
+          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
           # Absolute PublishDir: WiX resolves a relative <Files Include> against the .wxs folder (packaging\),
           # not the repo root, so a bare "publish" harvested nothing -> an empty ~32 KB MSI.
           wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d "PublishDir=$PWD\publish" -o AcerHelper-Setup.msi
@@ -104,7 +107,9 @@ jobs:
       - name: Verify tag matches csproj <Version>
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          ver=$(grep -oP '<Version>\K[^<]+' AcerHelper.csproj)
+          # Anchor on </Version> (lookahead) so we match ONLY the real element, not the literal "<Version>" that
+          # appears in this file's own explanatory comments — grep -o would otherwise emit every occurrence.
+          ver=$(grep -oP '<Version>\K[^<]+(?=</Version>)' AcerHelper.csproj | head -1)
           tag="${GITHUB_REF_NAME#v}"
           if [ "$ver" != "$tag" ]; then echo "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging."; exit 1; fi
           echo "OK: tag matches <Version> = $ver"
