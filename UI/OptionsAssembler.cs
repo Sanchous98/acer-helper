@@ -1,4 +1,5 @@
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Threading;
 
 namespace AcerHelper.UI;
@@ -17,14 +18,14 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         // LCD overdrive's write (SetGamingProfile) returns a status byte, so it self-confirms — no readback
         // (a second EC transaction the user hears as a second "click").
         if (d.LcdOverdrive is { } lcd)
-            list.Add(new OptionToggle("LCD overdrive", true, lcd.Get(),
+            list.Add(new OptionToggle(Loc.T("LCD overdrive"), true, lcd.Get(),
                 v => RunSet(() => svc.SetLcdOverdrive(v), "LCD overdrive")));
         // Keyboard-backlight timeout uses SetFunction, which returns nothing about the result -> read back.
         if (d.KeyboardBacklight is { } kbd)
-            list.Add(new OptionToggle("Keyboard backlight timeout", true, kbd.GetTimeout(),
+            list.Add(new OptionToggle(Loc.T("Keyboard backlight timeout"), true, kbd.GetTimeout(),
                 v => RunSet(() => svc.SetBacklightTimeout(v), "Backlight timeout"), Read: kbd.GetTimeout));
         if (d.FnLock is { } fn)
-            list.Add(new OptionToggle("Fn lock", true, fn.Get(),
+            list.Add(new OptionToggle(Loc.T("Fn lock"), true, fn.Get(),
                 v => RunSet(() => svc.SetFnLock(v), "Fn lock"), Read: fn.Get));
         return list;
     }
@@ -37,8 +38,8 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.UsbCharging is { } usb)
         {
             var levels = usb.Levels;
-            var names = levels.Select(l => l.DisplayName).ToList();
-            list.Add(new OptionChoice("USB charging when off:", true, names, IndexOf(levels, usb.Get()),
+            var names = levels.Select(l => Loc.T(l.DisplayName)).ToList();
+            list.Add(new OptionChoice(Loc.T("USB charging when off:"), true, names, IndexOf(levels, usb.Get()),
                 i => RunSet(() => svc.SetUsbCharging(levels[i].Id), "USB charging"),
                 Read: () => IndexOf(levels, usb.Get())));
         }
@@ -50,8 +51,8 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.KeyboardBacklightTimeout is { } to)
         {
             var opts = to.Options;
-            var names = opts.Select(o => o.DisplayName).ToList();
-            list.Add(new OptionChoice("Keyboard backlight timeout:", true, names, IndexOf(opts, to.Get()),
+            var names = opts.Select(o => Loc.T(o.DisplayName)).ToList();
+            list.Add(new OptionChoice(Loc.T("Keyboard backlight timeout:"), true, names, IndexOf(opts, to.Get()),
                 i => RunSet(() => svc.SetKeyboardTimeout(opts[i].Id), "Backlight timeout"),
                 Read: () => IndexOf(opts, to.Get())));
         }
@@ -59,9 +60,9 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.DisplayTint is { } tint && tint.Levels > 0)
         {
             string[] all = ["Off", "Low", "Medium", "High", "Long-use"];
-            var names = all.Take(tint.Levels).ToList();
+            var names = all.Take(tint.Levels).Select(n => Loc.T(n)).ToList();
             int idx = Math.Clamp(svc.Settings.Bluelight, 0, names.Count - 1);
-            list.Add(new OptionChoice("Blue-light filter:", true, names, idx,
+            list.Add(new OptionChoice(Loc.T("Blue-light filter:"), true, names, idx,
                 i => svc.SetBlueLight(i)));
         }
 
@@ -75,22 +76,22 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     {
         if (svc.Device.BatteryChargeMode is not { } mode) return null;
         var modes = mode.Modes;
-        var names = modes.Select(m => m.DisplayName).ToList();
-        return new OptionChoice("Charge mode", true, names, IndexOf(modes, mode.Get()),
+        var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
+        return new OptionChoice(Loc.T("Charge mode"), true, names, IndexOf(modes, mode.Get()),
             i => RunSet(() => svc.SetBatteryChargeMode(modes[i].Id), "Charge mode"),
             Read: () => IndexOf(modes, mode.Get()));
     }
 
     public OptionToggle? BatteryLimit()
         => svc.Device.BatteryChargeLimit is { } limit
-            ? new OptionToggle("Charge limit (~80%)", true, limit.Get(),
+            ? new OptionToggle(Loc.T("Charge limit (~80%)"), true, limit.Get(),
                 v => RunSet(() => svc.SetBatteryLimit(v), "Battery limit"), Read: limit.Get)
             : null;
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
     public OptionToggle? BatteryCalibration()
         => svc.Device.BatteryCalibration is { } cal
-            ? new OptionToggle("Calibration (full cycle)", true, cal.Get(),
+            ? new OptionToggle(Loc.T("Calibration (full cycle)"), true, cal.Get(),
                 v => RunSet(() => svc.SetBatteryCalibration(v), "Battery calibration"),
                 Read: cal.Get, ConfirmAsync: confirmCalibration)
             : null;
@@ -106,7 +107,8 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         catch { ok = false; }
         if (ok) return;
         var e = svc.LastError;
-        Dispatcher.UIThread.Post(() => notify($"{what} failed{(e != null ? $": {e}" : "")}"));
+        // `what` is the English control name; localize both it and the "… failed" template.
+        Dispatcher.UIThread.Post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (e != null ? $": {e}" : "")));
     }
 
     private static int IndexOf(IReadOnlyList<ChoiceOption> list, string? id)

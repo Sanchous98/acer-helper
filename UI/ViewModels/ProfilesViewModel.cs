@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -88,7 +89,7 @@ public sealed partial class ProfileButtonViewModel : ObservableObject
     {
         _profile = profile;
         _onApply = onApply;
-        Name = profile.DisplayName;
+        Name = Loc.T(profile.DisplayName);
         // Each mode's signature colour (from the domain model) fills the segment when it's selected, so the
         // active mode reads at a glance — Eco teal / Quiet blue / Balanced green / Performance orange /
         // Turbo red. Unknown profiles fall back to neutral grey.

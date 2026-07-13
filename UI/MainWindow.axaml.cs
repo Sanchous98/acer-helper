@@ -17,6 +17,8 @@ public partial class MainWindow : Window
 {
     public bool IsOpen { get; private set; }
 
+    private bool _destroying;   // set by Destroy() so the Closing handler lets a real close through (see below)
+
     /// <summary>Set just before we programmatically open another of our windows (the calibration dialog)
     /// so the focus change isn't treated as a click "outside". One-shot.</summary>
     public bool SuppressDismiss { get; set; }
@@ -28,7 +30,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        Closing += (_, e) => { e.Cancel = true; CloseFlyout(); };   // hide, never destroy
+        Closing += (_, e) => { if (_destroying) return; e.Cancel = true; CloseFlyout(); };   // hide, never destroy (unless torn down for a rebuild)
 
         // The window is SizeToContent, so switching to a taller page (e.g. the fan Curve editor) grows it.
         // It's anchored by its top-left, so growth would push the bottom off-screen — re-anchor on every size
@@ -70,6 +72,15 @@ public partial class MainWindow : Window
         IsOpen = false;
         StopOutsideWatch();
         Hide();                  // hide instantly (no fade-out)
+    }
+
+    /// <summary>Really close and dispose the window (bypassing the hide-on-close behaviour), unhooking the
+    /// low-level mouse hook first. Used when the app rebuilds its UI for a live language switch.</summary>
+    public void Destroy()
+    {
+        CloseFlyout();           // hide + unhook the outside-click mouse hook
+        _destroying = true;      // let the Closing handler perform a real close this time
+        Close();
     }
 
     private void Reanchor()

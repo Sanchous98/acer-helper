@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -94,10 +95,10 @@ public sealed partial class FansViewModel : SectionViewModel
     partial void OnGpuUseCurveChanged(bool value) { if (!_loading) PersistCurve(true); }
 
     [RelayCommand] private async Task OpenCpuCurve()
-        => await _showCurve(new FanCurveDialogViewModel("CPU fan curve", CpuCurve, CpuUseCurve, u => CpuUseCurve = u));
+        => await _showCurve(new FanCurveDialogViewModel(Loc.T("CPU fan curve"), CpuCurve, CpuUseCurve, u => CpuUseCurve = u));
 
     [RelayCommand] private async Task OpenGpuCurve()
-        => await _showCurve(new FanCurveDialogViewModel("GPU fan curve", GpuCurve, GpuUseCurve, u => GpuUseCurve = u));
+        => await _showCurve(new FanCurveDialogViewModel(Loc.T("GPU fan curve"), GpuCurve, GpuUseCurve, u => GpuUseCurve = u));
 
     /// <summary>Reflect a mode's saved fan preset without triggering apply/persist (the service already set
     /// the hardware on the mode switch). The <c>_loading</c> guard neuters the hooks.</summary>

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using AcerHelper.UI.ViewModels;
@@ -13,13 +14,15 @@ internal sealed class AppController
 {
     private readonly IClassicDesktopStyleApplicationLifetime _desktop;
     private readonly LaptopService _svc;
-    private readonly MainViewModel _vm;
-    private readonly FlyoutCoordinator _windows;
-    private readonly TrayController _tray;
+    // The string-baked UI (view-models, flyout window, tray). Not readonly: a live language switch rebuilds all
+    // three from scratch in the new language (see RebuildForLanguage) — everything below this stays put.
+    private MainViewModel _vm;
+    private FlyoutCoordinator _windows;
+    private TrayController _tray;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
-    private readonly LightingViewModel? _lighting;     // kept so the re-apply can drive the profile-follow lightbar
+    private LightingViewModel? _lighting;              // kept so the re-apply can drive the profile-follow lightbar
     private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private readonly UpdateChecker _updates = new();
@@ -29,6 +32,7 @@ internal sealed class AppController
     private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
+    private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
     {
@@ -55,36 +59,10 @@ internal sealed class AppController
             if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
         };
 
-        // The Lighting window hosts RGB zones AND/OR a plain (non-RGB) keyboard-backlight brightness control,
-        // so it opens whenever the device has either.
-        // The "follows performance profile" flag is vendor-scoped: its key is owned by the backend (the Acer
-        // lightbar) and surfaced through the neutral IRgbDevice port, so the app persists it via the generic
-        // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
-        var followKey = d.Lighting?.ProfileFollowKey;
-        _lighting = d.Lighting != null || d.KeyboardBrightness != null
-            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
-                                    followKey != null && _svc.GetDeviceFlag(followKey, true),
-                                    // On flip: persist the flag, then kick the re-apply so the lightbar repaints
-                                    // now (ON -> this profile's palette; OFF -> its custom colour) instead of
-                                    // waiting for the next switch. Safe: _lightReapply is created just above.
-                                    v => { if (followKey != null) _svc.SetDeviceFlag(followKey, v);
-                                           _lightReapplyLeft = 2; _lightReapply.Stop(); _lightReapply.Start(); },
-                                    d.KeyboardBrightness, _svc.SetKeyboardBrightness)
-            : null;
-        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
-        var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
-        _vm = new MainViewModel(d, new UiActions(
-            ApplyProfile, SetTurbo, SetFan, SetFanCurve, ShowFanCurve,
-            opts.Toggles(), opts.Choices(),
-            () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
-            _svc.Settings.TurboToggles, SetTurboToggles,
-            () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
-            fan0.Mode, fan0.Cpu, fan0.Gpu,
-            fan0.CpuUseCurve, fan0.GpuUseCurve, fan0.CpuCurve, fan0.GpuCurve,
-            d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
-            _lighting);
-
-        _windows = new FlyoutCoordinator(_vm);
+        // Build the string-baked UI (view-models, flyout window, tray). It reads all its text via Loc at
+        // construction, so a live language switch simply tears this down and rebuilds it in the new language
+        // (RebuildForLanguage). Everything set up AFTER this point holds no localized text and survives the swap.
+        (_vm, _windows, _tray, _lighting) = BuildUi();
         _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
 
@@ -92,7 +70,8 @@ internal sealed class AppController
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch.
         ApplyFollowLighting();
 
-        _tray = new TrayController(d, ApplyProfile, _windows.ToggleMain, _windows.OpenMain, _windows.ShowLighting, ExitApp);
+        // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
+        ApplyHardwareAccessBanner();
 
         // Real-time keyboard-brightness sync: the Fn brightness key raises raw input, so instead of polling we
         // re-read on that input, while the Lighting panel is visible. The read is off-thread and self-
@@ -130,8 +109,97 @@ internal sealed class AppController
         if (!startMinimized) _windows.OpenMain();
 
         _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
+    }
 
-        // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
+    // Assemble the localized UI: the lighting view-model, the dashboard view-model (with its UiActions), the
+    // flyout window and the tray. Returns them for the caller to store — kept side-effect-free (no field writes
+    // beyond what the closures capture) so it can run both at startup and on a live language rebuild.
+    private (MainViewModel, FlyoutCoordinator, TrayController, LightingViewModel?) BuildUi()
+    {
+        var d = _svc.Device;
+
+        // The Lighting window hosts RGB zones AND/OR a plain (non-RGB) keyboard-backlight brightness control,
+        // so it opens whenever the device has either.
+        // The "follows performance profile" flag is vendor-scoped: its key is owned by the backend (the Acer
+        // lightbar) and surfaced through the neutral IRgbDevice port, so the app persists it via the generic
+        // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
+        var followKey = d.Lighting?.ProfileFollowKey;
+        var lighting = d.Lighting != null || d.KeyboardBrightness != null
+            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
+                                    followKey != null && _svc.GetDeviceFlag(followKey, true),
+                                    // On flip: persist the flag, then kick the re-apply so the lightbar repaints
+                                    // now (ON -> this profile's palette; OFF -> its custom colour) instead of
+                                    // waiting for the next switch. Safe: _lightReapply is created before BuildUi.
+                                    v => { if (followKey != null) _svc.SetDeviceFlag(followKey, v);
+                                           _lightReapplyLeft = 2; _lightReapply.Stop(); _lightReapply.Start(); },
+                                    d.KeyboardBrightness, _svc.SetKeyboardBrightness)
+            : null;
+        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
+        var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
+        var vm = new MainViewModel(d, new UiActions(
+            ApplyProfile, SetTurbo, SetFan, SetFanCurve, ShowFanCurve,
+            opts.Toggles(), opts.Choices(),
+            () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
+            _svc.Settings.TurboToggles, SetTurboToggles,
+            () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
+            fan0.Mode, fan0.Cpu, fan0.Gpu,
+            fan0.CpuUseCurve, fan0.GpuUseCurve, fan0.CpuCurve, fan0.GpuCurve,
+            d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode(),
+            _svc.Settings.Language, SetLanguage),
+            lighting);
+
+        var windows = new FlyoutCoordinator(vm);
+        var tray = new TrayController(d, ApplyProfile, windows.ToggleMain, windows.OpenMain, windows.ShowLighting, ExitApp);
+        return (vm, windows, tray, lighting);
+    }
+
+    // ---- live language switch ----
+
+    // The user picked a language in Options. Persist it and rebuild the UI in that language. Deferred to the
+    // next UI-thread turn: we're inside the language dropdown's own change handler, on the very window we're
+    // about to tear down, so let this event unwind first.
+    private void SetLanguage(AppLanguage language)
+    {
+        if (language == _svc.Settings.Language) return;
+        _svc.SetLanguage(language);
+        Dispatcher.UIThread.Post(RebuildForLanguage);
+    }
+
+    // Swap the whole string-baked UI for a fresh copy in the newly-selected language. The service, timers, lid/
+    // resume watchers and the hotkey subscription persist untouched — they carry no localized text and keep
+    // running across the swap (they read _vm/_windows/_tray/_lighting via fields, so they pick up the new ones).
+    private void RebuildForLanguage()
+    {
+        var wasOpen = _windows.IsMainOpen;
+
+        _tray.Dispose();       // remove the old tray icon
+        _windows.Dispose();    // close + unhook the old flyout window for good
+
+        Loc.Use(_svc.Settings.Language);
+        (_vm, _windows, _tray, _lighting) = BuildUi();
+        _lastModeKey = _svc.CurrentModeKey();     // freshly seeded VMs; don't let Refresh re-trigger a mode reload
+        _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
+        ApplyFollowLighting();
+        ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
+        ApplyHardwareAccessBanner();
+        Refresh();                                 // push live state into the fresh view-models + tray
+
+        // Reopen where the language switch lives so the change is immediately visible (only if it was open — the
+        // switch is only reachable from the Options drawer, so in practice it always was).
+        if (wasOpen) { _windows.OpenMain(); _vm.OpenOptionsCommand.Execute(null); }
+    }
+
+    // Re-show the "update available" banner + tray item from the remembered check result (used after a UI
+    // rebuild, and by the initial check when it completes). No-op until an update has been found.
+    private void ApplyUpdateBanner()
+    {
+        if (_pendingUpdate is not { } u) return;
+        _vm.SetUpdate(u.version, u.act);
+        _tray.SetUpdate(Loc.T("Update available: v{0}", u.version), u.act);
+    }
+
+    private void ApplyHardwareAccessBanner()
+    {
         if (HardwareAccess.RulesNeeded())
             _vm.SetHardwareAccessNeeded(() => _ = GrantHardwareAccessAsync());
     }
@@ -154,30 +222,30 @@ internal sealed class AppController
 
         Dispatcher.UIThread.Post(() =>
         {
-            _vm.SetUpdate(info.Version, act);
-            _tray.SetUpdate($"Update available: v{info.Version}", act);
+            _pendingUpdate = (info.Version, act);   // remembered so a language rebuild can re-show it
+            ApplyUpdateBanner();
         });
     }
 
     private async Task SelfUpdateAsync(string assetUrl)
     {
-        Notify("Downloading update…");
+        Notify(Loc.T("Downloading update…"));
         var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
         if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
-        else Notify("Update failed" + Err(err));
+        else Notify(Loc.T("Update failed") + Err(err));
     }
 
     // Windows: download the MSI, then hand off to the detached msiexec helper and quit so the exe unlocks —
     // the helper upgrades in place and relaunches us.
     private async Task SelfUpdateWindowsAsync(string assetUrl)
     {
-        Notify("Downloading update…");
+        Notify(Loc.T("Downloading update…"));
         var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
-        if (!ok) { Notify("Update failed" + Err(res)); return; }
+        if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
 
-        Notify("Installing update…");
+        Notify(Loc.T("Installing update…"));
         if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
-        else Notify("Update failed");
+        else Notify(Loc.T("Update failed"));
     }
 
     private async Task GrantHardwareAccessAsync()
@@ -185,8 +253,8 @@ internal sealed class AppController
         var (ok, err) = await Task.Run(() => { var r = HardwareAccess.Install(out var e); return (r, e); });
         Dispatcher.UIThread.Post(() =>
         {
-            if (ok) { _vm.NeedsHardwareAccess = false; Notify("Hardware access granted — restart to use the unlocked controls."); }
-            else Notify("Grant access failed" + Err(err));
+            if (ok) { _vm.NeedsHardwareAccess = false; Notify(Loc.T("Hardware access granted — restart to use the unlocked controls.")); }
+            else Notify(Loc.T("Grant access failed") + Err(err));
         });
     }
 
@@ -208,14 +276,14 @@ internal sealed class AppController
 
     private void ApplyProfile(PerformanceProfile p)
     {
-        if (!_svc.ApplyProfile(p)) Notify("Failed to set " + p.DisplayName + Err(_svc.LastError));
+        if (!_svc.ApplyProfile(p)) Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(_svc.LastError));
         Refresh();
     }
 
     // Turbo used as a switch (the "Turbo toggles" mode).
     private void SetTurbo(bool on)
     {
-        if (!_svc.SetTurbo(on)) Notify("Turbo failed" + Err(_svc.LastError));
+        if (!_svc.SetTurbo(on)) Notify(Loc.T("Turbo failed") + Err(_svc.LastError));
         Refresh();
     }
 
@@ -255,7 +323,7 @@ internal sealed class AppController
         _lastTurbo = now;
 
         var applied = _svc.TogglePerformance();
-        if (applied != null) Notify("Profile: " + applied.DisplayName);
+        if (applied != null) Notify(Loc.T("Profile: {0}", Loc.T(applied.DisplayName)));
         Refresh();
     }
 
@@ -280,7 +348,10 @@ internal sealed class AppController
         var current = _svc.CurrentProfile();
         var selectable = _svc.SelectableProfiles();
         var sensors = _svc.ReadSensors();
-        var status = _svc.Device.StatusMessage ?? string.Empty;
+        // null (not "") when the device has no diagnostic message, so MainViewModel.Refresh's `if (status != null)`
+        // guard leaves the status line alone and a transient Notify() message survives (a device StatusMessage,
+        // when present, is a latched startup diagnostic — localized and shown; it never reverts to null).
+        var status = _svc.Device.StatusMessage is { } m ? Loc.T(m) : null;
 
         // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
         // lighting presets to the hardware and reflect them in the UI.

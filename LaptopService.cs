@@ -1,4 +1,5 @@
 using AcerHelper.Features;
+using AcerHelper.Localization;
 
 namespace AcerHelper;
 
@@ -335,6 +336,14 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     public void SetTurboToggles(bool on)
     {
         Settings.TurboToggles = on;
+        Save();
+    }
+
+    /// <summary>Persist the chosen UI language. Activating it (and rebuilding the UI) is the app layer's job
+    /// (see AppController) — this only records the preference.</summary>
+    public void SetLanguage(AppLanguage language)
+    {
+        Settings.Language = language;
         Save();
     }
 

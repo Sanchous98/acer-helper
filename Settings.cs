@@ -1,9 +1,15 @@
+using AcerHelper.Localization;
+
 namespace AcerHelper;
 
 /// <summary>User preferences. Persisted by an <see cref="ISettingsStore"/> (Infrastructure).
 /// Values are vendor-neutral so they survive a hardware/vendor change.</summary>
 public sealed class Settings
 {
+    // UI language. Default follows the OS UI culture (see Loc); serialized as the enum's numeric value by the
+    // source-generated JSON context, so it round-trips under Native AOT.
+    public AppLanguage Language { get; set; } = AppLanguage.System;
+
     public bool TurboToggles { get; set; }
     public bool Clamshell    { get; set; }
 

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using AcerHelper;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -69,7 +70,7 @@ public sealed partial class MainViewModel : ObservableObject
     public void SetUpdate(string version, Action open)
     {
         _openUpdate = open;
-        UpdateLabel = $"Update available: v{version}";
+        UpdateLabel = Loc.T("Update available: v{0}", version);
         UpdateAvailable = true;
     }
 
@@ -84,13 +85,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand] private void GrantHardwareAccess() => _grantAccess?.Invoke();
 
-    [RelayCommand] private void OpenOptions() => OpenDrawer("Options", _options);
+    [RelayCommand] private void OpenOptions() => OpenDrawer(Loc.T("Options"), _options);
 
     [RelayCommand]
     private void OpenLighting()
     {
         _lighting?.Sync();   // re-read live keyboard brightness (Fn keys change it out-of-band) before showing
-        OpenDrawer("Lighting", _lighting);
+        OpenDrawer(Loc.T("Lighting"), _lighting);
     }
 
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
@@ -128,7 +129,7 @@ public sealed partial class MainViewModel : ObservableObject
                         SensorSnapshot s, BatteryInfoSnapshot battery, string? status)
     {
         HasProfile = current != null;
-        ProfileName = current?.DisplayName ?? "";
+        ProfileName = current != null ? Loc.T(current.DisplayName) : "";
         _profiles?.Update(current, selectable, turboToggles, baseProfile);
         _monitor?.Update(s);
         _battery?.Update(battery);

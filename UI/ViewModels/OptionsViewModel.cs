@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -31,18 +32,28 @@ public sealed class OptionsViewModel : SectionViewModel
     public static OptionsViewModel? TryCreate(IDevice device, UiActions a)
     {
         var vm = new OptionsViewModel();
+
+        // Language selector — app-level, so always present (this is why the Options drawer never disappears
+        // now). Endonyms stay in their own language; only "System" is translated. Picking one rebuilds the
+        // whole UI live in the new language (see AppController.SetLanguage).
+        AppLanguage[] langValues = [AppLanguage.System, AppLanguage.English, AppLanguage.Russian];
+        string[] langNames = [Loc.T("System"), "English", "Русский"];
+        var langIndex = Math.Max(0, Array.IndexOf(langValues, a.Language));
+        vm.Rows.Add(new ChoiceRowViewModel(new OptionChoice(Loc.T("Language"), true, langNames, langIndex,
+            i => a.SetLanguage(langValues[i]))));
+
         foreach (var t in a.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t));
         foreach (var c in a.HwChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
 
         if (device.Clamshell is { } clam)
-            vm.Rows.Add(new ToggleRowViewModel(clam.Label, a.ClamshellEnabled(), true, a.SetClamshell));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), a.ClamshellEnabled(), true, a.SetClamshell));
 
         if (device.PowerProfiles?.All.Any(p => p.Kind == ProfileKind.Turbo) ?? false)
-            vm.Rows.Add(new ToggleRowViewModel("Turbo key toggles Turbo", a.TurboToggles, true, a.SetTurboToggles,
-                tip: "Otherwise the Turbo key cycles through profiles."));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), a.TurboToggles, true, a.SetTurboToggles,
+                tip: Loc.T("Otherwise the Turbo key cycles through profiles.")));
 
         if (device.Autostart is { } auto)
-            vm.Rows.Add(new ToggleRowViewModel(auto.Label, a.AutostartEnabled(), true, a.SetAutostart));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), a.AutostartEnabled(), true, a.SetAutostart));
 
         return vm.Rows.Count > 0 ? vm : null;
     }

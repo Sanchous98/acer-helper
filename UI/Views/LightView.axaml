@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
              x:Class="AcerHelper.UI.Views.LightView"
              x:DataType="vm:LightViewModel">
 
@@ -27,13 +28,13 @@
 
     <!-- Single colour — breathing, or static on a single-zone light (e.g. the lightbar). -->
     <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ShowSingleColor}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Width="64" Text="Colour"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="64" Text="{l:Tr Colour}"/>
       <ColorPicker Color="{Binding Color, Mode=TwoWay}"/>
     </StackPanel>
 
     <!-- Brightness (always) -->
     <Grid ColumnDefinitions="64,*,44">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Brightness"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Brightness}"/>
       <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
               Value="{Binding Brightness, Mode=TwoWay}"/>
       <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
@@ -42,7 +43,7 @@
 
     <!-- Speed — only for effects that have a speed -->
     <Grid ColumnDefinitions="64,*,44" IsVisible="{Binding HasSpeed}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Speed"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Speed}"/>
       <Slider Grid.Column="1" Minimum="0" Maximum="9" VerticalAlignment="Center"
               Value="{Binding Speed, Mode=TwoWay}"/>
       <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
@@ -51,10 +52,10 @@
 
     <!-- Direction — only for directional effects (e.g. Wave) -->
     <Grid ColumnDefinitions="64,*" IsVisible="{Binding HasDirection}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="Direction"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Direction}"/>
       <ToggleSwitch Grid.Column="1" HorizontalAlignment="Left"
                     IsChecked="{Binding ReverseDirection, Mode=TwoWay}"
-                    OffContent="Normal" OnContent="Reversed"/>
+                    OffContent="{l:Tr Normal}" OnContent="{l:Tr Reversed}"/>
     </Grid>
 
   </StackPanel>

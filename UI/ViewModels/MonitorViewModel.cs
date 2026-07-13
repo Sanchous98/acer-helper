@@ -1,4 +1,5 @@
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
@@ -43,8 +44,8 @@ public sealed partial class MonitorViewModel : SectionViewModel
 
         ShowCpuFan = cpu is { Rpm: >= 0 };
         ShowGpuFan = gpu is { Rpm: >= 0 };
-        CpuFan = ShowCpuFan ? $"{cpu!.Value.Rpm} rpm" : "—";
-        GpuFan = ShowGpuFan ? $"{gpu!.Value.Rpm} rpm" : "—";
+        CpuFan = ShowCpuFan ? Loc.T("{0} rpm", cpu!.Value.Rpm) : "—";
+        GpuFan = ShowGpuFan ? Loc.T("{0} rpm", gpu!.Value.Rpm) : "—";
         CpuFanRpm = ShowCpuFan ? cpu!.Value.Rpm : 0;
         GpuFanRpm = ShowGpuFan ? gpu!.Value.Rpm : 0;
     }

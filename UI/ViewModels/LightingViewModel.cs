@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -133,7 +134,13 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly object _readGate = new();   // guards the off-thread brightness read coalescing
     private bool _reading, _readPending;
 
+    /// <summary>The zone's stable identity (e.g. "Keyboard"/"Lightbar") — used as the settings key and for
+    /// panel matching, so it stays English. Bind the tab header to <see cref="DisplayName"/> instead.</summary>
     public string Title { get; }
+
+    /// <summary>The localized tab header for this zone (translation of <see cref="Title"/>).</summary>
+    public string DisplayName => Loc.T(Title);
+
     public IReadOnlyList<string> EffectNames { get; }
     public ObservableCollection<ZoneColorViewModel> Zones { get; } = [];
 
@@ -158,7 +165,7 @@ public sealed partial class LightViewModel : ObservableObject
         _readBrightness = readBrightness;
         _state = state;
         _save = save;
-        EffectNames = effects.Select(e => e.Name).ToList();
+        EffectNames = effects.Select(e => Loc.T(e.Name)).ToList();
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
         _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
@@ -173,7 +180,7 @@ public sealed partial class LightViewModel : ObservableObject
             for (var i = 0; i < zones; i++)
             {
                 var c = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : def[i % def.Length];
-                var z = new ZoneColorViewModel($"Zone {i + 1}", c);
+                var z = new ZoneColorViewModel(Loc.T("Zone {0}", i + 1), c);
                 z.PropertyChanged += OnZoneChanged;
                 Zones.Add(z);
             }
@@ -397,9 +404,9 @@ public sealed partial class BacklightViewModel : ObservableObject
 
     private static IReadOnlyList<string> NamesFor(int max) => max switch
     {
-        1 => ["Off", "On"],
-        2 => ["Off", "Dim", "Bright"],
-        3 => ["Off", "Low", "Medium", "High"],
-        _ => [.. Enumerable.Range(0, max + 1).Select(i => i == 0 ? "Off" : i.ToString())],
+        1 => [Loc.T("Off"), Loc.T("On")],
+        2 => [Loc.T("Off"), Loc.T("Dim"), Loc.T("Bright")],
+        3 => [Loc.T("Off"), Loc.T("Low"), Loc.T("Medium"), Loc.T("High")],
+        _ => [.. Enumerable.Range(0, max + 1).Select(i => i == 0 ? Loc.T("Off") : i.ToString())],
     };
 }

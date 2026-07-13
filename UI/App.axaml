@@ -123,12 +123,16 @@
       <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
-      <Setter Property="Padding" Value="2,8" />
+      <Setter Property="Padding" Value="2,6" />
       <Setter Property="Margin" Value="3,0" />
-      <Setter Property="FontSize" Value="11" />
+      <!-- MinHeight so single-line (Эко/Turbo) and wrapped two-line (Производительность) segments share one
+           height and stay aligned; FontSize 10 gives the wrapped labels a little more room in the 5-segment row. -->
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="FontSize" Value="10" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
     <!-- The active segment: filled with the mode's OWN signature colour, bound per-item from the view-model,

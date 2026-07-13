@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using AcerHelper.Localization;
 using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
@@ -8,7 +9,7 @@ namespace AcerHelper.UI;
 /// they're pages inside the flyout, navigated purely via view-model state (<c>IsDrawerOpen</c>), so this
 /// coordinator no longer choreographs a second window (no park/reveal/positioning). Keeps the window
 /// behaviour out of <see cref="AppController"/>, which only needs to open/toggle/hide.</summary>
-internal sealed class FlyoutCoordinator
+internal sealed class FlyoutCoordinator : IDisposable
 {
     private readonly MainWindow _main;
     private readonly MainViewModel _vm;
@@ -22,6 +23,10 @@ internal sealed class FlyoutCoordinator
     }
 
     public bool IsMainOpen => _main.IsOpen;
+
+    /// <summary>Tear the flyout window down for good — used when the UI is rebuilt for a live language switch.
+    /// Unlike <see cref="HideAll"/> (which only hides it), this really closes the window and unhooks it.</summary>
+    public void Dispose() => _main.Destroy();
 
     public void OpenMain()
     {
@@ -67,10 +72,10 @@ internal sealed class FlyoutCoordinator
     {
         _main.SuppressDismiss = true;
         return Views.ConfirmDialog.ShowAsync(_main,
-            "Start battery calibration?",
-            "This runs a full charge then a full discharge cycle and can take several hours. Keep the "
-            + "laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop.",
-            "Start");
+            Loc.T("Start battery calibration?"),
+            Loc.T("This runs a full charge then a full discharge cycle and can take several hours. Keep the "
+            + "laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop."),
+            Loc.T("Start"));
     }
 
     /// <summary>Light-dismiss: if focus left the flyout, the user clicked outside the app, so hide it.

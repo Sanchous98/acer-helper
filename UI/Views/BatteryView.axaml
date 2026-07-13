@@ -1,11 +1,12 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
              x:Class="AcerHelper.UI.Views.BatteryView"
              x:DataType="vm:BatteryViewModel">
   <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="10">
-      <TextBlock Classes="section" Text="BATTERY"/>
+      <TextBlock Classes="section" Text="{l:Tr BATTERY}"/>
 
       <!-- Live: big charge %, state, then health / cycles as labelled rows -->
       <StackPanel Spacing="6" IsVisible="{Binding ShowInfo}">
@@ -14,11 +15,11 @@
           <TextBlock Classes="muted" VerticalAlignment="Bottom" Margin="0,0,0,4" Text="{Binding State}"/>
         </StackPanel>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowHealth}">
-          <TextBlock Classes="muted" Text="Health"/>
+          <TextBlock Classes="muted" Text="{l:Tr Health}"/>
           <TextBlock Grid.Column="1" Text="{Binding Health}"/>
         </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowCycles}">
-          <TextBlock Classes="muted" Text="Charge cycles"/>
+          <TextBlock Classes="muted" Text="{l:Tr 'Charge cycles'}"/>
           <TextBlock Grid.Column="1" Text="{Binding Cycles}"/>
         </Grid>
       </StackPanel>

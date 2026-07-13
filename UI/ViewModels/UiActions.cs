@@ -1,4 +1,5 @@
 using AcerHelper.Features;
+using AcerHelper.Localization;
 
 namespace AcerHelper.UI.ViewModels;
 
@@ -18,4 +19,5 @@ public sealed record UiActions(
     int FanModeInit, int CpuFanInit, int GpuFanInit,
     bool CpuUseCurveInit, bool GpuUseCurveInit, int[] CpuCurveInit, int[] GpuCurveInit,
     bool HasBatteryInfo, OptionToggle? BatteryLimit, OptionToggle? BatteryCalibration,
-    OptionChoice? BatteryChargeMode);
+    OptionChoice? BatteryChargeMode,
+    AppLanguage Language, Action<AppLanguage> SetLanguage);

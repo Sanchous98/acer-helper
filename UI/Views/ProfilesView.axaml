@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
              x:Class="AcerHelper.UI.Views.ProfilesView"
              x:DataType="vm:ProfilesViewModel">
   <UserControl.Styles>
@@ -19,8 +20,8 @@
            when the option is off), so toggling the option never changes the section — and thus the SizeToContent
            window's — height. While the option is off, Turbo is instead one of the segment buttons below. -->
       <Grid ColumnDefinitions="*,Auto,Auto">
-        <TextBlock Classes="section" Text="PERFORMANCE" VerticalAlignment="Center"/>
-        <TextBlock Grid.Column="1" Text="Turbo" FontWeight="SemiBold" VerticalAlignment="Center"
+        <TextBlock Classes="section" Text="{l:Tr PERFORMANCE}" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{l:Tr Turbo}" FontWeight="SemiBold" VerticalAlignment="Center"
                    Margin="0,0,8,0" IsVisible="{Binding ShowTurboSwitch}"/>
         <ToggleSwitch Grid.Column="2" VerticalAlignment="Center" Classes.ghost="{Binding !ShowTurboSwitch}"
                       IsChecked="{Binding TurboOn, Mode=TwoWay}" IsEnabled="{Binding TurboEnabled}"/>
@@ -31,9 +32,13 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ProfileButtonViewModel">
+            <!-- Wrap the label: long localized names (e.g. Russian "Производительность") don't fit one line in
+                 an equal-width 5-segment row on the fixed 468px flyout, so let them break to two lines. The
+                 Button.seg MinHeight keeps single- and two-line segments the same height (see App.axaml). -->
             <Button Classes="seg" Classes.selected="{Binding IsSelected}"
-                    Content="{Binding Name}" Command="{Binding ApplyCommand}"
-                    IsEnabled="{Binding IsEnabled}"/>
+                    Command="{Binding ApplyCommand}" IsEnabled="{Binding IsEnabled}">
+              <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"/>
+            </Button>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>

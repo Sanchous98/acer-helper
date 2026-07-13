@@ -1,5 +1,6 @@
 using System.Globalization;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -46,7 +47,7 @@ internal sealed class TrayController : IDisposable
     /// <summary>Reflect the current profile in the tooltip, icon and the menu's radio state.</summary>
     public void Update(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable)
     {
-        _tray.ToolTipText = "Acer Helper — " + (current?.DisplayName ?? "?");
+        _tray.ToolTipText = "Acer Helper — " + (current != null ? Loc.T(current.DisplayName) : "?");
         if (current != null) _tray.Icon = ProfileIcon(current);
         foreach (var kv in _menuItems)
         {
@@ -68,15 +69,15 @@ internal sealed class TrayController : IDisposable
         var profiles = device.PowerProfiles?.All ?? [];
         foreach (var p in profiles)
         {
-            var item = new NativeMenuItem { Header = p.DisplayName, ToggleType = MenuItemToggleType.Radio };
+            var item = new NativeMenuItem { Header = Loc.T(p.DisplayName), ToggleType = MenuItemToggleType.Radio };
             item.Click += (_, _) => applyProfile(p);
             _menuItems[p.Id] = item;
             menu.Items.Add(item);
         }
         if (profiles.Count > 0) menu.Items.Add(new NativeMenuItemSeparator());
-        var show = new NativeMenuItem { Header = "Show" }; show.Click += (_, _) => openMain(); menu.Items.Add(show);
-        if (device.Lighting != null || device.KeyboardBrightness != null) { var light = new NativeMenuItem { Header = "Lighting…" }; light.Click += (_, _) => showLighting(); menu.Items.Add(light); }
-        var ex = new NativeMenuItem { Header = "Exit" }; ex.Click += (_, _) => exit(); menu.Items.Add(ex);
+        var show = new NativeMenuItem { Header = Loc.T("Show") }; show.Click += (_, _) => openMain(); menu.Items.Add(show);
+        if (device.Lighting != null || device.KeyboardBrightness != null) { var light = new NativeMenuItem { Header = Loc.T("Lighting…") }; light.Click += (_, _) => showLighting(); menu.Items.Add(light); }
+        var ex = new NativeMenuItem { Header = Loc.T("Exit") }; ex.Click += (_, _) => exit(); menu.Items.Add(ex);
         return menu;
     }
 

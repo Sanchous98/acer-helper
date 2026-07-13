@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
              xmlns:views="clr-namespace:AcerHelper.UI.Views"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
              x:Class="AcerHelper.UI.Views.LightingView"
              x:DataType="vm:LightingViewModel">
 
@@ -10,7 +11,7 @@
     <!-- Plain (non-RGB) keyboard backlight: brightness is the ONLY control. The levels are discrete hardware
          steps, so the slider snaps to tick stops (Off/Dim/Bright) rather than a free 0-100 range. -->
     <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasBacklight}" Margin="0,4,0,0">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="Brightness"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="{l:Tr Brightness}"/>
       <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding Backlight.MaxLevel}"
               TickFrequency="1" IsSnapToTickEnabled="True" TickPlacement="BottomRight"
               Value="{Binding Backlight.Level, Mode=TwoWay}"/>
@@ -22,7 +23,7 @@
          performance profile's palette on every switch. On (default) = leave it to the firmware, so it shows its
          per-profile colour seamlessly (no flash) and gets no tab; off = it becomes a normal zone (custom
          colour/effects) at the cost of that brief palette flash on each profile switch. -->
-    <CheckBox Content="Lightbar follows performance profile"
+    <CheckBox Content="{l:Tr 'Lightbar follows performance profile'}"
               IsChecked="{Binding FollowsProfile, Mode=TwoWay}"
               IsVisible="{Binding ShowFollowsProfile}"/>
 
@@ -36,7 +37,7 @@
       </TabControl.ItemsPanel>
       <TabControl.ItemTemplate>
         <DataTemplate x:DataType="vm:LightViewModel">
-          <TextBlock Text="{Binding Title}"/>
+          <TextBlock Text="{Binding DisplayName}"/>
         </DataTemplate>
       </TabControl.ItemTemplate>
       <TabControl.ContentTemplate>

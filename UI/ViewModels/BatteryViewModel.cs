@@ -1,4 +1,5 @@
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AcerHelper.UI.ViewModels;
@@ -38,9 +39,9 @@ public sealed partial class BatteryViewModel : SectionViewModel
         Charge = s.Percent < 0 ? "—" : $"{s.Percent}%";
         State = s.State switch
         {
-            BatteryState.Charging    => "Charging",
-            BatteryState.Discharging => "On battery",
-            BatteryState.Idle        => "Plugged in",
+            BatteryState.Charging    => Loc.T("Charging"),
+            BatteryState.Discharging => Loc.T("On battery"),
+            BatteryState.Idle        => Loc.T("Plugged in"),
             _                        => "",
         };
         Health = s.HealthPercent < 0 ? "" : $"{s.HealthPercent}%";
