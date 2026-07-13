@@ -24,6 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Guard the in-app update check: it compares the GitHub release tag against the version baked into the
+      # binary (AppInfo.Version, generated from csproj <Version>). If a v* tag is pushed WITHOUT bumping
+      # <Version>, the shipped build advertises a lower version than its own release tag and every client is
+      # offered a perpetual "update" to the build it already runs (and WiX MajorUpgrade won't replace the prior
+      # install because ProductVersion — also from <Version> — didn't rise). Fail fast before building.
+      - name: Verify tag matches csproj <Version>
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)').Groups[1].Value
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($ver -ne $tag) { throw "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging." }
+          Write-Host "OK: tag matches <Version> = $ver"
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
@@ -84,6 +98,16 @@ jobs:
       contents: write        # attach the AppImage to the GitHub Release on a version tag
     steps:
       - uses: actions/checkout@v7
+
+      # Same guard as the windows job: a v* tag pushed without bumping csproj <Version> would ship an AppImage
+      # whose baked-in AppInfo.Version is below its own release tag, perpetually offering an "update" to itself.
+      - name: Verify tag matches csproj <Version>
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          ver=$(grep -oP '<Version>\K[^<]+' AcerHelper.csproj)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$ver" != "$tag" ]; then echo "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging."; exit 1; fi
+          echo "OK: tag matches <Version> = $ver"
 
       # Native AOT needs a C toolchain + zlib to link the native image; the runtime needs ICU; curl fetches
       # appimagetool; `file` is REQUIRED by appimagetool to inspect the AppDir (the minimal fedora container

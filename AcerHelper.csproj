@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.20.0</Version>
+    <Version>0.20.1</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -88,4 +88,30 @@
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
+
+  <!-- Bake <Version> into a compile-time string constant (AcerHelper.AppInfo.Version) that the in-app update
+       check reads. We must NOT get the running version from Assembly.GetName().Version: Native AOT (the
+       shipped build) strips assembly-version reflection metadata and hands back 0.0.0.0, so every GitHub
+       release looked newer than the running build and the app perpetually offered an "update" to the version
+       already installed. A const is plain IL (a literal inlined at each use site) — immune to AOT/trim/
+       single-file stripping — so this keeps the csproj <Version> as the single source of truth while working
+       identically under JIT and AOT. Runs per-TFM (each writes into its own obj/<tfm> intermediate). -->
+  <Target Name="GenerateAppVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_AppVersionFile>$(IntermediateOutputPath)AppVersion.g.cs</_AppVersionFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_AppVersionLine Include="// &lt;auto-generated /&gt; Generated from &lt;Version&gt; in AcerHelper.csproj. Do not edit." />
+      <_AppVersionLine Include="namespace AcerHelper%3B" />
+      <_AppVersionLine Include="internal static class AppInfo" />
+      <_AppVersionLine Include="{" />
+      <_AppVersionLine Include="    public const string Version = &quot;$(Version)&quot;%3B" />
+      <_AppVersionLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_AppVersionFile)" Lines="@(_AppVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_AppVersionFile)" />
+      <FileWrites Include="$(_AppVersionFile)" />
+    </ItemGroup>
+  </Target>
 </Project>

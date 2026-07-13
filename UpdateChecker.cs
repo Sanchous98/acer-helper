@@ -1,5 +1,4 @@
 using System.Net.Http;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -19,9 +18,13 @@ public sealed class UpdateChecker
     /// <summary>The newer release, or null if we're already current / couldn't check.</summary>
     public async Task<UpdateInfo?> CheckAsync(CancellationToken ct = default)
     {
-        var current = Assembly.GetEntryAssembly()?.GetName().Version
-                      ?? Assembly.GetExecutingAssembly().GetName().Version;
-        if (current == null) return null;
+        // The running version is a compile-time constant baked from the csproj <Version> (AppInfo.Version,
+        // written by the GenerateAppVersion MSBuild target). We deliberately do NOT read it from
+        // Assembly.GetName().Version: Native AOT (the shipped build) strips assembly-version reflection
+        // metadata and returns 0.0.0.0, so every release compared as newer and the app kept offering an
+        // "update" to the version already installed. Parse current and the tag through the SAME helper so the
+        // component counts match (Version("0.20.0") has Revision -1) and equal versions compare equal.
+        if (!TryParseVersion(AppInfo.Version, out var current)) return null;
 
         try
         {
@@ -32,24 +35,33 @@ public sealed class UpdateChecker
             var json = await http.GetStringAsync(LatestReleaseApi, ct);
             var release = JsonSerializer.Deserialize(json, GithubJsonContext.Default.GithubRelease);
             if (release?.TagName == null || string.IsNullOrEmpty(release.HtmlUrl)) return null;
-            if (!TryParseTag(release.TagName, out var latest) || latest <= current) return null;
+            if (!TryParseVersion(release.TagName, out var latest) || latest <= current) return null;
 
             var assets = (release.Assets ?? [])
                 .Where(a => a.Name != null && a.BrowserDownloadUrl != null)
                 .Select(a => new ReleaseAsset(a.Name!, a.BrowserDownloadUrl!))
                 .ToList();
-            return new UpdateInfo(latest.ToString(), release.HtmlUrl, assets);
+            // Display the human-authored tag ("0.21.0", maybe "-beta"), not the 4-component normalized Version
+            // ("0.21.0.0"); this string is only ever shown in the "Update available: v{0}" banner/tray text.
+            return new UpdateInfo(release.TagName.TrimStart('v', 'V'), release.HtmlUrl, assets);
         }
         catch { return null; }
     }
 
-    // Tags look like "v0.15.0" or "0.15.0" (maybe with a "-beta" suffix) -> take the leading numeric part.
-    private static bool TryParseTag(string tag, out Version version)
+    // Accepts release tags ("v0.15.0") and the bare app version ("0.15.0"), maybe with a "-beta" suffix ->
+    // take the leading numeric part. Used for BOTH the running version and the latest tag so they parse to the
+    // same shape and a same-version tag compares as "not newer".
+    private static bool TryParseVersion(string tag, out Version version)
     {
         var s = tag.TrimStart('v', 'V');
         var end = 0;
         while (end < s.Length && (char.IsDigit(s[end]) || s[end] == '.')) end++;
-        return Version.TryParse(s[..end], out version!);
+        if (!Version.TryParse(s[..end], out var v)) { version = null!; return false; }
+        // Normalize to 4 fully-specified components (unspecified -> 0) so the app version and the tag compare
+        // purely on value regardless of how many parts each was written with: Version treats an unspecified
+        // component as -1, so without this "0.20" and "0.20.0.0" would compare unequal to "0.20.0".
+        version = new Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build, v.Revision < 0 ? 0 : v.Revision);
+        return true;
     }
 }
 
