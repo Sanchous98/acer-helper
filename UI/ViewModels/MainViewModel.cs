@@ -22,6 +22,16 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly LightingViewModel? _lighting;
 
     public string DeviceName { get; }
+
+    /// <summary>Small "v0.20.x" tag next to the device name. AppInfo.Version is the compile-time const
+    /// baked from the csproj &lt;Version&gt; (AOT-safe — see UpdateChecker), so header and update check
+    /// can never disagree about what version is running.</summary>
+    public string AppVersion { get; } = "v" + AppInfo.Version;
+
+    /// <summary>Tooltip for the tag — names the app, because an unlabeled "v0.20.2" sitting next to a
+    /// hardware product name reads as a device/BIOS version. Brand + number: locale-neutral, no Tr key.</summary>
+    public string AppVersionTip { get; } = "Acer Helper v" + AppInfo.Version;
+
     public ObservableCollection<SectionViewModel> Sections { get; } = [];
 
     public bool ShowOptions => _options != null;

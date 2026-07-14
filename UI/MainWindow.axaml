@@ -68,9 +68,24 @@
                   IsVisible="{Binding NeedsHardwareAccess}" Command="{Binding GrantHardwareAccessCommand}"
                   Content="{l:Tr 'Grant hardware access…'}"/>
 
-          <!-- Header: device name + current-profile accent chip -->
+          <!-- Header: device name + tiny version tag + current-profile accent chip -->
           <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
-            <TextBlock Classes="h1" VerticalAlignment="Center" Text="{Binding DeviceName}"/>
+            <!-- DockPanel, NOT a horizontal StackPanel: a StackPanel measures children unconstrained, so a
+                 long device name (raw DMI string on the Dell/generic backends, user-overridable JSON on
+                 Acer) would push the version tag under the translucent chip / off the card. Here the tag
+                 is measured first (Dock=Right) and the name fills the rest and ellipsizes; Left alignment
+                 keeps the tag adjacent to short names instead of parked at the column edge. -->
+            <DockPanel HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0">
+              <!-- Unobtrusive version indicator: extra-muted, sized to read as a tag, nudged down toward
+                   the h1 baseline (11px on a 16px neighbour centres visually too high otherwise). The
+                   tooltip names the app: next to a hardware name an unlabeled "v0.20.2" would read as a
+                   device/BIOS version. -->
+              <TextBlock DockPanel.Dock="Right" Classes="muted" FontSize="11" Opacity="0.75"
+                         VerticalAlignment="Center" Margin="7,2,0,0" Text="{Binding AppVersion}"
+                         ToolTip.Tip="{Binding AppVersionTip}"/>
+              <TextBlock Classes="h1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                         Text="{Binding DeviceName}"/>
+            </DockPanel>
             <Border Grid.Column="1" Classes="chip" IsVisible="{Binding HasProfile}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource AccentBrush}"/>
