@@ -26,7 +26,10 @@ public static class WindowsUpdater
         foreach (var f in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
         {
             var dir = Environment.GetFolderPath(f);
-            if (!string.IsNullOrEmpty(dir) && exe.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) return true;
+            // Trailing separator so "C:\Program Files" doesn't also match a sibling "C:\Program Filesque".
+            if (string.IsNullOrEmpty(dir)) continue;
+            var root = dir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (exe.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return false;
     }
@@ -35,11 +38,21 @@ public static class WindowsUpdater
     public static ReleaseAsset? PickAsset(IReadOnlyList<ReleaseAsset> assets)
         => assets.FirstOrDefault(a => a.Name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Download the MSI to a temp file. (ok, msiPath-or-error). Blocking I/O — call off the UI
-    /// thread.</summary>
+    // Staging directory for the downloaded MSI and the helper .cmd. NOT the user %TEMP%: everything staged
+    // here is later executed ELEVATED, and %TEMP% is writable by any same-user medium-IL process, which
+    // could swap the MSI (or rewrite the .cmd — cmd.exe reads batch files incrementally, so even a running
+    // script isn't safe) during the seconds between download and msiexec — a silent user→admin escalation.
+    // IsSupported guarantees the exe lives under Program Files, which only administrators can write, so the
+    // install folder itself is the protected staging area; we're elevated, so writing there is fine, and
+    // the helper deletes both files when done.
+    private static string StagingDir => AppContext.BaseDirectory;
+
+    /// <summary>Download the MSI next to the installed exe (see <see cref="StagingDir"/>). (ok,
+    /// msiPath-or-error). Blocking I/O — call off the UI thread.</summary>
     public static async Task<(bool ok, string? result)> DownloadAsync(string assetUrl, CancellationToken ct = default)
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"AcerHelper-Setup-{Guid.NewGuid():N}.msi");
+        SweepStale();   // clear any MSI/.cmd stranded by a previous failed/interrupted update (see below)
+        var tmp = Path.Combine(StagingDir, $"AcerHelper-Setup-{Guid.NewGuid():N}.msi");
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
@@ -64,7 +77,7 @@ public static class WindowsUpdater
         if (!OperatingSystem.IsWindows() || Environment.ProcessPath is not { } exe) return false;
         var pid = Environment.ProcessId;
         var image = Path.GetFileName(exe);   // "AcerHelper.exe"
-        var bat = Path.Combine(Path.GetTempPath(), $"AcerHelper-update-{Guid.NewGuid():N}.cmd");
+        var bat = Path.Combine(StagingDir, $"AcerHelper-update-{Guid.NewGuid():N}.cmd");
 
         // ping -n 2 == ~1s sleep with no console/stdin (unlike `timeout`). Loop while our PID+image is still
         // listed; once the process is gone, tasklist prints "No tasks" and `find` fails -> fall through.
@@ -87,6 +100,27 @@ public static class WindowsUpdater
                    })) { }
             return true;
         }
-        catch { return false; }
+        catch
+        {
+            // The helper never launched, so nothing will delete what we staged — clean up both here (the
+            // MSI would otherwise sit in Program Files forever, an admin-only, user-visible directory).
+            try { File.Delete(bat); } catch { /* ignore */ }
+            try { File.Delete(msiPath); } catch { /* ignore */ }
+            return false;
+        }
+    }
+
+    // Remove MSI/.cmd left in the staging dir by an update that failed or was interrupted before the helper
+    // could delete them (app crash/reboot between download and install; a Process.Start failure). Called at
+    // the start of each download; the re-entrancy guard upstream means no in-flight update is ever swept.
+    private static void SweepStale()
+    {
+        try
+        {
+            foreach (var pattern in new[] { "AcerHelper-Setup-*.msi", "AcerHelper-update-*.cmd" })
+                foreach (var f in Directory.EnumerateFiles(StagingDir, pattern))
+                    try { File.Delete(f); } catch { /* locked/in-use -> leave it */ }
+        }
+        catch { /* directory unreadable -> nothing to sweep */ }
     }
 }

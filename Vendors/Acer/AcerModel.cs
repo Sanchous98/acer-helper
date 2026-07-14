@@ -79,7 +79,11 @@ public static class AcerModels
     }
 
     // Optional user-editable override at the settings dir (%AppData%/AcerHelper or ~/.config/AcerHelper):
-    // add or correct a model without rebuilding. Its models are checked before the built-ins.
+    // add or correct a model without rebuilding. Its models are checked before the built-ins; its default
+    // (when the file has one) replaces the built-in default. "Has one" is detected by the raw JSON carrying
+    // a "default" key — NOT by comparing the deserialized object to factory values, which silently dropped
+    // any override that changed only Zones/Lightbar while leaving Name at its default "Acer" (this file is
+    // the documented no-rebuild escape hatch for unknown models, so that must work).
     private static void MergeUserOverride(AcerModelConfig cfg)
     {
         try
@@ -88,11 +92,26 @@ public static class AcerModels
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "AcerHelper", "acer-models.json");
             if (!File.Exists(path)) return;
-            var user = JsonSerializer.Deserialize(File.ReadAllText(path), AcerModelJsonContext.Default.AcerModelConfig);
+            var json = File.ReadAllText(path);
+            var user = JsonSerializer.Deserialize(json, AcerModelJsonContext.Default.AcerModelConfig);
             if (user == null) return;
             cfg.Models.InsertRange(0, user.Models);
-            if (user.Default.Match.Length == 0 && user.Default.Name != "Acer") cfg.Default = user.Default;
+            // Adopt the user default only when the file actually carries a (non-null) "default" object:
+            // key presence distinguishes "user customized only Zones/Lightbar" (Name stays "Acer") from
+            // "no default section" (keep the built-in), while the null check stops `"default": null` from
+            // nulling cfg.Default — Detect() returns it for unmatched products and callers deref it (NRE).
+            if (user.Default != null && HasDefaultKey(json)) cfg.Default = user.Default;
         }
         catch { /* ignore a bad user config */ }
+    }
+
+    private static bool HasDefaultKey(string json)
+    {
+        using var doc = JsonDocument.Parse(json, new JsonDocumentOptions
+            { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+        foreach (var prop in doc.RootElement.EnumerateObject())
+            if (prop.Name.Equals("default", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 }

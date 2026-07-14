@@ -51,25 +51,29 @@ internal sealed class AcerHotkeys : IHotkeys
     {
         // struct input_event, 64-bit: 16-byte timestamp, u16 type, u16 code, s32 value (1 = key down).
         var buf = new byte[24];
-        try
+        while (!_closing)
         {
-            while (!_closing)
+            try { _dev.ReadExactly(buf); }
+            catch { return; }   // device closed/gone -> the port goes quiet
+
+            if (BitConverter.ToUInt16(buf, 16) != EV_KEY ||
+                BitConverter.ToUInt16(buf, 18) != KEY_PRESENTATION ||
+                BitConverter.ToInt32(buf, 20) != 1) continue;
+
+            // The firmware auto-repeats the make/break while the key is held — act once per press.
+            var now = DateTime.UtcNow;
+            if (now - _lastFire < TimeSpan.FromMilliseconds(400)) continue;
+            _lastFire = now;
+
+            // Subscriber exceptions must not kill the read loop (the Nitro key would stay dead for the
+            // rest of the session) — only a device error above may end it.
+            try
             {
-                _dev.ReadExactly(buf);
-                if (BitConverter.ToUInt16(buf, 16) != EV_KEY ||
-                    BitConverter.ToUInt16(buf, 18) != KEY_PRESENTATION ||
-                    BitConverter.ToInt32(buf, 20) != 1) continue;
-
-                // The firmware auto-repeats the make/break while the key is held — act once per press.
-                var now = DateTime.UtcNow;
-                if (now - _lastFire < TimeSpan.FromMilliseconds(400)) continue;
-                _lastFire = now;
-
                 InputActivity?.Invoke();
                 Pressed?.Invoke(HotkeyAction.ToggleWindow);   // AppController marshals to the UI thread
             }
+            catch { /* handler bug — swallow, keep listening */ }
         }
-        catch { /* device closed/gone -> the port goes quiet */ }
     }
 
     public void Dispose()

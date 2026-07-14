@@ -24,7 +24,7 @@ public sealed class UpdateChecker
         // metadata and returns 0.0.0.0, so every release compared as newer and the app kept offering an
         // "update" to the version already installed. Parse current and the tag through the SAME helper so the
         // component counts match (Version("0.20.0") has Revision -1) and equal versions compare equal.
-        if (!TryParseVersion(AppInfo.Version, out var current)) return null;
+        if (!TryParseVersion(AppInfo.Version, out var current, out var currentIsPre)) return null;
 
         try
         {
@@ -35,7 +35,11 @@ public sealed class UpdateChecker
             var json = await http.GetStringAsync(LatestReleaseApi, ct);
             var release = JsonSerializer.Deserialize(json, GithubJsonContext.Default.GithubRelease);
             if (release?.TagName == null || string.IsNullOrEmpty(release.HtmlUrl)) return null;
-            if (!TryParseVersion(release.TagName, out var latest) || latest <= current) return null;
+            if (!TryParseVersion(release.TagName, out var latest, out var latestIsPre)) return null;
+            // Numerically newer wins outright; numerically EQUAL is an update only when it graduates a
+            // prerelease to the final build ("0.21.0-beta" running, "v0.21.0" released) — the suffix is
+            // dropped by the numeric parse, so without this a beta user would never see the matching final.
+            if (!(latest > current || (latest == current && currentIsPre && !latestIsPre))) return null;
 
             var assets = (release.Assets ?? [])
                 .Where(a => a.Name != null && a.BrowserDownloadUrl != null)
@@ -49,13 +53,15 @@ public sealed class UpdateChecker
     }
 
     // Accepts release tags ("v0.15.0") and the bare app version ("0.15.0"), maybe with a "-beta" suffix ->
-    // take the leading numeric part. Used for BOTH the running version and the latest tag so they parse to the
-    // same shape and a same-version tag compares as "not newer".
-    private static bool TryParseVersion(string tag, out Version version)
+    // take the leading numeric part, reporting whether a prerelease suffix followed it (semver orders
+    // 0.21.0-beta BEFORE 0.21.0, so the caller must not collapse them into "equal"). Used for BOTH the
+    // running version and the latest tag so they parse to the same shape.
+    private static bool TryParseVersion(string tag, out Version version, out bool prerelease)
     {
         var s = tag.TrimStart('v', 'V');
         var end = 0;
         while (end < s.Length && (char.IsDigit(s[end]) || s[end] == '.')) end++;
+        prerelease = end < s.Length;   // anything after the numeric part ("-beta", "-rc1") marks a prerelease
         if (!Version.TryParse(s[..end], out var v)) { version = null!; return false; }
         // Normalize to 4 fully-specified components (unspecified -> 0) so the app version and the tag compare
         // purely on value regardless of how many parts each was written with: Version treats an unspecified

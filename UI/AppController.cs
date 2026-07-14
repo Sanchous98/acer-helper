@@ -32,7 +32,11 @@ internal sealed class AppController
     private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
+    private bool _blankedByLid;      // WE blanked the backlight under a shut lid; restore on the next open (see OnLidChanged)
     private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
+    private bool _updating;   // a self-update download/install is in flight — both the banner and the tray item
+                              // stay clickable, so without this a second click starts a second download and a
+                              // second msiexec (which then trips over the Windows Installer mutex mid-upgrade)
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
     {
@@ -229,23 +233,35 @@ internal sealed class AppController
 
     private async Task SelfUpdateAsync(string assetUrl)
     {
-        Notify(Loc.T("Downloading update…"));
-        var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
-        if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
-        else Notify(Loc.T("Update failed") + Err(err));
+        if (_updating) return;   // one update at a time (see the field); failure resets so retry works
+        _updating = true;
+        try
+        {
+            Notify(Loc.T("Downloading update…"));
+            var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
+            if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
+            else Notify(Loc.T("Update failed") + Err(err));
+        }
+        finally { _updating = false; }
     }
 
     // Windows: download the MSI, then hand off to the detached msiexec helper and quit so the exe unlocks —
     // the helper upgrades in place and relaunches us.
     private async Task SelfUpdateWindowsAsync(string assetUrl)
     {
-        Notify(Loc.T("Downloading update…"));
-        var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
-        if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
+        if (_updating) return;   // one update at a time (see the field); failure resets so retry works
+        _updating = true;
+        try
+        {
+            Notify(Loc.T("Downloading update…"));
+            var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
+            if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
 
-        Notify(Loc.T("Installing update…"));
-        if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
-        else Notify(Loc.T("Update failed"));
+            Notify(Loc.T("Installing update…"));
+            if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
+            else Notify(Loc.T("Update failed"));
+        }
+        finally { _updating = false; }
     }
 
     private async Task GrantHardwareAccessAsync()
@@ -267,10 +283,12 @@ internal sealed class AppController
     // Any special-key input -> re-read keyboard brightness immediately (no debounce), but only while the
     // Lighting panel is visible so normal typing does ZERO work here. The read is off-thread and coalesces
     // back-to-back requests, so rapid presses track without piling up or blocking input.
-    private void OnInputActivity()
+    // Marshaled to the UI thread like OnHotkey: on Linux the event fires on the evdev reader thread, and
+    // IsLightingVisible/Sync touch UI-bound state (incl. enumerating the Panels collection the UI mutates).
+    private void OnInputActivity() => Dispatcher.UIThread.Post(() =>
     {
         if (_vm.IsLightingVisible) _vm.SyncLightingIfVisible();
-    }
+    });
 
     // ---- actions ----
 
@@ -361,7 +379,7 @@ internal sealed class AppController
             _lastModeKey = modeKey;
             if (_svc.ApplyModeFan() is { } fan)
                 _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu, fan.CpuUseCurve, fan.GpuUseCurve, fan.CpuCurve, fan.GpuCurve);
-            if (BacklightHidden) _svc.Device.Lighting?.Blank();   // don't light a hidden keyboard on a mode change under a shut lid
+            if (BacklightHidden) BlankBacklight();   // don't light a hidden keyboard on a mode change under a shut lid
             else _vm.ReloadLighting(_svc.LightsForCurrentMode());
         }
 
@@ -392,7 +410,7 @@ internal sealed class AppController
     // old colour) and repeated by _lightReapply as a safety net against a late firmware repaint.
     private void ApplyFollowLighting()
     {
-        if (BacklightHidden) { _svc.Device.Lighting?.Blank(); return; }   // lid shut in clamshell mode -> keep it dark
+        if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
         if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _svc.CurrentProfile()?.FlashColor is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
         _vm.ReloadLighting(_svc.LightsForCurrentMode());
@@ -409,16 +427,29 @@ internal sealed class AppController
         _lightReapply.Stop(); _lightReapply.Start();
     }
 
-    // Lid opened/closed while clamshell keep-awake is enabled: shut -> blank the (now hidden) backlight without
-    // touching the app's stored per-zone state; opened -> restore the current mode's lighting. Ignored when
-    // clamshell is off — a lid-close then sleeps the machine, and the backlight is re-applied on resume instead.
+    // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
+    // touching the app's stored per-zone state; opened -> restore the current mode's lighting. The blank is
+    // gated on clamshell (a lid-close otherwise sleeps the machine and resume re-applies), but the RESTORE is
+    // gated on _blankedByLid — the remembered fact that we blanked — NOT on clamshell still being enabled at
+    // open time: the user can flip clamshell off from the external screen while the lid is shut, and the
+    // EC-latched blank would otherwise stick until the next profile switch / resume / restart.
     // Posted to the UI thread by the lid watcher, so all HID writes stay serialized with the rest of the app.
     private void OnLidChanged(bool open)
     {
         _lidShut = !open;   // remembered so a repaint (profile/mode/power change) under a shut lid re-blanks (see BacklightHidden)
-        if (_svc.Device.Clamshell?.Enabled != true) return;
-        if (open) ReapplyLighting();
-        else _svc.Device.Lighting?.Blank();
+        if (open)
+        {
+            if (_blankedByLid) { _blankedByLid = false; ReapplyLighting(); }
+        }
+        else if (_svc.Device.Clamshell?.Enabled == true)
+            BlankBacklight();
+    }
+
+    // Blank the hidden backlight and remember that WE did it, so the next lid-open restores it (see OnLidChanged).
+    private void BlankBacklight()
+    {
+        _blankedByLid = true;
+        _svc.Device.Lighting?.Blank();
     }
 
     // True while the backlight must stay dark: the lid is shut AND clamshell keep-awake is on, so the machine runs

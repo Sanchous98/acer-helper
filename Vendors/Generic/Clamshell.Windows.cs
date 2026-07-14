@@ -25,7 +25,37 @@ public sealed partial class Clamshell
 
     private partial bool CanManageLidAction() => GetAcLidAction() != null;
     private partial bool OnAc() => GetSystemPowerStatus(out SYSTEM_POWER_STATUS s) && s.ACLineStatus == 1;
-    private partial void SetLidStayAwake(bool stayAwake) => SetAcLidAction(stayAwake ? LID_DO_NOTHING : LID_SLEEP);
+
+    private uint? _originalLidAction;   // the AC lid action found before we took control (this session)
+
+    private partial void SetLidStayAwake(bool stayAwake)
+    {
+        if (stayAwake)
+        {
+            // Capture the pre-existing action once per take-over, so leaving stay-awake puts back what the
+            // user actually had (Hibernate / Shut down / …) instead of a hardcoded Sleep.
+            _originalLidAction ??= GetAcLidAction();
+            SetAcLidAction(LID_DO_NOTHING);
+        }
+        else if (_originalLidAction is { } o)
+        {
+            // We took over this session -> put back exactly what we captured, unless that was already
+            // stay-awake (would break the "never leave lid=stay-awake" invariant) -> Sleep. Clear so the
+            // next take-over re-captures fresh.
+            _originalLidAction = null;
+            SetAcLidAction(o != LID_DO_NOTHING ? o : LID_SLEEP);
+        }
+        else
+        {
+            // Nothing captured this session: we never wrote DO_NOTHING, so there's nothing of ours to undo
+            // — leave the user's action (Hibernate / Shut down / …) ALONE. This path is reachable via
+            // Evaluate(inactive) on a startup take-over while undocked, and via a disable after a prior
+            // undock already restored — writing Sleep here (the old behavior) silently clobbered the user's
+            // setting. The one thing worth fixing is a crash leftover: a previous session that died with our
+            // DO_NOTHING still in place -> repair it to Sleep so the lid isn't stuck staying awake.
+            if (GetAcLidAction() == LID_DO_NOTHING) SetAcLidAction(LID_SLEEP);
+        }
+    }
 
     // ---- lid-close power setting (powrprof) ----
 

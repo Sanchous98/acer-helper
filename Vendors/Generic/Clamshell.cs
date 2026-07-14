@@ -22,7 +22,7 @@ public sealed partial class Clamshell : IClamshell
     public void SetEnabled(bool value)
     {
         Enabled = value;
-        if (!value) { SetLidStayAwake(false); _applied = false; }   // restore "sleep on lid close"
+        if (!value) { SetLidStayAwake(false); _applied = false; }   // put back the pre-takeover lid action
         else _applied = null;                                       // force re-apply on next Evaluate
         Evaluate();
     }
@@ -48,6 +48,7 @@ public sealed partial class Clamshell : IClamshell
     private partial bool CanManageLidAction();
     private partial bool HasExternalDisplay();
     private partial bool OnAc();
-    /// <summary>true = lid close does nothing (stay awake); false = sleep on lid close.</summary>
+    /// <summary>true = lid close does nothing (stay awake); false = put back the lid action captured at
+    /// take-over (never stay-awake — see the Windows implementation for the crash-leftover guard).</summary>
     private partial void SetLidStayAwake(bool stayAwake);
 }

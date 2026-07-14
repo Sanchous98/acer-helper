@@ -265,6 +265,11 @@ public sealed partial class LightViewModel : ObservableObject
     private void SyncBrightness(int value)
     {
         value = Math.Clamp(value, 0, 100);
+        // A user edit is in flight (the debounce is pending): the hardware read raced ahead of the apply and
+        // carries a stale value — accepting it would yank the slider back mid-drag, and (worse) the pending
+        // debounce tick would then apply and PERSIST the stale value over the user's choice. The user wins;
+        // the periodic sync re-reads after the apply has landed.
+        if (_debounce.IsEnabled) return;
         // A read-back of 0 while the app is driving a non-zero brightness is spurious: the OPMODE profile-flash
         // (follows-profile mode) zeroes the EC's keyboard-brightness register even though the keyboard is lit by
         // the STATIC re-apply — and that register stays 0 until the next firmware switch-flash, incl. across a

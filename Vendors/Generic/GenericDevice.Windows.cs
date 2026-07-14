@@ -13,7 +13,8 @@ public partial class GenericDevice
         DisplayTint = new DisplayTint();
 
         var clamshell = new Clamshell();
-        if (!clamshell.Supported) return;
+        if (!clamshell.Supported) { clamshell.Dispose(); return; }   // its ctor subscribed to the STATIC
+        // SystemEvents — an undisposed reject would stay pinned (and handled) for the process lifetime.
         Clamshell = clamshell; Own(clamshell);
     }
 }

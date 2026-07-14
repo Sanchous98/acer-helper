@@ -94,6 +94,7 @@ public sealed class FanCurveEditor : Control
     {
         var pts = Points;
         if (pts is not { Count: > 0 }) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;   // only the left button edits
         var p = e.GetPosition(this);
         _drag = NearestIndex(p.X, pts.Count);
         SetPoint(pts, _drag, p.Y);
@@ -105,7 +106,17 @@ public sealed class FanCurveEditor : Control
     {
         var pts = Points;
         if (_drag < 0 || pts is not { Count: > 0 } || _drag >= pts.Count) return;
+        // The button check ends a drag whose release we never saw (lost capture, cancelled touch) —
+        // OnPointerMoved fires on plain hover, and without this the point would track the cursor with no
+        // button held, feeding accidental duty values into the debounced apply/persist path.
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { _drag = -1; return; }
         SetPoint(pts, _drag, e.GetPosition(this).Y);
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _drag = -1;   // capture can vanish without a release (window hidden mid-drag, touch cancel)
     }
 
     // A fan curve must be monotonic (duty never drops as temperature rises), so a point is constrained

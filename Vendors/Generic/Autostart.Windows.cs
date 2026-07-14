@@ -25,7 +25,15 @@ public sealed partial class Autostart
     {
         if (!enable) return Run($"/delete /tn \"{TaskName}\" /f").exit == 0;
 
-        var xmlPath = Path.Combine(Path.GetTempPath(), "acerhelper-autostart.xml");
+        // Over-the-shoulder elevation guard: when a standard user elevates with a DIFFERENT admin account,
+        // our token (which BuildTaskXml binds the logon trigger + principal to) is that admin — who never
+        // logs on interactively, so the task would register fine and never fire. No task shape can fix
+        // this: Task Scheduler can't raise a UAC prompt, so it cannot start a requireAdministrator exe for
+        // a non-admin user at all. Refuse instead of registering a convincing no-op; the toggle then
+        // honestly reads back OFF (IsEnabled checks task existence).
+        if (!TokenUserIsInteractiveUser()) return false;
+
+        var xmlPath = Path.Combine(StagingDir(), $"acerhelper-autostart-{Guid.NewGuid():N}.xml");
         try
         {
             File.WriteAllText(xmlPath, BuildTaskXml(), Encoding.Unicode);   // UTF-16 + BOM, as schtasks /xml expects
@@ -33,6 +41,25 @@ public sealed partial class Autostart
         }
         catch { return false; }
         finally { try { File.Delete(xmlPath); } catch { /* best-effort */ } }
+    }
+
+    // Where to stage the task XML that ELEVATED schtasks will parse. A fixed name in the user %TEMP% was a
+    // TOCTOU gift: any same-user medium-IL process could swap the file between our write and schtasks'
+    // read and register an arbitrary elevated task. For the installed build the exe sits under Program
+    // Files (admin-writable only), so its own folder is the protected choice. A portable run falls back to
+    // %TEMP% — there the exe itself is user-writable, so hardening the XML alone would protect nothing —
+    // with the random name at least breaking the trivial watch-and-swap of a known path.
+    private static string StagingDir()
+    {
+        var dir = AppContext.BaseDirectory;
+        foreach (var f in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+        {
+            var pf = Environment.GetFolderPath(f);
+            // Compare with a trailing separator so "C:\Program Files" doesn't also match a sibling like
+            // "C:\Program Filesque" (which would misclassify a user-writable folder as protected).
+            if (!string.IsNullOrEmpty(pf) && IsUnder(dir, pf)) return dir;
+        }
+        return Path.GetTempPath();
     }
 
     // Re-register the logon task if it exists but is out of date (an older build's command — e.g. the removed
@@ -91,6 +118,50 @@ public sealed partial class Autostart
             $"    <Exec><Command>{exe}</Command><Arguments>{AppArgs.Startup}</Arguments></Exec>\n" +
             "  </Actions>\n" +
             "</Task>";
+    }
+
+    private static bool IsUnder(string path, string root)
+    {
+        var r = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return path.StartsWith(r, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Does our process token belong to the user actually logged on to this session? (See the guard in
+    // SetEnabled.) The token gives DOMAIN\user; WTS reports the session's bare user name — compare the user
+    // parts. Any uncertainty answers TRUE (register the task): WTS returning nothing (SYSTEM/session-0) or
+    // a rare same-short-name collision across two accounts both fail open, because blocking a legitimate
+    // self-elevated admin is worse than the cosmetic no-op this guard exists to avoid. (Domain comparison
+    // was considered and dropped: WTS vs token domain formatting differs for AzureAD/MSA accounts, risking
+    // a false block of legitimate users — not worth it for this low-severity guard.)
+    private static bool TokenUserIsInteractiveUser()
+    {
+        try
+        {
+            var token = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+            var sessionUser = InteractiveUser();
+            if (string.IsNullOrEmpty(sessionUser)) return true;   // WTS gave us nothing usable -> fail open
+            var slash = token.LastIndexOf('\\');
+            var tokenUser = slash >= 0 ? token[(slash + 1)..] : token;
+            return string.Equals(tokenUser, sessionUser, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return true; }
+    }
+
+    private const int WTSUserName = 5;
+
+    [System.Runtime.InteropServices.LibraryImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static partial bool WTSQuerySessionInformation(nint server, int sessionId, int infoClass, out nint buffer, out int bytes);
+
+    [System.Runtime.InteropServices.LibraryImport("wtsapi32.dll")]
+    private static partial void WTSFreeMemory(nint buffer);
+
+    private static string? InteractiveUser()
+    {
+        if (!WTSQuerySessionInformation(0, Process.GetCurrentProcess().SessionId, WTSUserName, out var buf, out _)
+            || buf == 0) return null;
+        try { return System.Runtime.InteropServices.Marshal.PtrToStringUni(buf); }
+        finally { WTSFreeMemory(buf); }
     }
 
     private static (int exit, string output) Run(string args)

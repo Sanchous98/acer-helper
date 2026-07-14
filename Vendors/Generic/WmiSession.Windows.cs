@@ -55,7 +55,7 @@ internal sealed class WmiSession : IDisposable
                 bstrNs = Wbem.SysAllocString(@namespace);
                 hr = locator.ConnectServer(bstrNs, 0, 0, 0, 0, 0, 0, out pSvc);
             }
-            finally { (locator as IDisposable)?.Dispose(); }
+            finally { Wbem.Release(locator); }
             if (hr < 0 || pSvc == 0) { error = Hr("ConnectServer", hr); return null; }
 
             // Required or WMI calls fail with access-denied: set the standard auth blanket on the proxy.
@@ -89,15 +89,17 @@ internal sealed class WmiSession : IDisposable
                 bLang = Wbem.SysAllocString("WQL");
                 bQuery = Wbem.SysAllocString(wql);
                 var hr = _svc.ExecQuery(bLang, bQuery, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-                    0, out var en);
-                if (hr < 0 || en == null) { error = Hr("ExecQuery", hr); return null; }
+                    0, out var enPtr);
+                var en = Wbem.Wrap<IEnumWbemClassObject>(enPtr);
+                if (hr < 0 || en == null) { Wbem.Release(en); error = Hr("ExecQuery", hr); return null; }
                 try
                 {
-                    hr = en.Next(WBEM_INFINITE, 1, out var obj, out var returned);
-                    if (hr < 0 || returned == 0 || obj == null) return null;   // no rows
+                    hr = en.Next(WBEM_INFINITE, 1, out var objPtr, out var returned);
+                    var obj = Wbem.Wrap<IWbemClassObject>(objPtr);
+                    if (hr < 0 || returned == 0 || obj == null) { Wbem.Release(obj); return null; }   // no rows
                     return new WmiObject(obj);
                 }
-                finally { (en as IDisposable)?.Dispose(); }
+                finally { Wbem.Release(en); }
             }
             catch (Exception ex) { error = ex.Message; return null; }
             finally { if (bLang != 0) Wbem.SysFreeString(bLang); if (bQuery != 0) Wbem.SysFreeString(bQuery); }
@@ -127,32 +129,42 @@ internal sealed class WmiSession : IDisposable
                 if (string.IsNullOrEmpty(path)) { error = "instance has no __PATH"; return null; }
 
                 bClass = Wbem.SysAllocString(className);
-                var hr = _svc.GetObject(bClass, 0, 0, out var classRaw, 0);
-                if (hr < 0 || classRaw == null) { error = Hr("GetObject(class)", hr); return null; }
+                var hr = _svc.GetObject(bClass, 0, 0, out var classPtr, 0);
+                var classRaw = Wbem.Wrap<IWbemClassObject>(classPtr);
+                if (hr < 0 || classRaw == null) { Wbem.Release(classRaw); error = Hr("GetObject(class)", hr); return null; }
                 classObj = new WmiObject(classRaw);
 
                 bMethod = Wbem.SysAllocString(method);
-                hr = classObj.Raw.GetMethod(bMethod, 0, out var inSig, out var outSig);
-                (outSig as IDisposable)?.Dispose();
-                if (hr < 0) { error = Hr("GetMethod", hr); return null; }
-
-                if (inSig != null)
+                hr = classObj.Raw.GetMethod(bMethod, 0, out var inSigPtr, out var outSigPtr);
+                if (outSigPtr != 0) Marshal.Release(outSigPtr);   // out-signature is never read — drop the raw ref
+                if (hr < 0)
                 {
+                    if (inSigPtr != 0) Marshal.Release(inSigPtr);
+                    error = Hr("GetMethod", hr);
+                    return null;
+                }
+
+                if (inSigPtr != 0)   // a method with no in-parameters has a null in-signature
+                {
+                    var inSig = Wbem.Wrap<IWbemClassObject>(inSigPtr)!;
                     try
                     {
-                        hr = inSig.SpawnInstance(0, out var inInst);
-                        if (hr < 0 || inInst == null) { error = Hr("SpawnInstance", hr); return null; }
+                        hr = inSig.SpawnInstance(0, out var inInstPtr);
+                        var inInst = Wbem.Wrap<IWbemClassObject>(inInstPtr);
+                        if (hr < 0 || inInst == null) { Wbem.Release(inInst); error = Hr("SpawnInstance", hr); return null; }
                         inParams = new WmiObject(inInst);
                     }
-                    finally { (inSig as IDisposable)?.Dispose(); }
+                    finally { Wbem.Release(inSig); }
 
                     if (args != null)
                         foreach (var kv in args) inParams.PutValue(kv.Key, kv.Value);
                 }
 
                 bPath = Wbem.SysAllocString(path);
-                hr = _svc.ExecMethod(bPath, bMethod, 0, 0, inParams?.Raw, out var outObj, 0);
+                hr = _svc.ExecMethod(bPath, bMethod, 0, 0, inParams?.Raw, out var outPtr, 0);
+                var outObj = Wbem.Wrap<IWbemClassObject>(outPtr);
                 if (hr >= 0 && outObj != null) return new WmiObject(outObj);
+                Wbem.Release(outObj);
                 error = Hr("ExecMethod", hr);
                 return null;
             }
@@ -168,7 +180,7 @@ internal sealed class WmiSession : IDisposable
         }
     }
 
-    public void Dispose() => (_svc as IDisposable)?.Dispose();
+    public void Dispose() => Wbem.Release(_svc);
 
     private static string Hr(string what, int hr) => $"{what} failed (0x{hr:X8})";
 }
@@ -324,5 +336,5 @@ public sealed class WmiObject : IDisposable
         return long.TryParse(s, out var l) ? unchecked((ulong)l) : 0;   // negative sint64 -> reinterpret
     }
 
-    public void Dispose() => (Raw as IDisposable)?.Dispose();
+    public void Dispose() => Wbem.Release(Raw);
 }

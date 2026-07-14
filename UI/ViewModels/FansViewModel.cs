@@ -94,16 +94,34 @@ public sealed partial class FansViewModel : SectionViewModel
     partial void OnCpuUseCurveChanged(bool value) { if (!_loading) PersistCurve(false); }
     partial void OnGpuUseCurveChanged(bool value) { if (!_loading) PersistCurve(true); }
 
-    [RelayCommand] private async Task OpenCpuCurve()
-        => await _showCurve(new FanCurveDialogViewModel(Loc.T("CPU fan curve"), CpuCurve, CpuUseCurve, u => CpuUseCurve = u));
+    // The open dialog (if any) is remembered so Load() can push a mode-switch's use-curve flag into it:
+    // the dialog's POINTS are live (it binds the shared collection), but its switch holds a by-value copy.
+    private FanCurveDialogViewModel? _cpuDialog, _gpuDialog;
 
-    [RelayCommand] private async Task OpenGpuCurve()
-        => await _showCurve(new FanCurveDialogViewModel(Loc.T("GPU fan curve"), GpuCurve, GpuUseCurve, u => GpuUseCurve = u));
+    [RelayCommand]
+    private async Task OpenCpuCurve()
+    {
+        var dlg = new FanCurveDialogViewModel(Loc.T("CPU fan curve"), CpuCurve, CpuUseCurve, u => CpuUseCurve = u);
+        _cpuDialog = dlg;
+        try { await _showCurve(dlg); } finally { _cpuDialog = null; }
+    }
+
+    [RelayCommand]
+    private async Task OpenGpuCurve()
+    {
+        var dlg = new FanCurveDialogViewModel(Loc.T("GPU fan curve"), GpuCurve, GpuUseCurve, u => GpuUseCurve = u);
+        _gpuDialog = dlg;
+        try { await _showCurve(dlg); } finally { _gpuDialog = null; }
+    }
 
     /// <summary>Reflect a mode's saved fan preset without triggering apply/persist (the service already set
     /// the hardware on the mode switch). The <c>_loading</c> guard neuters the hooks.</summary>
     public void Load(int mode, int cpu, int gpu, bool cpuUseCurve, bool gpuUseCurve, int[] cpuCurve, int[] gpuCurve)
     {
+        // A pending debounce belongs to the PREVIOUS mode: letting it tick after this reload would fire
+        // the NEW mode's just-loaded values at the hardware and persist them under the new key (silently
+        // creating a preset from leftover UI state). The stale edit raced the mode switch — drop it.
+        _fixedDebounce.Stop(); _cpuCurveDebounce.Stop(); _gpuCurveDebounce.Stop();
         _loading = true;
         Cpu = Math.Clamp(cpu, 0, 100);
         Gpu = Math.Clamp(gpu, 0, 100);
@@ -115,6 +133,10 @@ public sealed partial class FansViewModel : SectionViewModel
         GpuUseCurve = gpuUseCurve;
         LoadCurve(CpuCurve, cpuCurve);
         LoadCurve(GpuCurve, gpuCurve);
+        // An open curve dialog shows the new mode's points already (shared collection) — keep its
+        // "Follow curve" switch in step too, or it would show the old mode's flag and look broken.
+        _cpuDialog?.SyncUseCurve(cpuUseCurve);
+        _gpuDialog?.SyncUseCurve(gpuUseCurve);
         _loading = false;
     }
 
@@ -147,10 +169,12 @@ public sealed partial class FansViewModel : SectionViewModel
 }
 
 /// <summary>View-model for the modal fan-curve editor: the fan's points (shared with the row) + a "Follow
-/// curve" switch. Toggling the switch flows back to the fan row via <paramref name="setUse"/>.</summary>
+/// curve" switch. Toggling the switch flows back to the fan row via <paramref name="setUse"/>; a mode
+/// switch while the dialog is open flows the other way via <see cref="SyncUseCurve"/>.</summary>
 public sealed partial class FanCurveDialogViewModel : ObservableObject
 {
     private readonly Action<bool> _setUse;
+    private bool _syncing;
 
     public FanCurveDialogViewModel(string title, ObservableCollection<CurvePointViewModel> points, bool useCurve, Action<bool> setUse)
     {
@@ -165,7 +189,20 @@ public sealed partial class FanCurveDialogViewModel : ObservableObject
 
     [ObservableProperty] private bool _useCurve;
 
-    partial void OnUseCurveChanged(bool value) => _setUse(value);
+    partial void OnUseCurveChanged(bool value) { if (!_syncing) _setUse(value); }
+
+    /// <summary>Reflect the row's flag (a mode switch changed it) without echoing it back through
+    /// <c>_setUse</c> — the row already holds this value.</summary>
+    public void SyncUseCurve(bool value)
+    {
+        if (UseCurve == value) return;
+        // try/finally: the UseCurve setter raises PropertyChanged synchronously (the two-way ToggleSwitch
+        // binding runs inside it); a throwing subscriber must not latch _syncing true, which would silence
+        // every later user toggle (OnUseCurveChanged would keep skipping _setUse).
+        _syncing = true;
+        try { UseCurve = value; }
+        finally { _syncing = false; }
+    }
 }
 
 /// <summary>One editable point of a fan curve: a fixed temperature anchor (label) + its duty%.</summary>

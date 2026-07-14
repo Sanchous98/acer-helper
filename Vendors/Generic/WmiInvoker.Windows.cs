@@ -26,15 +26,19 @@ public sealed class WmiInvoker : IDisposable
         Available = probe != null;
     }
 
-    /// <summary>Invoke a method with one input parameter; return one numeric output as U64.</summary>
-    public ulong Invoke(string method, string inParam, object inValue, string outParam)
+    /// <summary>Invoke a method with one input parameter; return one numeric output as U64, or null when
+    /// the WMI call itself failed (see <see cref="LastError"/>). Null must stay distinguishable from a real
+    /// value: in the Acer gaming protocol the output's low byte is a status where 0 = SUCCESS, so collapsing
+    /// failure to 0 would turn every transient WMI error into a false "success with value 0" (a failed
+    /// profile read becomes "current profile is Quiet", a failed write reports ok).</summary>
+    public ulong? Invoke(string method, string inParam, object inValue, string outParam)
     {
         using var session = WmiSession.Connect(Namespace, out var e);
-        if (session == null) { LastError = e; return 0; }
+        if (session == null) { LastError = e; return null; }
         using var outp = session.InvokeMethod(_className, method,
             new Dictionary<string, object> { [inParam] = inValue }, out e);
         LastError = e;
-        return outp?.GetU64(outParam) ?? 0;
+        return outp?.GetU64(outParam);
     }
 
     /// <summary>Invoke a method with several input parameters; the caller reads and disposes the result.

@@ -16,7 +16,14 @@
            Scope="perMachine"
            Compressed="yes">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <!-- AllowSameVersionUpgrades: a prerelease and its final share a numeric ProductVersion (MSI has no
+         semver suffix — "0.21.0-beta" and "0.21.0" both build as 0.21.0.0). The in-app updater offers that
+         graduation (UpdateChecker), so the final MSI must UPGRADE the still-registered beta in place;
+         without this, MajorUpgrade's FindRelatedProducts misses the equal version and msiexec installs a
+         second product owning the same files (two ARP entries; uninstalling either strips the other). The
+         ICE61 validation warning this raises is expected and benign. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Feature Id="Main" Title="Acer Helper">

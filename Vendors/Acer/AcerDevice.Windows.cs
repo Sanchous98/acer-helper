@@ -89,7 +89,13 @@ public sealed partial class AcerDevice
     }
 
     // ---- LCD overdrive ----
-    private bool GetLcd() => (GmGet(_gaming, "GetGamingProfile", 0x00) & LcdGetBit) != 0;
+    private bool GetLcd()
+    {
+        // Status byte first: the failure sentinel (all-ones) has LcdGetBit set, so an unchecked read
+        // would report overdrive "on" whenever the WMI call fails.
+        var o = GmGet(_gaming, "GetGamingProfile", 0x00);
+        return (o & 0xFF) == 0 && (o & LcdGetBit) != 0;
+    }
     private (bool, string?) SetLcd(bool on) => GmSet(_gaming, "SetGamingProfile", on ? LcdOn : LcdOff);
 
     // ---- battery health (charge limit / calibration; differ only by mask) ----
@@ -124,10 +130,13 @@ public sealed partial class AcerDevice
 
     // ---- WMI call helpers ----
     // Gaming: one gmInput -> gmOutput; low byte = status (0 = ok), the rest is the value. APGeAction uses
-    // uiInput -> uiOutput (GetFunction returns a raw magic value; SetFunction has no status).
+    // uiInput -> uiOutput (GetFunction returns a raw magic value; SetFunction has no status). Invoke returns
+    // null when the WMI call itself failed — that maps to the all-ones sentinel (status byte 0xFF), NEVER to
+    // 0, which the protocol would read as success-with-value-0 (e.g. "current profile is Quiet").
     private static ulong GmGet(WmiInvoker w, string method, ulong gmInput)
     {
-        try { return w.Invoke(method, "gmInput", gmInput, "gmOutput"); } catch { return ulong.MaxValue; }
+        try { return w.Invoke(method, "gmInput", gmInput, "gmOutput") ?? ulong.MaxValue; }
+        catch { return ulong.MaxValue; }
     }
 
     private static (bool ok, string? error) GmSet(WmiInvoker w, string method, ulong gmInput)
@@ -135,6 +144,7 @@ public sealed partial class AcerDevice
         try
         {
             var o = w.Invoke(method, "gmInput", gmInput, "gmOutput");
+            if (o == null) return (false, w.LastError ?? $"{method} failed (WMI)");
             return (o & 0xFF) == 0 ? (true, null) : (false, $"{method} status={o & 0xFF}");
         }
         catch (Exception ex) { return (false, ex.Message); }
@@ -148,12 +158,18 @@ public sealed partial class AcerDevice
 
     private static ulong UiGet(WmiInvoker w, ulong uiInput)
     {
-        try { return w.Invoke("GetFunction", "uiInput", uiInput, "uiOutput"); } catch { return ulong.MaxValue; }
+        try { return w.Invoke("GetFunction", "uiInput", uiInput, "uiOutput") ?? ulong.MaxValue; }
+        catch { return ulong.MaxValue; }
     }
 
     private static (bool ok, string? error) UiSet(WmiInvoker w, ulong uiInput)
     {
-        try { w.Invoke("SetFunction", "uiInput", uiInput, "uiOutput"); return (true, null); }
+        try
+        {
+            // SetFunction has no status in its output, but a null result means the WMI call itself failed.
+            return w.Invoke("SetFunction", "uiInput", uiInput, "uiOutput") != null
+                ? (true, null) : (false, w.LastError ?? "SetFunction failed (WMI)");
+        }
         catch (Exception ex) { return (false, ex.Message); }
     }
 

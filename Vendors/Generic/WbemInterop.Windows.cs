@@ -54,8 +54,27 @@ internal static partial class Wbem
     internal const int CIM_UINT64 = 21;
 
     // ComWrappers instance that turns a raw COM pointer into a callable RCW for our [GeneratedComInterface]
-    // types. UniqueInstance RCWs are IDisposable, so we release the underlying COM reference deterministically.
+    // types. Always wrap through Wrap(): source-generated RCWs do NOT implement IDisposable (a cast is a
+    // silent no-op) — the only deterministic release is ComObject.FinalRelease(), and that is itself a no-op
+    // unless the wrapper was created with CreateObjectFlags.UniqueInstance. Getting this wrong doesn't fail
+    // loudly: every COM reference just waits for a gen-2 GC + finalizer pass, and an enumerator proxy created
+    // on the (STA) UI thread then gets Released from the (MTA) finalizer thread — a wrong-apartment Release
+    // that can leak the matching server-side object inside the WinMgmt service. This is why the interfaces
+    // below return raw nint out-params instead of typed RCWs: the generated marshaller would wrap them
+    // WITHOUT UniqueInstance, making deterministic release impossible.
     internal static readonly StrategyBasedComWrappers ComWrappers = new();
+
+    /// <summary>Wrap a COM pointer received from an out-parameter into a callable RCW and release the
+    /// out-parameter's own reference (the wrapper takes its own AddRef). Null pointer wraps to null.</summary>
+    internal static T? Wrap<T>(nint ptr) where T : class
+    {
+        if (ptr == 0) return null;
+        try { return (T)ComWrappers.GetOrCreateObjectForComInstance(ptr, CreateObjectFlags.UniqueInstance); }
+        finally { Marshal.Release(ptr); }
+    }
+
+    /// <summary>Deterministically release an RCW created by <see cref="Wrap{T}"/> (no-op on null).</summary>
+    internal static void Release(object? rcw) => (rcw as ComObject)?.FinalRelease();
 
     // ---- ole32 / oleaut32 ----
     [LibraryImport("ole32.dll")]
@@ -131,7 +150,7 @@ internal partial interface IWbemServices
     [PreserveSig] int CancelAsyncCall();          // slot 4  (placeholder)
     [PreserveSig] int QueryObjectSink();          // slot 5  (placeholder)
     [PreserveSig] int GetObject(nint strObjectPath, int lFlags, nint pCtx,
-        out IWbemClassObject? ppObject, nint ppCallResult);   // slot 6 — fetch a class definition (for GetMethod)
+        out nint ppObject, nint ppCallResult);   // slot 6 — fetch a class definition (for GetMethod)
     [PreserveSig] int GetObjectAsync();           // slot 7  (placeholder)
     [PreserveSig] int PutClass();                 // slot 8  (placeholder)
     [PreserveSig] int PutClassAsync();            // slot 9  (placeholder)
@@ -146,12 +165,12 @@ internal partial interface IWbemServices
     [PreserveSig] int CreateInstanceEnum();       // slot 18 (placeholder)
     [PreserveSig] int CreateInstanceEnumAsync();  // slot 19 (placeholder)
     [PreserveSig] int ExecQuery(nint strQueryLanguage, nint strQuery, int lFlags, nint pCtx,
-        out IEnumWbemClassObject? ppEnum);        // slot 20
+        out nint ppEnum);                         // slot 20
     [PreserveSig] int ExecQueryAsync();           // slot 21 (placeholder)
     [PreserveSig] int ExecNotificationQuery();    // slot 22 (placeholder)
     [PreserveSig] int ExecNotificationQueryAsync();// slot 23 (placeholder)
     [PreserveSig] int ExecMethod(nint strObjectPath, nint strMethodName, int lFlags, nint pCtx,
-        IWbemClassObject? pInParams, out IWbemClassObject? ppOutParams, nint ppCallResult);   // slot 24
+        IWbemClassObject? pInParams, out nint ppOutParams, nint ppCallResult);   // slot 24
 }
 
 [GeneratedComInterface, Guid("dc12a681-737f-11cf-884d-00aa004b2e24")]
@@ -169,18 +188,18 @@ internal partial interface IWbemClassObject
     [PreserveSig] int Clone();                    // slot 12 (placeholder)
     [PreserveSig] int GetObjectText();            // slot 13 (placeholder)
     [PreserveSig] int SpawnDerivedClass();        // slot 14 (placeholder)
-    [PreserveSig] int SpawnInstance(int lFlags, out IWbemClassObject? ppNewInstance);        // slot 15
+    [PreserveSig] int SpawnInstance(int lFlags, out nint ppNewInstance);                     // slot 15
     [PreserveSig] int CompareTo();                // slot 16 (placeholder)
     [PreserveSig] int GetPropertyOrigin();        // slot 17 (placeholder)
     [PreserveSig] int InheritsFrom();             // slot 18 (placeholder)
-    [PreserveSig] int GetMethod(nint wszName, int lFlags, out IWbemClassObject? ppInSignature,
-        out IWbemClassObject? ppOutSignature);    // slot 19
+    [PreserveSig] int GetMethod(nint wszName, int lFlags, out nint ppInSignature,
+        out nint ppOutSignature);                 // slot 19
 }
 
 [GeneratedComInterface, Guid("027947e1-d731-11ce-a357-000000000001")]
 internal partial interface IEnumWbemClassObject
 {
     [PreserveSig] int Reset();                    // slot 3  (placeholder)
-    [PreserveSig] int Next(int lTimeout, uint uCount, out IWbemClassObject? apObjects,
+    [PreserveSig] int Next(int lTimeout, uint uCount, out nint apObjects,
         out uint puReturned);                     // slot 4
 }
