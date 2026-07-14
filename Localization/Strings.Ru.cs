@@ -24,10 +24,13 @@ internal static partial class Strings
         ["BATTERY"]                 = "АККУМУЛЯТОР",
 
         // ---- performance profiles ----
+        // Profile names render in the equal-width segment row (4-5 segments on the 468px flyout, ~10
+        // chars per line); Avalonia wraps but can't hyphenate, so a single long word breaks mid-word.
+        // Keep these one short word each (G-Helper's Russian uses the same convention).
         ["Eco"]                     = "Эко",
         ["Quiet"]                   = "Тихий",
-        ["Balanced"]                = "Сбалансированный",
-        ["Performance"]             = "Производительность",
+        ["Balanced"]                = "Баланс",
+        ["Performance"]             = "Мощный",
         ["Turbo"]                   = "Турбо",
         ["Turbo key toggles Turbo"] = "Клавиша Turbo включает Турбо",
         ["Otherwise the Turbo key cycles through profiles."] = "Иначе клавиша Turbo переключает профили по кругу.",
@@ -137,13 +140,15 @@ internal static partial class Strings
             = "Интерфейс профилей питания не найден — ограниченный набор функций.",
 
         // ---- other backends: generic OS power profiles (non-Acer) + Dell modes/durations ----
-        ["Best efficiency"]         = "Макс. энергоэффективность",
-        ["Best performance"]        = "Макс. производительность",
+        // Same segment-row constraint as the profile names above: single words stay short, two-word
+        // names are fine (they wrap at the space; MinHeight keeps the row even).
+        ["Best efficiency"]         = "Экономичный",
+        ["Best performance"]        = "Макс. мощность",
         ["Power saver"]             = "Энергосбережение",
-        ["Low power"]               = "Пониженное энергопотребление",
-        ["Balanced performance"]    = "Сбалансированная производительность",
+        ["Low power"]               = "Мин. мощность",
+        ["Balanced performance"]    = "Баланс+",
         ["Cool"]                    = "Прохладный",
-        ["Optimized"]               = "Оптимизированный",
+        ["Optimized"]               = "Оптимальный",
         ["Primarily AC use"]        = "Преимущественно от сети",
         ["5 s"]                     = "5 с",
         ["10 s"]                    = "10 с",

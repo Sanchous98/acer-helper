@@ -32,9 +32,11 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ProfileButtonViewModel">
-            <!-- Wrap the label: long localized names (e.g. Russian "Производительность") don't fit one line in
-                 an equal-width 5-segment row on the fixed 468px flyout, so let them break to two lines. The
-                 Button.seg MinHeight keeps single- and two-line segments the same height (see App.axaml). -->
+            <!-- Wrap the label: two-word localized names (e.g. Russian "Макс. мощность" on the generic
+                 backend) break at the space into two lines on the fixed 468px flyout. Wrapping can NOT
+                 hyphenate a single long word — translations must keep profile names to short words (see
+                 the note in Strings.Ru.cs). Button.seg MinHeight keeps one- and two-line segments the
+                 same height (see App.axaml). -->
             <Button Classes="seg" Classes.selected="{Binding IsSelected}"
                     Command="{Binding ApplyCommand}" IsEnabled="{Binding IsEnabled}">
               <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"/>
