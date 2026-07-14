@@ -87,10 +87,14 @@ The `windows` workflow builds an **MSI** (`packaging/AcerHelper.wxs`, WiX) from 
 `AcerHelper-Setup.msi` to install to Program Files with a Start-menu shortcut + uninstaller (admin
 elevation prompt; the app self-elevates at runtime too). WiX only builds on Windows, so build it there:
 
-```
+```powershell
 dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self-contained true -p:PublishAot=true -o publish
 dotnet tool install --global wix --version 5.0.2
-wix build packaging\AcerHelper.wxs -arch x64 -d Version=0.14.0 -d PublishDir=publish -o AcerHelper-Setup.msi
+# Version MUST match the csproj <Version> (it becomes the MSI ProductVersion — a stale value breaks
+# MajorUpgrade ordering and disagrees with the version shown in the app). PublishDir MUST be absolute:
+# WiX resolves relative paths against the .wxs folder (packaging\), harvesting nothing -> empty MSI.
+$ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d "PublishDir=$PWD\publish" -o AcerHelper-Setup.msi
 ```
 
 ## Install (Linux)
