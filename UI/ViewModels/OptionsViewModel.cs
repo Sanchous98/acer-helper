@@ -22,6 +22,52 @@ internal sealed class HwSerial
     }
 }
 
+/// <summary>The write -> read-back -> snap-back dance shared by the option rows and the plain-backlight
+/// slider, in one place: serialize each write off the UI thread (order preserved via <see cref="HwSerial"/>),
+/// then re-read the hardware and correct the control to the real value — UNLESS a newer request superseded
+/// this one (the desired latch) or the UI already shows it. Each caller keeps its own control-specific bits:
+/// how it reads the current UI value (<c>current</c>) and how it writes the corrected one (<c>snapBack</c> —
+/// e.g. a syncing-guarded property set). <paramref name="post"/> is the UI-thread marshaller (defaults to
+/// Dispatcher.UIThread.Post); passing a synchronous poster lets this run under a plain unit test.</summary>
+internal sealed class VerifiedHwValue<T>(Action<Action>? post = null)
+{
+    private static readonly EqualityComparer<T> Eq = EqualityComparer<T>.Default;
+    private readonly HwSerial _hw = new();
+    private readonly Action<Action> _post = post ?? (a => Dispatcher.UIThread.Post(a));
+    private T _desired = default!;
+
+    /// <summary>Record the latest intended value WITHOUT writing it (e.g. an optimistic UI flip awaiting a
+    /// confirm dialog), so a still-pending read-back from an earlier write can tell it's been superseded.</summary>
+    public void Latch(T desired) => _desired = desired;
+
+    /// <summary>Write <paramref name="desired"/> off-thread, read back, and snap the control to the actual
+    /// value via <paramref name="snapBack"/> — unless a newer Apply/Latch superseded it or
+    /// <paramref name="current"/> already equals it.</summary>
+    public void Apply(T desired, Action<T> write, Func<T> read, Func<T> current, Action<T> snapBack)
+    {
+        _desired = desired;
+        _hw.Enqueue(() =>
+        {
+            write(desired);
+            var actual = read();
+            _post(() =>
+            {
+                if (!Eq.Equals(desired, _desired) || Eq.Equals(actual, current())) return;   // superseded / matches
+                snapBack(actual);
+            });
+        });
+    }
+
+    /// <summary>Re-read the hardware (no write) and snap the control to it if it differs — for out-of-band
+    /// changes (e.g. an Fn key). Not gated on the latch: a genuine external change should always show.</summary>
+    public void Sync(Func<T> read, Func<T> current, Action<T> snapBack)
+        => _hw.Enqueue(() =>
+        {
+            var actual = read();
+            _post(() => { if (!Eq.Equals(actual, current())) snapBack(actual); });
+        });
+}
+
 /// <summary>Options section: hardware toggles/choices plus clamshell, Turbo-key behaviour and
 /// autostart — whichever the device exposes. <see cref="TryCreate"/> returns null when there is
 /// nothing to show, so the shell can omit the section.</summary>
@@ -29,7 +75,7 @@ public sealed class OptionsViewModel : SectionViewModel
 {
     public ObservableCollection<ObservableObject> Rows { get; } = [];
 
-    public static OptionsViewModel? TryCreate(IDevice device, UiActions a)
+    public static OptionsViewModel? TryCreate(IDevice device, OptionsSection o)
     {
         var vm = new OptionsViewModel();
 
@@ -38,22 +84,23 @@ public sealed class OptionsViewModel : SectionViewModel
         // whole UI live in the new language (see AppController.SetLanguage).
         AppLanguage[] langValues = [AppLanguage.System, AppLanguage.English, AppLanguage.Russian];
         string[] langNames = [Loc.T("System"), "English", "Русский"];
-        var langIndex = Math.Max(0, Array.IndexOf(langValues, a.Language));
+        var langIndex = Math.Max(0, Array.IndexOf(langValues, o.Language));
         vm.Rows.Add(new ChoiceRowViewModel(new OptionChoice(Loc.T("Language"), true, langNames, langIndex,
-            i => a.SetLanguage(langValues[i]))));
+            i => o.SetLanguage(langValues[i]))));
 
-        foreach (var t in a.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t));
-        foreach (var c in a.HwChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
+        foreach (var t in o.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t));
+        foreach (var c in o.HwChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
 
+        // Enabled state read straight off the port (we have the device) — no separate Func needed.
         if (device.Clamshell is { } clam)
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), a.ClamshellEnabled(), true, a.SetClamshell));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), clam.Enabled, true, o.SetClamshell));
 
         if (device.PowerProfiles?.All.Any(p => p.Kind == ProfileKind.Turbo) ?? false)
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), a.TurboToggles, true, a.SetTurboToggles,
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), o.TurboToggles, true, o.SetTurboToggles,
                 tip: Loc.T("Otherwise the Turbo key cycles through profiles.")));
 
         if (device.Autostart is { } auto)
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), a.AutostartEnabled(), true, a.SetAutostart));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), auto.IsEnabled(), true, o.SetAutostart));
 
         return vm.Rows.Count > 0 ? vm : null;
     }
@@ -68,9 +115,8 @@ public sealed class ToggleRowViewModel : ObservableObject
     private readonly Func<bool>? _read;
     private readonly Func<bool>? _confirm;
     private readonly Func<Task<bool>>? _confirmAsync;
-    private readonly HwSerial _hw = new();
+    private readonly VerifiedHwValue<bool> _hw = new();
     private bool _isOn;
-    private bool _desired;   // latest requested value; stale readbacks (from superseded clicks) are ignored
 
     public ToggleRowViewModel(OptionToggle t)
         : this(t.Label, t.Initial, t.Supported, t.OnChange, read: t.Read, confirm: t.Confirm, confirmAsync: t.ConfirmAsync) { }
@@ -83,7 +129,7 @@ public sealed class ToggleRowViewModel : ObservableObject
         IsEnabled = enabled;
         Tip = tip;
         _isOn = initial;
-        _desired = initial;
+        _hw.Latch(initial);
         _onChange = onChange;
         _read = read;
         _confirm = confirm;
@@ -112,7 +158,7 @@ public sealed class ToggleRowViewModel : ObservableObject
             if (value && _confirmAsync != null)
             {
                 SetProperty(ref _isOn, true);
-                _desired = true;
+                _hw.Latch(true);   // so a pending earlier read-back sees this optimistic flip
                 _ = ConfirmAndApplyAsync();
                 return;
             }
@@ -125,22 +171,15 @@ public sealed class ToggleRowViewModel : ObservableObject
     /// <summary>Write the value; then, for a readable (WMI) option, re-read the hardware and snap the switch
     /// to the real state — so a write that silently didn't take corrects itself. The write + readback run
     /// serialized off the UI thread; a correction is discarded if a newer click has since changed the intent
-    /// (<see cref="_desired"/>), so a fast burst never fights the user. Non-readable options apply inline.</summary>
+    /// (the desired latch inside <see cref="VerifiedHwValue{T}"/>), so a fast burst never fights the user.
+    /// Non-readable options apply inline.</summary>
     private void Apply(bool desired)
     {
-        _desired = desired;
-        if (_read == null) { _onChange(desired); return; }
-
-        _hw.Enqueue(() =>
+        if (_read == null) { _hw.Latch(desired); _onChange(desired); return; }   // non-readable: apply inline
+        _hw.Apply(desired, _onChange, _read, () => _isOn, actual =>
         {
-            _onChange(desired);
-            var actual = _read();
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (desired != _desired || actual == _isOn) return;   // superseded, or already matches
-                _isOn = actual;                                       // reflect reality (honest snap-back)
-                OnPropertyChanged(nameof(IsOn));
-            });
+            _isOn = actual;                   // reflect reality (honest snap-back)
+            OnPropertyChanged(nameof(IsOn));
         });
     }
 
@@ -150,7 +189,7 @@ public sealed class ToggleRowViewModel : ObservableObject
         else
         {
             _isOn = false;                    // revert without applying (was never confirmed)
-            _desired = false;
+            _hw.Latch(false);
             OnPropertyChanged(nameof(IsOn));
         }
     }
@@ -162,8 +201,7 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
 {
     private readonly Action<int> _onPick;
     private readonly Func<int>? _read;
-    private readonly HwSerial _hw = new();
-    private int _desired;      // latest requested index; stale readbacks are ignored
+    private readonly VerifiedHwValue<int> _hw = new();
     private bool _syncing;     // guards the readback snap-back so it doesn't re-fire OnChange
 
     public ChoiceRowViewModel(OptionChoice c)
@@ -174,7 +212,7 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
         _onPick = c.OnChange;
         _read = c.Read;
         _selectedIndex = Math.Clamp(c.InitialIndex, 0, c.Options.Count - 1);   // direct write -> no pick fired
-        _desired = _selectedIndex;
+        _hw.Latch(_selectedIndex);
     }
 
     public string Label { get; }
@@ -186,20 +224,12 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
     partial void OnSelectedIndexChanged(int value)
     {
         if (_syncing) return;   // change came from a readback snap-back, not the user
-        _desired = value;
-        if (_read == null) { _onPick(value); return; }
-
-        _hw.Enqueue(() =>
+        if (_read == null) { _hw.Latch(value); _onPick(value); return; }
+        _hw.Apply(value, _onPick, _read, () => SelectedIndex, actual =>
         {
-            _onPick(value);
-            var actual = _read();
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (value != _desired || actual == SelectedIndex) return;   // superseded, or already matches
-                _syncing = true;
-                SelectedIndex = actual;   // reflect reality without re-firing the pick
-                _syncing = false;
-            });
+            _syncing = true;
+            SelectedIndex = actual;   // reflect reality without re-firing the pick
+            _syncing = false;
         });
     }
 }

@@ -1,3 +1,4 @@
+using AcerHelper.Features;
 using AcerHelper.Vendors.Generic;
 
 namespace AcerHelper.Vendors.Dell;
@@ -69,4 +70,14 @@ internal sealed class DellBiosWmi
         var status = outp.GetU64("Status");
         return status == 0 ? (true, null) : (false, $"SetAttribute({attribute}) status={status}");
     }
+
+    // ---- port factories ----
+    // A BIOS enumeration attribute wired as a bool/choice in one line (Get/Set pair). Defaults are the usual
+    // Dell "Enabled"/"Disabled" enum literals.
+
+    public FlagPort Flag(string attribute, string on = "Enabled", string off = "Disabled")
+        => new(() => Get(attribute) == on, v => Set(attribute, v ? on : off));
+
+    public ChoicePort Choice(string attribute, IReadOnlyList<ChoiceOption> options)
+        => new(options, () => Get(attribute), id => Set(attribute, id));
 }

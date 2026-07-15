@@ -64,16 +64,16 @@ public sealed partial class MainViewModel : ObservableObject
         if (device.Sensors != null)
             Sections.Add(_monitor = new MonitorViewModel());
         if (device.PowerProfiles is { } pp)
-            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.ApplyProfile, a.TurboToggles, a.SetTurbo));
+            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.Profiles.Apply, a.Profiles.TurboToggles, a.Profiles.SetTurbo));
         if (device.FanControl is { } fc)
-            Sections.Add(_fans = new FansViewModel(fc.Capability, a.FanModeInit, a.CpuFanInit, a.GpuFanInit,
-                a.CpuUseCurveInit, a.GpuUseCurveInit, a.CpuCurveInit, a.GpuCurveInit,
-                a.SetFan, a.SetFanCurve, a.ShowFanCurve));
-        if (a.HasBatteryInfo || a.BatteryLimit != null || a.BatteryCalibration != null || a.BatteryChargeMode != null)
-            Sections.Add(_battery = new BatteryViewModel(a.HasBatteryInfo, a.BatteryLimit, a.BatteryCalibration, a.BatteryChargeMode));
+            Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
+                a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
+        var bat = a.Battery;
+        if (bat.HasInfo || bat.Limit != null || bat.Calibration != null || bat.ChargeMode != null)
+            Sections.Add(_battery = new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode));
 
         // Options live in the drawer, not the main column.
-        _options = OptionsViewModel.TryCreate(device, a);
+        _options = OptionsViewModel.TryCreate(device, a.Options);
     }
 
     /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
@@ -107,8 +107,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
     /// <summary>Reflect a mode's fan preset in the fan section (called when the performance mode changes).</summary>
-    public void ReloadFans(int mode, int cpu, int gpu, bool cpuUseCurve, bool gpuUseCurve, int[] cpuCurve, int[] gpuCurve)
-        => _fans?.Load(mode, cpu, gpu, cpuUseCurve, gpuUseCurve, cpuCurve, gpuCurve);
+    public void ReloadFans(FanPreset preset) => _fans?.Load(preset);
 
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);

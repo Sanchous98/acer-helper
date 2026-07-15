@@ -14,8 +14,10 @@ namespace AcerHelper.UI.ViewModels;
 /// persists per performance mode.</summary>
 public sealed partial class FansViewModel : SectionViewModel
 {
-    private static readonly int[] Anchors      = [50, 60, 70, 80, 90];   // must match LaptopService.FanCurveAnchors
-    private static readonly int[] DefaultCurve = [30, 45, 60, 80, 100];
+    // Anchors + default ramp come from the one owner (the emulated-curve engine), so the graph and the
+    // controller that drives the fans can't drift apart.
+    private static readonly int[] Anchors      = FanCurveEngine.Anchors;
+    private static readonly int[] DefaultCurve = FanCurveEngine.DefaultCurve;
 
     private readonly Action<FanMode, byte, byte> _setFan;
     private readonly Action<bool, bool, int[]> _setFanCurve;                 // (gpu, use, points)
@@ -32,8 +34,7 @@ public sealed partial class FansViewModel : SectionViewModel
     public ObservableCollection<CurvePointViewModel> CpuCurve { get; } = [];
     public ObservableCollection<CurvePointViewModel> GpuCurve { get; } = [];
 
-    public FansViewModel(FanCapability cap, int modeInit, int cpuInit, int gpuInit,
-                         bool cpuUseCurveInit, bool gpuUseCurveInit, int[] cpuCurveInit, int[] gpuCurveInit,
+    public FansViewModel(FanCapability cap, FanPreset preset,
                          Action<FanMode, byte, byte> setFan, Action<bool, bool, int[]> setFanCurve,
                          Func<FanCurveDialogViewModel, Task> showCurve)
     {
@@ -50,17 +51,17 @@ public sealed partial class FansViewModel : SectionViewModel
 
         for (var i = 0; i < Anchors.Length; i++)
         {
-            CpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(cpuCurveInit, i), () => OnCurveChanged(false)));
-            GpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(gpuCurveInit, i), () => OnCurveChanged(true)));
+            CpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(preset.CpuCurve, i), () => OnCurveChanged(false)));
+            GpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(preset.GpuCurve, i), () => OnCurveChanged(true)));
         }
 
-        _cpu = Math.Clamp(cpuInit, 0, 100);
-        _gpu = Math.Clamp(gpuInit, 0, 100);
+        _cpu = Math.Clamp(preset.Cpu, 0, 100);
+        _gpu = Math.Clamp(preset.Gpu, 0, 100);
         _cpuPct = $"{(int)_cpu}%";
         _gpuPct = $"{(int)_gpu}%";
-        _cpuUseCurve = cpuUseCurveInit;
-        _gpuUseCurve = gpuUseCurveInit;
-        var mode = (FanMode)modeInit;
+        _cpuUseCurve = preset.CpuUseCurve;
+        _gpuUseCurve = preset.GpuUseCurve;
+        var mode = (FanMode)preset.Mode;
         _isMax    = mode == FanMode.Max && HasMax;
         _isCustom = mode == FanMode.Custom && HasCustom;
         _isAuto   = !_isMax && !_isCustom;
@@ -116,27 +117,27 @@ public sealed partial class FansViewModel : SectionViewModel
 
     /// <summary>Reflect a mode's saved fan preset without triggering apply/persist (the service already set
     /// the hardware on the mode switch). The <c>_loading</c> guard neuters the hooks.</summary>
-    public void Load(int mode, int cpu, int gpu, bool cpuUseCurve, bool gpuUseCurve, int[] cpuCurve, int[] gpuCurve)
+    public void Load(FanPreset preset)
     {
         // A pending debounce belongs to the PREVIOUS mode: letting it tick after this reload would fire
         // the NEW mode's just-loaded values at the hardware and persist them under the new key (silently
         // creating a preset from leftover UI state). The stale edit raced the mode switch — drop it.
         _fixedDebounce.Stop(); _cpuCurveDebounce.Stop(); _gpuCurveDebounce.Stop();
         _loading = true;
-        Cpu = Math.Clamp(cpu, 0, 100);
-        Gpu = Math.Clamp(gpu, 0, 100);
-        var m = (FanMode)mode;
+        Cpu = Math.Clamp(preset.Cpu, 0, 100);
+        Gpu = Math.Clamp(preset.Gpu, 0, 100);
+        var m = (FanMode)preset.Mode;
         IsMax    = m == FanMode.Max && HasMax;
         IsCustom = m == FanMode.Custom && HasCustom;
         IsAuto   = !IsMax && !IsCustom;
-        CpuUseCurve = cpuUseCurve;
-        GpuUseCurve = gpuUseCurve;
-        LoadCurve(CpuCurve, cpuCurve);
-        LoadCurve(GpuCurve, gpuCurve);
+        CpuUseCurve = preset.CpuUseCurve;
+        GpuUseCurve = preset.GpuUseCurve;
+        LoadCurve(CpuCurve, preset.CpuCurve);
+        LoadCurve(GpuCurve, preset.GpuCurve);
         // An open curve dialog shows the new mode's points already (shared collection) — keep its
         // "Follow curve" switch in step too, or it would show the old mode's flag and look broken.
-        _cpuDialog?.SyncUseCurve(cpuUseCurve);
-        _gpuDialog?.SyncUseCurve(gpuUseCurve);
+        _cpuDialog?.SyncUseCurve(preset.CpuUseCurve);
+        _gpuDialog?.SyncUseCurve(preset.GpuUseCurve);
         _loading = false;
     }
 

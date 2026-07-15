@@ -19,14 +19,14 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         // (a second EC transaction the user hears as a second "click").
         if (d.LcdOverdrive is { } lcd)
             list.Add(new OptionToggle(Loc.T("LCD overdrive"), true, lcd.Get(),
-                v => RunSet(() => svc.SetLcdOverdrive(v), "LCD overdrive")));
+                v => RunSet(() => svc.SetFlag(lcd, v), "LCD overdrive")));
         // Keyboard-backlight timeout uses SetFunction, which returns nothing about the result -> read back.
         if (d.KeyboardBacklight is { } kbd)
-            list.Add(new OptionToggle(Loc.T("Keyboard backlight timeout"), true, kbd.GetTimeout(),
-                v => RunSet(() => svc.SetBacklightTimeout(v), "Backlight timeout"), Read: kbd.GetTimeout));
+            list.Add(new OptionToggle(Loc.T("Keyboard backlight timeout"), true, kbd.Get(),
+                v => RunSet(() => svc.SetFlag(kbd, v), "Backlight timeout"), Read: kbd.Get));
         if (d.FnLock is { } fn)
             list.Add(new OptionToggle(Loc.T("Fn lock"), true, fn.Get(),
-                v => RunSet(() => svc.SetFnLock(v), "Fn lock"), Read: fn.Get));
+                v => RunSet(() => svc.SetFlag(fn, v), "Fn lock"), Read: fn.Get));
         return list;
     }
 
@@ -37,10 +37,10 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
 
         if (d.UsbCharging is { } usb)
         {
-            var levels = usb.Levels;
+            var levels = usb.Options;
             var names = levels.Select(l => Loc.T(l.DisplayName)).ToList();
             list.Add(new OptionChoice(Loc.T("USB charging when off:"), true, names, IndexOf(levels, usb.Get()),
-                i => RunSet(() => svc.SetUsbCharging(levels[i].Id), "USB charging"),
+                i => RunSet(() => svc.SetChoice(usb, levels[i].Id), "USB charging"),
                 Read: () => IndexOf(levels, usb.Get())));
         }
 
@@ -53,7 +53,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             var opts = to.Options;
             var names = opts.Select(o => Loc.T(o.DisplayName)).ToList();
             list.Add(new OptionChoice(Loc.T("Keyboard backlight timeout:"), true, names, IndexOf(opts, to.Get()),
-                i => RunSet(() => svc.SetKeyboardTimeout(opts[i].Id), "Backlight timeout"),
+                i => RunSet(() => svc.SetChoice(to, opts[i].Id), "Backlight timeout"),
                 Read: () => IndexOf(opts, to.Get())));
         }
 
@@ -75,24 +75,24 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public OptionChoice? BatteryChargeMode()
     {
         if (svc.Device.BatteryChargeMode is not { } mode) return null;
-        var modes = mode.Modes;
+        var modes = mode.Options;
         var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
         return new OptionChoice(Loc.T("Charge mode"), true, names, IndexOf(modes, mode.Get()),
-            i => RunSet(() => svc.SetBatteryChargeMode(modes[i].Id), "Charge mode"),
+            i => RunSet(() => svc.SetChoice(mode, modes[i].Id), "Charge mode"),
             Read: () => IndexOf(modes, mode.Get()));
     }
 
     public OptionToggle? BatteryLimit()
         => svc.Device.BatteryChargeLimit is { } limit
             ? new OptionToggle(Loc.T("Charge limit (~80%)"), true, limit.Get(),
-                v => RunSet(() => svc.SetBatteryLimit(v), "Battery limit"), Read: limit.Get)
+                v => RunSet(() => svc.SetFlag(limit, v), "Battery limit"), Read: limit.Get)
             : null;
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
     public OptionToggle? BatteryCalibration()
         => svc.Device.BatteryCalibration is { } cal
             ? new OptionToggle(Loc.T("Calibration (full cycle)"), true, cal.Get(),
-                v => RunSet(() => svc.SetBatteryCalibration(v), "Battery calibration"),
+                v => RunSet(() => svc.SetFlag(cal, v), "Battery calibration"),
                 Read: cal.Get, ConfirmAsync: confirmCalibration)
             : null;
 

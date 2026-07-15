@@ -11,26 +11,24 @@ namespace AcerHelper.Vendors.Generic;
 // return the value directly (errors degrade to a default).
 
 /// <summary>A boolean toggle. The identical-shaped bool ports (charge limit, calibration, LCD overdrive,
-/// keyboard-backlight timeout, Fn lock) are all this one class, instantiated with different ops.</summary>
+/// keyboard-backlight timeout, Fn lock — all <see cref="IFlagPort"/>) are this one class, instantiated with
+/// different ops.</summary>
 public sealed class FlagPort(Func<bool> read, Func<bool, (bool ok, string? error)> write)
     : IBatteryChargeLimit, IBatteryCalibration, ILcdOverdrive, IKeyboardBacklight, IFnLock
 {
     public string? LastError { get; private set; }
     public bool Get() => read();
     public bool Set(bool on) { var (ok, e) = write(on); LastError = e; return ok; }
-    public bool GetTimeout() => read();
-    public bool SetTimeout(bool on) => Set(on);
 }
 
-/// <summary>A pick-one-of-N labeled choice. The identical-shaped choice ports (USB charging level,
-/// battery charge mode) are all this one class; ids are the vendor's stable keys.</summary>
+/// <summary>A pick-one-of-N labeled choice. The identical-shaped choice ports (USB charging, battery charge
+/// mode, backlight-timeout duration — all <see cref="IChoicePort"/>) are this one class; ids are the
+/// vendor's stable keys.</summary>
 public sealed class ChoicePort(IReadOnlyList<ChoiceOption> options, Func<string?> read, Func<string, (bool ok, string? error)> write)
     : IUsbCharging, IBatteryChargeMode, IKeyboardBacklightTimeout
 {
     public string? LastError { get; private set; }
-    public IReadOnlyList<ChoiceOption> Levels => options;    // IUsbCharging
-    public IReadOnlyList<ChoiceOption> Modes => options;     // IBatteryChargeMode
-    public IReadOnlyList<ChoiceOption> Options => options;   // IKeyboardBacklightTimeout
+    public IReadOnlyList<ChoiceOption> Options => options;
     public string? Get() => read();
     public bool Set(string id) { var (ok, e) = write(id); LastError = e; return ok; }
 }

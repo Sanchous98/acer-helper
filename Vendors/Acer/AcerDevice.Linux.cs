@@ -12,8 +12,6 @@ namespace AcerHelper.Vendors.Acer;
 // reached via raw hidraw — on recent models it's HID-over-I2C, not USB).
 public sealed partial class AcerDevice
 {
-    private const string OFF = "0";
-    private const string ON = "1";
     private const string LinuwuRoot = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi";
 
     private SysfsInvoker _sense = null!;
@@ -23,9 +21,7 @@ public sealed partial class AcerDevice
         // RGB is the ENE HID controller — the very same device (and packets) as on Windows, reached via
         // hidraw. It's independent of Linuwu-Sense (a WMI/EC driver, not the HID interface), so wire it first
         // regardless of whether the sysfs module is loaded. No brightness read-back here (that's gaming WMI).
-        var rgb = new EneHidController(_model.Zones, _model.Lightbar, readKeyboardBrightness: null);
-        if (rgb.Zones.Count > 0) { var dev = new RgbDevice(rgb); Lighting = dev; Own(dev); }
-        else rgb.Dispose();
+        WireRgb(readKeyboardBrightness: null);
 
         // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden).
         if (AcerHotkeys.TryCreate() is { } keys) Own(Hotkeys = keys);
@@ -54,12 +50,14 @@ public sealed partial class AcerDevice
             return;
         }
 
+        // Plain on/off sysfs knobs collapse to the shared flag factory (node = the id string; on/off = "1"/"0",
+        // the factory defaults). USB stays bespoke — its read normalises the raw node value to an option id.
         if (Usable("fan_speed"))
             FanControl = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        if (Usable("lcd_override"))        LcdOverdrive       = new FlagPort(GetLcd, SetLcd);
-        if (Usable("battery_limiter"))     BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
-        if (Usable("battery_calibration")) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
-        if (Usable("backlight_timeout"))   KeyboardBacklight  = new FlagPort(GetBacklight, SetBacklight);
+        if (Usable("lcd_override"))        LcdOverdrive       = _sense.Flag("lcd_override");
+        if (Usable("battery_limiter"))     BatteryChargeLimit = _sense.Flag("battery_limiter");
+        if (Usable("battery_calibration")) BatteryCalibration = _sense.Flag("battery_calibration");
+        if (Usable("backlight_timeout"))   KeyboardBacklight  = _sense.Flag("backlight_timeout");
         if (Usable("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
     }
 
@@ -110,32 +108,10 @@ public sealed partial class AcerDevice
     private (bool, string?) SetFanSpeeds(byte cpu, byte gpu)
         => Wr("fan_speed", $"{Math.Clamp((int)cpu, 0, 100)},{Math.Clamp((int)gpu, 0, 100)}");
 
-    // ---- bool sysfs toggles ----
-    private bool GetLcd() => _sense.Read("lcd_override") == ON;
-    
-    private (bool, string?) SetLcd(bool on) => Wr("lcd_override", on ? ON : OFF);
-    
-    private bool GetChargeLimit() => _sense.Read("battery_limiter") == ON;
-    
-    private (bool, string?) SetChargeLimit(bool on) => Wr("battery_limiter", on ? ON : OFF);
-    
-    private bool GetCalibration() => _sense.Read("battery_calibration") == ON;
-    
-    private (bool, string?) SetCalibration(bool on) => Wr("battery_calibration", on ? ON : OFF);
-    
-    private bool GetBacklight() => _sense.Read("backlight_timeout") == ON;
-    
-    private (bool, string?) SetBacklight(bool on) => Wr("backlight_timeout", on ? ON : OFF);
+    // (Plain bool sysfs toggles — LCD override, battery limiter/calibration, backlight timeout — are wired
+    // directly via _sense.Flag in InitVendor; no per-feature Get/Set methods needed.)
 
-    // ---- USB charging (ids = battery-threshold percentages, "0" = off) ----
-    private static readonly ChoiceOption[] UsbLevels = 
-    [
-        new("0", "Off"), 
-        new("10", "10%"), 
-        new("20", "20%"), 
-        new("30", "30%")
-    ];
-
+    // ---- USB charging (ids = battery-threshold percentages, "0" = off; UsbLevels shared in AcerDevice.cs) ----
     private string GetUsb() => int.TryParse(_sense.Read("usb_charging"), out var v) ? v.ToString() : "0";
 
     private (bool, string?) SetUsb(string id) => Wr("usb_charging", id);

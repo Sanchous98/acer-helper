@@ -70,7 +70,7 @@ public sealed partial class DellDevice
         if (_kbd.Has("stop_timeout"))
         {
             if (_kbd.CanWrite("stop_timeout"))
-                KeyboardBacklightTimeout = new ChoicePort(KbdTimeouts, GetKbdTimeout, SetKbdTimeout);
+                KeyboardBacklightTimeout = _kbd.Choice("stop_timeout", KbdTimeouts);
             else locked = true;
         }
 
@@ -83,10 +83,10 @@ public sealed partial class DellDevice
             locked = true;
         else if (_fw != null)
         {
-            if (_fw.CanRead("FnLock")) FnLock = new FlagPort(GetFnLock, SetFnLock);
+            if (_fw.CanRead("FnLock")) FnLock = _fw.Flag("FnLock");
             if (_fw.CanRead("UsbPowerShare"))
-                UsbCharging = new ChoicePort([new ChoiceOption("Disabled", "Off"), new ChoiceOption("Enabled", "On")],
-                                             GetPowerShare, SetPowerShare);
+                UsbCharging = _fw.Choice("UsbPowerShare",
+                    [new ChoiceOption("Disabled", "Off"), new ChoiceOption("Enabled", "On")]);
         }
 
         if (locked)
@@ -110,28 +110,7 @@ public sealed partial class DellDevice
         return (ok, e);
     }
 
-    // ---- keyboard-backlight auto-off delay (LED stop_timeout; reads/writes "5s","1m","1h",…) ----
-    private string? GetKbdTimeout() => _kbd.Read("stop_timeout");
-
-    private (bool, string?) SetKbdTimeout(string id)
-    {
-        var ok = _kbd.Write("stop_timeout", id, out var e);
-        return (ok, e);
-    }
-
-    // ---- BIOS attributes (dell-wmi-sysman) ----
-    private bool GetFnLock() => _fw?.Read("FnLock") == "Enabled";
-
-    private (bool, string?) SetFnLock(bool on) => WriteAttr("FnLock", on ? "Enabled" : "Disabled");
-
-    private string? GetPowerShare() => _fw?.Read("UsbPowerShare");
-
-    private (bool, string?) SetPowerShare(string id) => WriteAttr("UsbPowerShare", id);
-
-    private (bool, string?) WriteAttr(string attribute, string value)
-    {
-        if (_fw == null) return (false, null);
-        var ok = _fw.Write(attribute, value, out var e);
-        return (ok, e);
-    }
+    // (Keyboard-backlight delay, Fn-lock and USB PowerShare are plain read/write knobs wired directly via
+    // _kbd.Choice / _fw.Flag / _fw.Choice in InitVendor; only the bracket-parsed charge modes above keep
+    // their bespoke methods.)
 }

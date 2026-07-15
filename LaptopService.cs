@@ -184,12 +184,10 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
     // ---- fans ----
 
-    /// <summary>Fixed temperature anchors (°C) the emulated fan curve is defined at; a curve is one duty% per
-    /// anchor, per fan. Kept in sync with the UI (FansViewModel).</summary>
-    public static readonly int[] FanCurveAnchors = [50, 60, 70, 80, 90];
-    private static readonly int[] DefaultCurve   = [30, 45, 60, 80, 100];
-
-    private int _curveCpu = -1, _curveGpu = -1;   // last duty% the curve loop applied (for hysteresis)
+    // The emulated fan-curve controller (anchors, default ramp, hysteresis/deadband). Custom mode drives the
+    // fans through it on the sensor loop; Reset() on any out-of-band change so the deadband can't swallow the
+    // first write.
+    private readonly FanCurveEngine _fanCurve = new();
 
     public bool ApplyFan(FanMode mode, byte cpu, byte gpu)
     {
@@ -224,7 +222,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     {
         var f = StoredFan();
         f.Mode = (int)mode; f.Cpu = cpu; f.Gpu = gpu;
-        _curveCpu = _curveGpu = -1;
+        _fanCurve.Reset();
         Save();
         if (mode == FanMode.Custom) ApplyCustom(ReadSensors());
         else ApplyFan(mode, cpu, gpu);
@@ -236,7 +234,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         var f = StoredFan();
         if (gpu) { f.GpuUseCurve = use; f.GpuCurve = points; }
         else     { f.CpuUseCurve = use; f.CpuCurve = points; }
-        _curveCpu = _curveGpu = -1;
+        _fanCurve.Reset();
         Save();
         ApplyCustom(ReadSensors());
     }
@@ -251,7 +249,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     public FanPreset? ApplyModeFan()
     {
         if (!Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f)) return null;
-        _curveCpu = _curveGpu = -1;
+        _fanCurve.Reset();
         if ((FanMode)f.Mode != FanMode.Custom) ApplyFan((FanMode)f.Mode, (byte)f.Cpu, (byte)f.Gpu);
         return f;
     }
@@ -263,32 +261,11 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     {
         if (device.FanControl == null ||
             !Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) || (FanMode)f.Mode != FanMode.Custom)
-        { _curveCpu = _curveGpu = -1; return; }
+        { _fanCurve.Reset(); return; }
 
-        int cpu = f.CpuUseCurve ? EvalCurve(f.CpuCurve, s.CpuTempC, _curveCpu) : Math.Clamp(f.Cpu, 0, 100);
-        int gpu = f.GpuUseCurve ? EvalCurve(f.GpuCurve, s.GpuTempC, _curveGpu) : Math.Clamp(f.Gpu, 0, 100);
-
-        if (_curveCpu >= 0 && Math.Abs(cpu - _curveCpu) < 4 && Math.Abs(gpu - _curveGpu) < 4) return;   // deadband
-
-        if (ApplyFan(FanMode.Custom, (byte)cpu, (byte)gpu)) { _curveCpu = cpu; _curveGpu = gpu; }
-    }
-
-    /// <summary>Interpolate a duty% for <paramref name="temp"/> from the per-anchor curve (linear between
-    /// anchors, flat beyond the ends). Unknown temperature (-1) holds the last value (or the idle duty).</summary>
-    private static int EvalCurve(int[] duties, int temp, int fallback)
-    {
-        var a = FanCurveAnchors;
-        if (duties == null || duties.Length < a.Length) duties = DefaultCurve;
-        if (temp < 0)      return fallback >= 0 ? fallback : Math.Clamp(duties[0], 0, 100);
-        if (temp <= a[0])  return Math.Clamp(duties[0], 0, 100);
-        if (temp >= a[^1]) return Math.Clamp(duties[^1], 0, 100);
-        for (int i = 1; i < a.Length; i++)
-            if (temp <= a[i])
-            {
-                int d0 = duties[i - 1], d1 = duties[i];
-                return Math.Clamp(d0 + (d1 - d0) * (temp - a[i - 1]) / (a[i] - a[i - 1]), 0, 100);
-            }
-        return Math.Clamp(duties[^1], 0, 100);
+        if (_fanCurve.Step(f, s) is not { } duty) return;                       // within deadband
+        if (ApplyFan(FanMode.Custom, (byte)duty.cpu, (byte)duty.gpu))
+            _fanCurve.Commit(duty.cpu, duty.gpu);                               // advance state only on success
     }
 
     // ---- lighting (per-mode) ----
@@ -307,15 +284,12 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
     // ---- hardware toggles (return success; LastError holds the reason on failure) ----
 
-    public bool SetBatteryLimit(bool on)         => Run(device.BatteryChargeLimit, x => x.Set(on), x => x.LastError);
-    public bool SetBatteryCalibration(bool on)   => Run(device.BatteryCalibration, x => x.Set(on), x => x.LastError);
-    public bool SetBatteryChargeMode(string id)  => Run(device.BatteryChargeMode,  x => x.Set(id), x => x.LastError);
-    public bool SetLcdOverdrive(bool on)         => Run(device.LcdOverdrive,       x => x.Set(on), x => x.LastError);
-    public bool SetUsbCharging(string id)        => Run(device.UsbCharging,        x => x.Set(id), x => x.LastError);
-    public bool SetBacklightTimeout(bool on)     => Run(device.KeyboardBacklight,  x => x.SetTimeout(on), x => x.LastError);
-    public bool SetKeyboardTimeout(string id)    => Run(device.KeyboardBacklightTimeout, x => x.Set(id), x => x.LastError);
-    public bool SetKeyboardBrightness(int level) => Run(device.KeyboardBrightness, x => x.Set(level), x => x.LastError);
-    public bool SetFnLock(bool on)               => Run(device.FnLock,             x => x.Set(on), x => x.LastError);
+    // Every simple on/off or pick-one control routes through one of these two: the port carries its own
+    // error channel, so the caller (OptionsAssembler) passes the device's nullable port + the new value.
+    // SetKeyboardBrightness stays its own method — it's a LevelPort (an int), not a flag/choice.
+    public bool SetFlag(IFlagPort? port, bool on)       => Run(port, x => x.Set(on), x => x.LastError);
+    public bool SetChoice(IChoicePort? port, string id) => Run(port, x => x.Set(id), x => x.LastError);
+    public bool SetKeyboardBrightness(int level)        => Run(device.KeyboardBrightness, x => x.Set(level), x => x.LastError);
 
     public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 

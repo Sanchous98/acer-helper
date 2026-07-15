@@ -20,19 +20,16 @@ internal sealed class AppController
     private FlyoutCoordinator _windows;
     private TrayController _tray;
     private readonly DispatcherTimer _timer;
-    private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
-    private int _lightReapplyLeft;                     // remaining re-apply ticks
-    private LightingViewModel? _lighting;              // kept so the re-apply can drive the profile-follow lightbar
-    private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
-    private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
+    // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Created before
+    // the UI so the follows-profile toggle can reach it, then re-pointed at each fresh UI via Attach.
+    private readonly LightingCoordinator _lightingCoord;
+    private LightingViewModel? _lighting;              // current lighting VM (rebuilt per language); handed to _lightingCoord
     private readonly UpdateChecker _updates = new();
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
     private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
-    private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
-    private bool _blankedByLid;      // WE blanked the backlight under a shut lid; restore on the next open (see OnLidChanged)
     private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
     private bool _updating;   // a self-update download/install is in flight — both the banner and the tray item
                               // stay clickable, so without this a second click starts a second download and a
@@ -50,29 +47,22 @@ internal sealed class AppController
         // default (off) and shows off after every restart even though the setting is persisted (Settings.Clamshell).
         _svc.ApplyStartupState();
 
-        // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
-        // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting a
-        // couple of times right after the switch — whichever tick lands after the repaint overrides it and it
-        // then stays. (Only user-driven zones are re-applied; a "follows profile" lightbar has no panel and is
-        // left as the firmware's palette. The palette flash itself is firmware and can't be suppressed.)
-        // Created up front so the follows-profile toggle lambda below can safely start it.
-        _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        _lightReapply.Tick += (_, _) =>
-        {
-            ApplyFollowLighting();
-            if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
-        };
+        // The lighting re-apply / lid-blank / resume machine lives in its own coordinator. Created up front —
+        // before the UI — so the follows-profile toggle lambda built in BuildUi can reach it, and so it persists
+        // untouched across a live language rebuild (only its view-model targets are re-pointed, via Attach).
+        _lightingCoord = new LightingCoordinator(_svc);
 
         // Build the string-baked UI (view-models, flyout window, tray). It reads all its text via Loc at
         // construction, so a live language switch simply tears this down and rebuilds it in the new language
         // (RebuildForLanguage). Everything set up AFTER this point holds no localized text and survives the swap.
         (_vm, _windows, _tray, _lighting) = BuildUi();
+        _lightingCoord.Attach(_vm, _lighting);
         _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
 
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch.
-        ApplyFollowLighting();
+        _lightingCoord.ApplyFollowLighting();
 
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
         ApplyHardwareAccessBanner();
@@ -90,17 +80,6 @@ internal sealed class AppController
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
-
-        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake.
-        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLighting));
-        _resume.Start();
-
-        // In clamshell (keep-awake) mode the machine stays on with the lid shut, but the backlight is then hidden —
-        // so blank it while the lid is closed and restore it on open. Gated on clamshell being enabled (see
-        // OnLidChanged): without it a lid-close just sleeps the machine and the backlight is moot (restored by the
-        // resume re-apply above). The watcher fires on its message thread, so marshal to the UI thread here.
-        _lid = new LidWatcher(open => Dispatcher.UIThread.Post(() => OnLidChanged(open)));
-        _lid.Start();
 
         // Heal a stale run-at-logon entry from an older build (wrong launch command) so an in-place upgrade
         // migrates to the current definition. Best-effort, off the UI thread; only touches the entry if it
@@ -131,25 +110,24 @@ internal sealed class AppController
         var lighting = d.Lighting != null || d.KeyboardBrightness != null
             ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
                                     followKey != null && _svc.GetDeviceFlag(followKey, true),
-                                    // On flip: persist the flag, then kick the re-apply so the lightbar repaints
-                                    // now (ON -> this profile's palette; OFF -> its custom colour) instead of
-                                    // waiting for the next switch. Safe: _lightReapply is created before BuildUi.
+                                    // On flip: persist the flag (AppController owns the vendor key), then have the
+                                    // coordinator kick the re-apply so the lightbar repaints now (ON -> this
+                                    // profile's palette; OFF -> its custom colour) instead of waiting for the next
+                                    // switch. Safe: _lightingCoord is created before BuildUi and outlives rebuilds.
                                     v => { if (followKey != null) _svc.SetDeviceFlag(followKey, v);
-                                           _lightReapplyLeft = 2; _lightReapply.Stop(); _lightReapply.Start(); },
+                                           _lightingCoord.OnFollowsProfileFlipped(); },
                                     d.KeyboardBrightness, _svc.SetKeyboardBrightness)
             : null;
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
         var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         var vm = new MainViewModel(d, new UiActions(
-            ApplyProfile, SetTurbo, SetFan, SetFanCurve, ShowFanCurve,
-            opts.Toggles(), opts.Choices(),
-            () => d.Clamshell?.Enabled ?? false, b => _svc.SetClamshell(b),
-            _svc.Settings.TurboToggles, SetTurboToggles,
-            () => d.Autostart?.IsEnabled() ?? false, b => _svc.SetAutostart(b),
-            fan0.Mode, fan0.Cpu, fan0.Gpu,
-            fan0.CpuUseCurve, fan0.GpuUseCurve, fan0.CpuCurve, fan0.GpuCurve,
-            d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode(),
-            _svc.Settings.Language, SetLanguage),
+            new ProfileActions(ApplyProfile, _svc.Settings.TurboToggles, SetTurbo),
+            new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
+            new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
+            new OptionsSection(opts.Toggles(), opts.Choices(),
+                _svc.Settings.TurboToggles, SetTurboToggles,
+                b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
+                _svc.Settings.Language, SetLanguage)),
             lighting);
 
         var windows = new FlyoutCoordinator(vm);
@@ -181,9 +159,10 @@ internal sealed class AppController
 
         Loc.Use(_svc.Settings.Language);
         (_vm, _windows, _tray, _lighting) = BuildUi();
+        _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _lastModeKey = _svc.CurrentModeKey();     // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
-        ApplyFollowLighting();
+        _lightingCoord.ApplyFollowLighting();
         ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
         ApplyHardwareAccessBanner();
         Refresh();                                 // push live state into the fresh view-models + tray
@@ -378,23 +357,17 @@ internal sealed class AppController
         {
             _lastModeKey = modeKey;
             if (_svc.ApplyModeFan() is { } fan)
-                _vm.ReloadFans(fan.Mode, fan.Cpu, fan.Gpu, fan.CpuUseCurve, fan.GpuUseCurve, fan.CpuCurve, fan.GpuCurve);
-            if (BacklightHidden) BlankBacklight();   // don't light a hidden keyboard on a mode change under a shut lid
-            else _vm.ReloadLighting(_svc.LightsForCurrentMode());
+                _vm.ReloadFans(fan);
+            _lightingCoord.OnModeChanged();   // reflect the mode's lighting (or stay dark under a shut lid)
         }
 
         // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block above
-        // won't fire) repaint the lighting. Do it IMMEDIATELY — a following lightbar must show the NEW profile's
-        // palette at once, otherwise the previous colour lingers for a beat and looks like a stray flash of the
-        // old colour (NitroSense flips it the instant the profile changes). Then repeat a couple of times to
-        // catch any late firmware repaint.
+        // won't fire) repaint the lighting — immediately, then a couple of retries (see LightingCoordinator).
         var profileId = current?.Id ?? "";
         if (profileId != _lastProfileId)
         {
             _lastProfileId = profileId;
-            ApplyFollowLighting();
-            _lightReapplyLeft = 2;
-            _lightReapply.Stop(); _lightReapply.Start();
+            _lightingCoord.OnProfileChanged();
         }
 
         _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
@@ -404,65 +377,10 @@ internal sealed class AppController
         _tray.Update(current, selectable);
     }
 
-    // Repaint after a profile change/toggle. First paint the new profile's palette on a follow-lightbar (a GLOBAL
-    // write that also flashes the keyboard), then re-apply the per-zone colours so the keyboard settles back to
-    // its own custom colour on top. Called immediately on a switch (so the lightbar flips at once, no lingering
-    // old colour) and repeated by _lightReapply as a safety net against a late firmware repaint.
-    private void ApplyFollowLighting()
-    {
-        if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
-        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _svc.CurrentProfile()?.FlashColor is { } flash)
-            _svc.Device.Lighting?.SetProfileFlash(flash);
-        _vm.ReloadLighting(_svc.LightsForCurrentMode());
-    }
-
-    // Re-drive the current mode's lighting via the same path as a profile switch (palette flash for a follow-
-    // lightbar + per-zone re-apply). Used on wake from sleep/hibernation (the firmware drops the EC's RGB) and on
-    // lid-open in clamshell mode (we blanked it on lid-close). Uses more retries than a switch because the HID/EC
-    // can take a second or two to be ready after a hibernation resume.
-    private void ReapplyLighting()
-    {
-        ApplyFollowLighting();
-        _lightReapplyLeft = 6;
-        _lightReapply.Stop(); _lightReapply.Start();
-    }
-
-    // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
-    // touching the app's stored per-zone state; opened -> restore the current mode's lighting. The blank is
-    // gated on clamshell (a lid-close otherwise sleeps the machine and resume re-applies), but the RESTORE is
-    // gated on _blankedByLid — the remembered fact that we blanked — NOT on clamshell still being enabled at
-    // open time: the user can flip clamshell off from the external screen while the lid is shut, and the
-    // EC-latched blank would otherwise stick until the next profile switch / resume / restart.
-    // Posted to the UI thread by the lid watcher, so all HID writes stay serialized with the rest of the app.
-    private void OnLidChanged(bool open)
-    {
-        _lidShut = !open;   // remembered so a repaint (profile/mode/power change) under a shut lid re-blanks (see BacklightHidden)
-        if (open)
-        {
-            if (_blankedByLid) { _blankedByLid = false; ReapplyLighting(); }
-        }
-        else if (_svc.Device.Clamshell?.Enabled == true)
-            BlankBacklight();
-    }
-
-    // Blank the hidden backlight and remember that WE did it, so the next lid-open restores it (see OnLidChanged).
-    private void BlankBacklight()
-    {
-        _blankedByLid = true;
-        _svc.Device.Lighting?.Blank();
-    }
-
-    // True while the backlight must stay dark: the lid is shut AND clamshell keep-awake is on, so the machine runs
-    // with a hidden keyboard/lightbar. Every repaint path checks this, so a profile/mode/power-source change under
-    // a closed lid re-blanks instead of lighting the (hidden) keyboard back up until the lid is next opened.
-    private bool BacklightHidden => _lidShut && _svc.Device.Clamshell?.Enabled == true;
-
     private void ExitApp()
     {
         _timer.Stop();
-        _lightReapply.Stop();
-        _resume.Dispose();
-        _lid.Dispose();
+        _lightingCoord.Dispose();
         _tray.Dispose();
         _svc.Dispose();
         _desktop.Shutdown();

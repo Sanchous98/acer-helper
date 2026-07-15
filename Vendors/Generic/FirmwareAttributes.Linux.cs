@@ -1,4 +1,5 @@
 using System.IO;
+using AcerHelper.Features;
 
 namespace AcerHelper.Vendors.Generic;
 
@@ -51,4 +52,14 @@ public sealed class FirmwareAttributes
         try { return File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
         catch { return null; }
     }
+
+    // ---- port factories ----
+    // A BIOS attribute wired as a bool/choice in one line (the current_value read/write pair). Vendor
+    // defaults are the usual firmware-attribute enum literals.
+
+    public FlagPort Flag(string attribute, string on = "Enabled", string off = "Disabled")
+        => new(() => Read(attribute) == on, v => { var ok = Write(attribute, v ? on : off, out var e); return (ok, e); });
+
+    public ChoicePort Choice(string attribute, IReadOnlyList<ChoiceOption> options)
+        => new(options, () => Read(attribute), id => { var ok = Write(attribute, id, out var e); return (ok, e); });
 }

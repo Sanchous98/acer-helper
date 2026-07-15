@@ -355,8 +355,7 @@ public sealed partial class BacklightViewModel : ObservableObject
 {
     private readonly IKeyboardBrightness _port;
     private readonly Func<int, bool> _apply;
-    private readonly HwSerial _hw = new();
-    private int _desired;
+    private readonly VerifiedHwValue<int> _hw = new();
     private bool _syncing;
 
     public int MaxLevel { get; }
@@ -372,7 +371,7 @@ public sealed partial class BacklightViewModel : ObservableObject
         MaxLevel = port.MaxLevel;
         Names = NamesFor(MaxLevel);
         _level = Math.Clamp(port.Get(), 0, MaxLevel);
-        _desired = (int)_level;
+        _hw.Latch((int)_level);
         UpdateName();
     }
 
@@ -381,28 +380,16 @@ public sealed partial class BacklightViewModel : ObservableObject
         UpdateName();
         if (_syncing) return;   // change came from a readback snap-back, not the user
         var lvl = Math.Clamp((int)Math.Round(value), 0, MaxLevel);
-        _desired = lvl;
-        _hw.Enqueue(() =>
+        _hw.Apply(lvl, l => _apply(l), _port.Get, () => (int)Level, actual =>
         {
-            _apply(lvl);
-            var actual = _port.Get();
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (lvl != _desired || actual == (int)Level) return;   // superseded, or already matches
-                _syncing = true; Level = actual; _syncing = false; UpdateName();
-            });
+            _syncing = true; Level = actual; _syncing = false; UpdateName();
         });
     }
 
     /// <summary>Re-read the live level (Fn key changed it) and reflect it without applying.</summary>
-    public void SyncFromHardware() => _hw.Enqueue(() =>
+    public void SyncFromHardware() => _hw.Sync(_port.Get, () => (int)Level, actual =>
     {
-        var actual = _port.Get();
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (actual == (int)Level) return;
-            _syncing = true; Level = actual; _syncing = false; UpdateName();
-        });
+        _syncing = true; Level = actual; _syncing = false; UpdateName();
     });
 
     private void UpdateName() => LevelName = Names[Math.Clamp((int)Math.Round(Level), 0, Names.Count - 1)];

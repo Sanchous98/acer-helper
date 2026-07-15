@@ -46,9 +46,7 @@ public sealed partial class AcerDevice
         var bl = _apge.Available ? UiGet(_apge, BlQuery) : ulong.MaxValue;
         if (bl is BlGetOn or BlGetOff) KeyboardBacklight = new FlagPort(GetBacklight, SetBacklight);
 
-        var rgb = new EneHidController(_model.Zones, _model.Lightbar, ReadKbBrightness);
-        if (rgb.Zones.Count > 0) { var dev = new RgbDevice(rgb); Lighting = dev; Own(dev); }
-        else rgb.Dispose();
+        WireRgb(ReadKbBrightness);
 
         Own(Hotkeys = new AcerHotkeys());
     }
@@ -106,9 +104,7 @@ public sealed partial class AcerDevice
 
     // ---- USB charging / keyboard-backlight timeout (APGeAction) ----
     // Ids are the battery-threshold percentages ("0" = off): charging stops once the battery drops there.
-    private static readonly ChoiceOption[] UsbLevels =
-        [new("0", "Off"), new("10", "10%"), new("20", "20%"), new("30", "30%")];
-
+    // The UsbLevels list itself is shared (see AcerDevice.cs).
     private string? GetUsb() => Math.Max(0, UsbDecode(UiGet(_apge, UsbQuery))).ToString();
     private (bool, string?) SetUsb(string id) => UiSet(_apge, id switch { "10" => UsbAt10, "20" => UsbAt20, "30" => UsbAt30, _ => UsbOff });
     private bool GetBacklight() => UiGet(_apge, BlQuery) == BlGetOn;

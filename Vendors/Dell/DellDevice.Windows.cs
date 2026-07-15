@@ -51,12 +51,11 @@ public sealed partial class DellDevice
         if (bios.Get("ThermalManagement") != null)
             PowerProfiles = new ProfilesPort(Thermal, () => Thermal, CurrentThermal, SetThermal);
         if (bios.Get("PrimaryBattChargeCfg") != null)
-            BatteryChargeMode = new ChoicePort(ChargeModes, GetChargeMode, SetChargeMode);
+            BatteryChargeMode = _bios.Choice("PrimaryBattChargeCfg", ChargeModes);
         if (bios.Get("FnLock") != null)
-            FnLock = new FlagPort(GetFnLock, SetFnLock);
+            FnLock = _bios.Flag("FnLock");
         if (bios.Get("UsbPowerShare") != null)
-            UsbCharging = new ChoicePort([new("Disabled", "Off"), new("Enabled", "On")],
-                                         GetPowerShare, SetPowerShare);
+            UsbCharging = _bios.Choice("UsbPowerShare", [new("Disabled", "Off"), new("Enabled", "On")]);
         // Plain keyboard backlight (Disabled/Dim/Bright) as discrete brightness levels — shown in the
         // Lighting window, not Options. (On Linux the same knob is the kernel LED class, wired generically.)
         if (bios.Get("KeyboardIllumination") != null)
@@ -72,19 +71,9 @@ public sealed partial class DellDevice
 
     private (bool, string?) SetThermal(PerformanceProfile p) => _bios.Set("ThermalManagement", p.Id);
 
-    // ---- battery charge mode / Fn-lock / USB PowerShare ----
-    private string? GetChargeMode() => _bios.Get("PrimaryBattChargeCfg");
-
-    private (bool, string?) SetChargeMode(string id) => _bios.Set("PrimaryBattChargeCfg", id);
-
-    private bool GetFnLock() => _bios.Get("FnLock") == "Enabled";
-
-    private (bool, string?) SetFnLock(bool on) => _bios.Set("FnLock", on ? "Enabled" : "Disabled");
-
-    private string? GetPowerShare() => _bios.Get("UsbPowerShare");
-
-    private (bool, string?) SetPowerShare(string id) => _bios.Set("UsbPowerShare", id);
-
+    // ---- keyboard brightness (bespoke: enum name <-> 0..2 level index) ----
+    // (Charge mode, Fn-lock and USB PowerShare are plain attribute read/write knobs wired directly via
+    // _bios.Choice / _bios.Flag in InitVendor.)
     private int GetKbdBright() { var i = Array.IndexOf(Illum, _bios.Get("KeyboardIllumination")); return i < 0 ? 0 : i; }
 
     private (bool, string?) SetKbdBright(int level) => _bios.Set("KeyboardIllumination", Illum[Math.Clamp(level, 0, Illum.Length - 1)]);

@@ -33,13 +33,30 @@ public interface ISensors
     SensorSnapshot Read();
 }
 
-/// <summary>LCD overdrive (response-time boost).</summary>
-public interface ILcdOverdrive
+/// <summary>Shared shape of a boolean hardware toggle (on/off) with an error channel. The concrete on/off
+/// feature ports derive from this so they share one definition and one implementation (see FlagPort); the
+/// distinct interface types stay so IDevice can expose each capability as its own nullable port.</summary>
+public interface IFlagPort
 {
     string? LastError { get; }
     bool Get();
     bool Set(bool on);
 }
+
+/// <summary>Shared shape of a pick-one-of-N labelled choice with an error channel. The concrete choice
+/// feature ports derive from this (see ChoicePort). Ids are the vendor's stable keys; <see cref="Options"/>
+/// is the display list.</summary>
+public interface IChoicePort
+{
+    string? LastError { get; }
+    IReadOnlyList<ChoiceOption> Options { get; }
+    /// <summary>The active option's id, or null if it can't be read.</summary>
+    string? Get();
+    bool Set(string id);
+}
+
+/// <summary>LCD overdrive (response-time boost).</summary>
+public interface ILcdOverdrive : IFlagPort { }
 
 /// <summary>Live battery telemetry (charge %, state, health, cycles). Read-only.</summary>
 public interface IBatteryInfo
@@ -48,51 +65,22 @@ public interface IBatteryInfo
 }
 
 /// <summary>~80% battery charge limit (battery-health mode).</summary>
-public interface IBatteryChargeLimit
-{
-    string? LastError { get; }
-    bool Get();
-    bool Set(bool on);
-}
+public interface IBatteryChargeLimit : IFlagPort { }
 
 /// <summary>Battery calibration (full charge/discharge cycle).</summary>
-public interface IBatteryCalibration
-{
-    string? LastError { get; }
-    bool Get();
-    bool Set(bool on);
-}
+public interface IBatteryCalibration : IFlagPort { }
 
 /// <summary>Vendor battery charging strategy — a named mode, not a bare threshold (e.g. Dell:
-/// Adaptive / Express charge / Primarily AC / Standard / Custom). The mode set is what the firmware
-/// actually advertises on this machine.</summary>
-public interface IBatteryChargeMode
-{
-    string? LastError { get; }
-    IReadOnlyList<ChoiceOption> Modes { get; }
-    /// <summary>The active mode's id, or null if it can't be read.</summary>
-    string? Get();
-    bool Set(string id);
-}
+/// Adaptive / Express charge / Primarily AC / Standard / Custom). The mode set (<see cref="IChoicePort.Options"/>)
+/// is what the firmware actually advertises on this machine.</summary>
+public interface IBatteryChargeMode : IChoicePort { }
 
-/// <summary>USB charging while the laptop is powered off. Levels are vendor-defined labelled choices
+/// <summary>USB charging while the laptop is powered off. The options are vendor-defined labelled choices
 /// (Acer: Off/10%/20%/30% battery threshold; Dell PowerShare: Off/On).</summary>
-public interface IUsbCharging
-{
-    string? LastError { get; }
-    IReadOnlyList<ChoiceOption> Levels { get; }
-    /// <summary>The active level's id, or null if it can't be read.</summary>
-    string? Get();
-    bool Set(string id);
-}
+public interface IUsbCharging : IChoicePort { }
 
-/// <summary>Keyboard backlight auto-off timeout.</summary>
-public interface IKeyboardBacklight
-{
-    string? LastError { get; }
-    bool GetTimeout();
-    bool SetTimeout(bool on);
-}
+/// <summary>Keyboard backlight auto-off timeout (on/off).</summary>
+public interface IKeyboardBacklight : IFlagPort { }
 
 /// <summary>Plain (non-RGB) keyboard-backlight brightness in discrete hardware levels, 0 = off
 /// (e.g. Dell: 0..2 = Off/Dim/Bright). RGB keyboards expose brightness via <see cref="IRgbDevice"/> instead.</summary>
@@ -107,21 +95,10 @@ public interface IKeyboardBrightness
 /// <summary>Keyboard-backlight auto-off delay as a duration choice (5s / 30s / 1m / 5m …), for hardware
 /// where the timeout is a fixed set of durations rather than a plain on/off (e.g. the Dell LED stop_timeout).
 /// Ids are the exact strings the hardware accepts and reports back.</summary>
-public interface IKeyboardBacklightTimeout
-{
-    string? LastError { get; }
-    IReadOnlyList<ChoiceOption> Options { get; }
-    string? Get();
-    bool Set(string id);
-}
+public interface IKeyboardBacklightTimeout : IChoicePort { }
 
 /// <summary>Fn-key lock: whether the F-row defaults to its secondary (media/hardware) functions.</summary>
-public interface IFnLock
-{
-    string? LastError { get; }
-    bool Get();
-    bool Set(bool on);
-}
+public interface IFnLock : IFlagPort { }
 
 // RGB lighting is modelled as a zone-based device (IRgbDevice, in Rgb.cs) rather than a fixed
 // keyboard+lightbar port, so the UI adapts to whatever zones the active controllers advertise.
