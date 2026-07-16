@@ -5,11 +5,13 @@
              x:Class="AcerHelper.UI.Views.CpuView"
              x:DataType="vm:CpuViewModel">
 
-  <!-- Bare content (hosted under the "CPU" header inside the Overclock drawer). One control: the Windows
-       power-mode overlay mapped to the current performance profile. -->
-  <Grid ColumnDefinitions="Auto,*" Margin="0,4,0,0">
-    <TextBlock Classes="muted" VerticalAlignment="Center" Width="86" Text="{l:Tr 'Power mode'}"/>
-    <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+  <!-- Bare content (hosted under the "CPU" header inside the Tuning drawer). One control: the Windows
+       power-mode overlay mapped to the current performance profile. Laid out like the Options-drawer choices
+       (label fills the left, a content-sized dropdown sits on the right) so the select isn't stretched to the
+       full card width. -->
+  <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+    <TextBlock Classes="muted" VerticalAlignment="Center" Margin="0,0,10,0" Text="{l:Tr 'Power mode'}"/>
+    <ComboBox Grid.Column="1" MinWidth="160" VerticalAlignment="Center"
               ItemsSource="{Binding ModeNames}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
   </Grid>
 </UserControl>
