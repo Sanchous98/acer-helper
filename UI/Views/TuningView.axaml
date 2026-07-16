@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
+             x:Class="AcerHelper.UI.Views.TuningView"
+             x:DataType="vm:TuningViewModel">
+
+  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) under its own header.
+       The drawer supplies the surrounding panel and the "Tuning" title; the child views (GpuView/CpuView)
+       are bare and rendered via their DataTemplates. -->
+  <StackPanel Spacing="18">
+
+    <StackPanel Spacing="8" IsVisible="{Binding HasGpu}">
+      <TextBlock Classes="section" Text="{l:Tr GPU}"/>
+      <ContentControl Content="{Binding Gpu}"/>
+    </StackPanel>
+
+    <StackPanel Spacing="8" IsVisible="{Binding HasCpu}">
+      <TextBlock Classes="section" Text="{l:Tr CPU}"/>
+      <ContentControl Content="{Binding Cpu}"/>
+    </StackPanel>
+
+  </StackPanel>
+</UserControl>

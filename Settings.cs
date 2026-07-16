@@ -40,6 +40,12 @@ public sealed class Settings
     // stock, so switching to it must clear any offset the previous mode had applied.
     public Dictionary<string, GpuOcPreset> GpuOcPresets { get; set; } = new();
 
+    // CPU power mode (Windows power-mode overlay GUID) remembered PER performance mode (same key scheme).
+    // Switching mode re-applies that mode's overlay IF one is stored; a mode with no entry is "leave untouched"
+    // (like fans) — we don't force an OS power mode on profiles the user hasn't configured. Value = overlay
+    // GUID string.
+    public Dictionary<string, string> CpuPowerModes { get; set; } = new();
+
     // Vendor-specific device flags, keyed by an opaque string the owning backend defines (e.g. Acer's lightbar
     // "follows performance profile"). Kept as a neutral bag so Settings stays vendor-agnostic — on different
     // hardware the unused keys just sit inert. The key + its meaning live in the backend (Vendors/*); access

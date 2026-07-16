@@ -10,6 +10,7 @@ public sealed record UiActions(
     ProfileActions Profiles,
     FanSection Fans,
     GpuSection Gpu,
+    CpuSection Cpu,
     BatterySection Battery,
     OptionsSection Options);
 
@@ -29,6 +30,14 @@ public sealed record FanSection(
 public sealed record GpuSection(
     GpuOcPreset Initial,
     Action<int, int> SetGpuOc);
+
+/// <summary>CPU-power section: the available power-mode overlays, the current mode's chosen id (or the live
+/// effective overlay when unconfigured), and the apply/persist delegate. Built only when the device exposes an
+/// <see cref="Features.ICpuPower"/> port.</summary>
+public sealed record CpuSection(
+    IReadOnlyList<ChoiceOption> Modes,
+    string? Initial,
+    Action<string> SetCpuPower);
 
 /// <summary>Battery section: whether telemetry exists, plus the pre-built option rows the device supports.</summary>
 public sealed record BatterySection(

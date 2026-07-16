@@ -33,6 +33,7 @@ public partial class GenericDevice : IDevice
     public IHotkeys?            Hotkeys            { get; protected set; }
     public IDisplayTint?        DisplayTint        { get; protected set; }
     public IGpuOverclock?       GpuOverclock       { get; protected set; }
+    public ICpuPower?           CpuPower           { get; protected set; }
     public IAutostart?          Autostart          { get; protected set; }
     public IClamshell?          Clamshell          { get; protected set; }
 
@@ -51,6 +52,15 @@ public partial class GenericDevice : IDevice
 
     /// <summary>Per-OS common capabilities (profiles, sensors, clamshell, blue-light) — the .Windows/.Linux part.</summary>
     partial void InitPlatform();
+
+    /// <summary>Finish composition once ALL ports are final — in particular after a vendor backend has had its
+    /// chance (in InitVendor) to REPLACE the generic profiles with a WMI/BIOS port. Called by the composition
+    /// root (DeviceFactory) after the device is fully constructed, so it can make decisions that depend on the
+    /// final port set (e.g. the overlay-CPU-power axis is only valid when the profiles are NOT themselves the
+    /// Windows overlay). Per-OS work is in <see cref="FinalizeCompositionPlatform"/>.</summary>
+    internal void FinalizeComposition() => FinalizeCompositionPlatform();
+
+    partial void FinalizeCompositionPlatform();
 
     public void Dispose()
     {

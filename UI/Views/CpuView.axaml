@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
+             x:Class="AcerHelper.UI.Views.CpuView"
+             x:DataType="vm:CpuViewModel">
+
+  <!-- Bare content (hosted under the "CPU" header inside the Overclock drawer). One control: the Windows
+       power-mode overlay mapped to the current performance profile. -->
+  <Grid ColumnDefinitions="Auto,*" Margin="0,4,0,0">
+    <TextBlock Classes="muted" VerticalAlignment="Center" Width="86" Text="{l:Tr 'Power mode'}"/>
+    <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+              ItemsSource="{Binding ModeNames}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
+  </Grid>
+</UserControl>

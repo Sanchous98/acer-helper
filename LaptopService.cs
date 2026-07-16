@@ -24,7 +24,8 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     {
         if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
         if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
-        ApplyModeGpuOc();   // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
+        ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
+        ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
     }
 
     // ---- performance profiles ----
@@ -330,6 +331,35 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         var g = CurrentGpuOc();
         device.GpuOverclock?.Set(g.Core, g.Mem);
         return g;
+    }
+
+    // ---- CPU power mode (per-mode) ----
+
+    /// <summary>The CPU power-mode overlay id for the current mode: the stored choice if the user set one for
+    /// this profile, otherwise the live effective overlay (so the UI reflects reality on an unconfigured mode).</summary>
+    public string? CurrentCpuPower()
+        => Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id) ? id : device.CpuPower?.Current();
+
+    /// <summary>Set the CPU power-mode overlay for the CURRENT mode, persist, and apply now.</summary>
+    public bool SetCpuPower(string id)
+    {
+        Settings.CpuPowerModes[CurrentModeKey()] = id;
+        Save();
+        var cp = device.CpuPower;
+        if (cp == null) return false;
+        if (!cp.Set(id)) { LastError = cp.LastError; return false; }
+        return true;
+    }
+
+    /// <summary>Apply the current mode's CPU power overlay IF the user configured one for this profile; a mode
+    /// with no entry is left untouched (we don't force an OS power mode on unconfigured profiles). Returns the
+    /// id the UI should reflect (stored, or the live effective overlay). Called on mode change, startup, resume.</summary>
+    public string? ApplyModeCpuPower()
+    {
+        var cp = device.CpuPower;
+        if (cp == null) return null;
+        if (Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id)) { cp.Set(id); return id; }
+        return cp.Current();
     }
 
     public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();

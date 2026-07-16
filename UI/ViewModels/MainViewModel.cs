@@ -17,7 +17,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly MonitorViewModel? _monitor;
     private readonly ProfilesViewModel? _profiles;
     private readonly FansViewModel? _fans;
-    private readonly GpuViewModel? _gpu;
+    private readonly TuningViewModel? _tuning;   // Tuning drawer: GPU clocks + CPU power (either may be null)
     private readonly BatteryViewModel? _battery;
     private readonly OptionsViewModel? _options;
     private readonly LightingViewModel? _lighting;
@@ -37,7 +37,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool ShowOptions => _options != null;
     public bool ShowLighting => _lighting != null;
-    public bool ShowGpu => _gpu != null;
+    public bool ShowTuning => _tuning != null;
 
     [ObservableProperty] private bool _hasProfile;
     [ObservableProperty] private string _profileName = "";
@@ -77,10 +77,15 @@ public sealed partial class MainViewModel : ObservableObject
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a.Options);
 
-        // GPU overclock lives in its own drawer too (opened from the footer), not the main column — it keeps
-        // the dashboard uncluttered and leaves the tab room to grow (e.g. CPU controls) without crowding home.
-        if (device.GpuOverclock is { } gpu)
-            _gpu = new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc);
+        // Performance tuning (GPU clock offsets + CPU power mode) lives in its own "Tuning" drawer, opened
+        // from the footer — kept off the main column so the dashboard stays uncluttered. The drawer exists when
+        // the device supports at least one of the two; each child is null when its capability is absent.
+        var gpuVm = device.GpuOverclock is { } gpu
+            ? new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc) : null;
+        var cpuVm = device.CpuPower is { } cpu
+            ? new CpuViewModel(cpu.Modes, a.Cpu.Initial, a.Cpu.SetCpuPower) : null;
+        if (gpuVm != null || cpuVm != null)
+            _tuning = new TuningViewModel(gpuVm, cpuVm);
     }
 
     /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
@@ -104,7 +109,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand] private void OpenOptions() => OpenDrawer(Loc.T("Options"), _options);
 
-    [RelayCommand] private void OpenGpu() => OpenDrawer(Loc.T("GPU"), _gpu);
+    [RelayCommand] private void OpenTuning() => OpenDrawer(Loc.T("Tuning"), _tuning);
 
     [RelayCommand]
     private void OpenLighting()
@@ -119,7 +124,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void ReloadFans(FanPreset preset) => _fans?.Load(preset);
 
     /// <summary>Reflect a mode's GPU-OC preset in the GPU section (called when the performance mode changes).</summary>
-    public void ReloadGpuOc(GpuOcPreset preset) => _gpu?.Load(preset);
+    public void ReloadGpuOc(GpuOcPreset preset) => _tuning?.Gpu?.Load(preset);
+
+    /// <summary>Reflect a mode's CPU power choice in the CPU section (called when the performance mode changes).</summary>
+    public void ReloadCpuPower(string? id) => _tuning?.Cpu?.Load(id);
 
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);

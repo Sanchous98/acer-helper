@@ -15,8 +15,11 @@
     <DataTemplate DataType="vm:BatteryViewModel"><views:BatteryView/></DataTemplate>
     <!-- Drawer contents (hosted in the main window's slide-out side panel). -->
     <DataTemplate DataType="vm:OptionsViewModel"><views:OptionsView/></DataTemplate>
-    <DataTemplate DataType="vm:GpuViewModel"><views:GpuView/></DataTemplate>
     <DataTemplate DataType="vm:LightingViewModel"><views:LightingView/></DataTemplate>
+    <!-- Tuning drawer: the container + its GPU / CPU sub-views (rendered via ContentControl). -->
+    <DataTemplate DataType="vm:TuningViewModel"><views:TuningView/></DataTemplate>
+    <DataTemplate DataType="vm:GpuViewModel"><views:GpuView/></DataTemplate>
+    <DataTemplate DataType="vm:CpuViewModel"><views:CpuView/></DataTemplate>
   </Application.DataTemplates>
 
   <Application.Resources>

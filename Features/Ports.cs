@@ -140,6 +140,23 @@ public interface IGpuOverclock
     bool Set(int coreMhz, int memMhz);
 }
 
+/// <summary>CPU power behaviour via the Windows Power-Mode overlay (Best efficiency / Balanced / Best
+/// performance) — the one CPU-power knob that works driverless on this class of machine. There is no ring-0
+/// undervolt/PPT here and no Acer-native WMI power path (Acer bakes the whole PPT/STAPM envelope into its
+/// fixed EC profiles), so — exactly like G-Helper's driverless CPU axis — this maps a chosen OS power mode to
+/// each performance profile. Ids are the overlay scheme GUID strings; the mode set is the three fixed OS
+/// overlays. Present only where the overlay API responds (probe-and-hide).</summary>
+public interface ICpuPower
+{
+    string? LastError { get; }
+    /// <summary>The three OS power-mode overlays, in display order. Ids are overlay GUID strings.</summary>
+    IReadOnlyList<ChoiceOption> Modes { get; }
+    /// <summary>The effective overlay's id right now, or null if unreadable.</summary>
+    string? Current();
+    /// <summary>Switch the active OS power-mode overlay. Returns false and sets <see cref="LastError"/> on failure.</summary>
+    bool Set(string id);
+}
+
 /// <summary>Run-at-logon control.</summary>
 public interface IAutostart
 {
@@ -189,6 +206,7 @@ public interface IDevice : IDisposable
     IHotkeys?            Hotkeys            { get; }
     IDisplayTint?        DisplayTint        { get; }
     IGpuOverclock?       GpuOverclock       { get; }
+    ICpuPower?           CpuPower           { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
 }

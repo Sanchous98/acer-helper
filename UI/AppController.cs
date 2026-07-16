@@ -124,6 +124,7 @@ internal sealed class AppController
             new ProfileActions(ApplyProfile, _svc.Settings.TurboToggles, SetTurbo),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
+            new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(),
                 _svc.Settings.TurboToggles, SetTurboToggles,
@@ -307,6 +308,13 @@ internal sealed class AppController
         if (!_svc.SetGpuOc(core, mem)) Notify(Loc.T("GPU overclock failed") + Err(_svc.LastError));
     }
 
+    // CPU power-mode overlay, applied + persisted per performance mode by the service. Like SetGpuOc: no
+    // Refresh() (nothing shared depends on it); failure surfaced.
+    private void SetCpuPower(string id)
+    {
+        if (!_svc.SetCpuPower(id)) Notify(Loc.T("Power mode failed") + Err(_svc.LastError));
+    }
+
     private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
 
     private Task<bool> ConfirmCalibrationAsync() => _windows.ConfirmCalibrationAsync();
@@ -367,7 +375,8 @@ internal sealed class AppController
             _lastModeKey = modeKey;
             if (_svc.ApplyModeFan() is { } fan)
                 _vm.ReloadFans(fan);
-            _vm.ReloadGpuOc(_svc.ApplyModeGpuOc());   // re-apply + reflect this mode's GPU clock offsets
+            _vm.ReloadGpuOc(_svc.ApplyModeGpuOc());       // re-apply + reflect this mode's GPU clock offsets
+            _vm.ReloadCpuPower(_svc.ApplyModeCpuPower()); // re-apply + reflect this mode's CPU power mode
             _lightingCoord.OnModeChanged();   // reflect the mode's lighting (or stay dark under a shut lid)
         }
 

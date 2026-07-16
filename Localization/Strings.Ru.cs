@@ -48,12 +48,18 @@ internal static partial class Strings
         ["GPU fan curve"]           = "Кривая вентилятора GPU",
         ["{0} rpm"]                 = "{0} об/мин",
 
-        // ---- GPU overclock ----
-        // "GPU" stays "GPU" (universal acronym) -> no entry, falls back to the English key.
+        // ---- tuning tab (GPU clocks + CPU power) ----
+        // "GPU" and "CPU" stay as-is (universal acronyms) -> no entries, fall back to the English keys.
+        ["Tuning"]                  = "Настройка",
         ["Core"]                    = "Ядро",
         ["Memory"]                  = "Память",
         ["Reset"]                   = "Сброс",
         ["GPU overclock failed"]    = "Не удалось разогнать GPU",
+        // CPU power mode (Windows power-mode overlay). "Balanced" and "Best performance" reuse the existing
+        // keys above ("Баланс" / "Макс. мощность").
+        ["Power mode"]              = "Режим питания",
+        ["Best power efficiency"]   = "Энергоэффективность",
+        ["Power mode failed"]       = "Не удалось изменить режим питания",
 
         // ---- battery ----
         ["Health"]                  = "Состояние",

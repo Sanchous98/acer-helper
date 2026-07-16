@@ -17,12 +17,15 @@ public static class DeviceFactory
     {
         var (manufacturer, product) = MachineInfo.Read();
 
-        if (manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true)
-            return new AcerDevice(product);
+        GenericDevice device =
+            manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true ? new AcerDevice(product) :
+            manufacturer?.Contains("Dell", StringComparison.OrdinalIgnoreCase) == true ? new DellDevice(product) :   // "Dell Inc."
+            new GenericDevice();
 
-        if (manufacturer?.Contains("Dell", StringComparison.OrdinalIgnoreCase) == true)   // "Dell Inc."
-            return new DellDevice(product);
-
-        return new GenericDevice();
+        // Now that the vendor backend (if any) has finalized the port set — in particular whether the
+        // performance profiles are a vendor WMI/EC port or the generic Windows overlay — let the device make
+        // the composition decisions that depend on it (e.g. the overlay-CPU-power axis; see GenericDevice).
+        device.FinalizeComposition();
+        return device;
     }
 }

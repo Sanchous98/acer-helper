@@ -120,6 +120,7 @@ internal sealed class LightingCoordinator : IDisposable
         // and comes back at 0 offset, so re-assert the current mode's offsets. Value is unchanged, so no UI
         // reflect is needed (the slider already shows it); a no-op when the device has no GPU-OC port.
         _svc.ApplyModeGpuOc();
+        _svc.ApplyModeCpuPower();   // re-assert the current profile's CPU power mode (defensive; overlay usually persists)
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
