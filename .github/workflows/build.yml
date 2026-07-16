@@ -47,6 +47,18 @@ jobs:
           if ($ver -ne $tag) { throw "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging." }
           Write-Host "OK: tag matches <Version> = $ver"
 
+      # Cache the NuGet global-packages folder. The heavy restore cost here is the Native-AOT toolchain
+      # (Microsoft.DotNet.ILCompiler + the win-x64 runtime pack) plus Avalonia/HidSharp/CommunityToolkit and the
+      # WiX tool package — all immutable, versioned packages, so caching them is safe. Keyed on the csproj (the
+      # PackageReferences live there); the restore-keys fallback keeps the cache warm even when only <Version>
+      # changed for a release, so restore still finds every package and downloads nothing new.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
@@ -104,12 +116,44 @@ jobs:
           if [ "$ver" != "$tag" ]; then echo "Release tag v$tag does not match csproj <Version> ($ver). Bump <Version> to $tag before tagging."; exit 1; fi
           echo "OK: tag matches <Version> = $ver"
 
+      # actions/cache needs tar (+ zstd for fast compression) INSIDE the container, and the minimal fedora image
+      # ships neither — install them first (tiny, uncached) so the cache steps below can pack/unpack.
+      - name: Bootstrap cache tools
+        run: dnf -y install tar gzip zstd
+
+      # Cache the NuGet global-packages folder — same heavy toolchain restore as the windows job (ILCompiler +
+      # the linux-x64 runtime pack) plus Avalonia/etc. See that job for the keying rationale.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # Cache the downloaded dnf RPMs (clang — the AOT compiler/linker — is the heavy one). keepcache=1 on the
+      # install below keeps the .rpm files in /var/cache/dnf so this cache can hold them; on a hit dnf installs
+      # from disk instead of re-fetching. Bump the key suffix when the package list below changes.
+      - name: Cache dnf packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/dnf
+          key: fedora41-dnf-v1
+          restore-keys: fedora41-dnf-
+
+      # Cache appimagetool (continuous) so we don't re-fetch it from GitHub on every build — also removes a
+      # network dependency that has flaked before. Static key = pinned; bump it to pick up a newer appimagetool.
+      - name: Cache appimagetool
+        uses: actions/cache@v4
+        with:
+          path: appimagetool
+          key: appimagetool-continuous-x86_64
+
       # Native AOT needs a C toolchain + zlib to link the native image; the runtime needs ICU; curl fetches
-      # appimagetool; `file` is REQUIRED by appimagetool to inspect the AppDir (the minimal fedora container
-      # omits it — it aborts with "file command is missing but required"). (clang is .NET's documented AOT
-      # compiler; zlib-devel for the link.)
+      # appimagetool (when not cached); `file` is REQUIRED by appimagetool to inspect the AppDir (the minimal
+      # fedora container omits it — it aborts with "file command is missing but required"). (clang is .NET's
+      # documented AOT compiler; zlib-devel for the link.) keepcache=1 so the RPMs persist into the cache above.
       - name: Install build deps
-        run: dnf -y install clang zlib-devel libicu tar gzip findutils curl file
+        run: dnf -y --setopt=keepcache=1 install clang zlib-devel libicu findutils curl file
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
@@ -140,7 +184,8 @@ jobs:
           cp packaging/acer-helper.desktop "$AD/"
           cp packaging/acer-helper.png "$AD/"
           cp packaging/60-acer-helper.rules packaging/acer-helper.conf "$AD/"
-          curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          # Reuse the cached appimagetool if the cache restored it; otherwise fetch it.
+          [ -x appimagetool ] || curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$AD" AcerHelper-x86_64.AppImage
 
