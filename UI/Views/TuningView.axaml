@@ -5,20 +5,25 @@
              x:Class="AcerHelper.UI.Views.TuningView"
              x:DataType="vm:TuningViewModel">
 
-  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) under its own header.
-       The drawer supplies the surrounding panel and the "Tuning" title; the child views (GpuView/CpuView)
-       are bare and rendered via their DataTemplates. -->
-  <StackPanel Spacing="18">
+  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) in its own acrylic
+       card with a section header — the SAME card styling as the main-page sections (Monitor/Fans/…), so the
+       drawer reads consistently. The child views (GpuView/CpuView) are bare and rendered via their
+       DataTemplates. Cards carry their own bottom margin (see the .card style), so no outer spacing. -->
+  <StackPanel>
 
-    <StackPanel Spacing="8" IsVisible="{Binding HasGpu}">
-      <TextBlock Classes="section" Text="{l:Tr GPU}"/>
-      <ContentControl Content="{Binding Gpu}"/>
-    </StackPanel>
+    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasGpu}">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section" Text="{l:Tr GPU}"/>
+        <ContentControl Content="{Binding Gpu}"/>
+      </StackPanel>
+    </ExperimentalAcrylicBorder>
 
-    <StackPanel Spacing="8" IsVisible="{Binding HasCpu}">
-      <TextBlock Classes="section" Text="{l:Tr CPU}"/>
-      <ContentControl Content="{Binding Cpu}"/>
-    </StackPanel>
+    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasCpu}">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section" Text="{l:Tr CPU}"/>
+        <ContentControl Content="{Binding Cpu}"/>
+      </StackPanel>
+    </ExperimentalAcrylicBorder>
 
   </StackPanel>
 </UserControl>
