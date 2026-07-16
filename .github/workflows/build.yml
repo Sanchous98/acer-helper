@@ -3,9 +3,14 @@ name: build
 # One workflow, two jobs that run IN PARALLEL (GitHub parallelises jobs; steps within a job are sequential):
 #   • windows — Native-AOT AcerHelper.exe + a WiX MSI installer
 #   • linux   — Native-AOT binary packaged as a self-updating AppImage
-# Both are Native AOT (analyzer clean, 0 IL30xx on both TFMs). Each job attaches its artifact to the GitHub
-# Release on a v* tag (the feed the in-app update check + AppImage self-update read). They stay separate jobs
-# (not one matrix) because WiX only builds on Windows and the AppImage/AOT-link uses a Fedora container.
+# Both are Native AOT (analyzer clean, 0 IL30xx on both TFMs). Each job attaches its output to the GitHub
+# Release (the feed the in-app update check + AppImage self-update read). They stay separate jobs (not one
+# matrix) because WiX only builds on Windows and the AppImage/AOT-link uses a Fedora container.
+#
+# RUNS ONLY on a v* tag: a build's sole purpose is to produce a release, so plain pushes to master don't
+# build (no point building the same commit twice — once on the branch push, once on the tag). The release
+# assets ARE the deliverable, so there are no separate upload-artifact steps. workflow_dispatch is kept for a
+# manual build-only smoke test off a branch (the tag-guarded verify/release steps just skip there).
 #
 # AOT is safe here: WMI via source-generated COM interop ([GeneratedComInterface], raw VARIANT/SAFEARRAY),
 # NOT System.Management (classic COM interop AOT can't do); HidSharp is rooted (TrimmerRootAssembly) so RGB
@@ -13,6 +18,8 @@ name: build
 
 on:
   push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -55,20 +62,10 @@ jobs:
           -p:PublishAot=true
           -o publish
 
-      # Native AOT + Avalonia is NOT single-file: Skia/HarfBuzz/ANGLE ship as native DLLs next to the exe
-      # (libSkiaSharp.dll, libHarfBuzzSharp.dll, av_libGLESv2.dll, libEGL.dll, …). The exe P/Invokes them, so
-      # the whole folder is the artifact; drop the .pdb.
-      - name: Upload standalone app
-        uses: actions/upload-artifact@v7
-        with:
-          name: AcerHelper-win-x64
-          path: |
-            publish/
-            !publish/**/*.pdb
-          if-no-files-found: error
-
       # Installer: WiX MSI (packaging/AcerHelper.wxs) — harvests publish/ into Program Files + a Start-menu
-      # shortcut + uninstaller. Version read from the csproj.
+      # shortcut + uninstaller. Version read from the csproj. (Native AOT + Avalonia is NOT single-file:
+      # Skia/HarfBuzz/ANGLE ship as native DLLs next to the exe — libSkiaSharp.dll, libHarfBuzzSharp.dll,
+      # av_libGLESv2.dll, libEGL.dll, … — which the WiX harvest below bundles alongside it; the .pdb is dropped.)
       - name: Build MSI (WiX)
         shell: pwsh
         run: |
@@ -79,13 +76,6 @@ jobs:
           # Absolute PublishDir: WiX resolves a relative <Files Include> against the .wxs folder (packaging\),
           # not the repo root, so a bare "publish" harvested nothing -> an empty ~32 KB MSI.
           wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d "PublishDir=$PWD\publish" -o AcerHelper-Setup.msi
-
-      - name: Upload MSI
-        uses: actions/upload-artifact@v7
-        with:
-          name: AcerHelper-Setup
-          path: AcerHelper-Setup.msi
-          if-no-files-found: error
 
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -153,13 +143,6 @@ jobs:
           curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$AD" AcerHelper-x86_64.AppImage
-
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v7
-        with:
-          name: AcerHelper-AppImage
-          path: AcerHelper-x86_64.AppImage
-          if-no-files-found: error
 
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
