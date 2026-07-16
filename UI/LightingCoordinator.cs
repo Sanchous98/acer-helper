@@ -19,6 +19,7 @@ internal sealed class LightingCoordinator : IDisposable
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
     private bool _blankedByLid;      // WE blanked the backlight under a shut lid; restore on the next open (see OnLidChanged)
+    private DateTime _lastResume = DateTime.MinValue;   // coalesce Windows' double Resume event (see OnResume)
 
     // The current (rebuildable) view-models. Reassigned by Attach after each BuildUi; a re-apply/blank always
     // drives the live pair. Non-null before any callback can run (Attach is called synchronously right after
@@ -42,8 +43,10 @@ internal sealed class LightingCoordinator : IDisposable
             if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
         };
 
-        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake.
-        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(ReapplyLighting));
+        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — ONCE.
+        // The internal keyboard is always connected and never re-enumerates across sleep, so its HID handle
+        // stays valid and a single write lands; there's nothing to poll for. (See OnResume.)
+        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(OnResume));
         _resume.Start();
 
         // In clamshell (keep-awake) mode the machine stays on with the lid shut, but the backlight is then hidden —
@@ -103,15 +106,16 @@ internal sealed class LightingCoordinator : IDisposable
         _vm.ReloadLighting(_svc.LightsForCurrentMode());
     }
 
-    // Re-drive the current mode's lighting via the same path as a profile switch (palette flash for a follow-
-    // lightbar + per-zone re-apply). Used on wake from sleep/hibernation (the firmware drops the EC's RGB) and on
-    // lid-open in clamshell mode (we blanked it on lid-close). Uses more retries than a switch because the HID/EC
-    // can take a second or two to be ready after a hibernation resume.
-    private void ReapplyLighting()
+    // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE
+    // re-apply (the internal keyboard's HID handle survives sleep, so one write lands; no readiness to poll
+    // for). Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
+    // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the palette isn't flashed twice.
+    private void OnResume()
     {
+        var now = DateTime.UtcNow;
+        if ((now - _lastResume).TotalSeconds < 3) return;
+        _lastResume = now;
         ApplyFollowLighting();
-        _lightReapplyLeft = 6;
-        _lightReapply.Stop(); _lightReapply.Start();
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
@@ -126,7 +130,9 @@ internal sealed class LightingCoordinator : IDisposable
         _lidShut = !open;   // remembered so a repaint (profile/mode/power change) under a shut lid re-blanks (see BacklightHidden)
         if (open)
         {
-            if (_blankedByLid) { _blankedByLid = false; ReapplyLighting(); }
+            // Restore the mode's lighting we blanked on close — one apply (the machine stayed awake in
+            // clamshell mode, so the handle is live).
+            if (_blankedByLid) { _blankedByLid = false; ApplyFollowLighting(); }
         }
         else if (_svc.Device.Clamshell?.Enabled == true)
             BlankBacklight();
