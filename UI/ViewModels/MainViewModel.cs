@@ -37,6 +37,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool ShowOptions => _options != null;
     public bool ShowLighting => _lighting != null;
+    public bool ShowGpu => _gpu != null;
 
     [ObservableProperty] private bool _hasProfile;
     [ObservableProperty] private string _profileName = "";
@@ -69,14 +70,17 @@ public sealed partial class MainViewModel : ObservableObject
         if (device.FanControl is { } fc)
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
                 a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
-        if (device.GpuOverclock is { } gpu)
-            Sections.Add(_gpu = new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc));
         var bat = a.Battery;
         if (bat.HasInfo || bat.Limit != null || bat.Calibration != null || bat.ChargeMode != null)
             Sections.Add(_battery = new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode));
 
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a.Options);
+
+        // GPU overclock lives in its own drawer too (opened from the footer), not the main column — it keeps
+        // the dashboard uncluttered and leaves the tab room to grow (e.g. CPU controls) without crowding home.
+        if (device.GpuOverclock is { } gpu)
+            _gpu = new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc);
     }
 
     /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
@@ -99,6 +103,8 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void GrantHardwareAccess() => _grantAccess?.Invoke();
 
     [RelayCommand] private void OpenOptions() => OpenDrawer(Loc.T("Options"), _options);
+
+    [RelayCommand] private void OpenGpu() => OpenDrawer(Loc.T("GPU"), _gpu);
 
     [RelayCommand]
     private void OpenLighting()

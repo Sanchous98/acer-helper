@@ -101,6 +101,8 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
               <Button Content="{l:Tr Options}" Padding="14,5"
                       IsVisible="{Binding ShowOptions}" Command="{Binding OpenOptionsCommand}"/>
+              <Button Content="{l:Tr GPU}" Padding="14,5"
+                      IsVisible="{Binding ShowGpu}" Command="{Binding OpenGpuCommand}"/>
               <Button Classes="accent" Content="{l:Tr Lighting}" Padding="14,5"
                       IsVisible="{Binding ShowLighting}" Command="{Binding OpenLightingCommand}"/>
             </StackPanel>
