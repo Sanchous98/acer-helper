@@ -139,13 +139,29 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
 
         var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
         if (baseP == null) return;
-        pp.Set(baseP);                                                // set directly: don't rewrite the slot
 
-        if (!slot.Turbo || !Settings.TurboToggles) return;
-        
+        var current = pp.Current();
         var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
-        if (turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id)) 
-            pp.Set(turbo);
+        var wantTurbo = slot.Turbo && Settings.TurboToggles
+                        && turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id);
+
+        // Only touch the profile when the hardware isn't already in the target mode. Each Acer profile Set makes
+        // the firmware re-flash the keyboard/lightbar palette, so blindly re-applying an already-active mode on
+        // every AC<->battery change — the common case, same mode on both sources — just blinks the keyboard for
+        // nothing (TWICE in Turbo mode: the old code did base-Set + Turbo-Set unconditionally, briefly dropping
+        // out of Turbo and back). The base under Turbo is bookkeeping in the slot (BaseProfile reads it), not the
+        // active profile, so we don't need to re-drive it while Turbo is engaged.
+        if (wantTurbo)
+        {
+            if (current?.Kind == ProfileKind.Turbo) return;    // already in Turbo -> nothing to do
+            if (current?.Id != baseP.Id) pp.Set(baseP);        // establish the base we sit over (skip if on it)
+            pp.Set(turbo!);
+        }
+        else
+        {
+            if (current?.Id == baseP.Id) return;               // already in the remembered base profile
+            pp.Set(baseP);
+        }
     }
 
     /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
