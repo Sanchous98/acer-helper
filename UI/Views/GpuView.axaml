@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
+             x:Class="AcerHelper.UI.Views.GpuView"
+             x:DataType="vm:GpuViewModel">
+  <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
+    <StackPanel Spacing="8">
+      <!-- Header: section title + a Reset-to-stock button (right-aligned). -->
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="section" Text="{l:Tr GPU}" VerticalAlignment="Center"/>
+        <Button Grid.Column="1" Content="{l:Tr Reset}" Padding="10,4" Command="{Binding ResetCommand}"/>
+      </Grid>
+      <!-- Which GPU is being tuned (the driver-reported name). Trimmed so a long name can't widen the flyout. -->
+      <TextBlock Classes="muted" Text="{Binding GpuName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding GpuName}"/>
+
+      <!-- Core clock offset (MHz). -->
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Classes="muted" Width="52" VerticalAlignment="Center" Text="{l:Tr Core}"/>
+        <Slider Grid.Column="1" Minimum="{Binding CoreMin}" Maximum="{Binding CoreMax}" TickFrequency="25"
+                VerticalAlignment="Center" Value="{Binding Core, Mode=TwoWay}"/>
+        <TextBlock Grid.Column="2" Width="72" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
+                   Text="{Binding CoreLabel}"/>
+      </Grid>
+
+      <!-- Memory clock offset (MHz). -->
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Classes="muted" Width="52" VerticalAlignment="Center" Text="{l:Tr Memory}"/>
+        <Slider Grid.Column="1" Minimum="{Binding MemMin}" Maximum="{Binding MemMax}" TickFrequency="50"
+                VerticalAlignment="Center" Value="{Binding Mem, Mode=TwoWay}"/>
+        <TextBlock Grid.Column="2" Width="72" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
+                   Text="{Binding MemLabel}"/>
+      </Grid>
+    </StackPanel>
+  </ExperimentalAcrylicBorder>
+</UserControl>

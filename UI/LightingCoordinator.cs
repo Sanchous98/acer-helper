@@ -116,6 +116,10 @@ internal sealed class LightingCoordinator : IDisposable
         if ((now - _lastResume).TotalSeconds < 3) return;
         _lastResume = now;
         ApplyFollowLighting();
+        // GPU clock offsets are volatile GPU state too: the dGPU power-cycles across suspend (Optimus D3-cold)
+        // and comes back at 0 offset, so re-assert the current mode's offsets. Value is unchanged, so no UI
+        // reflect is needed (the slider already shows it); a no-op when the device has no GPU-OC port.
+        _svc.ApplyModeGpuOc();
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without

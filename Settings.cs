@@ -33,6 +33,13 @@ public sealed class Settings
     // and on mode switch.
     public Dictionary<string, LightPreset> LightPresets { get; set; } = new();
 
+    // GPU clock offsets remembered PER performance mode (same key scheme as FanPresets/LightPresets). Switching
+    // mode re-applies that mode's offsets. Unlike fans, an unconfigured mode is stock (0/0), NOT "leave
+    // untouched": the GPU driver zeroes clock offsets on every boot/driver-reload, so the app is the source of
+    // truth and re-applies on startup, on resume, and on each mode switch — a mode with no entry is definitely
+    // stock, so switching to it must clear any offset the previous mode had applied.
+    public Dictionary<string, GpuOcPreset> GpuOcPresets { get; set; } = new();
+
     // Vendor-specific device flags, keyed by an opaque string the owning backend defines (e.g. Acer's lightbar
     // "follows performance profile"). Kept as a neutral bag so Settings stays vendor-agnostic — on different
     // hardware the unused keys just sit inert. The key + its meaning live in the backend (Vendors/*); access
@@ -85,6 +92,14 @@ public sealed class FanPreset
 public sealed class LightPreset
 {
     public Dictionary<string, LightSettings> Zones { get; set; } = new();
+}
+
+/// <summary>A performance mode's remembered GPU clock offsets, in MHz (0 = stock). Applied on the mode switch
+/// and re-applied at startup/resume (the driver zeroes offsets across a reboot/driver reload).</summary>
+public sealed class GpuOcPreset
+{
+    public int Core { get; set; }
+    public int Mem  { get; set; }
 }
 
 /// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.</summary>

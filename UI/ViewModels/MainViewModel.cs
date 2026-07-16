@@ -17,6 +17,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly MonitorViewModel? _monitor;
     private readonly ProfilesViewModel? _profiles;
     private readonly FansViewModel? _fans;
+    private readonly GpuViewModel? _gpu;
     private readonly BatteryViewModel? _battery;
     private readonly OptionsViewModel? _options;
     private readonly LightingViewModel? _lighting;
@@ -68,6 +69,8 @@ public sealed partial class MainViewModel : ObservableObject
         if (device.FanControl is { } fc)
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
                 a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
+        if (device.GpuOverclock is { } gpu)
+            Sections.Add(_gpu = new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc));
         var bat = a.Battery;
         if (bat.HasInfo || bat.Limit != null || bat.Calibration != null || bat.ChargeMode != null)
             Sections.Add(_battery = new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode));
@@ -108,6 +111,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Reflect a mode's fan preset in the fan section (called when the performance mode changes).</summary>
     public void ReloadFans(FanPreset preset) => _fans?.Load(preset);
+
+    /// <summary>Reflect a mode's GPU-OC preset in the GPU section (called when the performance mode changes).</summary>
+    public void ReloadGpuOc(GpuOcPreset preset) => _gpu?.Load(preset);
 
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);

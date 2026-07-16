@@ -32,6 +32,7 @@ public partial class GenericDevice : IDevice
     public IRgbDevice?          Lighting           { get; protected set; }
     public IHotkeys?            Hotkeys            { get; protected set; }
     public IDisplayTint?        DisplayTint        { get; protected set; }
+    public IGpuOverclock?       GpuOverclock       { get; protected set; }
     public IAutostart?          Autostart          { get; protected set; }
     public IClamshell?          Clamshell          { get; protected set; }
 

@@ -24,6 +24,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
     {
         if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
         if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
+        ApplyModeGpuOc();   // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
     }
 
     // ---- performance profiles ----
@@ -292,6 +293,43 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         var key = CurrentModeKey();
         if (!Settings.LightPresets.TryGetValue(key, out var p)) Settings.LightPresets[key] = p = new LightPreset();
         return p.Zones;
+    }
+
+    // ---- GPU overclock (per-mode) ----
+
+    /// <summary>The stored GPU-OC preset for the current mode, created on first write (user is configuring it).</summary>
+    private GpuOcPreset StoredGpuOc()
+    {
+        var key = CurrentModeKey();
+        if (!Settings.GpuOcPresets.TryGetValue(key, out var g)) Settings.GpuOcPresets[key] = g = new GpuOcPreset();
+        return g;
+    }
+
+    /// <summary>The GPU-OC preset for the current mode, or stock (0/0) if none is saved yet (not stored).</summary>
+    public GpuOcPreset CurrentGpuOc()
+        => Settings.GpuOcPresets.TryGetValue(CurrentModeKey(), out var g) ? g : new GpuOcPreset();
+
+    /// <summary>Set the GPU core+memory clock offsets (MHz) for the CURRENT mode, persist, and apply now.</summary>
+    public bool SetGpuOc(int core, int mem)
+    {
+        var g = StoredGpuOc();
+        g.Core = core; g.Mem = mem;
+        Save();
+        var oc = device.GpuOverclock;
+        if (oc == null) return false;
+        if (!oc.Set(core, mem)) { LastError = oc.LastError; return false; }
+        return true;
+    }
+
+    /// <summary>Apply the current mode's GPU offsets to the hardware. Defaults to stock (0/0) when the mode has
+    /// no saved preset — the driver zeroes offsets on boot, so a never-configured mode is definitely stock and
+    /// switching to it must clear whatever the previous mode applied. Returns the preset so the UI reflects it.
+    /// Called on a mode change, at startup, and on resume.</summary>
+    public GpuOcPreset ApplyModeGpuOc()
+    {
+        var g = CurrentGpuOc();
+        device.GpuOverclock?.Set(g.Core, g.Mem);
+        return g;
     }
 
     public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();

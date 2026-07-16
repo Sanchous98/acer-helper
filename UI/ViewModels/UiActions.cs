@@ -9,6 +9,7 @@ namespace AcerHelper.UI.ViewModels;
 public sealed record UiActions(
     ProfileActions Profiles,
     FanSection Fans,
+    GpuSection Gpu,
     BatterySection Battery,
     OptionsSection Options);
 
@@ -22,6 +23,12 @@ public sealed record FanSection(
     Action<FanMode, byte, byte> SetFan,
     Action<bool, bool, int[]> SetFanCurve,
     Func<FanCurveDialogViewModel, Task> ShowCurve);
+
+/// <summary>GPU-overclock section: the current mode's saved core/memory offsets (MHz) plus the apply/persist
+/// delegate. The section is only built when the device exposes an <see cref="IGpuOverclock"/> port.</summary>
+public sealed record GpuSection(
+    GpuOcPreset Initial,
+    Action<int, int> SetGpuOc);
 
 /// <summary>Battery section: whether telemetry exists, plus the pre-built option rows the device supports.</summary>
 public sealed record BatterySection(

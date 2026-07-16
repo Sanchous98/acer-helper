@@ -121,6 +121,25 @@ public interface IDisplayTint
     bool Apply(int level);
 }
 
+/// <summary>Discrete-GPU clock overclocking: signed core- and memory-clock offsets (MHz) layered on the GPU's
+/// stock boost curve, each within the driver-reported allowed range. Present only when a controllable NVIDIA
+/// dGPU is detected — the port is null otherwise, so the UI hides the section. The offsets are NOT persisted
+/// by the driver (a reboot/driver-reload zeroes them), so the app is the source of truth and re-applies on
+/// startup, on resume, and on every performance-mode switch (see LaptopService).</summary>
+public interface IGpuOverclock
+{
+    string? LastError { get; }
+    /// <summary>Name of the GPU being tuned, for the section header (e.g. "NVIDIA GeForce RTX 4060 Laptop GPU").</summary>
+    string Name { get; }
+    /// <summary>Allowed core-clock offset range in MHz (inclusive; Min ≤ 0 ≤ Max).</summary>
+    (int Min, int Max) CoreRange { get; }
+    /// <summary>Allowed memory-clock offset range in MHz (inclusive).</summary>
+    (int Min, int Max) MemRange { get; }
+    /// <summary>Apply a core + memory clock offset in MHz (each clamped to its allowed range). Returns false
+    /// and sets <see cref="LastError"/> on failure.</summary>
+    bool Set(int coreMhz, int memMhz);
+}
+
 /// <summary>Run-at-logon control.</summary>
 public interface IAutostart
 {
@@ -169,6 +188,7 @@ public interface IDevice : IDisposable
     IRgbDevice?          Lighting           { get; }
     IHotkeys?            Hotkeys            { get; }
     IDisplayTint?        DisplayTint        { get; }
+    IGpuOverclock?       GpuOverclock       { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
 }

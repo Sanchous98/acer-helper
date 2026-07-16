@@ -48,6 +48,13 @@ internal static partial class Strings
         ["GPU fan curve"]           = "Кривая вентилятора GPU",
         ["{0} rpm"]                 = "{0} об/мин",
 
+        // ---- GPU overclock ----
+        // "GPU" stays "GPU" (universal acronym) -> no entry, falls back to the English key.
+        ["Core"]                    = "Ядро",
+        ["Memory"]                  = "Память",
+        ["Reset"]                   = "Сброс",
+        ["GPU overclock failed"]    = "Не удалось разогнать GPU",
+
         // ---- battery ----
         ["Health"]                  = "Состояние",
         ["Charge cycles"]           = "Циклы заряда",

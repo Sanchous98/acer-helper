@@ -12,6 +12,7 @@
     <DataTemplate DataType="vm:MonitorViewModel"><views:MonitorView/></DataTemplate>
     <DataTemplate DataType="vm:ProfilesViewModel"><views:ProfilesView/></DataTemplate>
     <DataTemplate DataType="vm:FansViewModel"><views:FansView/></DataTemplate>
+    <DataTemplate DataType="vm:GpuViewModel"><views:GpuView/></DataTemplate>
     <DataTemplate DataType="vm:BatteryViewModel"><views:BatteryView/></DataTemplate>
     <!-- Drawer contents (hosted in the main window's slide-out side panel). -->
     <DataTemplate DataType="vm:OptionsViewModel"><views:OptionsView/></DataTemplate>

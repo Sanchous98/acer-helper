@@ -12,6 +12,11 @@ public partial class GenericDevice
 
         DisplayTint = new DisplayTint();
 
+        // NVIDIA dGPU clock overclock via NvAPI — cross-vendor (any laptop with an NVIDIA dGPU + driver), so it
+        // lives here in the generic base rather than a vendor backend. Null on AMD/Intel-only machines (no
+        // nvapi64.dll), which hides the GPU section.
+        if (NvidiaGpu.TryCreate() is { } gpu) { GpuOverclock = gpu; Own(gpu); }
+
         var clamshell = new Clamshell();
         if (!clamshell.Supported) { clamshell.Dispose(); return; }   // its ctor subscribed to the STATIC
         // SystemEvents — an undisposed reject would stay pinned (and handled) for the process lifetime.
