@@ -5,25 +5,28 @@
              x:Class="AcerHelper.UI.Views.TuningView"
              x:DataType="vm:TuningViewModel">
 
-  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) in its own acrylic
-       card with a section header — the SAME card styling as the main-page sections (Monitor/Fans/…), so the
-       drawer reads consistently. The child views (GpuView/CpuView) are bare and rendered via their
-       DataTemplates. Cards carry their own bottom margin (see the .card style), so no outer spacing. -->
+  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) in its own card with a
+       section header, to match the main-page sections (Monitor/Fans/…). NOTE: these use a SOLID card
+       (Border + AppCardSolid), not the ExperimentalAcrylicBorder the main page uses — the Digger acrylic
+       doesn't composite the same inside this sliding drawer page (it renders lighter), which washed out the
+       muted section headers and made them look styled differently from the dashboard. The opaque fill matches
+       the acrylic card's effective tone, so the .section headers now read with the SAME contrast everywhere.
+       Cards carry their own bottom margin (see the .card style), so no outer spacing. -->
   <StackPanel>
 
-    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasGpu}">
+    <Border Classes="card" Background="{DynamicResource AppCardSolid}" IsVisible="{Binding HasGpu}">
       <StackPanel Spacing="8">
         <TextBlock Classes="section" Text="{l:Tr GPU}"/>
         <ContentControl Content="{Binding Gpu}"/>
       </StackPanel>
-    </ExperimentalAcrylicBorder>
+    </Border>
 
-    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasCpu}">
+    <Border Classes="card" Background="{DynamicResource AppCardSolid}" IsVisible="{Binding HasCpu}">
       <StackPanel Spacing="8">
         <TextBlock Classes="section" Text="{l:Tr CPU}"/>
         <ContentControl Content="{Binding Cpu}"/>
       </StackPanel>
-    </ExperimentalAcrylicBorder>
+    </Border>
 
   </StackPanel>
 </UserControl>
