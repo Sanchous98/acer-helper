@@ -65,6 +65,11 @@ internal sealed partial class EneHidController
 
     private partial void CloseTransport() => _dev?.Dispose();
 
+    // No device-node restart on Linux: hidraw re-opens per write (WriteFeature re-runs OpenTransport when the
+    // node was dropped), and the display-contended-bus corruption this works around is a Windows/this-model
+    // issue. Kept as a no-op so the shared writer loop can call it unconditionally.
+    private partial void TryReinitTransport() { }
+
     [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
     private static partial int Ioctl(SafeFileHandle fd, nuint request, [In] byte[] data);
 }

@@ -170,6 +170,11 @@ internal sealed partial class EneHidController : IRgbController
 
     private void WorkerLoop()
     {
+        // First action on the writer thread (never the UI thread): optionally re-initialise the HID transport
+        // by restarting the ENE I2C-HID device node — the software analog of the physical display replug that
+        // recovers a boot-with-display corrupted channel. Blocking PnP work, hence here and not in the ctor.
+        // Best-effort and bounded; no-op on Linux and when not applicable (see the Windows implementation).
+        TryReinitTransport();
         while (true)
         {
             byte[] report;
@@ -208,4 +213,7 @@ internal sealed partial class EneHidController : IRgbController
     private partial bool OpenTransport();
     private partial bool WriteFeature(byte[] report);
     private partial void CloseTransport();
+    // Optional one-shot transport re-initialisation, run as the writer thread's first action. Windows restarts
+    // the ENE I2C-HID device node (see EneHidController.Windows.cs); Linux no-op.
+    private partial void TryReinitTransport();
 }
