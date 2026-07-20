@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.27.0</Version>
+    <Version>0.27.1</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
