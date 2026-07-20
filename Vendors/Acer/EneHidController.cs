@@ -127,6 +127,16 @@ internal sealed partial class EneHidController : IRgbController
     private bool _stopping;
     private const int MaxPending = 32;             // backstop only; coalescing keeps this to a handful
 
+    // Inter-write pacing: a small gap between consecutive feature reports on the worker (NOT the UI thread —
+    // this only ever stalls the writer). A full keyboard apply is several back-to-back reports (profile-flash +
+    // per-zone paints + lightbar); on a HID-over-I2C bus that an externally-booted display is contending, a
+    // tight burst tends to land some reports corrupted (amber fallback) and others clean ("half green/half
+    // orange"). Spacing the reports decorrelates them so they don't all fall inside one contention window —
+    // it can't phase-lock to the display's traffic, only randomise phase, so it *reduces* the odds of a fully
+    // corrupt apply rather than guaranteeing a clean one. 5 reports × this delay stays well under the ~120 ms
+    // apply debounce, so a normal apply is still visually instant. 0 disables.
+    private const int PacingMs = 10;
+
     // Enqueue one report. Runs on the caller's thread (UI); never blocks, never touches hardware. Returns true
     // = accepted onto the queue (no lighting caller consumes the result — the old "hardware acknowledged"
     // meaning is gone).
@@ -173,6 +183,9 @@ internal sealed partial class EneHidController : IRgbController
             // WriteFeature drops the transport handle on failure so the next write re-opens (a bad boot-time
             // handle otherwise sticks forever); it swallows its own errors, the catch is belt-and-braces.
             try { WriteFeature(report); } catch { /* keep the worker alive */ }
+            // Space the next report (see PacingMs). Outside _gate, so SetFeature can keep enqueuing meanwhile;
+            // a trailing sleep with nothing queued only delays the worker's return to Wait — harmless.
+            if (PacingMs > 0) Thread.Sleep(PacingMs);
         }
     }
 

@@ -22,6 +22,22 @@ internal sealed class LightingCoordinator : IDisposable
     private readonly LaptopService _svc;
     private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
+
+    // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) override a late
+    // firmware palette repaint after a profile switch (the original 2-tick purpose), and (2) self-heal a
+    // corrupted apply on a display-contended HID-over-I2C bus (booted-with-external-display), where the first
+    // apply can land amber/partial — each retry is a fresh chance to hit a clean bus window, and once one lands
+    // it sticks (the device is last-write-wins; idle state isn't re-corrupted). Bounded on purpose: if the bus
+    // is corrupting CONSTANTLY (no clean window) this just retries for ~3 s and stops, rather than flickering
+    // forever. Re-asserting an already-correct colour is visually silent (the firmware re-latches the same value).
+    private const int ReapplyTicks = 8;
+    // Of those ticks, how many also RE-SEND the profile palette flash. The flash is a global write that briefly
+    // repaints the whole keyboard with the palette colour before the per-zone paint overrides it, so re-sending
+    // it every tick would add a visible shimmer on a follows-profile lightbar. Limit it to the first couple of
+    // ticks (matching the pre-existing behaviour) — enough to catch a late firmware repaint / give the lightbar
+    // a couple of clean-window chances — while the per-zone KEYBOARD paint (the actual "half green/half orange"
+    // self-heal) is re-applied on EVERY tick, which is silent when it's already correct.
+    private const int FlashTicks = 2;
     private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
@@ -46,14 +62,17 @@ internal sealed class LightingCoordinator : IDisposable
         _svc = svc;
 
         // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
-        // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting a
-        // couple of times right after the switch — whichever tick lands after the repaint overrides it and it
-        // then stays. (Only user-driven zones are re-applied; a "follows profile" lightbar has no panel and is
-        // left as the firmware's palette. The palette flash itself is firmware and can't be suppressed.)
+        // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting
+        // several times (ReapplyTicks) right after the switch/startup — whichever tick lands after the repaint
+        // (or in a clean window on a display-contended bus) overrides it and it then stays. (Only user-driven
+        // zones are re-applied; a "follows profile" lightbar has no panel and is left as the firmware's palette.
+        // The palette flash itself is firmware and can't be suppressed.)
         _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _lightReapply.Tick += (_, _) =>
         {
-            Paint();
+            // Re-send the flash only on the first FlashTicks ticks (_lightReapplyLeft counts down from
+            // ReapplyTicks); every tick re-applies the per-zone keyboard paint.
+            Paint(includeFlash: _lightReapplyLeft > ReapplyTicks - FlashTicks);
             if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
         };
 
@@ -82,9 +101,13 @@ internal sealed class LightingCoordinator : IDisposable
     /// <summary>The follows-profile flag was flipped in the Lighting panel: kick the re-apply so the lightbar
     /// repaints now (ON -> this profile's palette; OFF -> its custom colour) instead of waiting for the next
     /// switch, reusing the cached flash/lights. (Persisting the flag itself stays in AppController.)</summary>
-    public void OnFollowsProfileFlipped()
+    public void OnFollowsProfileFlipped() => KickReapply();
+
+    // Schedule a bounded re-apply burst (see ReapplyTicks). Restarting the timer coalesces overlapping kicks
+    // into one running burst. Runs on the UI thread (all callers are UI-thread), so no synchronisation needed.
+    private void KickReapply()
     {
-        _lightReapplyLeft = 2;
+        _lightReapplyLeft = ReapplyTicks;
         _lightReapply.Stop(); _lightReapply.Start();
     }
 
@@ -98,8 +121,7 @@ internal sealed class LightingCoordinator : IDisposable
         _flash = flash;
         _lights = lights;
         Paint();
-        _lightReapplyLeft = 2;
-        _lightReapply.Stop(); _lightReapply.Start();
+        KickReapply();
     }
 
     /// <summary>The performance MODE changed (its preset key): reflect the mode's saved lighting (handed in by the
@@ -108,16 +130,19 @@ internal sealed class LightingCoordinator : IDisposable
     {
         _lights = lights;
         if (BacklightHidden) BlankBacklight();
-        else _vm.ReloadLighting(_lights);
+        else { _vm.ReloadLighting(_lights); KickReapply(); }   // retry the paint for a few seconds (contended-bus self-heal)
     }
 
     /// <summary>Startup / language-rebuild paint: seed the cached flash colour + mode lights (read by the caller
-    /// off the UI thread) and paint once, so the lighting matches from launch.</summary>
+    /// off the UI thread) and paint, then re-apply for a few seconds. Startup is exactly the boot-with-external-
+    /// display case where the first apply is most likely to land corrupted on the contended HID-over-I2C bus, so
+    /// the burst gives the initial lighting several chances to settle correctly.</summary>
     public void ApplyFollowLighting(AccentColor? flash, Dictionary<string, LightSettings> lights)
     {
         _flash = flash;
         _lights = lights;
         Paint();
+        KickReapply();
     }
 
     // Repaint from the cached (flash, lights). First paint the profile's palette on a follow-lightbar (a GLOBAL
@@ -125,10 +150,10 @@ internal sealed class LightingCoordinator : IDisposable
     // its own custom colour on top. The HID writes are async (EneHidController queues them), so this never
     // blocks the UI thread; and it reads nothing from the EC (uses the cache). Called immediately on a switch
     // and repeated by _lightReapply / resume / lid as a safety net against a late firmware repaint.
-    private void Paint()
+    private void Paint(bool includeFlash = true)
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
-        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
+        if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
         _vm.ReloadLighting(_lights);
     }

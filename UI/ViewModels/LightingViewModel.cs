@@ -315,14 +315,31 @@ public sealed partial class LightViewModel : ObservableObject
     private void ApplyNow()
     {
         byte b = (byte)Brightness, s = (byte)Speed, d = (byte)(ReverseDirection ? 2 : 1);
-        if (ShowZones && _applyZone != null)
+        if (ShowZones && _applyZone != null && !AllZonesSameColor())
+            // Genuinely-multicolour: one STATIC report per zone (unavoidable).
             for (var i = 0; i < Zones.Count; i++)
             {
                 var c = Zones[i].Color;
                 _applyZone(i, b, new AccentColor(c.R, c.G, c.B));
             }
         else
-            _applyAll(Current, new AccentColor(Color.R, Color.G, Color.B), b, s, d);
+            // Single colour (or a non-zone effect): ONE all-zones report. For a uniform multi-zone keyboard this
+            // replaces the 4 per-zone writes — which is what "half green / half orange" was (some per-zone reports
+            // landing, others corrupting to the amber fallback on a contended HID-over-I2C bus). One report can't
+            // be split across zones, so it removes that failure mode for the common uniform case.
+            _applyAll(Current, new AccentColor(SingleColor.R, SingleColor.G, SingleColor.B), b, s, d);
+    }
+
+    // The colour to drive an all-zones write with: the shared zone colour when the keyboard is in per-zone
+    // (static multi-zone) mode and all zones match, else the single-colour swatch.
+    private Color SingleColor => ShowZones && Zones.Count > 0 ? Zones[0].Color : Color;
+
+    private bool AllZonesSameColor()
+    {
+        if (Zones.Count == 0) return true;
+        var first = Zones[0].Color;
+        foreach (var z in Zones) if (z.Color != first) return false;
+        return true;
     }
 
     private void SaveState()
