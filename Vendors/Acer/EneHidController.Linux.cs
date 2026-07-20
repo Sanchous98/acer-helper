@@ -46,15 +46,24 @@ internal sealed partial class EneHidController
         return false;
     }
 
-    private partial bool SetFeature(byte[] report)
+    // Runs on the controller's writer thread (never the UI thread — see EneHidController.SetFeature). Re-opens
+    // the hidraw node if it was dropped, and drops it again on failure so the next write re-opens — a node
+    // opened in a bad state at boot-with-display (bus busy) would otherwise stay broken until restart.
+    private partial bool WriteFeature(byte[] report)
     {
-        if (_dev == null) return false;
-        // HIDIOCSFEATURE(len) = _IOC(WRITE|READ, 'H', 0x06, len); the report id is byte 0 of the buffer.
-        var request = 0xC0000000u | ((uint)report.Length << 16) | ('H' << 8) | 0x06;
-        return Ioctl(_dev.SafeFileHandle, request, report) >= 0;
+        if (_dev == null && !OpenTransport()) return false;
+        try
+        {
+            // HIDIOCSFEATURE(len) = _IOC(WRITE|READ, 'H', 0x06, len); the report id is byte 0 of the buffer.
+            var request = 0xC0000000u | ((uint)report.Length << 16) | ('H' << 8) | 0x06;
+            if (Ioctl(_dev!.SafeFileHandle, request, report) >= 0) return true;
+        }
+        catch { /* fall through to drop the node */ }
+        _dev?.Dispose(); _dev = null;
+        return false;
     }
 
-    public partial void Dispose() => _dev?.Dispose();
+    private partial void CloseTransport() => _dev?.Dispose();
 
     [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
     private static partial int Ioctl(SafeFileHandle fd, nuint request, [In] byte[] data);

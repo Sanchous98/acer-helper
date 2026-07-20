@@ -31,6 +31,14 @@ internal sealed partial class EneHidController : IRgbController
     {
         if (!OpenTransport()) return;   // no ENE interface -> no zones -> composition skips lighting
 
+        // Feature writes go through a single background worker (see SetFeature), never the caller's (UI) thread:
+        // WriteFeature is a synchronous no-timeout HID write, and on HID-over-I2C models (AN18-61) it can block
+        // for a long time when that shared bus is saturated — e.g. an external USB-C display, worst at boot.
+        // Doing it on the UI thread froze the whole app until the bus freed (monitor unplug); the worker keeps
+        // such a stall off the UI thread. Started only on the keep-path (transport opened above).
+        _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "ene-hid-writer" };
+        _worker.Start();
+
         _zones.Add(new RgbZone("Keyboard", keyboardZones,
             RgbEffects.Keyboard.Select(e => e.ToModeInfo()).ToList(),
             ApplyKeyboard, ApplyKeyboardZone, readKeyboardBrightness));
@@ -105,8 +113,86 @@ internal sealed partial class EneHidController : IRgbController
         return new AccentColor((byte)(c.R * b / 100), (byte)(c.G * b / 100), (byte)(c.B * b / 100));
     }
 
+    // ---- serialized background writer ----
+    // Every feature report is enqueued here and written by ONE long-lived worker thread — NOT the caller's
+    // (UI) thread. WriteFeature (the per-OS transport) is a synchronous, no-timeout HID write that can block
+    // hard on a contended HID-over-I2C bus; off the UI thread, that stall freezes only the worker, so the app
+    // stays responsive. Fire-and-forget: SetFeature only enqueues. Writes coalesce by region (see SameRegion)
+    // so a stalled worker can't accumulate — and won't replay — a flood of stale writes: when the bus frees it
+    // applies just the latest state per region. A single in-flight write is also the de-facto circuit breaker
+    // (the worker can't issue a second write while one blocks), keeping the app's bus contention minimal.
+    private readonly object _gate = new();
+    private readonly List<byte[]> _pending = [];   // ordered; a superseded same-region write is moved to the TAIL
+    private Thread? _worker;
+    private bool _stopping;
+    private const int MaxPending = 32;             // backstop only; coalescing keeps this to a handful
+
+    // Enqueue one report. Runs on the caller's thread (UI); never blocks, never touches hardware. Returns true
+    // = accepted onto the queue (no lighting caller consumes the result — the old "hardware acknowledged"
+    // meaning is gone).
+    private bool SetFeature(byte[] report)
+    {
+        lock (_gate)
+        {
+            if (_stopping) return false;
+            for (var i = 0; i < _pending.Count; i++)
+                // Coalesce a superseded same-region write by MOVING it to the tail (not replacing in place): the
+                // coordinator always enqueues the profile-flash (mode 0x06) BEFORE the keyboard paint (mode 0x02)
+                // so the custom colour lands on top of the global flash. Move-to-tail orders each region by its
+                // most-recent enqueue, so the latest paint stays AFTER the latest flash in every interleaving —
+                // including a multi-second bus stall where a re-emitted flash+paint pair queues behind an
+                // in-flight write. In-place replacement would strand an early paint ahead of a later flash and
+                // leave the keyboard showing the flash palette instead of the custom colour.
+                if (SameRegion(_pending[i], report)) { _pending.RemoveAt(i); _pending.Add(report); Monitor.Pulse(_gate); return true; }
+            if (_pending.Count >= MaxPending) _pending.RemoveAt(0);   // defensive FIFO evict; unreachable in practice
+            _pending.Add(report);
+            Monitor.Pulse(_gate);
+        }
+        return true;
+    }
+
+    // Same region = same target (byte 1), mode (byte 2) and zone mask (byte 9), so a brightness/colour drag
+    // collapses to its latest value. The profile-flash (mode 0x06, which no keyboard effect uses) and each
+    // keyboard sub-zone (distinct zone masks) are their own regions, so a flash never collapses a paint and
+    // vice-versa; their relative order is handled by the move-to-tail coalescing in SetFeature.
+    private static bool SameRegion(byte[] a, byte[] b)
+        => a.Length > 9 && b.Length > 9 && a[1] == b[1] && a[2] == b[2] && a[9] == b[9];
+
+    private void WorkerLoop()
+    {
+        while (true)
+        {
+            byte[] report;
+            lock (_gate)
+            {
+                while (_pending.Count == 0 && !_stopping) Monitor.Wait(_gate);
+                if (_pending.Count == 0) return;   // stopping and drained
+                report = _pending[0];
+                _pending.RemoveAt(0);
+            }
+            // WriteFeature drops the transport handle on failure so the next write re-opens (a bad boot-time
+            // handle otherwise sticks forever); it swallows its own errors, the catch is belt-and-braces.
+            try { WriteFeature(report); } catch { /* keep the worker alive */ }
+        }
+    }
+
+    private void StopWorker()
+    {
+        Thread? t;
+        lock (_gate) { _stopping = true; _pending.Clear(); Monitor.Pulse(_gate); t = _worker; }
+        // Bounded: a worker stuck inside a blocked write is a background thread, so a timed-out Join can't keep
+        // the process alive — we proceed and let CloseTransport unstick it (disposing the handle faults the write).
+        t?.Join(TimeSpan.FromSeconds(1));
+    }
+
+    public void Dispose()
+    {
+        StopWorker();       // stop enqueuing/writing first ...
+        CloseTransport();   // ... then release the handle (best-effort; also unsticks a blocked worker write)
+    }
+
     // ---- transport, per-OS (found device? / send one feature report / release) ----
     private partial bool OpenTransport();
-    private partial bool SetFeature(byte[] report);
-    public partial void Dispose();
+    private partial bool WriteFeature(byte[] report);
+    private partial void CloseTransport();
 }

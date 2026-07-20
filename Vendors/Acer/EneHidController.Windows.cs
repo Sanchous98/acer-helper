@@ -15,7 +15,11 @@ internal sealed partial class EneHidController
         return _device != null;
     }
 
-    private partial bool SetFeature(byte[] report)
+    // Runs on the controller's writer thread (never the UI thread — see EneHidController.SetFeature). The
+    // synchronous SetFeature can block on a contended HID-over-I2C bus; that's fine here, it only stalls the
+    // worker. On any failure drop the stream so the next write re-opens a fresh handle — otherwise a bad
+    // handle opened at boot-with-display (bus busy) would stick forever (the old `_stream ??=` never re-opened).
+    private partial bool WriteFeature(byte[] report)
     {
         if (_device == null) return false;
         try
@@ -23,7 +27,7 @@ internal sealed partial class EneHidController
             (_stream ??= _device.Open()).SetFeature(report);
             return true;
         }
-        catch { return false; }
+        catch { _stream?.Dispose(); _stream = null; return false; }
     }
 
     private static HidDevice? FindDevice()
@@ -38,5 +42,5 @@ internal sealed partial class EneHidController
         return null;
     }
 
-    public partial void Dispose() => _stream?.Dispose();
+    private partial void CloseTransport() => _stream?.Dispose();
 }
