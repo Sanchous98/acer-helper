@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using Avalonia.Threading;
+using AcerHelper.Features;
 using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
@@ -9,7 +11,12 @@ namespace AcerHelper.UI;
 /// pointed at the current view-models via <see cref="Attach"/> after each <c>BuildUi</c> (startup + live
 /// language rebuild). AppController drives it from its refresh loop (<see cref="OnProfileChanged"/> /
 /// <see cref="OnModeChanged"/>) and forwards the startup/rebuild repaint (<see cref="ApplyFollowLighting"/>)
-/// and the follows-profile flip (<see cref="OnFollowsProfileFlipped"/>).</summary>
+/// and the follows-profile flip (<see cref="OnFollowsProfileFlipped"/>).
+///
+/// It does NO hardware reads of its own: the current profile's flash colour and the mode's per-zone lights are
+/// read on the (background) refresh pass and handed in, then cached here so the timer / resume / lid / follows-
+/// flip re-paints reuse them. This keeps every path on the UI thread free of a blocking EC read — the HID
+/// writes it issues are already async (EneHidController's background writer).</summary>
 internal sealed class LightingCoordinator : IDisposable
 {
     private readonly LaptopService _svc;
@@ -20,6 +27,13 @@ internal sealed class LightingCoordinator : IDisposable
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
     private bool _blankedByLid;      // WE blanked the backlight under a shut lid; restore on the next open (see OnLidChanged)
     private DateTime _lastResume = DateTime.MinValue;   // coalesce Windows' double Resume event (see OnResume)
+
+    // Cached lighting inputs, refreshed by the caller (who reads them off the UI thread): the current profile's
+    // palette flash colour and the current mode's per-zone lights. The re-paint paths (timer/resume/lid/follows-
+    // flip) reuse these instead of reading the EC/Settings on the UI thread. _lights is the LIVE dictionary
+    // reference (same aliasing as before — only the UI thread touches it after hand-off).
+    private AccentColor? _flash;
+    private Dictionary<string, LightSettings> _lights = new();
 
     // The current (rebuildable) view-models. Reassigned by Attach after each BuildUi; a re-apply/blank always
     // drives the live pair. Non-null before any callback can run (Attach is called synchronously right after
@@ -39,7 +53,7 @@ internal sealed class LightingCoordinator : IDisposable
         _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _lightReapply.Tick += (_, _) =>
         {
-            ApplyFollowLighting();
+            Paint();
             if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
         };
 
@@ -67,7 +81,7 @@ internal sealed class LightingCoordinator : IDisposable
 
     /// <summary>The follows-profile flag was flipped in the Lighting panel: kick the re-apply so the lightbar
     /// repaints now (ON -> this profile's palette; OFF -> its custom colour) instead of waiting for the next
-    /// switch. (Persisting the flag itself stays in AppController, which owns the vendor key.)</summary>
+    /// switch, reusing the cached flash/lights. (Persisting the flag itself stays in AppController.)</summary>
     public void OnFollowsProfileFlipped()
     {
         _lightReapplyLeft = 2;
@@ -75,60 +89,73 @@ internal sealed class LightingCoordinator : IDisposable
     }
 
     /// <summary>A HARDWARE profile change (incl. base&lt;-&gt;Turbo, which shares its base's preset KEY). Repaint
-    /// the lighting IMMEDIATELY — a following lightbar must show the NEW profile's palette at once, otherwise the
-    /// previous colour lingers for a beat and looks like a stray flash of the old colour (NitroSense flips it the
-    /// instant the profile changes). Then repeat a couple of times to catch any late firmware repaint.</summary>
-    public void OnProfileChanged()
+    /// the lighting IMMEDIATELY with the new profile's flash colour + the mode's lights (both read off the UI
+    /// thread by the caller) — a following lightbar must show the NEW profile's palette at once, otherwise the
+    /// previous colour lingers for a beat (NitroSense flips it instantly). Then repeat a couple of times to catch
+    /// any late firmware repaint.</summary>
+    public void OnProfileChanged(AccentColor? flash, Dictionary<string, LightSettings> lights)
     {
-        ApplyFollowLighting();
+        _flash = flash;
+        _lights = lights;
+        Paint();
         _lightReapplyLeft = 2;
         _lightReapply.Stop(); _lightReapply.Start();
     }
 
-    /// <summary>The performance MODE changed (its preset key): reflect the mode's saved lighting, or keep the
-    /// backlight dark if it's hidden under a shut lid (don't light a hidden keyboard on a mode change).</summary>
-    public void OnModeChanged()
+    /// <summary>The performance MODE changed (its preset key): reflect the mode's saved lighting (handed in by the
+    /// caller), or keep the backlight dark if it's hidden under a shut lid (don't light a hidden keyboard).</summary>
+    public void OnModeChanged(Dictionary<string, LightSettings> lights)
     {
+        _lights = lights;
         if (BacklightHidden) BlankBacklight();
-        else _vm.ReloadLighting(_svc.LightsForCurrentMode());
+        else _vm.ReloadLighting(_lights);
     }
 
-    /// <summary>Repaint after a profile change/toggle. First paint the new profile's palette on a follow-lightbar
-    /// (a GLOBAL write that also flashes the keyboard), then re-apply the per-zone colours so the keyboard settles
-    /// back to its own custom colour on top. Called immediately on a switch (so the lightbar flips at once, no
-    /// lingering old colour) and repeated by _lightReapply as a safety net against a late firmware repaint. Also
-    /// the startup/rebuild paint (AppController calls it once the view-models are attached).</summary>
-    public void ApplyFollowLighting()
+    /// <summary>Startup / language-rebuild paint: seed the cached flash colour + mode lights (read by the caller
+    /// off the UI thread) and paint once, so the lighting matches from launch.</summary>
+    public void ApplyFollowLighting(AccentColor? flash, Dictionary<string, LightSettings> lights)
+    {
+        _flash = flash;
+        _lights = lights;
+        Paint();
+    }
+
+    // Repaint from the cached (flash, lights). First paint the profile's palette on a follow-lightbar (a GLOBAL
+    // write that also flashes the keyboard), then re-apply the per-zone colours so the keyboard settles back to
+    // its own custom colour on top. The HID writes are async (EneHidController queues them), so this never
+    // blocks the UI thread; and it reads nothing from the EC (uses the cache). Called immediately on a switch
+    // and repeated by _lightReapply / resume / lid as a safety net against a late firmware repaint.
+    private void Paint()
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
-        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _svc.CurrentProfile()?.FlashColor is { } flash)
+        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
-        _vm.ReloadLighting(_svc.LightsForCurrentMode());
+        _vm.ReloadLighting(_lights);
     }
 
     // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE
-    // re-apply (the internal keyboard's HID handle survives sleep, so one write lands; no readiness to poll
-    // for). Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
+    // re-apply from the cache (the internal keyboard's HID handle survives sleep, so one write lands; no
+    // readiness to poll for). Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
     // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the palette isn't flashed twice.
     private void OnResume()
     {
         var now = DateTime.UtcNow;
         if ((now - _lastResume).TotalSeconds < 3) return;
         _lastResume = now;
-        ApplyFollowLighting();
+        Paint();
         // GPU clock offsets are volatile GPU state too: the dGPU power-cycles across suspend (Optimus D3-cold)
-        // and comes back at 0 offset, so re-assert the current mode's offsets. Value is unchanged, so no UI
-        // reflect is needed (the slider already shows it); a no-op when the device has no GPU-OC port.
-        _svc.ApplyModeGpuOc();
-        _svc.ApplyModeCpuPower();   // re-assert the current profile's CPU power mode (defensive; overlay usually persists)
+        // and comes back at 0 offset, so re-assert the current mode's offsets; likewise the CPU power mode.
+        // Off the UI thread — ApplyModeCpuPower reads the EC (profile) which can stall right after wake, and we
+        // must not block the UI. No UI reflect needed (values unchanged); no-op when those ports are absent.
+        _ = Task.Run(() => { _svc.ApplyModeGpuOc(); _svc.ApplyModeCpuPower(); });
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
-    // touching the app's stored per-zone state; opened -> restore the current mode's lighting. The blank is
-    // gated on clamshell (a lid-close otherwise sleeps the machine and resume re-applies), but the RESTORE is
-    // gated on _blankedByLid — the remembered fact that we blanked — NOT on clamshell still being enabled at
-    // open time: the user can flip clamshell off from the external screen while the lid is shut, and the
-    // EC-latched blank would otherwise stick until the next profile switch / resume / restart.
+    // touching the app's stored per-zone state; opened -> restore the current mode's lighting from the cache. The
+    // blank is gated on clamshell (a lid-close otherwise sleeps the machine and resume re-applies), but the
+    // RESTORE is gated on _blankedByLid — the remembered fact that we blanked — NOT on clamshell still being
+    // enabled at open time: the user can flip clamshell off from the external screen while the lid is shut, and
+    // the EC-latched blank would otherwise stick until the next profile switch / resume / restart.
     // Posted to the UI thread by the lid watcher, so all HID writes stay serialized with the rest of the app.
     private void OnLidChanged(bool open)
     {
@@ -137,7 +164,7 @@ internal sealed class LightingCoordinator : IDisposable
         {
             // Restore the mode's lighting we blanked on close — one apply (the machine stayed awake in
             // clamshell mode, so the handle is live).
-            if (_blankedByLid) { _blankedByLid = false; ApplyFollowLighting(); }
+            if (_blankedByLid) { _blankedByLid = false; Paint(); }
         }
         else if (_svc.Device.Clamshell?.Enabled == true)
             BlankBacklight();

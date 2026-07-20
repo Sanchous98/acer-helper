@@ -30,6 +30,10 @@ public sealed partial class LightingViewModel : ObservableObject
     private readonly IReadOnlyList<RgbZone> _followZones;
     private readonly Action _save;
     private readonly Action<bool> _saveFollowsProfile;
+    // Create-if-missing a zone entry in the live per-mode dict, UNDER the service's _state lock — the dict is
+    // aliased into LaptopService.Settings and now enumerated by a background Save(), so the structural insert
+    // must be serialized with it (see LaptopService.EnsureLightZone).
+    private readonly Func<Dictionary<string, LightSettings>, string, LightSettings> _ensureZone;
     private Dictionary<string, LightSettings> _lights;   // current performance mode's per-zone state (swapped by Reload)
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
@@ -43,11 +47,13 @@ public sealed partial class LightingViewModel : ObservableObject
     /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
     /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
     /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.</summary>
-    public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights, Action save,
+    public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights,
+                             Func<Dictionary<string, LightSettings>, string, LightSettings> ensureZone, Action save,
                              bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null)
     {
         _lights = lights;
+        _ensureZone = ensureZone;
         _save = save;
         _saveFollowsProfile = saveFollowsProfile;
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
@@ -70,8 +76,7 @@ public sealed partial class LightingViewModel : ObservableObject
     // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness also drives Sync.
     private void BuildPanel(RgbZone zone)
     {
-        if (!_lights.TryGetValue(zone.Name, out var state))
-            _lights[zone.Name] = state = new LightSettings();
+        var state = _ensureZone(_lights, zone.Name);   // create-if-missing under the service lock (see _ensureZone)
         Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
@@ -107,11 +112,7 @@ public sealed partial class LightingViewModel : ObservableObject
     {
         _lights = lights;   // keep for BuildPanel when the follow switch is flipped mid-mode
         foreach (var panel in Panels)
-        {
-            if (!lights.TryGetValue(panel.Title, out var state))
-                lights[panel.Title] = state = new LightSettings();
-            panel.Rebind(state);
-        }
+            panel.Rebind(_ensureZone(lights, panel.Title));   // create-if-missing under the service lock
     }
 }
 

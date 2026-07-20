@@ -28,8 +28,13 @@ internal sealed class AppController
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
-    private string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
-    private string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
+    // Touched by the background refresh pass (below) and seeded on the UI thread (ctor / language rebuild);
+    // volatile for clean publication across the Task.Run barrier. The pass is single-flight (_busy), so no two
+    // passes race on them.
+    private volatile string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
+    private volatile string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
+    private int _busy;                         // 0/1 single-flight guard for the refresh background pass (Interlocked)
+    private int _rerun;                        // set when a Refresh() arrives mid-pass -> run exactly once more (coalesced)
     private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
     private bool _updating;   // a self-update download/install is in flight — both the banner and the tray item
                               // stay clickable, so without this a second click starts a second download and a
@@ -57,12 +62,14 @@ internal sealed class AppController
         // (RebuildForLanguage). Everything set up AFTER this point holds no localized text and survives the swap.
         (_vm, _windows, _tray, _lighting) = BuildUi();
         _lightingCoord.Attach(_vm, _lighting);
-        _lastModeKey = _svc.CurrentModeKey();   // VMs already seeded with this mode's presets; don't re-trigger
-        _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
+        var cur0 = _svc.CurrentProfile();
+        _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
+        _lastProfileId = cur0?.Id ?? "";
 
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
-        // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch.
-        _lightingCoord.ApplyFollowLighting();
+        // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch. The
+        // flash colour + mode lights are read here and handed to the coordinator, which caches them.
+        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor, _svc.LightsForCurrentMode());
 
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
         ApplyHardwareAccessBanner();
@@ -108,7 +115,7 @@ internal sealed class AppController
         // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
         var followKey = d.Lighting?.ProfileFollowKey;
         var lighting = d.Lighting != null || d.KeyboardBrightness != null
-            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.PersistLighting,
+            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.EnsureLightZone, _svc.PersistLighting,
                                     followKey != null && _svc.GetDeviceFlag(followKey, true),
                                     // On flip: persist the flag (AppController owns the vendor key), then have the
                                     // coordinator kick the re-apply so the lightbar repaints now (ON -> this
@@ -162,9 +169,10 @@ internal sealed class AppController
         Loc.Use(_svc.Settings.Language);
         (_vm, _windows, _tray, _lighting) = BuildUi();
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
-        _lastModeKey = _svc.CurrentModeKey();     // freshly seeded VMs; don't let Refresh re-trigger a mode reload
-        _lastProfileId = _svc.CurrentProfile()?.Id ?? "";
-        _lightingCoord.ApplyFollowLighting();
+        var cur = _svc.CurrentProfile();
+        _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
+        _lastProfileId = cur?.Id ?? "";
+        _lightingCoord.ApplyFollowLighting(cur?.FlashColor, _svc.LightsForCurrentMode());
         ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
         ApplyHardwareAccessBanner();
         Refresh();                                 // push live state into the fresh view-models + tray
@@ -352,48 +360,116 @@ internal sealed class AppController
     
     // ---- refresh ----
 
+    // One poll's worth of state, read on the background pass and consumed on the UI pass. Immutable snapshot so
+    // the UI thread never re-touches the hardware (that's what used to freeze the app when the ACPI-EC stalled
+    // during a display connect). Lights is the live per-mode dict (only the UI thread touches it after hand-off).
+    private readonly record struct Tick(
+        PerformanceProfile? Current, IReadOnlyList<PerformanceProfile> Selectable, PerformanceProfile? Base,
+        SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
+        bool ModeChanged, FanPreset? Fan, GpuOcPreset? Gpu, string? CpuId,
+        bool ProfileChanged, AccentColor? Flash,
+        Dictionary<string, LightSettings>? Lights);
+
+    // Kick a refresh. All hardware I/O runs on a pool thread (BackgroundPass) so a stalled EC/WMI read can never
+    // freeze the UI; the VM/tray updates are posted back to the UI thread (UiPass). Single-flight: if a pass is
+    // still running (e.g. blocked on a contended EC), DON'T drop this request — mark _rerun so exactly one more
+    // pass runs when the current one finishes. That matters for user actions (profile/Turbo/hotkey) which call
+    // Refresh() right after their synchronous hardware Set: the follow-up pass reflects the new state (chip/tray,
+    // lightbar palette, the new mode's fan/GPU/CPU presets) on the very next pass instead of waiting for the 3s tick.
     private void Refresh()
     {
-        _svc.EvaluateClamshell();
-
-        var battery = _svc.ReadBatteryInfo();
-        _svc.SyncPowerSource(battery);   // re-apply the per-source remembered mode on AC<->battery change
-
-        var current = _svc.CurrentProfile();
-        var selectable = _svc.SelectableProfiles();
-        var sensors = _svc.ReadSensors();
-        // null (not "") when the device has no diagnostic message, so MainViewModel.Refresh's `if (status != null)`
-        // guard leaves the status line alone and a transient Notify() message survives (a device StatusMessage,
-        // when present, is a latched startup diagnostic — localized and shown; it never reverts to null).
-        var status = _svc.Device.StatusMessage is { } m ? Loc.T(m) : null;
-
-        // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
-        // lighting presets to the hardware and reflect them in the UI.
-        var modeKey = _svc.CurrentModeKey();
-        if (modeKey != _lastModeKey)
+        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
         {
-            _lastModeKey = modeKey;
-            if (_svc.ApplyModeFan() is { } fan)
-                _vm.ReloadFans(fan);
-            _vm.ReloadGpuOc(_svc.ApplyModeGpuOc());       // re-apply + reflect this mode's GPU clock offsets
-            _vm.ReloadCpuPower(_svc.ApplyModeCpuPower()); // re-apply + reflect this mode's CPU power mode
-            _lightingCoord.OnModeChanged();   // reflect the mode's lighting (or stay dark under a shut lid)
+            Interlocked.Exchange(ref _rerun, 1);
+            // The in-flight pass may have finished (and read _rerun==0) between our failed CAS above and this
+            // write, leaving _rerun==1 with nothing scheduled. Re-check: if the guard is now free, adopt the run
+            // ourselves so a user action isn't deferred to the next 3s tick. Still busy -> its finally sees _rerun.
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return;
         }
+        try { _ = Task.Run(BackgroundPass); }
+        catch { Interlocked.Exchange(ref _busy, 0); }   // scheduler refused (rare) -> release, don't wedge the guard
+    }
 
-        // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block above
-        // won't fire) repaint the lighting — immediately, then a couple of retries (see LightingCoordinator).
-        var profileId = current?.Id ?? "";
-        if (profileId != _lastProfileId)
+    // Pool thread: every blocking hardware read/write lives here. LaptopService guards its shared Settings state
+    // with its own lock, and the WMI layer serializes EC access process-wide, so this never corrupts a
+    // concurrent user-initiated write — they just serialize.
+    private void BackgroundPass()
+    {
+        try
         {
-            _lastProfileId = profileId;
-            _lightingCoord.OnProfileChanged();
+            _svc.EvaluateClamshell();                 // QueryDisplayConfig can hitch during a topology change
+
+            var battery = _svc.ReadBatteryInfo();
+            _svc.SyncPowerSource(battery);            // re-apply the per-source remembered mode on AC<->battery change
+
+            var current = _svc.CurrentProfile();      // the ONE hardware profile read this pass
+            var modeKey = _svc.CurrentModeKey(current);
+            var profileId = current?.Id ?? "";
+            var selectable = _svc.SelectableProfiles();
+            var sensors = _svc.ReadSensors();
+            // null (not "") when the device has no diagnostic message, so MainViewModel.Refresh's `if (status != null)`
+            // guard leaves the status line alone and a transient Notify() survives (a device StatusMessage, when
+            // present, is a latched startup diagnostic — localized and shown; it never reverts to null).
+            var status = _svc.Device.StatusMessage is { } m ? Loc.T(m) : null;
+            var turbo = _svc.Settings.TurboToggles;
+
+            bool modeChanged = modeKey != _lastModeKey;
+            bool profileChanged = profileId != _lastProfileId;
+            // The current mode's per-zone lights, read once and shared by both the mode- and profile-change paths
+            // (same dict). Only read when something changed — the coordinator caches it for its re-paints.
+            var lights = (modeChanged || profileChanged) ? _svc.LightsForCurrentMode() : null;
+
+            FanPreset? fan = null; GpuOcPreset? gpu = null; string? cpu = null; AccentColor? flash = null;
+            // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
+            // GPU/CPU presets to the hardware here (background); reflect them in the UI on the UI pass.
+            if (modeChanged)
+            {
+                _lastModeKey = modeKey;
+                fan = _svc.ApplyModeFan();
+                gpu = _svc.ApplyModeGpuOc();       // re-apply this mode's GPU clock offsets
+                cpu = _svc.ApplyModeCpuPower();    // re-apply this mode's CPU power mode
+            }
+            // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block
+            // above won't fire) repaint the lighting on the UI pass (immediately, then a couple of retries).
+            if (profileChanged)
+            {
+                _lastProfileId = profileId;
+                flash = current?.FlashColor;
+            }
+
+            _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
+            var baseP = _svc.BaseProfile(current);
+
+            var t = new Tick(current, selectable, baseP, sensors, battery, status, turbo,
+                             modeChanged, fan, gpu, cpu, profileChanged, flash, lights);
+            Dispatcher.UIThread.Post(() => UiPass(t));
         }
+        catch { /* transient hardware error — next tick retries */ }
+        finally
+        {
+            Interlocked.Exchange(ref _busy, 0);   // release even on throw, or every future tick wedges
+            // A tick/user action arrived while we were busy -> run exactly one more pass to reflect it now.
+            if (Interlocked.Exchange(ref _rerun, 0) == 1) Refresh();
+        }
+    }
 
-        _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
+    // UI thread: reflect the snapshot into the view-models / tray / lighting coordinator. Order matches the old
+    // inline Refresh exactly. No hardware reads here — everything is pre-read in the Tick.
+    private void UiPass(Tick t)
+    {
+        if (t.ModeChanged)
+        {
+            if (t.Fan is { } fan) _vm.ReloadFans(fan);
+            if (t.Gpu is { } gpu) _vm.ReloadGpuOc(gpu);
+            _vm.ReloadCpuPower(t.CpuId);
+            _lightingCoord.OnModeChanged(t.Lights!);   // Lights is non-null whenever Mode/Profile changed
+        }
+        if (t.ProfileChanged)
+            _lightingCoord.OnProfileChanged(t.Flash, t.Lights!);
 
-        _vm.Refresh(current, selectable, _svc.Settings.TurboToggles, _svc.BaseProfile(), sensors, battery, status);
-        _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live while the Lighting panel is open
-        _tray.Update(current, selectable);
+        _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Battery, t.Status);
+        _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live (its read is already off-thread)
+        _tray.Update(t.Current, t.Selectable);
     }
 
     private void ExitApp()
