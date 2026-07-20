@@ -43,12 +43,12 @@
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#CCF3F3F3" />
           <SolidColorBrush x:Key="AppCard"        Color="#40FFFFFF" />
-          <!-- Opaque card fill matching the acrylic CardMaterial's effective tone. Used where the Digger
-               acrylic can't composite reliably (the sliding Tuning drawer), so those cards keep the SAME
-               contrast as the main-page cards and the section headers read identically. -->
-          <SolidColorBrush x:Key="AppCardSolid"   Color="#FAFAFA" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#14000000" />
           <SolidColorBrush x:Key="AppMuted"       Color="#99000000" />
+          <!-- Section headers (BATTERY / GPU / …). OPAQUE (not the semi-transparent AppMuted) so a header reads
+               the SAME on every card regardless of the card's rendered darkness — a translucent header
+               composited over a slightly-different card background looked brighter on some cards than others. -->
+          <SolidColorBrush x:Key="AppSectionFg"   Color="#505050" />
           <!-- Neutral control surfaces (segmented buttons, icon-button hover), theme-aware so they read
                as subtle raised controls on either theme. Rest / hover-or-pressed. -->
           <SolidColorBrush x:Key="AppControl"      Color="#18000000" />
@@ -62,11 +62,11 @@
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="AppAcrylicTint" Color="#CC2A2A2A" />
           <SolidColorBrush x:Key="AppCard"        Color="#14FFFFFF" />
-          <!-- See the Light dict: opaque card fill (~the dark CardMaterial tint) for the sliding Tuning drawer,
-               where the Digger acrylic can't composite the same as on the static main page. -->
-          <SolidColorBrush x:Key="AppCardSolid"   Color="#1A1A1A" />
           <SolidColorBrush x:Key="AppCardStroke"  Color="#1FFFFFFF" />
           <SolidColorBrush x:Key="AppMuted"       Color="#B3FFFFFF" />
+          <!-- See the Light dict: opaque section-header colour (not translucent AppMuted) so headers read the
+               same on every card. Brighter than AppMuted's effective look so it stays crisp on any card. -->
+          <SolidColorBrush x:Key="AppSectionFg"   Color="#D6D6D6" />
           <SolidColorBrush x:Key="AppControl"      Color="#22FFFFFF" />
           <SolidColorBrush x:Key="AppControlHover" Color="#33FFFFFF" />
           <ExperimentalAcrylicMaterial x:Key="CardMaterial" BackgroundSource="Digger"
@@ -108,7 +108,7 @@
     <Style Selector="TextBlock.section">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppSectionFg}" />
       <Setter Property="Margin" Value="2,0,0,10" />
     </Style>
 
