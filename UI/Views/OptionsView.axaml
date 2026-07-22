@@ -4,28 +4,12 @@
              x:Class="AcerHelper.UI.Views.OptionsView"
              x:DataType="vm:OptionsViewModel">
 
-  <!-- Bare list of option rows; the side drawer supplies the surrounding panel and title. -->
+  <!-- Bare list of option rows; the side drawer supplies the surrounding panel and title. The per-row
+       item templates (ToggleRowViewModel / ChoiceRowViewModel) live in App.axaml at application scope so
+       they resolve reliably — a control-level ItemsControl.DataTemplates copy left the rows unrendered. -->
   <ItemsControl ItemsSource="{Binding Rows}">
     <ItemsControl.ItemsPanel>
       <ItemsPanelTemplate><StackPanel Spacing="14"/></ItemsPanelTemplate>
     </ItemsControl.ItemsPanel>
-    <ItemsControl.DataTemplates>
-
-      <DataTemplate DataType="vm:ToggleRowViewModel" x:DataType="vm:ToggleRowViewModel">
-        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="{Binding Tip}">
-          <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding IsOn, Mode=TwoWay}"/>
-        </Grid>
-      </DataTemplate>
-
-      <DataTemplate DataType="vm:ChoiceRowViewModel" x:DataType="vm:ChoiceRowViewModel">
-        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}">
-          <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
-          <ComboBox Grid.Column="1" MinWidth="110" VerticalAlignment="Center"
-                    ItemsSource="{Binding Options}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
-        </Grid>
-      </DataTemplate>
-
-    </ItemsControl.DataTemplates>
   </ItemsControl>
 </UserControl>

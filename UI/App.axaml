@@ -20,6 +20,24 @@
     <DataTemplate DataType="vm:TuningViewModel"><views:TuningView/></DataTemplate>
     <DataTemplate DataType="vm:GpuViewModel"><views:GpuView/></DataTemplate>
     <DataTemplate DataType="vm:CpuViewModel"><views:CpuView/></DataTemplate>
+
+    <!-- Options-drawer row templates. Kept HERE (application scope) rather than inside OptionsView's
+         ItemsControl.DataTemplates: an ItemsControl whose heterogeneous items were matched by a
+         control-level DataTemplates collection rendered NOTHING (the rows never realised), while these same
+         DataType templates resolve fine at application scope — which is how every other view is templated. -->
+    <DataTemplate DataType="vm:ToggleRowViewModel" x:DataType="vm:ToggleRowViewModel">
+      <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="{Binding Tip}">
+        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
+        <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding IsOn, Mode=TwoWay}"/>
+      </Grid>
+    </DataTemplate>
+    <DataTemplate DataType="vm:ChoiceRowViewModel" x:DataType="vm:ChoiceRowViewModel">
+      <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsEnabled}">
+        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" Text="{Binding Label}"/>
+        <ComboBox Grid.Column="1" MinWidth="110" VerticalAlignment="Center"
+                  ItemsSource="{Binding Options}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
+      </Grid>
+    </DataTemplate>
   </Application.DataTemplates>
 
   <Application.Resources>
