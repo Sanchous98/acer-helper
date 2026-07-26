@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KMDF driver project for AcerHelperLampArray.sys.
+
+  Hand-written from the standard WDK "Kernel Mode Driver, Empty (KMDF)" template so the driver can live in this
+  repo as plain text. If your WDK/toolset combination disagrees with it, the fastest fix is to create a fresh
+  KMDF project in Visual Studio and add driver.c/driver.h/lamparray.h/public.h + the INF to it — nothing here
+  is special except the vhfkm.lib dependency and the INF's "LowerFilters = vhf".
+
+  Build:  msbuild AcerHelperLampArray.vcxproj /p:Configuration=Release /p:Platform=x64
+  Needs:  Visual Studio 2022 (C++ desktop workload) + Windows Driver Kit, matching versions.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{9F2B7C41-3D5E-4A18-9C6B-2E7A1D4F5B30}</ProjectGuid>
+    <RootNamespace>AcerHelperLampArray</RootNamespace>
+    <TargetName>AcerHelperLampArray</TargetName>
+    <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <TargetVersion>Windows10</TargetVersion>
+    <!-- Windows 11 22H2 is where Dynamic Lighting's LampArray consumer lives; the INF states the same floor. -->
+    <TargetPlatformVersion>10.0</TargetPlatformVersion>
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverType>KMDF</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Release'">false</UseDebugLibraries>
+    <SpectreMitigation>Spectre</SpectreMitigation>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- Plain C, kernel mode. The sources are C99-clean and expected to build without warnings under the
+           WDK's default /W4 /WX. -->
+      <CompileAs>CompileAsC</CompileAs>
+      <PreprocessorDefinitions>_KERNEL_MODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <!-- The Virtual HID Framework static library: VhfCreate/VhfStart/VhfDelete/VhfAsyncOperationComplete. -->
+      <AdditionalDependencies>$(DDK_LIB_PATH)vhfkm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Inf>
+      <TimeStampServer>http://timestamp.digicert.com</TimeStampServer>
+    </Inf>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="driver.c" />
+    <ClInclude Include="driver.h" />
+    <ClInclude Include="lamparray.h" />
+    <ClInclude Include="public.h" />
+    <Inf Include="AcerHelperLampArray.inf" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

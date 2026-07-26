@@ -2,5 +2,10 @@
 bin
 obj
 
+# Driver build output (container cross-build + MSBuild/WDK), and the tools the signing script extracts.
+driver/**/out
+driver/**/x64
+driver/**/tools
+
 # Rider per-user solution settings (machine-local; must never be committed)
 *.DotSettings.user

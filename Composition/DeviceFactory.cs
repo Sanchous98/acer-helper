@@ -28,4 +28,10 @@ public static class DeviceFactory
         device.FinalizeComposition();
         return device;
     }
+
+    /// <summary>The OS's transport for publishing this laptop's zones as a virtual HID LampArray (Windows
+    /// Dynamic Lighting), or null where there is none / the driver isn't installed. Kept here rather than in
+    /// <see cref="LaptopService"/> so the OS choice stays in composition: the two implementations are picked by
+    /// file name (LampArrayTransport.Windows.cs / .Linux.cs), like every other platform split.</summary>
+    public static ILampArrayTransport? CreateLampArrayTransport() => LampArrayHost.Create();
 }

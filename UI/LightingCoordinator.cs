@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using AcerHelper.Features;
+using AcerHelper.Localization;
 using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
@@ -88,6 +89,12 @@ internal sealed class LightingCoordinator : IDisposable
         // resume re-apply above). The watcher fires on its message thread, so marshal to the UI thread here.
         _lid = new LidWatcher(open => Dispatcher.UIThread.Post(() => OnLidChanged(open)));
         _lid.Start();
+
+        // A host (Windows Dynamic Lighting / a LampArray app) taking or releasing the backlight changes who
+        // paints it — see OnHostOwnerChanged. Fires on the bridge's worker thread, so marshal like the watchers
+        // above; posting (not sending) also means it can't run before Attach has supplied the view-models.
+        if (_svc.LampArray is { } lamps)
+            lamps.OwnerChanged += hostOwns => Dispatcher.UIThread.Post(() => OnHostOwnerChanged(hostOwns));
     }
 
     /// <summary>Point the coordinator at the current view-models. Called after each BuildUi (startup + live
@@ -153,9 +160,33 @@ internal sealed class LightingCoordinator : IDisposable
     private void Paint(bool includeFlash = true)
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
+
+        // A host owns the surface (Dynamic Lighting / a LampArray app): the app must not paint over it — but it
+        // MUST re-assert the host's last frame, because every caller of Paint() is an event that clobbers the
+        // RGB behind everyone's back (the EC forces its amber profile-flash on a profile switch, sleep drops the
+        // state, a lid-open restores from black). Without this the keyboard would sit amber until the host
+        // happened to send its next frame. The profile flash itself is deliberately skipped: it is a global
+        // write that would visibly fight the host's colours.
+        if (_svc.LampArray is { HostOwnsLighting: true } lamps) { lamps.Reassert(); return; }
+
         if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
         _vm.ReloadLighting(_lights);
+    }
+
+    /// <summary>A LampArray host took (or released) the backlight. Taking it: nothing to do — the bridge is
+    /// already painting, and <see cref="Paint"/> now yields to it; we only tell the user, because the Lighting
+    /// panel's controls no longer describe what the keyboard is showing (G HUB blocks its own lighting UI in the
+    /// same situation). Releasing it: the surface is frozen on the host's last frame, so repaint the app's own
+    /// lighting for the current mode right away — from the cache, no hardware reads on the UI thread.</summary>
+    private void OnHostOwnerChanged(bool hostOwns)
+    {
+        _vm.Status = Loc.T(hostOwns
+            ? "Keyboard lighting is controlled by Windows Dynamic Lighting"
+            : "Keyboard lighting is back under app control");
+        if (hostOwns) return;
+        Paint();
+        KickReapply();   // the EC may still repaint late after a host hand-back; the burst overrides it
     }
 
     // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE

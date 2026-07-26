@@ -61,10 +61,40 @@ One project, organised by module; **namespaces match the directories** (`AcerHel
   Dell Latitude 5540 on Linux: shows the firmware's cool/quiet/balanced/performance profiles.)
 - **root** (`AcerHelper`) — the application use cases (`LaptopService`, `Settings`) and the
   Avalonia UI (tray + windows), capability-driven (binds to `Features` only).
+- **`driver/`** — the one piece that can't be C#: `AcerHelperLampArray.sys`, a KMDF HID *source* driver over the
+  in-box Virtual HID Framework that publishes the keyboard's zones as a **HID LampArray** so Windows Dynamic
+  Lighting can paint them. Windows only enumerates lighting devices as LampArray HID collections, so a driver
+  has to exist; it is kept deliberately dumb (static report descriptor + a lamp table pushed down over three
+  IOCTLs) with all the logic in `Features/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
 
 OS-specific code is selected by the `*.Windows.cs` / `*.Linux.cs` file-name suffix (MSBuild
 `<Compile Remove>` globs per target framework) — **no preprocessor directives**. Adding a laptop
 vendor = a new set of files under `Vendors/`; adding an OS = `*.Linux.cs` siblings. The UI never changes.
+
+## Windows Dynamic Lighting (LampArray)
+
+Optional: expose the keyboard's zones (and the lightbar, when it isn't following the performance profile) as a
+virtual **HID LampArray**, so Windows' own Dynamic Lighting page — and any app or game that drives lighting
+through it — can paint them. This is the same construction as Logitech G HUB's "LampArray translation layer":
+a small signed HID source driver over `vhf.sys`, plus a user-mode translator (here, the app itself).
+
+The app publishes the device only while the option is on, throttles host frames to 10 Hz (the ENE controller
+sits on a contended HID-over-I2C bus), collapses uniform frames to a single write, and yields its own
+per-mode lighting while a host holds the surface — re-asserting the host's last frame after the events that
+clobber the EC's RGB (profile switch, resume, lid-open).
+
+The toggle appears in **Options** only once the driver package is installed
+(`pnputil /add-driver`, see [driver/README.md](driver/README.md)); it needs a signature Windows will load, so
+it is not shipped in the MSI. Design, wire format and limitations: [docs/lamparray.md](docs/lamparray.md).
+
+The driver builds **without Visual Studio or a WDK install** — `driver/Dockerfile` cross-compiles it in a Linux
+container with clang-cl/lld-link against the WDK/SDK NuGet packages, and the signing tools (`signtool`,
+`inf2cat`) come out of those same packages:
+
+```
+docker build -t acerhelper-wdk driver
+docker run --rm -v "$PWD/driver/AcerHelperLampArray:/src" acerhelper-wdk
+```
 
 ## Build
 

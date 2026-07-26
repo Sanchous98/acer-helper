@@ -91,6 +91,8 @@ internal static partial class Strings
         ["Battery limit"]                = "Ограничение заряда",
         ["Battery calibration"]          = "Калибровка аккумулятора",
         ["Blue-light filter:"]           = "Фильтр синего света:",
+        ["Windows Dynamic Lighting"]     = "Динамическое освещение Windows",
+        ["Dynamic Lighting"]             = "Динамическое освещение",
         ["{0} failed"]                   = "Ошибка: {0}",
 
         // ---- generic level / state labels (blue-light, USB, plain backlight) ----
@@ -111,6 +113,10 @@ internal static partial class Strings
         ["Normal"]                  = "Обычное",
         ["Reversed"]                = "Обратное",
         ["Lightbar follows performance profile"] = "Световая панель следует за профилем производительности",
+        ["Keyboard lighting is controlled by Windows Dynamic Lighting"]
+            = "Подсветкой клавиатуры управляет «Динамическое освещение» Windows",
+        ["Keyboard lighting is back under app control"]
+            = "Подсветка клавиатуры снова под управлением приложения",
         ["Zone {0}"]                = "Зона {0}",
         ["Keyboard"]                = "Клавиатура",
         ["Lightbar"]                = "Световая панель",

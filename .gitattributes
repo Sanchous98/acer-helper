@@ -10,6 +10,9 @@ packaging/*.desktop         text eol=lf
 packaging/*.rules           text eol=lf
 packaging/*.conf            text eol=lf
 *.sh                        text eol=lf
+# The driver's container cross-build: a Dockerfile with CRLF breaks RUN line continuations, and build.sh is
+# executed inside the image.
+driver/Dockerfile           text eol=lf
 
 # Windows scripts — keep CRLF.
 *.cmd                       text eol=crlf

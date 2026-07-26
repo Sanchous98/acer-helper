@@ -1,0 +1,81 @@
+;
+; AcerHelperLampArray.inf
+;
+; Installs AcerHelperLampArray.sys — the HID source driver that publishes a virtual HID LampArray device for
+; Windows Dynamic Lighting (see driver.c and docs/lamparray.md).
+;
+; Two things make this work:
+;   * LowerFilters = vhf   -- the in-box Virtual HID Framework sits below us and builds the virtual HID tree.
+;                             This is exactly what Logitech's logi_lamparray_hid.inf does.
+;   * a root-parented node -- there is no real bus behind this device. Acer Helper creates the node itself at
+;                             runtime (SwDeviceCreate), which is why the hardware id appears bare here as well
+;                             as in the Root\ form (the latter lets you create it manually with devgen/devcon
+;                             for debugging).
+;
+; Install:   pnputil /add-driver AcerHelperLampArray.inf /install
+; Remove:    pnputil /delete-driver oemNN.inf /uninstall /force
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = HIDClass
+ClassGuid   = {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Provider    = %ManufacturerName%
+CatalogFile = AcerHelperLampArray.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+AcerHelperLampArray.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...22621
+
+; Windows 11 22H2 (build 22621) is the floor: that is where Dynamic Lighting's LampArray consumer lives.
+[Standard.NT$ARCH$.10.0...22621]
+%DeviceName% = AcerHelperLampArray_Device, AcerHelperLampArray, Root\AcerHelperLampArray
+
+[AcerHelperLampArray_Device.NT]
+CopyFiles = Drivers_Dir
+
+[Drivers_Dir]
+AcerHelperLampArray.sys
+
+[AcerHelperLampArray_Device.NT.Services]
+AddService = AcerHelperLampArray,%SPSVCINST_ASSOCSERVICE%,AcerHelperLampArray_Service_Inst
+
+[AcerHelperLampArray_Service_Inst]
+DisplayName   = %ServiceName%
+ServiceType   = 1                       ; SERVICE_KERNEL_DRIVER
+StartType     = 3                       ; SERVICE_DEMAND_START
+ErrorControl  = 1                       ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\AcerHelperLampArray.sys
+
+[AcerHelperLampArray_Device.NT.HW]
+AddReg = AcerHelperLampArray_HW_AddReg
+
+[AcerHelperLampArray_HW_AddReg]
+; vhf.sys must load BELOW us: it is what turns our report descriptor into a real HID device node.
+HKR,,"LowerFilters",0x00010008,"vhf"
+; Only SYSTEM and administrators may open the control device — the app runs elevated anyway, and the IOCTLs
+; drive the machine's lighting, so there is no reason to expose them to every process on the box.
+HKR,,"Security",,"D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+
+[AcerHelperLampArray_Device.NT.Wdf]
+KmdfService = AcerHelperLampArray, AcerHelperLampArray_wdfsect
+
+[AcerHelperLampArray_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName       = "Acer Helper"
+DiskName               = "Acer Helper LampArray Installation Disk"
+DeviceName             = "Acer Helper keyboard lighting (LampArray)"
+ServiceName            = "Acer Helper LampArray"

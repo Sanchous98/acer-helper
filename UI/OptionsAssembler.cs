@@ -27,6 +27,16 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (d.FnLock is { } fn)
             list.Add(new OptionToggle(Loc.T("Fn lock"), true, fn.Get(),
                 v => RunSet(() => svc.SetFlag(fn, v), "Fn lock"), Read: fn.Get));
+
+        // Publish the keyboard's zones as a virtual HID LampArray, so Windows Dynamic Lighting and
+        // LampArray-aware apps can paint them (Features/LampArrayBridge.cs). The row only exists where the
+        // bridge can exist at all — the OS transport plus the installed driver (see docs/lamparray.md) — so on a
+        // machine without the driver there is nothing to promise the user. `Read` is the bridge's REAL state:
+        // publishing can fail (driver removed, PnP refused), and then the switch snaps back by itself.
+        if (svc.LampArray is { } lamps)
+            list.Add(new OptionToggle(Loc.T("Windows Dynamic Lighting"), true, lamps.Enabled,
+                v => RunSet(() => svc.SetDynamicLighting(v), "Dynamic Lighting"), Read: () => lamps.Enabled));
+
         return list;
     }
 

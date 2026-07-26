@@ -10,7 +10,8 @@ namespace AcerHelper;
 /// All orchestration (profile cycling/toggling, persistence of changes) lives here, never in
 /// the UI or in Infrastructure.
 /// </summary>
-public sealed class LaptopService(IDevice device, ISettingsStore store) : IDisposable
+public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArrayTransport? lampArray = null)
+    : IDisposable
 {
     /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
@@ -41,6 +42,63 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
             ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
             ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
         }
+
+        // Bring the virtual LampArray back up if the user left it on. Off the caller's (UI) thread on purpose:
+        // publishing it creates a PnP device node and waits for the driver to start — up to a few seconds on a
+        // cold boot. Failure is not surfaced here; the Options row reads the bridge's real state when shown.
+        if (Settings.DynamicLighting && LampArray is { } la)
+            _ = Task.Run(() => { try { la.Enable(); } catch { /* stays off */ } });
+    }
+
+    // ---- LampArray / Windows Dynamic Lighting ----
+
+    private LampArrayBridge? _lampArray;
+    private bool _lampArrayBuilt;
+    // Its OWN lock, deliberately not _state: this property is read from the UI thread on every lighting repaint
+    // (LightingCoordinator.Paint), and _state is held across blocking EC/WMI work by the background pass — so
+    // sharing it would put an ACPI-EC stall in front of a UI-thread paint. Nothing here touches Settings.
+    private readonly Lock _lampGate = new();
+
+    /// <summary>The LampArray bridge (Features/LampArrayBridge.cs), or null when this build/OS/device can't
+    /// offer it: no transport for the OS, no driver installed, or no RGB zones at all. Built lazily — creating
+    /// it is free, but it must not happen before the settings are loaded, and most runs never need it.</summary>
+    public LampArrayBridge? LampArray
+    {
+        get
+        {
+            lock (_lampGate)
+            {
+                if (_lampArrayBuilt) return _lampArray;
+                _lampArrayBuilt = true;
+                if (lampArray != null && device.Lighting is { } rgb)
+                    _lampArray = new LampArrayBridge(rgb, lampArray, ZoneAvailableToHost);
+                return _lampArray;
+            }
+        }
+    }
+
+    // Which zones a host may paint. A "follows performance profile" lightbar is the firmware's while that flag
+    // is on (the app doesn't drive it either — see LightingViewModel), so it is not offered as lamps; flipping
+    // the flag off and re-enabling the bridge picks it up.
+    private bool ZoneAvailableToHost(RgbZone zone)
+        => !(zone.CanFollowProfile && device.Lighting?.ProfileFollowKey is { } key && GetDeviceFlag(key, true));
+
+    /// <summary>Turn the virtual LampArray on/off and persist the choice. Returns false if it could not be
+    /// published (see <see cref="LampArrayBridge.LastError"/>) — the setting is then left off, so the UI row
+    /// snaps back on its next read instead of claiming a device that isn't there. Blocking (opens the driver);
+    /// call off the UI thread — the Options rows already do.</summary>
+    public bool SetDynamicLighting(bool on)
+    {
+        var la = LampArray;
+        if (la == null) return false;
+
+        var ok = true;
+        if (on) ok = la.Enable();
+        else la.Disable();
+        if (!ok) LastError = la.LastError;
+
+        lock (_state) { Settings.DynamicLighting = on && ok; Save(); }
+        return ok;
     }
 
     // ---- performance profiles ----
@@ -517,5 +575,11 @@ public sealed class LaptopService(IDevice device, ISettingsStore store) : IDispo
         return ok;
     }
 
-    public void Dispose() => device.Dispose();
+    public void Dispose()
+    {
+        // Tear the virtual LampArray down BEFORE the device: it stops its worker and removes the PnP node, so
+        // Windows doesn't keep offering a lighting device this process no longer backs.
+        try { _lampArray?.Dispose(); } catch { /* best-effort teardown */ }
+        device.Dispose();
+    }
 }

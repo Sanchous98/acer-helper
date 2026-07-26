@@ -20,7 +20,8 @@ public partial class App : Avalonia.Application
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             // composition root: detect device, wire settings, build the application service
-            var service = new LaptopService(DeviceFactory.Create(), new JsonSettingsStore());
+            var service = new LaptopService(DeviceFactory.Create(), new JsonSettingsStore(),
+                                            DeviceFactory.CreateLampArrayTransport());
             // Activate the persisted UI language before any window/view-model is built (they read their
             // strings via Loc at construction). Default is "System" -> follow the OS UI culture.
             Loc.Use(service.Settings.Language);
