@@ -40,6 +40,14 @@ public sealed partial class AcerDevice
 
         // Profiles + sensors: Acer's WMI is the richer/only source on Windows -> override the generic ones.
         PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
+
+        // Boot sync, EC-ONLY: the profile byte survives a reboot but the EC usage mode behind it does not, so
+        // the machine can report Turbo while running the lowest power row. Push the mode matching whatever
+        // profile the hardware reports — deliberately NOT a profile switch. Driving a full pp.Set() here (as
+        // 0.28.0 did from LaptopService.ApplyStartupState) re-flashed the lightbar and raced the power-source
+        // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
+        // WMI write, no palette flash, and it cannot disagree with what the UI shows.
+        if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(cur.Kind);
         Sensors       = new SensorsPort(ReadSensors);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         LcdOverdrive  = new FlagPort(GetLcd, SetLcd);

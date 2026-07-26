@@ -28,9 +28,10 @@ via `root\WMI` class `AcerGamingFunction`.
 profile, but it does **not** move the power envelope. The envelope — GPU TGP/CTGP and the CPU limits — lives in
 the EC's own "system usage mode", reachable only over HID (VID `0x1025` / PID `0x174B`, 65-byte feature
 reports). Without it the dGPU stays at its bare vBIOS default (~78 W sustained instead of ~108 W) no matter
-which profile the app shows. A profile switch now drives both channels, and the profile is re-asserted at
-startup because the EC mode is not implied by the profile the hardware reports. Full protocol, the measured
-mode→watts table and the dead ends: [`docs/power-an18-61.md`](docs/power-an18-61.md).
+which profile the app shows. A profile switch now drives both channels, and at startup the EC mode is synced —
+EC only, no profile switch — to whatever profile the hardware reports, because the profile byte survives a
+reboot while the EC mode behind it does not. Full protocol, the measured mode→watts table and the dead ends:
+[`docs/power-an18-61.md`](docs/power-an18-61.md).
 
 ## Requirements
 

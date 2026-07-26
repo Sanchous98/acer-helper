@@ -23,10 +23,17 @@ public sealed partial class BatteryInfo
     {
         if (!GetSystemPowerStatus(out SYSTEM_POWER_STATUS s)) return (-1, BatteryState.Unknown);
         int percent = s.BatteryLifePercent == 255 ? -1 : s.BatteryLifePercent;
+        // 255 means "unknown" for BOTH fields, and Windows really does report it — notably for a while during
+        // boot, before the power drivers have settled. It must map to Unknown, never to Discharging: callers
+        // treat Discharging as "on battery" (LaptopService.SyncPowerSource restores that source's remembered
+        // mode), so a transient unknown used to look like an unplug-then-replug and set off a visible cascade
+        // of profile switches at every boot — on-battery slot, then on-AC slot, each re-flashing the lightbar.
+        // Unknown is explicitly ignored by those callers, which is exactly the wanted behaviour here.
         BatteryState state =
-            (s.BatteryFlag & 8) != 0 ? BatteryState.Charging     // 8 = charging
-            : s.ACLineStatus == 1    ? BatteryState.Idle         // plugged in, not charging
-            :                          BatteryState.Discharging;
+            s.ACLineStatus == 255                                  ? BatteryState.Unknown
+            : s.BatteryFlag != 255 && (s.BatteryFlag & 8) != 0      ? BatteryState.Charging     // 8 = charging
+            : s.ACLineStatus == 1                                  ? BatteryState.Idle         // plugged in, not charging
+            :                                                        BatteryState.Discharging;
         return (percent, state);
     }
 

@@ -63,7 +63,7 @@ WARNING acer_hid_2025_v2.cpp:163 GetCurrentSystemUsageMode() Try GetCurrentSyste
 ```
 
 So **there is no way to read the current mode back**. The app therefore treats the mode as write-only and
-re-asserts it rather than reconciling it (see `LaptopService.ReassertProfile`).
+re-asserts it rather than reconciling it (see the boot sync in `AcerDevice.Windows.InitVendor`).
 
 ## Mode byte → measured dGPU power
 
@@ -106,7 +106,10 @@ needed — this is why the app can replace NitroSense outright rather than shado
 
 Two caveats:
 
-* It is **not known** to survive a reboot, which is why `ApplyStartupState` re-asserts the profile.
+* It is **not known** to survive a reboot, which is why `AcerDevice.Windows.InitVendor` pushes the mode for the
+  currently reported profile at startup. That write is deliberately **EC-only**: driving a full profile switch
+  there (what 0.28.0 did from `LaptopService.ApplyStartupState`) re-flashed the lightbar and raced the
+  power-source restore, producing a visible Balanced→Turbo→Eco cascade at every boot.
 * Acer's `AcerQAAgent`, while running, re-applies **its** mode within a minute or two and will overwrite
   these writes. That is an argument for removing the Acer stack, not for polling here.
 

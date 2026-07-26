@@ -46,7 +46,13 @@ public sealed partial class AcerDevice
         // The full Acer BIOS profile set — but only when this process can actually switch it (root/udev);
         // otherwise the generic polkit-authorised PPD port stays (working beats richer-but-broken).
         var profiles = new SysfsPowerProfiles();
-        if (profiles is { Available: true, Writable: true }) PowerProfiles = new BatteryGatedProfiles(profiles, _ec);
+        if (profiles is { Available: true, Writable: true })
+        {
+            PowerProfiles = new BatteryGatedProfiles(profiles, _ec);
+            // Boot sync, EC-only — same reasoning as AcerDevice.Windows.cs: push the EC usage mode for the
+            // profile the platform already reports, without driving a profile switch.
+            if (_ec != null && profiles.Current() is { } cur) _ec.Apply(cur.Kind);
+        }
 
         _sense = new SysfsInvoker(senseDir);
 
