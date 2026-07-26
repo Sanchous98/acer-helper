@@ -39,6 +39,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         {
             if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
             if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
+            ReassertProfile();    // the EC power envelope isn't implied by the profile the hardware reports
             ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
             ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
         }
@@ -145,6 +146,29 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
             Save();
         }
         return true;
+    }
+
+    /// <summary>Re-drive the profile the app believes is active, UNCONDITIONALLY. A profile is not one atomic
+    /// hardware value: on Acer EC-HID models the profile byte the platform reports survives a reboot but the EC
+    /// power envelope behind it does not, so the machine can report "Turbo" while actually running the lowest
+    /// power row (measured on the AN18-61: ~78 W instead of ~108 W). That is why this cannot reuse
+    /// <see cref="ApplyStoredMode"/> — that one skips the write when the reported profile already matches, which
+    /// is precisely the case that leaves the envelope wrong. Prefers this power source's remembered mode, falling
+    /// back to whatever the hardware reports. Called at startup.</summary>
+    public void ReassertProfile()
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return;
+        lock (_state)
+        {
+            // Turbo-as-a-switch: the remembered slot holds the base, with Turbo layered on top (see SetTurbo).
+            var target = (Settings.TurboToggles && Slot.Turbo
+                             ? pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo)
+                             : null)
+                         ?? pp.All.FirstOrDefault(p => p.Id == Slot.BaseId)
+                         ?? pp.Current();
+            if (target != null && !pp.Set(target)) LastError = pp.LastError;
+        }
     }
 
     /// <summary>True if the hardware is currently in the Turbo profile.</summary>

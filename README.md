@@ -23,13 +23,23 @@ Switch the platform performance profile from a tray icon and a compact window:
 `GetGamingMiscSetting(gmInput = 0x0B)` to read (status in byte 0, value in byte 1),
 via `root\WMI` class `AcerGamingFunction`.
 
+**Plus a second channel on models that need it.** On the Nitro AN18-61 that WMI byte turned out to be only an
+*indicator*: it moves the tray state and the lightbar palette, and the EC reports it back as the current
+profile, but it does **not** move the power envelope. The envelope — GPU TGP/CTGP and the CPU limits — lives in
+the EC's own "system usage mode", reachable only over HID (VID `0x1025` / PID `0x174B`, 65-byte feature
+reports). Without it the dGPU stays at its bare vBIOS default (~78 W sustained instead of ~108 W) no matter
+which profile the app shows. A profile switch now drives both channels, and the profile is re-asserted at
+startup because the EC mode is not implied by the profile the hardware reports. Full protocol, the measured
+mode→watts table and the dead ends: [`docs/power-an18-61.md`](docs/power-an18-61.md).
+
 ## Requirements
 
 - Acer gaming laptop exposing `AcerGamingFunction` (Nitro / Predator, recent gen).
 - Windows 10/11.
 - **Run as Administrator** (Acer WMI/ACPI methods require elevation — the app
   manifest already requests it).
-- Stop NitroSense / `PredatorSenseService` if running, or it may override changes.
+- Remove or disable NitroSense and the Acer service stack. Not just cosmetic: `AcerQAAgent`, while running,
+  re-applies its own EC usage mode every minute or two and will overwrite the power envelope this app sets.
 
 ## Architecture
 

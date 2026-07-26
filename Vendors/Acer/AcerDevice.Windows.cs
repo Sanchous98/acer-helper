@@ -20,6 +20,10 @@ public sealed partial class AcerDevice
 
     private WmiInvoker _gaming = null!, _battery = null!, _apge = null!;
 
+    // The EC HID channel that carries the real performance envelope on models that expose it; null elsewhere
+    // (then SetProfile keeps doing WMI alone, exactly as before). See AcerEcHidController.
+    private AcerEcHidController? _ec;
+
     partial void InitVendor()
     {
         Own(_gaming = new WmiInvoker("AcerGamingFunction"));
@@ -28,6 +32,11 @@ public sealed partial class AcerDevice
             StatusMessage = _gaming.LastError ?? "Acer WMI unavailable — run as administrator.";
             return;   // keep the inherited generic ports only
         }
+
+        // Probe the EC HID interface before wiring profiles: on models that have it, a profile switch has to
+        // drive it too or the power envelope never moves (see AcerEcHidController). Not owned when absent.
+        var ec = new AcerEcHidController();
+        if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
         // Profiles + sensors: Acer's WMI is the richer/only source on Windows -> override the generic ones.
         PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
@@ -64,8 +73,16 @@ public sealed partial class AcerDevice
         return (o & 0xFF) != 0 ? null : AcerProfiles.ToDomain((byte)((o >> 8) & 0xFF));
     }
 
+    // TWO channels, both needed. The WMI byte is what the EC reports back as "current profile", so the tray,
+    // the per-mode presets and the lightbar palette all follow it. The EC HID usage mode is what actually moves
+    // the power envelope (GPU TGP/CTGP + CPU limits) on models that expose it — on the AN18-61 the WMI byte
+    // alone leaves the dGPU at its bare vBIOS default. They are independent; the EC write is only enqueued
+    // (it lands on the controller's writer thread), so it cannot slow this call down.
     private (bool, string?) SetProfile(PerformanceProfile p)
-        => GmSet(_gaming, "SetGamingMiscSetting", 0x0B | ((ulong)AcerProfiles.ToByte(p) << 8));
+    {
+        _ec?.Apply(p.Kind);
+        return GmSet(_gaming, "SetGamingMiscSetting", 0x0B | ((ulong)AcerProfiles.ToByte(p) << 8));
+    }
 
     // ---- sensors ----
     private SensorSnapshot ReadSensors() => new()

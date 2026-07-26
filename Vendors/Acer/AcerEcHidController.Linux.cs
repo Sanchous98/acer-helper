@@ -1,0 +1,73 @@
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace AcerHelper.Vendors.Acer;
+
+// Linux transport for the Acer EC controller: hidraw directly, no HID library — the same approach and the same
+// reason as EneHidController.Linux.cs (this controller sits on HID-over-I2C, which HidSharp's Linux enumeration
+// never lists). One hidraw node covers all of a device's collections, so matching the parent hid device's
+// HID_ID (bus:vendor:product) is enough; the report id in byte 0 selects the vendor collection's report.
+// Reaching /dev/hidrawN without root relies on the desktop's uaccess ACL (present for built-in HID) or a udev
+// rule — the same prerequisite the RGB controller already documents.
+//
+// NOTE: untested on Linux hardware. The codec is verified on Windows (see AcerEcHidController.cs); if the node
+// is missing or unwritable the controller simply reports Available = false and the profile path keeps its
+// previous behaviour, so a wrong guess here degrades to "no EC envelope control", never to a bad write.
+internal sealed partial class AcerEcHidController
+{
+    private FileStream? _dev;
+
+    private partial bool OpenTransport()
+    {
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories("/sys/class/hidraw"))
+            {
+                if (!IsAcerEc(Path.Combine(dir, "device/uevent"))) continue;
+                try
+                {
+                    _dev = File.Open($"/dev/{Path.GetFileName(dir)}", FileMode.Open, FileAccess.ReadWrite);
+                    return true;
+                }
+                catch { /* no permission on this node — try the next match */ }
+            }
+        }
+        catch { /* no hidraw class -> no device */ }
+        return false;
+    }
+
+    // uevent of the parent hid device carries HID_ID=<bus>:<vendor>:<product> (8 hex digits each).
+    private static bool IsAcerEc(string ueventPath)
+    {
+        try
+        {
+            foreach (var line in File.ReadLines(ueventPath))
+                if (line.StartsWith("HID_ID=", StringComparison.Ordinal))
+                    return line.EndsWith($":{VID:X8}:{PID:X8}", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { /* unreadable -> not ours */ }
+        return false;
+    }
+
+    // Runs on the controller's writer thread. Re-opens the node if it was dropped, and drops it again on
+    // failure so the next write re-opens.
+    private partial bool WriteFeature(byte[] report)
+    {
+        if (_dev == null && !OpenTransport()) return false;
+        try
+        {
+            // HIDIOCSFEATURE(len) = _IOC(WRITE|READ, 'H', 0x06, len); the report id is byte 0 of the buffer.
+            var request = 0xC0000000u | ((uint)report.Length << 16) | ('H' << 8) | 0x06;
+            if (Ioctl(_dev!.SafeFileHandle, request, report) >= 0) return true;
+        }
+        catch { /* fall through to drop the node */ }
+        _dev?.Dispose(); _dev = null;
+        return false;
+    }
+
+    private partial void CloseTransport() => _dev?.Dispose();
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int Ioctl(SafeFileHandle fd, nuint request, [In] byte[] data);
+}

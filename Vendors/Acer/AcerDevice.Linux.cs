@@ -16,12 +16,22 @@ public sealed partial class AcerDevice
 
     private SysfsInvoker _sense = null!;
 
+    // The EC HID performance-envelope channel; null when this model doesn't expose it. See AcerEcHidController.
+    private AcerEcHidController? _ec;
+
     partial void InitVendor()
     {
         // RGB is the ENE HID controller — the very same device (and packets) as on Windows, reached via
         // hidraw. It's independent of Linuwu-Sense (a WMI/EC driver, not the HID interface), so wire it first
         // regardless of whether the sysfs module is loaded. No brightness read-back here (that's gaming WMI).
         WireRgb(readKeyboardBrightness: null);
+
+        // The EC HID performance-envelope channel is independent of Linuwu-Sense (that is a WMI/EC platform
+        // driver; this is the HID interface), so probe it here regardless of whether the module is loaded.
+        // UNTESTED on Linux hardware: absent or unwritable just means Available = false and the profile path
+        // behaves exactly as it did before.
+        var ec = new AcerEcHidController();
+        if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
         // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden).
         if (AcerHotkeys.TryCreate() is { } keys) Own(Hotkeys = keys);
@@ -36,7 +46,7 @@ public sealed partial class AcerDevice
         // The full Acer BIOS profile set — but only when this process can actually switch it (root/udev);
         // otherwise the generic polkit-authorised PPD port stays (working beats richer-but-broken).
         var profiles = new SysfsPowerProfiles();
-        if (profiles is { Available: true, Writable: true }) PowerProfiles = new BatteryGatedProfiles(profiles);
+        if (profiles is { Available: true, Writable: true }) PowerProfiles = new BatteryGatedProfiles(profiles, _ec);
 
         _sense = new SysfsInvoker(senseDir);
 
@@ -66,14 +76,22 @@ public sealed partial class AcerDevice
     // The EC rejects everything except balanced/low-power while on battery (EOPNOTSUPP straight from the
     // driver — verified on AN18-61), mirroring the Windows supported-mask behaviour (Turbo drops out when
     // unplugged). Grey those profiles out rather than letting every click fail.
-    private sealed class BatteryGatedProfiles(SysfsPowerProfiles inner) : IPowerProfiles
+    private sealed class BatteryGatedProfiles(SysfsPowerProfiles inner, AcerEcHidController? ec) : IPowerProfiles
     {
         private static readonly string[] BatterySafe = ["balanced", "low-power"];
 
         public string? LastError => inner.LastError;
         public IReadOnlyList<PerformanceProfile> All => inner.All;
         public PerformanceProfile? Current() => inner.Current();
-        public bool Set(PerformanceProfile profile) => inner.Set(profile);
+
+        // Two channels, as on Windows (see AcerDevice.Windows.SetProfile): platform_profile is the profile the
+        // platform reports, but on EC-HID models it does not move the power envelope — the EC usage mode does.
+        // Enqueue-only, and a no-op when the interface is absent.
+        public bool Set(PerformanceProfile profile)
+        {
+            ec?.Apply(profile.Kind);
+            return inner.Set(profile);
+        }
 
         public IReadOnlyList<PerformanceProfile> Selectable()
             => OnAc() ? inner.Selectable() : inner.Selectable().Where(p => BatterySafe.Contains(p.Id)).ToList();
