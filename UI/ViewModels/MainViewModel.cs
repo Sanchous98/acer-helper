@@ -52,10 +52,36 @@ public sealed partial class MainViewModel : ObservableObject
     private Action? _grantAccess;
     [ObservableProperty] private bool _needsHardwareAccess;
 
-    // Side drawer: a single host that shows either the Options or the Lighting content.
+    // Side drawer: which page is showing. DrawerContent identifies it; the three pages are hosted SIDE BY SIDE
+    // in the view and toggled by the Is*Page flags below, NOT swapped through one shared host — see those flags.
     [ObservableProperty] private object? _drawerContent;
     [ObservableProperty] private string _drawerTitle = "";
     [ObservableProperty] private bool _isDrawerOpen;
+
+    // The drawer pages, each with its own host in the view (MainWindow.axaml). They were previously swapped
+    // through a single ContentControl, which is what caused the empty-drawer bug: after the Tuning page had been
+    // hosted there — it is the only page with nested ContentControls of its own (GPU/CPU) — the presenter built
+    // NOTHING for whatever page came next. Measured: the drawer page had 14 visual descendants (just the chrome:
+    // back button, title, ScrollViewer, the presenter) and no view at all, while the view-model still held its
+    // rows. Opening the same page a second time fixed itself, which is why it looked like "works once, then
+    // empty" and why the victim alternated between Options and Lighting. Giving each page its own host removes
+    // the re-hosting entirely: every view is built once and only its visibility changes. An IsVisible=false
+    // control is not measured either, so the flyout still sizes to the page actually on screen.
+    public OptionsViewModel?  OptionsPage  => _options;
+    public LightingViewModel? LightingPage => _lighting;
+    public TuningViewModel?   TuningPage   => _tuning;
+
+    public bool IsOptionsPage  => ReferenceEquals(DrawerContent, _options);
+    public bool IsLightingPage => ReferenceEquals(DrawerContent, _lighting);
+    public bool IsTuningPage   => ReferenceEquals(DrawerContent, _tuning);
+
+    // Keep the page flags in step with DrawerContent (the [ObservableProperty] setter raises this).
+    partial void OnDrawerContentChanged(object? value)
+    {
+        OnPropertyChanged(nameof(IsOptionsPage));
+        OnPropertyChanged(nameof(IsLightingPage));
+        OnPropertyChanged(nameof(IsTuningPage));
+    }
 
     public MainViewModel(IDevice device, UiActions a, LightingViewModel? lighting)
     {

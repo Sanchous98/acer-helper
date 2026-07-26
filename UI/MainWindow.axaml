@@ -135,8 +135,18 @@
             <TextBlock Grid.Column="1" Classes="h1" VerticalAlignment="Center" Margin="6,0,0,0"
                        Text="{Binding DrawerTitle}"/>
           </Grid>
+          <!-- One host PER PAGE, switched by visibility — deliberately NOT a single ContentControl bound to
+               DrawerContent. Swapping three heterogeneous view-models through one presenter left it empty:
+               after the Tuning page (the only one with nested ContentControls of its own) had been hosted,
+               the presenter built no view at all for the next page. Separate hosts mean each view is created
+               once and never re-hosted; a collapsed one isn't measured, so the flyout still sizes to the page
+               on screen. See MainViewModel's page flags. -->
           <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-            <ContentControl Content="{Binding DrawerContent}"/>
+            <Panel>
+              <ContentControl Content="{Binding OptionsPage}"  IsVisible="{Binding IsOptionsPage}"/>
+              <ContentControl Content="{Binding LightingPage}" IsVisible="{Binding IsLightingPage}"/>
+              <ContentControl Content="{Binding TuningPage}"   IsVisible="{Binding IsTuningPage}"/>
+            </Panel>
           </ScrollViewer>
         </DockPanel>
       </Grid>
