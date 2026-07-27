@@ -167,26 +167,28 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     }
 
     /// <summary>Turbo used as a switch (the "Turbo toggles" mode): on = apply Turbo over the current base;
-    /// off = return to the remembered base. The base id is preserved; only the Turbo flag flips.</summary>
-    public bool SetTurbo(bool on)
+    /// off = return to the remembered base. The base id is preserved; only the Turbo flag flips.
+    /// Returns the profile that actually landed (null on failure) so the caller doesn't have to read it back
+    /// out of the hardware to know what it just applied — see AppController's lighting hand-off.</summary>
+    public PerformanceProfile? SetTurbo(bool on)
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return false;
+        if (pp == null) return null;
         lock (_state)
         {
             if (on)
             {
                 var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
-                if (turbo == null) return false;
+                if (turbo == null) return null;
                 var cur = pp.Current();
                 if (cur != null && cur.Kind != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
-                if (!pp.Set(turbo)) { LastError = pp.LastError; return false; }
+                if (!pp.Set(turbo)) { LastError = pp.LastError; return null; }
                 Slot.Turbo = true;
                 Save();
-                return true;
+                return turbo;
             }
             var baseP = BaseProfile();
-            return baseP != null && ApplyProfile(baseP);   // clears Turbo flag + persists base
+            return baseP != null && ApplyProfile(baseP) ? baseP : null;   // clears Turbo flag + persists base
         }
     }
 
@@ -270,7 +272,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         bool turboToggles;
         lock (_state) turboToggles = Settings.TurboToggles;
         if (turboToggles)
-            return SetTurbo(!IsTurboOn()) ? pp.Current() : null;
+            return SetTurbo(!IsTurboOn());   // returns what landed — no read-back needed
 
         var target = NextSelectable(pp, pp.Current());
         return target != null && ApplyProfile(target) ? target : null;

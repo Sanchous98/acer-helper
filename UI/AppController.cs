@@ -281,16 +281,24 @@ internal sealed class AppController
 
     // ---- actions ----
 
+    // Repaint the lighting from the profile we just applied, rather than waiting for the refresh pass to
+    // rediscover it by polling: the firmware flashes the new palette the moment the profile byte is written, so
+    // a repaint that lands ~750 ms later reads as a SECOND blink cycle of the keyboard and lightbar (and, if it
+    // catches a still-running burst from the previous switch, in the PREVIOUS profile's colour). Every path that
+    // changes the profile — pick, tray, hotkey, Turbo switch — goes through here.
     private void ApplyProfile(PerformanceProfile p)
     {
-        if (!_svc.ApplyProfile(p)) Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(_svc.LastError));
+        if (_svc.ApplyProfile(p)) _lightingCoord.OnProfileApplied(p);
+        else Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(_svc.LastError));
         Refresh();
     }
 
-    // Turbo used as a switch (the "Turbo toggles" mode).
+    // Turbo used as a switch (the "Turbo toggles" mode). SetTurbo returns the profile that landed (Turbo, or the
+    // remembered base when switching off), so the lighting follows it without a read-back.
     private void SetTurbo(bool on)
     {
-        if (!_svc.SetTurbo(on)) Notify(Loc.T("Turbo failed") + Err(_svc.LastError));
+        if (_svc.SetTurbo(on) is { } applied) _lightingCoord.OnProfileApplied(applied);
+        else Notify(Loc.T("Turbo failed") + Err(_svc.LastError));
         Refresh();
     }
 
@@ -345,7 +353,11 @@ internal sealed class AppController
         _lastTurbo = now;
 
         var applied = _svc.TogglePerformance();
-        if (applied != null) Notify(Loc.T("Profile: {0}", Loc.T(applied.DisplayName)));
+        if (applied != null)
+        {
+            Notify(Loc.T("Profile: {0}", Loc.T(applied.DisplayName)));
+            _lightingCoord.OnProfileApplied(applied);
+        }
         Refresh();
     }
 
@@ -462,10 +474,12 @@ internal sealed class AppController
             if (t.Fan is { } fan) _vm.ReloadFans(fan);
             if (t.Gpu is { } gpu) _vm.ReloadGpuOc(gpu);
             _vm.ReloadCpuPower(t.CpuId);
-            _lightingCoord.OnModeChanged(t.Lights!);   // Lights is non-null whenever Mode/Profile changed
         }
-        if (t.ProfileChanged)
-            _lightingCoord.OnProfileChanged(t.Flash, t.Lights!);
+        // ONE lighting hand-off for both kinds of change (Lights is non-null whenever either fired). Two separate
+        // calls made the coordinator paint twice per switch and let a mode change repaint from a flash colour the
+        // profile hand-off had not updated yet.
+        if (t.ModeChanged || t.ProfileChanged)
+            _lightingCoord.OnStateChanged(t.ProfileChanged, t.Current?.Id, t.Flash, t.Lights!);
 
         _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Battery, t.Status);
         _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live (its read is already off-thread)

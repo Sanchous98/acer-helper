@@ -23,9 +23,10 @@ internal sealed class LightingCoordinator : IDisposable
     private readonly LaptopService _svc;
     private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
+    private int _flashTicksLeft;                       // of those, how many still re-send the palette
 
-    // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) override a late
-    // firmware palette repaint after a profile switch (the original 2-tick purpose), and (2) self-heal a
+    // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) restore the per-zone
+    // colours the firmware's own palette repaint clobbers after a profile switch, and (2) self-heal a
     // corrupted apply on a display-contended HID-over-I2C bus (booted-with-external-display), where the first
     // apply can land amber/partial — each retry is a fresh chance to hit a clean bus window, and once one lands
     // it sticks (the device is last-write-wins; idle state isn't re-corrupted). Bounded on purpose: if the bus
@@ -33,12 +34,19 @@ internal sealed class LightingCoordinator : IDisposable
     // forever. Re-asserting an already-correct colour is visually silent (the firmware re-latches the same value).
     private const int ReapplyTicks = 8;
     // Of those ticks, how many also RE-SEND the profile palette flash. The flash is a global write that briefly
-    // repaints the whole keyboard with the palette colour before the per-zone paint overrides it, so re-sending
-    // it every tick would add a visible shimmer on a follows-profile lightbar. Limit it to the first couple of
-    // ticks (matching the pre-existing behaviour) — enough to catch a late firmware repaint / give the lightbar
-    // a couple of clean-window chances — while the per-zone KEYBOARD paint (the actual "half green/half orange"
-    // self-heal) is re-applied on EVERY tick, which is silent when it's already correct.
+    // repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one more
+    // visible blink of the keyboard and lightbar. It is worth that cost on the RESTORE paths (startup, resume,
+    // lid open, host hand-back), where nothing else re-establishes the palette and the bus may be contended, so
+    // those kicks ask for it. A profile SWITCH does not: the firmware flashes the new palette itself at the
+    // moment of the write and we now send ours in the same instant (see OnProfileApplied), so a re-send 400 ms
+    // later is simply a second blink cycle. Hence the flag on KickReapply. The per-zone KEYBOARD paint (the
+    // actual "half green/half orange" self-heal) still runs on EVERY tick, which is silent when already correct.
     private const int FlashTicks = 2;
+
+    // How long a locally-applied profile may stay unconfirmed by the refresh pass before we stop suppressing
+    // pass-driven repaints. Only a write the firmware silently refused ever gets here; the normal case is
+    // confirmed within one pass (~1 s).
+    private const double PendingTimeoutSeconds = 5;
     private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
@@ -51,6 +59,12 @@ internal sealed class LightingCoordinator : IDisposable
     // reference (same aliasing as before — only the UI thread touches it after hand-off).
     private AccentColor? _flash;
     private Dictionary<string, LightSettings> _lights = new();
+
+    // A profile WE applied that the refresh pass hasn't reported back yet (id + when we applied it). The pass
+    // discovers the profile by polling, so for the ~1 s until it catches up every pass still describes the
+    // PREVIOUS profile — repainting from one of those undoes the switch's lighting. See OnStateChanged.
+    private string? _pendingId;
+    private DateTime _pendingSince;
 
     // The current (rebuildable) view-models. Reassigned by Attach after each BuildUi; a re-apply/blank always
     // drives the live pair. Non-null before any callback can run (Attach is called synchronously right after
@@ -71,9 +85,11 @@ internal sealed class LightingCoordinator : IDisposable
         _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _lightReapply.Tick += (_, _) =>
         {
-            // Re-send the flash only on the first FlashTicks ticks (_lightReapplyLeft counts down from
-            // ReapplyTicks); every tick re-applies the per-zone keyboard paint.
-            Paint(includeFlash: _lightReapplyLeft > ReapplyTicks - FlashTicks);
+            // Re-send the palette only while this burst has flash ticks left (a switch-driven burst has none —
+            // see KickReapply); every tick re-applies the per-zone keyboard paint.
+            var withFlash = _flashTicksLeft > 0;
+            if (withFlash) _flashTicksLeft--;
+            Paint(includeFlash: withFlash);
             if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
         };
 
@@ -108,36 +124,65 @@ internal sealed class LightingCoordinator : IDisposable
     /// <summary>The follows-profile flag was flipped in the Lighting panel: kick the re-apply so the lightbar
     /// repaints now (ON -> this profile's palette; OFF -> its custom colour) instead of waiting for the next
     /// switch, reusing the cached flash/lights. (Persisting the flag itself stays in AppController.)</summary>
-    public void OnFollowsProfileFlipped() => KickReapply();
+    public void OnFollowsProfileFlipped() => KickReapply(withFlash: true);
 
     // Schedule a bounded re-apply burst (see ReapplyTicks). Restarting the timer coalesces overlapping kicks
-    // into one running burst. Runs on the UI thread (all callers are UI-thread), so no synchronisation needed.
-    private void KickReapply()
+    // into one running burst. withFlash decides whether its first ticks also re-send the profile palette (see
+    // FlashTicks) — restore paths want that, a profile switch does not. Runs on the UI thread (all callers are
+    // UI-thread), so no synchronisation needed.
+    private void KickReapply(bool withFlash)
     {
         _lightReapplyLeft = ReapplyTicks;
+        _flashTicksLeft = withFlash ? FlashTicks : 0;
         _lightReapply.Stop(); _lightReapply.Start();
     }
 
-    /// <summary>A HARDWARE profile change (incl. base&lt;-&gt;Turbo, which shares its base's preset KEY). Repaint
-    /// the lighting IMMEDIATELY with the new profile's flash colour + the mode's lights (both read off the UI
-    /// thread by the caller) — a following lightbar must show the NEW profile's palette at once, otherwise the
-    /// previous colour lingers for a beat (NitroSense flips it instantly). Then repeat a couple of times to catch
-    /// any late firmware repaint.</summary>
-    public void OnProfileChanged(AccentColor? flash, Dictionary<string, LightSettings> lights)
+    /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
+    /// profile that actually landed, so nothing has to be read back out of the hardware. Repaint NOW.
+    ///
+    /// This used to wait for the refresh pass to DISCOVER the change by polling, which is what produced the
+    /// double blink: the firmware flashes the new palette the instant the profile byte is written, and our own
+    /// palette write then landed ~750 ms later as a second, separate flash cycle. Painting here puts our write
+    /// in the same instant as the firmware's, so the two coincide into one — and the burst we kick deliberately
+    /// carries NO further palette re-sends, only the per-zone self-heal.</summary>
+    public void OnProfileApplied(PerformanceProfile applied)
     {
-        _flash = flash;
-        _lights = lights;
+        _pendingId = applied.Id;          // suppress the stale passes still describing the previous profile
+        _pendingSince = DateTime.UtcNow;
+        _flash = applied.FlashColor;
         Paint();
-        KickReapply();
+        KickReapply(withFlash: false);
     }
 
-    /// <summary>The performance MODE changed (its preset key): reflect the mode's saved lighting (handed in by the
-    /// caller), or keep the backlight dark if it's hidden under a shut lid (don't light a hidden keyboard).</summary>
-    public void OnModeChanged(Dictionary<string, LightSettings> lights)
+    /// <summary>The refresh pass observed a profile and/or mode change (the profile's flash colour and the
+    /// mode's per-zone lights are read off the UI thread by the caller and handed in). Covers changes we did
+    /// NOT make — the firmware's own Turbo key, another tool, a power-source restore — and delivers the new
+    /// mode's saved zone colours after one of our own switches.</summary>
+    public void OnStateChanged(bool profileChanged, string? profileId, AccentColor? flash,
+                               Dictionary<string, LightSettings> lights)
     {
+        // A switch of ours that the poll hasn't caught up to yet: until it does, every pass still reports the
+        // PREVIOUS profile, and repainting from one of those puts the old palette and the old mode's zones back
+        // over the profile the user just picked ("sometimes the old one first, then the new one"). Drop those
+        // passes; the one that finally reports our profile clears the claim. The timeout is the safety valve for
+        // a write the firmware silently refused — without it we would ignore the poll forever.
+        if (_pendingId != null)
+        {
+            if ((DateTime.UtcNow - _pendingSince).TotalSeconds > PendingTimeoutSeconds) _pendingId = null;
+            else if (profileId != _pendingId) return;
+            else { _pendingId = null; profileChanged = false; }   // caught up — OnProfileApplied already painted it
+        }
+
         _lights = lights;
-        if (BacklightHidden) BlankBacklight();
-        else { _vm.ReloadLighting(_lights); KickReapply(); }   // retry the paint for a few seconds (contended-bus self-heal)
+        if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
+
+        // An out-of-band profile change is the only case left that still needs the palette: nobody has painted
+        // it yet, so adopt the colour, show it at once (otherwise the previous one lingers for a beat) and let
+        // the burst re-assert it. Everything else — a mode-only change, or the tail of our own switch — just
+        // binds the new mode's zones; the profile's colour is either unchanged or already on screen.
+        if (profileChanged) _flash = flash;
+        Paint(includeFlash: profileChanged);
+        KickReapply(withFlash: profileChanged);
     }
 
     /// <summary>Startup / language-rebuild paint: seed the cached flash colour + mode lights (read by the caller
@@ -149,7 +194,7 @@ internal sealed class LightingCoordinator : IDisposable
         _flash = flash;
         _lights = lights;
         Paint();
-        KickReapply();
+        KickReapply(withFlash: true);
     }
 
     // Repaint from the cached (flash, lights). First paint the profile's palette on a follow-lightbar (a GLOBAL
@@ -186,7 +231,7 @@ internal sealed class LightingCoordinator : IDisposable
             : "Keyboard lighting is back under app control");
         if (hostOwns) return;
         Paint();
-        KickReapply();   // the EC may still repaint late after a host hand-back; the burst overrides it
+        KickReapply(withFlash: true);   // the EC may still repaint late after a host hand-back; the burst overrides it
     }
 
     // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE
