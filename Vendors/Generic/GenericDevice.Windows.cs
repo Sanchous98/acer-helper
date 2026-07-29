@@ -18,14 +18,21 @@ public partial class GenericDevice
         // it depends on the FINAL performance-profile backend, which a vendor's InitVendor may still replace.)
         if (NvidiaGpu.TryCreate() is { } gpu) { GpuOverclock = gpu; Own(gpu); }
 
+        // AMD Curve Optimizer (CPU undervolt) over the SMU mailbox — cross-vendor for the same reason as the GPU
+        // offsets: it depends on the CPU and on the PawnIO driver, not on the laptop's vendor. Null unless this is a
+        // CPU whose mailbox layout is known AND the driver + its SMU module are installed, which hides the section
+        // on every other machine (the common case, since both ship separately from the app).
+        if (RyzenCurveOptimizer.TryCreate() is { } co) { CurveOptimizer = co; Own(co); }
+
         var clamshell = new Clamshell();
         if (!clamshell.Supported) { clamshell.Dispose(); return; }   // its ctor subscribed to the STATIC
         // SystemEvents — an undisposed reject would stay pinned (and handled) for the process lifetime.
         Clamshell = clamshell; Own(clamshell);
     }
 
-    // CPU power management via the Windows power-mode overlay — the one driverless CPU-power knob (no ring-0
-    // undervolt/PPT; Acer exposes no WMI power path). Wired here (after the vendor backend has finalized the
+    // CPU power management via the Windows power-mode overlay — the one CPU-power knob that needs no driver at all
+    // (ring-0 PPT is out of reach; the ring-0 undervolt axis is the separate CurveOptimizer port wired in
+    // InitPlatform, and Acer exposes no WMI power path). Wired here (after the vendor backend has finalized the
     // profile port) rather than in InitPlatform, and ONLY when the performance profiles are NOT themselves the
     // Windows overlay: OverlayCpuPower and OverlayPowerProfiles drive the SAME overlay with the SAME GUIDs, so
     // if the profile picker already IS the overlay (generic laptop, or a vendor whose WMI/BIOS profile path was

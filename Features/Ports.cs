@@ -141,11 +141,12 @@ public interface IGpuOverclock
 }
 
 /// <summary>CPU power behaviour via the Windows Power-Mode overlay (Best efficiency / Balanced / Best
-/// performance) — the one CPU-power knob that works driverless on this class of machine. There is no ring-0
-/// undervolt/PPT here and no Acer-native WMI power path (Acer bakes the whole PPT/STAPM envelope into its
-/// fixed EC profiles), so — exactly like G-Helper's driverless CPU axis — this maps a chosen OS power mode to
-/// each performance profile. Ids are the overlay scheme GUID strings; the mode set is the three fixed OS
-/// overlays. Present only where the overlay API responds (probe-and-hide).</summary>
+/// performance) — the one CPU-power knob that works with no driver at all on this class of machine. Acer exposes
+/// no WMI power path (it bakes the whole PPT/STAPM envelope into its fixed EC profiles), so — exactly like
+/// G-Helper's driverless CPU axis — this maps a chosen OS power mode to each performance profile. Ids are the
+/// overlay scheme GUID strings; the mode set is the three fixed OS overlays. Present only where the overlay API
+/// responds (probe-and-hide). The voltage-curve axis is separate and needs a driver: see
+/// <see cref="ICurveOptimizer"/>.</summary>
 public interface ICpuPower
 {
     string? LastError { get; }
@@ -156,6 +157,50 @@ public interface ICpuPower
     /// <summary>Switch the active OS power-mode overlay. Returns false and sets <see cref="LastError"/> on failure.</summary>
     bool Set(string id);
 }
+
+/// <summary>CPU undervolt via AMD's Curve Optimizer: a signed offset in AVFS "counts" applied to the whole
+/// voltage/frequency curve (negative = less voltage at every frequency, 0 = stock). The CPU-side twin of
+/// <see cref="IGpuOverclock"/> — same shape, same volatility, same re-apply duty: the offset lives in SMU state,
+/// so a power cycle restores stock and the app is the source of truth per performance mode.
+///
+/// Present only on a CPU whose SMU mailbox layout is known AND where the required ring-0 gateway is installed —
+/// null otherwise, so the UI hides the section. Two properties of this port are unusual and deliberate: a
+/// successful <see cref="Set"/> means the SMU <i>accepted</i> the message, not that the curve provably moved
+/// (this hardware offers no trustworthy read-back), and a too-aggressive offset fails hours later at idle rather
+/// than under load — so callers should treat it as opt-in, warn, and default to stock.</summary>
+public interface ICurveOptimizer
+{
+    string? LastError { get; }
+    /// <summary>Name of the CPU being tuned, for the section header (e.g. "AMD Ryzen AI 9 365 w/ Radeon 880M").</summary>
+    string Name { get; }
+    /// <summary>Allowed offset range in AVFS counts (inclusive; Min &lt; 0, Max = 0 — undervolt only).</summary>
+    (int Min, int Max) Range { get; }
+    /// <summary>Approximate millivolts one count is worth, for displaying the offset in units a user thinks in.
+    /// APPROXIMATE by nature: a Curve Optimizer offset shifts the whole voltage/frequency curve rather than clamping
+    /// a voltage, so the delivered delta varies with frequency and temperature. Treat it as a label, not a spec.</summary>
+    double MillivoltsPerCount { get; }
+
+    /// <summary>The independently tunable voltage domains, in display order — empty when the CPU accepts only one
+    /// offset for everything. A hybrid part has more than one because its clusters are separate rails, and that is the
+    /// finest granularity worth exposing: within a rail the delivered voltage follows the mildest core's request, so a
+    /// per-CORE control would leave all but one core per cluster inert.</summary>
+    IReadOnlyList<VoltageDomain> Domains { get; }
+
+    /// <summary>Apply one offset per domain, index-aligned with <see cref="Domains"/> (each clamped to
+    /// <see cref="Range"/>). Returns false and sets <see cref="LastError"/> when the SMU refuses. Only meaningful
+    /// when <see cref="Domains"/> is non-empty.</summary>
+    bool SetDomains(IReadOnlyList<int> counts);
+
+    /// <summary>Apply one offset to every core (clamped to <see cref="Range"/>). Returns false and sets
+    /// <see cref="LastError"/> when the SMU refuses.</summary>
+    bool Set(int counts);
+}
+
+/// <summary>One independently tunable CPU voltage domain — on a hybrid part, a core cluster. <see cref="Label"/> is for
+/// display (e.g. "Zen 5c") and is an AMD architecture name, so it is not translated. <see cref="Key"/> is the stable
+/// identity used as the settings key: it names the hardware domain rather than a position in a list, so a preset
+/// survives a change in how domains are ordered or labelled.</summary>
+public sealed record VoltageDomain(string Label, string Key);
 
 /// <summary>Run-at-logon control.</summary>
 public interface IAutostart
@@ -207,6 +252,7 @@ public interface IDevice : IDisposable
     IDisplayTint?        DisplayTint        { get; }
     IGpuOverclock?       GpuOverclock       { get; }
     ICpuPower?           CpuPower           { get; }
+    ICurveOptimizer?     CurveOptimizer     { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
 }

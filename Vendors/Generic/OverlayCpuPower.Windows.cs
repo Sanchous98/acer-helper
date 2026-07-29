@@ -6,10 +6,11 @@ namespace AcerHelper.Vendors.Generic;
 /// <summary>
 /// CPU power management via the Windows Power-Mode overlay (the taskbar battery-slider modes: Best power
 /// efficiency / Balanced / Best performance), driven by <c>powrprof.dll</c>'s <c>PowerSetActiveOverlayScheme</c>.
-/// This is the one CPU-power knob available driverless on this class of machine: real PPT/STAPM/TDP and
-/// Curve-Optimizer undervolt are all ring-0 (RyzenAdj/SMU) and this app ships no kernel driver, and Acer — unlike
-/// ASUS — exposes NO WMI/ACPI CPU-power setter (it bakes the whole envelope into its fixed EC profiles). So,
-/// mirroring G-Helper's driverless CPU axis, the app maps an OS power mode to each performance profile.
+/// This is the one CPU-power knob available with NO driver at all on this class of machine: real PPT/STAPM/TDP is
+/// ring-0 (RyzenAdj/SMU) and Acer — unlike ASUS — exposes NO WMI/ACPI CPU-power setter (it bakes the whole envelope
+/// into its fixed EC profiles). So, mirroring G-Helper's driverless CPU axis, the app maps an OS power mode to each
+/// performance profile. The voltage-curve axis is a separate port that does need a ring-0 gateway — see
+/// <see cref="ICurveOptimizer"/> / <see cref="RyzenCurveOptimizer"/>.
 ///
 /// The overlay is an axis ORTHOGONAL to the Acer performance profile (the Acer WMI profile write carries no
 /// overlay GUID and touches no Windows power scheme), so setting it per profile does not fight the EC.

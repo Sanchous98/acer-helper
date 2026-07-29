@@ -43,6 +43,13 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
             ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
         }
 
+        // Re-apply the current mode's CPU undervolt. Deliberately OUTSIDE the _state lock and off the caller's (UI)
+        // thread: unlike the GPU offsets above (a fast NvAPI call), an SMU mailbox transaction waits on the
+        // machine-wide PCI access lock that HWiNFO/Ryzen Master/RyzenAdj also take, so it can block for seconds —
+        // holding _state across it would stall the background refresh pass and, through it, the UI.
+        if (device.CurveOptimizer != null)
+            _ = Task.Run(() => { try { ApplyModeCo(); } catch { /* stays stock */ } });
+
         // Bring the virtual LampArray back up if the user left it on. Off the caller's (UI) thread on purpose:
         // publishing it creates a PnP device node and waits for the driver to start — up to a few seconds on a
         // cold boot. Failure is not surfaced here; the Options row reads the bridge's real state when shown.
@@ -506,6 +513,118 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         lock (_state)
             if (Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id)) { cp.Set(id); return id; }
         return cp.Current();
+    }
+
+    // ---- CPU curve optimizer (per-mode) ----
+
+    /// <summary>The stored Curve-Optimizer preset for the current mode, created on first write (user is
+    /// configuring it). Caller holds _state.</summary>
+    private CoPreset StoredCo()
+    {
+        var key = CurrentModeKey();
+        if (!Settings.CoPresets.TryGetValue(key, out var c)) Settings.CoPresets[key] = c = new CoPreset();
+        return c;
+    }
+
+    /// <summary>The Curve-Optimizer preset for the current mode, or stock (0) if none is saved yet (not stored).</summary>
+    public CoPreset CurrentCo()
+    {
+        lock (_state)
+            return Settings.CoPresets.TryGetValue(CurrentModeKey(), out var c) ? c : new CoPreset();
+    }
+
+    /// <summary>Set the all-core Curve-Optimizer offset (AVFS counts, negative = undervolt) for the CURRENT mode,
+    /// persist, and apply now. Call this OFF the UI thread: the SMU transaction waits on a machine-wide PCI lock
+    /// that other tuning tools also take, so it can block for seconds.</summary>
+    public bool SetCo(int allCore)
+    {
+        var co = device.CurveOptimizer;
+        // Clamp against the port's own range BEFORE persisting. The port clamps what it sends to the SMU anyway, so
+        // storing an out-of-range value would only make the app report an undervolt the hardware never got.
+        if (co != null) allCore = Math.Clamp(allCore, co.Range.Min, co.Range.Max);
+        lock (_state)
+        {
+            var c = StoredCo();
+            c.AllCore = allCore;
+            Save();
+        }
+        if (co == null) return false;
+        if (!co.Set(allCore)) { LastError = co.LastError; return false; }
+        return true;
+    }
+
+    /// <summary>The current mode's Curve-Optimizer offsets, index-aligned with the port's voltage domains — or a single
+    /// all-core value on a CPU without domain control, so the UI can render rows without knowing which path is in play.
+    /// Empty when the device has no Curve-Optimizer port.</summary>
+    public int[] CurrentCoDomains()
+    {
+        var co = device.CurveOptimizer;
+        if (co == null) return [];
+        var c = CurrentCo();
+        if (co.Domains.Count == 0) return [c.AllCore];
+        var counts = new int[co.Domains.Count];
+        for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
+        return counts;
+    }
+
+    /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
+    /// all-core value — so the UI has a single entry point. Call OFF the UI thread.</summary>
+    public bool SetCoValues(IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null || counts.Count == 0) return false;
+        return co.Domains.Count > 0 ? SetCoDomains(counts) : SetCo(counts[0]);
+    }
+
+    /// <summary>Set the per-domain Curve-Optimizer offsets (index-aligned with the port's domains) for the CURRENT mode,
+    /// persist, and apply now. Call this OFF the UI thread — it is one SMU transaction per core slot.</summary>
+    public bool SetCoDomains(IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null || co.Domains.Count != counts.Count) return false;
+
+        var clamped = new int[counts.Count];
+        for (var i = 0; i < counts.Count; i++) clamped[i] = Math.Clamp(counts[i], co.Range.Min, co.Range.Max);
+
+        lock (_state)
+        {
+            var c = StoredCo();
+            for (var i = 0; i < clamped.Length; i++) c.Domains[co.Domains[i].Key] = clamped[i];
+            Save();
+        }
+        if (!co.SetDomains(clamped)) { LastError = co.LastError; return false; }
+        return true;
+    }
+
+    /// <summary>Apply the current mode's Curve-Optimizer offset to the hardware. Defaults to stock (0) when the mode
+    /// has no saved preset — the offset is SMU-resident and a power cycle clears it, so a never-configured mode is
+    /// definitely stock and switching to it must clear whatever undervolt the previous mode applied. Returns the
+    /// preset so the UI reflects it. Called on a mode change, at startup, and on resume — always off the UI thread,
+    /// because the mailbox transaction can wait seconds on the shared PCI lock.</summary>
+    public CoPreset ApplyModeCo()
+    {
+        CoPreset c;
+        lock (_state)
+        {
+            // Never configured on this install -> never talk to the SMU at all. An empty store means the user has
+            // not opted into undervolting, and sending the mailbox message anyway would be traffic nobody asked for
+            // on an opcode this CPU does not confirm. The first SetCo creates an entry, after which the
+            // "unconfigured mode = stock, actively re-applied" contract below takes over unchanged — so switching
+            // to a mode with no preset still clears the previous mode's undervolt.
+            if (Settings.CoPresets.Count == 0) return new CoPreset();
+            c = Settings.CoPresets.TryGetValue(CurrentModeKey(), out var s) ? s : new CoPreset();
+        }
+        if (device.CurveOptimizer is not { } co) return c;
+        // Per-domain wins where the CPU has separate rails: one number for both clusters is pinned by whichever gives
+        // out first, so the per-domain values are the real setting and AllCore is only the single-domain fallback.
+        if (co.Domains.Count > 0)
+        {
+            var counts = new int[co.Domains.Count];
+            for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
+            if (!co.SetDomains(counts)) LastError = co.LastError;
+        }
+        else if (!co.Set(c.AllCore)) LastError = co.LastError;
+        return c;
     }
 
     public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();

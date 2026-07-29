@@ -248,7 +248,15 @@ internal sealed class LightingCoordinator : IDisposable
         // and comes back at 0 offset, so re-assert the current mode's offsets; likewise the CPU power mode.
         // Off the UI thread — ApplyModeCpuPower reads the EC (profile) which can stall right after wake, and we
         // must not block the UI. No UI reflect needed (values unchanged); no-op when those ports are absent.
-        _ = Task.Run(() => { _svc.ApplyModeGpuOc(); _svc.ApplyModeCpuPower(); });
+        // The CPU curve-optimizer offset is volatile in the same way — it lives in SMU state, which the platform
+        // restores to stock across a power transition — so it joins the same off-thread re-assert. Guarded because
+        // the device can be tearing down (an exit racing the wake), and an escaping throw here would be an
+        // unobserved task exception rather than anything anyone sees.
+        _ = Task.Run(() =>
+        {
+            try { _svc.ApplyModeGpuOc(); _svc.ApplyModeCpuPower(); _svc.ApplyModeCo(); }
+            catch { /* the next resume or mode switch re-asserts */ }
+        });
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without

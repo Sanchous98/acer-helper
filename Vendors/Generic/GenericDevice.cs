@@ -34,6 +34,7 @@ public partial class GenericDevice : IDevice
     public IDisplayTint?        DisplayTint        { get; protected set; }
     public IGpuOverclock?       GpuOverclock       { get; protected set; }
     public ICpuPower?           CpuPower           { get; protected set; }
+    public ICurveOptimizer?     CurveOptimizer     { get; protected set; }
     public IAutostart?          Autostart          { get; protected set; }
     public IClamshell?          Clamshell          { get; protected set; }
 

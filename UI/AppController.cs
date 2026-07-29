@@ -132,6 +132,7 @@ internal sealed class AppController
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
             new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
+            new CoSection(d.CurveOptimizer?.Domains.Select(v => v.Label).ToArray() ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(),
                 _svc.Settings.TurboToggles, SetTurboToggles,
@@ -331,6 +332,20 @@ internal sealed class AppController
         if (!_svc.SetCpuPower(id)) Notify(Loc.T("Power mode failed") + Err(_svc.LastError));
     }
 
+    // CPU undervolt (all-core Curve Optimizer), applied + persisted per performance mode by the service. Unlike
+    // SetGpuOc/SetCpuPower this may NOT run inline: the SMU mailbox transaction waits on a machine-wide lock that
+    // other tuning tools also take, so it can block for seconds — on the dispatcher that would freeze the window
+    // mid-drag. Hand it off and post the failure back, the same shape OptionsAssembler uses for its slow rows.
+    private void SetCo(int[] counts)
+    {
+        _ = Task.Run(() =>
+        {
+            var ok = _svc.SetCoValues(counts);
+            var err = _svc.LastError;
+            if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("CPU undervolt failed") + Err(err)));
+        });
+    }
+
     private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
 
     private Task<bool> ConfirmCalibrationAsync() => _windows.ConfirmCalibrationAsync();
@@ -378,7 +393,7 @@ internal sealed class AppController
     private readonly record struct Tick(
         PerformanceProfile? Current, IReadOnlyList<PerformanceProfile> Selectable, PerformanceProfile? Base,
         SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
-        bool ModeChanged, FanPreset? Fan, GpuOcPreset? Gpu, string? CpuId,
+        bool ModeChanged, FanPreset? Fan, GpuOcPreset? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, AccentColor? Flash,
         Dictionary<string, LightSettings>? Lights);
 
@@ -431,7 +446,8 @@ internal sealed class AppController
             // (same dict). Only read when something changed — the coordinator caches it for its re-paints.
             var lights = (modeChanged || profileChanged) ? _svc.LightsForCurrentMode() : null;
 
-            FanPreset? fan = null; GpuOcPreset? gpu = null; string? cpu = null; AccentColor? flash = null;
+            FanPreset? fan = null; GpuOcPreset? gpu = null; string? cpu = null; int[]? co = null;
+            AccentColor? flash = null;
             // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
             // GPU/CPU presets to the hardware here (background); reflect them in the UI on the UI pass.
             if (modeChanged)
@@ -440,6 +456,13 @@ internal sealed class AppController
                 fan = _svc.ApplyModeFan();
                 gpu = _svc.ApplyModeGpuOc();       // re-apply this mode's GPU clock offsets
                 cpu = _svc.ApplyModeCpuPower();    // re-apply this mode's CPU power mode
+                // CPU undervolt: read the stored value here (a dictionary lookup) so the UI can reflect it on this
+                // pass, but APPLY it off-pass. The mailbox waits on the machine-wide PCI lock other tuning tools
+                // also take, so it can block for seconds — inline it would delay the Tick post (chip/tray/presets)
+                // and hold the single-flight guard behind it. Like the GPU offsets it is SMU state a power cycle
+                // clears, so it has to be re-applied on every switch.
+                co = _svc.CurrentCoDomains();
+                _ = Task.Run(() => { try { _svc.ApplyModeCo(); } catch { /* stays as it was */ } });
             }
             // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block
             // above won't fire) repaint the lighting on the UI pass (immediately, then a couple of retries).
@@ -453,7 +476,7 @@ internal sealed class AppController
             var baseP = _svc.BaseProfile(current);
 
             var t = new Tick(current, selectable, baseP, sensors, battery, status, turbo,
-                             modeChanged, fan, gpu, cpu, profileChanged, flash, lights);
+                             modeChanged, fan, gpu, cpu, co, profileChanged, flash, lights);
             Dispatcher.UIThread.Post(() => UiPass(t));
         }
         catch { /* transient hardware error — next tick retries */ }
@@ -474,6 +497,7 @@ internal sealed class AppController
             if (t.Fan is { } fan) _vm.ReloadFans(fan);
             if (t.Gpu is { } gpu) _vm.ReloadGpuOc(gpu);
             _vm.ReloadCpuPower(t.CpuId);
+            if (t.Co is { } co) _vm.ReloadCo(co);
         }
         // ONE lighting hand-off for both kinds of change (Lights is non-null whenever either fired). Two separate
         // calls made the coordinator paint twice per switch and let a mode change repaint from a flash colour the

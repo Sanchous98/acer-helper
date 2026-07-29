@@ -110,8 +110,10 @@ public sealed partial class MainViewModel : ObservableObject
             ? new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc) : null;
         var cpuVm = device.CpuPower is { } cpu
             ? new CpuViewModel(cpu.Modes, a.Cpu.Initial, a.Cpu.SetCpuPower) : null;
-        if (gpuVm != null || cpuVm != null)
-            _tuning = new TuningViewModel(gpuVm, cpuVm);
+        var coVm = device.CurveOptimizer is { } co
+            ? new CoViewModel(co.Name, co.Range, co.MillivoltsPerCount, a.Co.Domains, a.Co.Initial, a.Co.SetCo) : null;
+        if (gpuVm != null || cpuVm != null || coVm != null)
+            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm);
     }
 
     /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
@@ -154,6 +156,10 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Reflect a mode's CPU power choice in the CPU section (called when the performance mode changes).</summary>
     public void ReloadCpuPower(string? id) => _tuning?.Cpu?.Load(id);
+
+    /// <summary>Reflect a mode's undervolt offsets in the CPU section (called when the performance mode changes).
+    /// Index-aligned with the port's core groups.</summary>
+    public void ReloadCo(IReadOnlyList<int> counts) => _tuning?.Co?.Load(counts);
 
     /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);

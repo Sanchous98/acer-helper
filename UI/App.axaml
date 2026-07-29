@@ -20,6 +20,7 @@
     <DataTemplate DataType="vm:TuningViewModel"><views:TuningView/></DataTemplate>
     <DataTemplate DataType="vm:GpuViewModel"><views:GpuView/></DataTemplate>
     <DataTemplate DataType="vm:CpuViewModel"><views:CpuView/></DataTemplate>
+    <DataTemplate DataType="vm:CoViewModel"><views:CoView/></DataTemplate>
 
     <!-- Options-drawer row templates. Kept HERE (application scope) rather than inside OptionsView's
          ItemsControl.DataTemplates: an ItemsControl whose heterogeneous items were matched by a

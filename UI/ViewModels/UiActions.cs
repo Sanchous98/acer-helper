@@ -11,6 +11,7 @@ public sealed record UiActions(
     FanSection Fans,
     GpuSection Gpu,
     CpuSection Cpu,
+    CoSection Co,
     BatterySection Battery,
     OptionsSection Options);
 
@@ -38,6 +39,14 @@ public sealed record CpuSection(
     IReadOnlyList<ChoiceOption> Modes,
     string? Initial,
     Action<string> SetCpuPower);
+
+/// <summary>CPU-undervolt section: the labels of the independently tunable voltage domains (empty on a CPU that takes
+/// one offset for everything), the current mode's saved offsets index-aligned with them, and the apply/persist
+/// delegate. Built only when the device exposes an <see cref="ICurveOptimizer"/> port.</summary>
+public sealed record CoSection(
+    IReadOnlyList<string> Domains,
+    IReadOnlyList<int> Initial,
+    Action<int[]> SetCo);
 
 /// <summary>Battery section: whether telemetry exists, plus the pre-built option rows the device supports.</summary>
 public sealed record BatterySection(

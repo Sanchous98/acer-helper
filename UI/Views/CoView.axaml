@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
+             x:Class="AcerHelper.UI.Views.CoView"
+             x:DataType="vm:CoViewModel">
+
+  <!-- Bare drawer content; TuningView supplies the surrounding card and the "CPU" title. -->
+  <StackPanel Spacing="14">
+
+    <!-- Which CPU is being tuned + a Reset-to-stock button (resets every group at once). Name trimmed so a long
+         brand string can't widen the fixed flyout. -->
+    <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+      <TextBlock Classes="muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                 ToolTip.Tip="{Binding CpuName}" Text="{Binding CpuName}"/>
+      <Button Grid.Column="1" Content="{l:Tr Reset}" Padding="10,4" Command="{Binding ResetCommand}"/>
+    </Grid>
+
+    <!-- One row per voltage domain ("Zen 5" / "Zen 5c"): they are separate rails at different voltages, so one number
+         for both is pinned by whichever cluster gives out first. Not per core — within a rail the delivered voltage
+         follows the mildest core's request, so extra sliders would be inert. Negative only — a positive offset raises
+         voltage. The tooltip carries the warning rather than a banner: too aggressive an undervolt fails hours later
+         at idle, not under load, so the user needs it before dragging rather than after. -->
+    <ItemsControl ItemsSource="{Binding Rows}"
+                  ToolTip.Tip="{l:Tr 'Lower voltage at the same clocks, in AVFS steps of roughly 2.5 mV. Too much is unstable — test for hours, and reset if anything crashes.'}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:CoRowViewModel">
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+            <TextBlock Classes="muted" Width="64" VerticalAlignment="Center" Text="{Binding Label}"/>
+            <Slider Grid.Column="1" Minimum="{Binding OffsetMin}" Maximum="{Binding OffsetMax}" TickFrequency="5"
+                    VerticalAlignment="Center" Value="{Binding Offset, Mode=TwoWay}"/>
+            <!-- Wider than the GPU rows' value box: it carries the step count plus the millivolts in brackets. -->
+            <TextBlock Grid.Column="2" Width="116" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
+                       Text="{Binding OffsetLabel}"/>
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+  </StackPanel>
+</UserControl>

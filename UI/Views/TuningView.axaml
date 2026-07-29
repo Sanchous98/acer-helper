@@ -18,10 +18,14 @@
       </StackPanel>
     </ExperimentalAcrylicBorder>
 
-    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasCpu}">
+    <!-- One "CPU" card for both CPU axes: the OS power-mode picker and the undervolt slider are independent
+         capabilities (either can be absent) but they are the same subject, so they share a header instead of
+         producing two cards both titled "CPU". -->
+    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasCpuCard}">
       <StackPanel Spacing="8">
         <TextBlock Classes="section" Text="{l:Tr CPU}"/>
-        <ContentControl Content="{Binding Cpu}"/>
+        <ContentControl Content="{Binding Cpu}" IsVisible="{Binding HasCpu}"/>
+        <ContentControl Content="{Binding Co}" IsVisible="{Binding HasCo}"/>
       </StackPanel>
     </ExperimentalAcrylicBorder>
 

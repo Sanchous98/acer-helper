@@ -46,6 +46,14 @@ public sealed class Settings
     // stock, so switching to it must clear any offset the previous mode had applied.
     public Dictionary<string, GpuOcPreset> GpuOcPresets { get; set; } = new();
 
+    // CPU Curve-Optimizer offset remembered PER performance mode (same key scheme as GpuOcPresets). Follows the
+    // GPU-offset contract, NOT the fan one: an unconfigured mode is stock (0), not "leave untouched" — the offset
+    // lives in volatile SMU state that a power cycle clears, so the app is the source of truth and re-applies on
+    // startup, on resume, and on each mode switch. A mode with no entry is therefore definitely stock, and
+    // switching to it must clear whatever undervolt the previous mode had applied — a stale negative offset
+    // carried into a profile the user never configured is exactly how an unexplained instability happens.
+    public Dictionary<string, CoPreset> CoPresets { get; set; } = new();
+
     // CPU power mode (Windows power-mode overlay GUID) remembered PER performance mode (same key scheme).
     // Switching mode re-applies that mode's overlay IF one is stored; a mode with no entry is "leave untouched"
     // (like fans) — we don't force an OS power mode on profiles the user hasn't configured. Value = overlay
@@ -112,6 +120,22 @@ public sealed class GpuOcPreset
 {
     public int Core { get; set; }
     public int Mem  { get; set; }
+}
+
+/// <summary>A performance mode's remembered CPU Curve-Optimizer offset, in AVFS counts (0 = stock, negative =
+/// undervolt). Applied on the mode switch and re-applied at startup/resume — the offset is SMU-resident and a
+/// power cycle restores stock.</summary>
+public sealed class CoPreset
+{
+    /// <summary>Offset applied to every core, used on a CPU that exposes no per-group control.</summary>
+    public int AllCore { get; set; }
+
+    /// <summary>Per-voltage-domain offsets keyed by the domain's hardware identity (see
+    /// <see cref="Features.VoltageDomain.Key"/>) — a domain name rather than a list position, so a preset survives a
+    /// change in how domains are ordered or labelled. Preferred over <see cref="AllCore"/> wherever the CPU exposes
+    /// separate domains, because a hybrid part's clusters are separate rails sitting at different voltages, and one
+    /// number for both is pinned by whichever gives out first. A missing key means stock (0) for that domain.</summary>
+    public Dictionary<string, int> Domains { get; set; } = new();
 }
 
 /// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.</summary>

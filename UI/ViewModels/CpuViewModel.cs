@@ -9,7 +9,8 @@ namespace AcerHelper.UI.ViewModels;
 /// Balanced / Best performance) to the current performance profile. Applies on change and persists PER
 /// profile — switching profile reloads that profile's choice (see <see cref="Load"/>); an unconfigured profile
 /// shows the live effective overlay and is left untouched. Only built when the device exposes an
-/// <see cref="ICpuPower"/> port. This is the driverless CPU-power axis (no undervolt/PPT — those need ring-0).</summary>
+/// <see cref="ICpuPower"/> port. This is the driverless CPU-power axis; PPT is out of reach and the undervolt axis
+/// is a separate port (<see cref="ICurveOptimizer"/>), since it needs a ring-0 gateway.</summary>
 public sealed partial class CpuViewModel : SectionViewModel
 {
     private readonly IReadOnlyList<ChoiceOption> _modes;   // id = overlay GUID string

@@ -48,7 +48,7 @@ internal static partial class Strings
         ["GPU fan curve"]           = "Кривая вентилятора GPU",
         ["{0} rpm"]                 = "{0} об/мин",
 
-        // ---- tuning tab (GPU clocks + CPU power) ----
+        // ---- tuning tab (GPU clocks + CPU power + CPU undervolt) ----
         // "GPU" and "CPU" stay as-is (universal acronyms) -> no entries, fall back to the English keys.
         ["Tuning"]                  = "Настройка",
         ["Core"]                    = "Ядро",
@@ -60,6 +60,12 @@ internal static partial class Strings
         ["Power mode"]              = "Режим питания",
         ["Best power efficiency"]   = "Энергоэффективность",
         ["Power mode failed"]       = "Не удалось изменить режим питания",
+        // CPU undervolt (all-core Curve Optimizer). The value is a bare AVFS step count, so it carries no unit
+        // string. "Reset" above is reused for the back-to-stock button.
+        ["Undervolt"]               = "Андервольт",
+        ["CPU undervolt failed"]    = "Не удалось изменить андервольт CPU",
+        ["Lower voltage at the same clocks, in AVFS steps of roughly 2.5 mV. Too much is unstable — test for hours, and reset if anything crashes."]
+            = "Меньше напряжения на тех же частотах, шагами AVFS примерно по 2.5 мВ. Перебор ведёт к нестабильности — проверяйте часами, при сбоях сбросьте.",
 
         // ---- battery ----
         ["Health"]                  = "Состояние",
