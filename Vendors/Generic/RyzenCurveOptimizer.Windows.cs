@@ -26,10 +26,11 @@ namespace AcerHelper.Vendors.Generic;
 /// truth and re-applies per performance mode at startup, on resume, and on each mode switch (see LaptopService),
 /// exactly like the GPU clock offsets. That volatility is also the recovery path: nothing is written to firmware.
 ///
-/// Gated to AMD family 0x1A models 0x20/0x24 (Strix Point) and to a machine where the PawnIO driver and its Ryzen
-/// SMU module are present; <see cref="TryCreate"/> returns null otherwise, so the port stays null and the UI hides
-/// the section. The probe is deliberately cheap (CPUID + a file lookup) because composition runs on the UI thread —
-/// the driver handle and its module are opened on first use instead, off that thread.
+/// Gated to AMD family 0x1A models 0x20/0x24 (Strix Point) and to a machine where PawnIO is installed;
+/// <see cref="TryCreate"/> returns null otherwise, so the port stays null and the UI hides the section
+/// (<see cref="PawnIoInstaller"/> is what offers to install the driver). The probe is deliberately cheap — CPUID
+/// plus a registry read — because composition runs on the UI thread; the driver handle is opened on first use
+/// instead, off that thread, since loading a module is a kernel-side signature verify.
 /// </summary>
 internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 {
@@ -77,6 +78,11 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // triple, so a 0x4C sent that way would go to the wrong mailbox. Hand-rolling the transaction over the raw
     // register accessors is what G-Helper does, and it is legal because the module's own range check admits the
     // whole 0x3B10000-0x3B10FFF window these three registers live in.
+    // The module blob is EMBEDDED, which is what its author prescribes: modules are LGPL-2.1-or-later, the
+    // integration guide says to take a release blob and "include its contents in your software", and the project
+    // states outright that module APIs are NOT stable across releases — so the version whose call shapes this file
+    // is written against has to travel with it. Note the PawnIO installer ships no modules at all, so there is no
+    // shared system location to read one from; an explicit override file is honoured for advanced use.
     private const string ModuleFile = "RyzenSMU.bin";
     private const string FnReadReg  = "ioctl_read_smu_register";    // 1 arg in, 1 value out
     private const string FnWriteReg = "ioctl_write_smu_register";   // 2 args in, nothing out
@@ -112,7 +118,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 
     private const string UnsupportedError = "the SMU does not implement this command (0xFE)";
 
-    private readonly string _modulePath;
+    private readonly byte[] _module;
     private readonly Lock _gate = new();
 
     private PawnIo? _io;
@@ -140,9 +146,9 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 
     public string? LastError { get; private set; }
 
-    private RyzenCurveOptimizer(string modulePath, string name, int physicalCores)
+    private RyzenCurveOptimizer(byte[] module, string name, int physicalCores)
     {
-        _modulePath = modulePath;
+        _module = module;
         Name = name;
 
         // ONE KNOB PER CLUSTER, not per core — the granularity the hardware actually honours.
@@ -169,14 +175,16 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     }
 
     /// <summary>Probe for a tunable CPU. Returns null — feature hidden — unless this is a CPU whose MP1 mailbox
-    /// layout is known and the PawnIO SMU module is present on disk. Cheap on purpose (see the class remarks); the
-    /// driver itself is opened on the first <see cref="Set"/>. Never throws.</summary>
+    /// layout is known AND PawnIO is installed. The driver check is the registry one, not a device open: it must
+    /// stay cheap (composition runs on the UI thread) and it must not depend on elevation. Gating on it keeps the
+    /// section honest — without the driver the sliders could appear and then refuse every write.
+    /// <see cref="PawnIoInstaller"/> is what offers to install it. Never throws.</summary>
     public static RyzenCurveOptimizer? TryCreate()
     {
         try
         {
-            if (!IsKnownStrixPoint()) return null;
-            var module = FindModule();
+            if (!IsKnownStrixPoint() || !PawnIoInstaller.Installed) return null;
+            var module = LoadModule();
             return module == null ? null : new RyzenCurveOptimizer(module, ReadCpuName(), PhysicalCores());
         }
         catch { return null; }
@@ -276,8 +284,8 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     private PawnIo? Io()
     {
         if (_io != null) return _io;
-        try { return _io = PawnIo.TryLoad(File.ReadAllBytes(_modulePath)); }
-        catch { return null; }   // module deleted or unreadable since the probe
+        try { return _io = PawnIo.TryLoad(_module); }
+        catch { return null; }
     }
 
     // ---- the mailbox transaction ----
@@ -390,6 +398,10 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // deliberately NOT accepted: they share the family case group in the reverse-engineering projects, but the
     // published results diverge (the same opcode is reported rejected on one and effective on the other), so
     // claiming support here would be guessing on someone else's hardware.
+    /// <summary>Whether this CPU is one the undervolt supports, independent of whether the driver is installed — so
+    /// the driver-setup offer knows if it is even relevant here.</summary>
+    public static bool SupportedCpu => IsKnownStrixPoint();
+
     private static bool IsKnownStrixPoint()
     {
         if (!X86Base.IsSupported) return false;
@@ -451,29 +463,37 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 
     // ---- module + interlock lookup ----
 
-    // The module blob ships separately (only its author can sign one), so it is looked for rather than embedded:
-    // next to the app first — the natural place to drop it — then in PawnIO's own install tree.
-    private static string? FindModule()
+    // Embedded blob by default, with a user file allowed to override it — the same arrangement acer-models.json
+    // uses. The override exists because module APIs are explicitly unstable across releases: if a future blob
+    // changes a call shape, someone can pin their own without waiting for a build. It is deliberately an explicit
+    // path in the app's own config folder rather than a scan of shared locations, so a stray file elsewhere can
+    // never silently change which bytes get loaded into the kernel.
+    private static byte[]? LoadModule()
     {
-        foreach (var dir in ModuleDirectories())
+        foreach (var path in new[]
+                 {
+                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                  "AcerHelper", ModuleFile),
+                     Path.Combine(AppContext.BaseDirectory, ModuleFile),
+                 })
         {
-            try
-            {
-                var path = Path.Combine(dir, ModuleFile);
-                if (File.Exists(path)) return path;
-            }
-            catch { /* unreadable candidate — try the next */ }
+            try { if (File.Exists(path)) return File.ReadAllBytes(path); }
+            catch { /* unreadable override — fall through to the embedded copy */ }
         }
-        return null;
-    }
 
-    private static IEnumerable<string> ModuleDirectories()
-    {
-        yield return AppContext.BaseDirectory;
-        var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        if (pf.Length == 0) yield break;
-        yield return Path.Combine(pf, "PawnIO", "modules");
-        yield return Path.Combine(pf, "PawnIO");
+        try
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            var res = asm.GetManifestResourceNames()
+                         .FirstOrDefault(n => n.EndsWith(ModuleFile, StringComparison.OrdinalIgnoreCase));
+            if (res == null) return null;   // dev build without the fetched blob -> feature hidden
+            using var stream = asm.GetManifestResourceStream(res);
+            if (stream == null) return null;
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            return ms.ToArray();
+        }
+        catch { return null; }
     }
 
     // Opened per transaction rather than held for the process lifetime, so the app never keeps a machine-wide lock

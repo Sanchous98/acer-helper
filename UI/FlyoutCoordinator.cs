@@ -81,6 +81,20 @@ internal sealed class FlyoutCoordinator : IDisposable
             Loc.T("Start"));
     }
 
+    /// <summary>Shown over the flyout to ask before installing a third-party driver. Names the driver and where it
+    /// comes from, because that is somebody else's kernel software and the user is agreeing to install it — not to
+    /// "enable a feature".</summary>
+    public Task<bool> ConfirmDriverAsync(string name, string purpose, string sourceUrl)
+    {
+        _main.SuppressDismiss = true;
+        return Views.ConfirmDialog.ShowAsync(_main,
+            Loc.T("Install {0}?", name),
+            Loc.T("{0} needs the {1} kernel driver from {2}. It is third-party software, shared with other tuning "
+            + "tools, and Acer Helper will never update or remove it. You can install it yourself instead.",
+                purpose, name, sourceUrl),
+            Loc.T("Install"));
+    }
+
     /// <summary>Light-dismiss: if focus left the flyout, the user clicked outside the app, so hide it.
     /// SuppressDismiss skips the one deactivation we cause by opening our own dialog.</summary>
     private void MaybeDismiss()

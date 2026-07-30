@@ -202,6 +202,28 @@ public interface ICurveOptimizer
 /// survives a change in how domains are ordered or labelled.</summary>
 public sealed record VoltageDomain(string Label, string Key);
 
+/// <summary>A third-party driver some feature needs, which the app can offer to install. Present only when that
+/// driver is relevant to THIS machine and this build actually carries its installer — so a machine that can never
+/// use it is never asked, and a build without the payload never offers something it cannot do.
+///
+/// Deliberately an offer, not an action taken on the user's behalf: installing a kernel driver is the user's
+/// decision, it is somebody else's software, and it may be shared with other tools on the machine. Nothing here
+/// upgrades or removes anything.</summary>
+public interface IDriverSetup
+{
+    /// <summary>What is being installed, for the prompt (e.g. "PawnIO").</summary>
+    string Name { get; }
+    /// <summary>Where it comes from, so the prompt can say so rather than hiding it.</summary>
+    string SourceUrl { get; }
+    /// <summary>Which app feature it unlocks, for the prompt.</summary>
+    string Purpose { get; }
+    /// <summary>Whether it is already installed. Cheap and elevation-independent, so it can gate UI.</summary>
+    bool Installed { get; }
+    /// <summary>Install it, blocking. Returns null on success, otherwise a message to show the user. Call OFF the
+    /// UI thread. Never throws.</summary>
+    string? Install();
+}
+
 /// <summary>Run-at-logon control.</summary>
 public interface IAutostart
 {
@@ -253,6 +275,7 @@ public interface IDevice : IDisposable
     IGpuOverclock?       GpuOverclock       { get; }
     ICpuPower?           CpuPower           { get; }
     ICurveOptimizer?     CurveOptimizer     { get; }
+    IDriverSetup?        DriverSetup        { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
 }

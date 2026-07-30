@@ -64,6 +64,45 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # The PawnIO driver installer, for the CPU undervolt's one-click setup offer. Fetched pinned rather than
+      # committed (3.4 MB, proprietary freeware); the RyzenSMU module it pairs with IS committed, and the reasoning
+      # for treating the two differently is in third-party/README.md. Redistribution is granted by the binary itself
+      # ("This installer can be redistributed unmodified."), so it travels untouched and the app only ever INVOKES
+      # it — never unpacks it, never upgrades it, never removes it.
+      # Both guards are fail-the-build, not warn: a hash mismatch means these are not the bytes the feature was
+      # written against, and a bad signature means the payload is not the author's.
+      - name: Fetch PawnIO installer (pinned)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe'
+          $path = 'third-party/PawnIO_setup.exe'
+          $want = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
+
+          Invoke-WebRequest -Uri $url -OutFile $path
+          $got = (Get-FileHash $path -Algorithm SHA256).Hash
+          if ($got -ne $want) {
+            Write-Host "::error::$path hash mismatch. Expected $want, got $got"
+            exit 1
+          }
+          $sig = Get-AuthenticodeSignature $path
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::error::PawnIO_setup.exe signature is $($sig.Status)"
+            exit 1
+          }
+          Write-Host "PawnIO_setup.exe OK ($got), signed by: $($sig.SignerCertificate.Subject)"
+
+          # The LGPL 2.1 text the embedded RyzenSMU module is licensed under. Fetched rather than committed so the
+          # licence is never a hand-copied approximation, and shipped beside the app because the licence has to
+          # accompany the binary we convey. The grep is the 404 guard.
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/namazso/PawnIO.Modules/main/COPYING' `
+                            -OutFile third-party/RyzenSMU.COPYING
+          if (-not (Select-String -Path third-party/RyzenSMU.COPYING -Pattern 'LESSER GENERAL PUBLIC LICENSE' -Quiet)) {
+            Write-Host "::error::RyzenSMU.COPYING does not look like the LGPL text"
+            exit 1
+          }
+          Write-Host "RyzenSMU.COPYING OK"
+
       - name: Publish (self-contained, Native AOT)
         run: >
           dotnet publish AcerHelper.csproj
@@ -82,6 +121,12 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item publish\*.pdb -ErrorAction SilentlyContinue
+          # The PawnIO installer rides along in the install folder so the app can offer a one-click install; the
+          # <Files Include="$(var.PublishDir)\**"> harvest below picks it up, so no .wxs change is needed. The module
+          # is already inside the exe as a resource and must NOT be copied here as well.
+          Copy-Item third-party\PawnIO_setup.exe publish\ -Force
+          # The module's licence ships with the binary it covers (the module itself is inside the exe as a resource).
+          Copy-Item third-party\RyzenSMU.COPYING publish\ -Force
           dotnet tool install --global wix --version 5.0.2
           # Anchor on </Version> so a "<Version>" mention in a csproj comment can't be picked up instead.
           $ver = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value

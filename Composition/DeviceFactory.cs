@@ -17,7 +17,7 @@ public static class DeviceFactory
     {
         var (manufacturer, product) = MachineInfo.Read();
 
-        GenericDevice device =
+        var device =
             manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true ? new AcerDevice(product) :
             manufacturer?.Contains("Dell", StringComparison.OrdinalIgnoreCase) == true ? new DellDevice(product) :   // "Dell Inc."
             new GenericDevice();

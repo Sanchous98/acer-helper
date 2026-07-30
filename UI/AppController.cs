@@ -99,6 +99,33 @@ internal sealed class AppController
         if (!startMinimized) _windows.OpenMain();
 
         _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
+        _ = OfferDriverAsync(d, startMinimized);   // one-time consent prompt for the driver a feature needs
+    }
+
+    // ---- third-party driver offer ----
+
+    // A feature (CPU undervolt) needs a third-party kernel driver we do not ship installed. Ask ONCE, remember the
+    // answer, and never nag: the port only exists on a machine where the driver is relevant and the build carries
+    // its installer, so this is silent everywhere else. Declining is sticky — the user can still install it by hand,
+    // and the feature appears by itself on the next launch either way, because the port probes for it.
+    private async Task OfferDriverAsync(IDevice d, bool startMinimized)
+    {
+        if (d.DriverSetup is not { Installed: false } setup) return;
+        // A logon start runs us into the tray with no window on screen — a modal dialog there would be an ambush, so
+        // say nothing and leave the flag unset: the offer comes the next time the user actually opens the app.
+        if (startMinimized) return;
+
+        const string askedFlag = "driver.setupAsked.";
+        if (_svc.GetDeviceFlag(askedFlag + setup.Name, false)) return;
+
+        await Task.Delay(1500);   // let the flyout finish opening before stealing focus
+        var yes = await _windows.ConfirmDriverAsync(setup.Name, setup.Purpose, setup.SourceUrl);
+        _svc.SetDeviceFlag(askedFlag + setup.Name, true);
+        if (!yes) return;
+
+        // The installer blocks for seconds and self-elevates; keep it off the dispatcher and report either way.
+        var error = await Task.Run(setup.Install);
+        Notify(error ?? Loc.T("{0} installed — restart Acer Helper to use {1}", setup.Name, setup.Purpose));
     }
 
     // Assemble the localized UI: the lighting view-model, the dashboard view-model (with its UiActions), the

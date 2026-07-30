@@ -64,6 +64,15 @@ internal static partial class Strings
         // string. "Reset" above is reused for the back-to-stock button.
         ["Undervolt"]               = "Андервольт",
         ["CPU undervolt failed"]    = "Не удалось изменить андервольт CPU",
+        // Third-party driver offer. "{0}" is the driver name and "{1}" the feature — both substituted, so the
+        // placeholders must survive translation. "CPU undervolt" doubles as the feature name in the prompt.
+        ["CPU undervolt"]           = "андервольт CPU",
+        ["Install {0}?"]           = "Установить {0}?",
+        ["Install"]                = "Установить",
+        ["{0} needs the {1} kernel driver from {2}. It is third-party software, shared with other tuning tools, and Acer Helper will never update or remove it. You can install it yourself instead."]
+            = "Для «{0}» нужен драйвер ядра {1} с {2}. Это сторонняя программа, её используют и другие утилиты настройки, и Acer Helper никогда не будет её обновлять или удалять. Можно установить и вручную.",
+        ["{0} installed — restart Acer Helper to use {1}"]
+            = "{0} установлен — перезапустите Acer Helper, чтобы использовать {1}",
         ["Lower voltage at the same clocks, in AVFS steps of roughly 2.5 mV. Too much is unstable — test for hours, and reset if anything crashes."]
             = "Меньше напряжения на тех же частотах, шагами AVFS примерно по 2.5 мВ. Перебор ведёт к нестабильности — проверяйте часами, при сбоях сбросьте.",
 

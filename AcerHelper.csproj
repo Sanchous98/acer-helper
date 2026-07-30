@@ -50,6 +50,15 @@
     <EmbeddedResource Include="acer-models.json" />
   </ItemGroup>
 
+  <!-- PawnIO's RyzenSMU module (LGPL-2.1-or-later, © namazso) — the bytecode the CPU undervolt loads into the
+       driver. Its author prescribes bundling it ("include its contents in your software") precisely because module
+       APIs carry NO stability guarantee across releases, so the exact bytes this code was verified against travel
+       with the build; provenance, licence and the update procedure are in third-party/README.md. Conditional only so
+       a checkout that deliberately drops the blob still compiles — the undervolt section then hides itself. -->
+  <ItemGroup Condition="Exists('third-party\RyzenSMU.bin') And $(TargetFramework.Contains('windows'))">
+    <EmbeddedResource Include="third-party\RyzenSMU.bin" />
+  </ItemGroup>
+
   <!-- Default packaging: one compressed, self-extracting single-file .exe (JIT).
        Mutually exclusive with Native AOT, so disabled when PublishAot=true. -->
   <PropertyGroup Condition="'$(PublishAot)' != 'true'">

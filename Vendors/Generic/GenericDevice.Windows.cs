@@ -24,6 +24,11 @@ public partial class GenericDevice
         // on every other machine (the common case, since both ship separately from the app).
         if (RyzenCurveOptimizer.TryCreate() is { } co) { CurveOptimizer = co; Own(co); }
 
+        // The driver the undervolt needs is third-party and not installed by us. Offer it only where it is relevant
+        // (a CPU the undervolt supports) and only if this build carries the installer; the port reports whether it
+        // is already there, and AppController asks the user once.
+        DriverSetup = PawnIoSetup.TryCreate();
+
         var clamshell = new Clamshell();
         if (!clamshell.Supported) { clamshell.Dispose(); return; }   // its ctor subscribed to the STATIC
         // SystemEvents — an undisposed reject would stay pinned (and handled) for the process lifetime.
