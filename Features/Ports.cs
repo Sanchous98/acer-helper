@@ -183,7 +183,10 @@ public interface ICurveOptimizer
     /// <summary>The independently tunable voltage domains, in display order — empty when the CPU accepts only one
     /// offset for everything. A hybrid part has more than one because its clusters are separate rails, and that is the
     /// finest granularity worth exposing: within a rail the delivered voltage follows the mildest core's request, so a
-    /// per-CORE control would leave all but one core per cluster inert.</summary>
+    /// per-CORE control would leave all but one core per cluster inert. On an APU the integrated GPU is a domain too:
+    /// same SMU, same volatility, same per-mode preset, just a different rail and mailbox. A domain may carry its own
+    /// <see cref="VoltageDomain.Range"/> / <see cref="VoltageDomain.MillivoltsPerCount"/>, so callers must read those
+    /// per domain and fall back to the port's only when they are null.</summary>
     IReadOnlyList<VoltageDomain> Domains { get; }
 
     /// <summary>Apply one offset per domain, index-aligned with <see cref="Domains"/> (each clamped to
@@ -196,11 +199,24 @@ public interface ICurveOptimizer
     bool Set(int counts);
 }
 
-/// <summary>One independently tunable CPU voltage domain — on a hybrid part, a core cluster. <see cref="Label"/> is for
-/// display (e.g. "Zen 5c") and is an AMD architecture name, so it is not translated. <see cref="Key"/> is the stable
-/// identity used as the settings key: it names the hardware domain rather than a position in a list, so a preset
-/// survives a change in how domains are ordered or labelled.</summary>
-public sealed record VoltageDomain(string Label, string Key);
+/// <summary>One independently tunable voltage domain of the processor package — on a hybrid part a core cluster, and on
+/// an APU also the integrated GPU, which is a separate rail on the same SMU. <see cref="Label"/> is for display
+/// (e.g. "Zen 5c", "iGPU") and is an architecture name or a technical abbreviation, so it is not translated.
+/// <see cref="Key"/> is the stable identity used as the settings key: it names the hardware domain rather than a
+/// position in a list, so a preset survives a change in how domains are ordered or labelled.
+///
+/// <see cref="Range"/> overrides the port-wide range for this domain alone; null means "use the port's".
+/// <see cref="MillivoltsPerCount"/> is different — null there means <i>unknown for this domain, show no estimate</i>,
+/// NOT "inherit". Domains are not interchangeable: volts-per-count is a property of one particular rail and has to be
+/// measured on it. On this hardware the graphics rail turned out to move 5 mV per count against the cores' 2.5, so a
+/// domain that borrowed a neighbour's figure would misreport every offset by a factor of two — and a domain nobody has
+/// measured must be able to say so rather than guess. The port-wide
+/// <see cref="ICurveOptimizer.MillivoltsPerCount"/> is the fallback for the domainless (single all-core) case.</summary>
+public sealed record VoltageDomain(
+    string Label,
+    string Key,
+    (int Min, int Max)? Range = null,
+    double? MillivoltsPerCount = null);
 
 /// <summary>A third-party driver some feature needs, which the app can offer to install. Present only when that
 /// driver is relevant to THIS machine and this build actually carries its installer — so a machine that can never

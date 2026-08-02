@@ -16,13 +16,15 @@
       <Button Grid.Column="1" Content="{l:Tr Reset}" Padding="10,4" Command="{Binding ResetCommand}"/>
     </Grid>
 
-    <!-- One row per voltage domain ("Zen 5" / "Zen 5c"): they are separate rails at different voltages, so one number
-         for both is pinned by whichever cluster gives out first. Not per core — within a rail the delivered voltage
+    <!-- One row per voltage domain ("Zen 5" / "Zen 5c" / "iGPU"): separate rails at different voltages, so one number
+         for all of them is pinned by whichever gives out first. Not per core — within a rail the delivered voltage
          follows the mildest core's request, so extra sliders would be inert. Negative only — a positive offset raises
          voltage. The tooltip carries the warning rather than a banner: too aggressive an undervolt fails hours later
-         at idle, not under load, so the user needs it before dragging rather than after. -->
+         at idle, not under load, so the user needs it before dragging rather than after. It no longer quotes a
+         millivolts-per-step figure, because that is a property of one rail and they differ: measured here, the cores
+         move 2.5 mV per step and the graphics rail 5. Each row prints its own mV in the value box instead. -->
     <ItemsControl ItemsSource="{Binding Rows}"
-                  ToolTip.Tip="{l:Tr 'Lower voltage at the same clocks, in AVFS steps of roughly 2.5 mV. Too much is unstable — test for hours, and reset if anything crashes.'}">
+                  ToolTip.Tip="{l:Tr 'Lower voltage at the same clocks, in AVFS steps. Too much is unstable — test for hours, and reset if anything crashes.'}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:CoRowViewModel">
           <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">

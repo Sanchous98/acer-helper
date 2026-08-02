@@ -583,8 +583,14 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         var co = device.CurveOptimizer;
         if (co == null || co.Domains.Count != counts.Count) return false;
 
+        // Per DOMAIN, not per port: the domains are different rails with different bounds (the iGPU carries its own),
+        // so clamping them all against the port-wide range would silently widen or narrow one of them.
         var clamped = new int[counts.Count];
-        for (var i = 0; i < counts.Count; i++) clamped[i] = Math.Clamp(counts[i], co.Range.Min, co.Range.Max);
+        for (var i = 0; i < counts.Count; i++)
+        {
+            var (min, max) = co.Domains[i].Range ?? co.Range;
+            clamped[i] = Math.Clamp(counts[i], min, max);
+        }
 
         lock (_state)
         {

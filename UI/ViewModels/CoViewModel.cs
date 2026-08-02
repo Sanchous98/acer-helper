@@ -33,18 +33,23 @@ public sealed partial class CoViewModel : SectionViewModel
     public IReadOnlyList<CoRowViewModel> Rows { get; }
 
     public CoViewModel(string name, (int Min, int Max) range, double millivoltsPerCount,
-                       IReadOnlyList<string> domainLabels, IReadOnlyList<int> initial, Action<int[]> apply)
+                       IReadOnlyList<Features.VoltageDomain> domains, IReadOnlyList<int> initial, Action<int[]> apply)
     {
         _loading = true;
         _apply = apply;
         CpuName = name;
         _debounce.Tick += (_, _) => { _debounce.Stop(); Apply(); };
 
-        // A domain label is an AMD architecture name, which is not translated, so it is shown as-is; the single-domain
-        // case has nothing to name the row after and uses the localized section word instead.
-        var rows = new List<CoRowViewModel>(domainLabels.Count);
-        for (var i = 0; i < domainLabels.Count; i++)
-            rows.Add(new CoRowViewModel(domainLabels[i], range, millivoltsPerCount,
+        // A domain label is an architecture name or a technical abbreviation ("Zen 5c", "iGPU"), neither of which is
+        // translated, so it is shown as-is; the single-domain case has nothing to name the row after and uses the
+        // localized section word instead.
+        //
+        // Range and mV come from the DOMAIN where it states them, because the rails genuinely differ: measured on this
+        // hardware the graphics rail moves 5 mV per count against the cores' 2.5, and its slider runs deeper. A domain
+        // that states no scale (null) shows bare steps instead of a borrowed, wrong voltage.
+        var rows = new List<CoRowViewModel>(domains.Count);
+        for (var i = 0; i < domains.Count; i++)
+            rows.Add(new CoRowViewModel(domains[i].Label, domains[i].Range ?? range, domains[i].MillivoltsPerCount,
                                         i < initial.Count ? initial[i] : 0, Debounce));
         if (rows.Count == 0)
             rows.Add(new CoRowViewModel(Loc.T("Undervolt"), range, millivoltsPerCount,
@@ -88,18 +93,19 @@ public sealed partial class CoViewModel : SectionViewModel
     }
 }
 
-/// <summary>One voltage domain's slider row. The label is an AMD architecture name ("Zen 5c"), which is not translated;
-/// the value reads out as the AVFS step count with the millivolts it works out to in brackets.</summary>
+/// <summary>One voltage domain's slider row. The label is an architecture name or abbreviation ("Zen 5c", "iGPU"),
+/// which is not translated; the value reads out as the AVFS step count, with the millivolts it works out to in
+/// brackets ONLY where that rail's scale is known.</summary>
 public sealed partial class CoRowViewModel : ObservableObject
 {
-    private readonly double _mvPerCount;
+    private readonly double? _mvPerCount;
     private readonly Action _changed;
 
     public string Label { get; }
     public int OffsetMin { get; }
     public int OffsetMax { get; }
 
-    public CoRowViewModel(string label, (int Min, int Max) range, double millivoltsPerCount, int initial,
+    public CoRowViewModel(string label, (int Min, int Max) range, double? millivoltsPerCount, int initial,
                           Action changed)
     {
         Label = label;
@@ -120,9 +126,15 @@ public sealed partial class CoRowViewModel : ObservableObject
     // mV figure carries "≈" on purpose: a count is only approximately a fixed voltage, because the offset shifts the
     // whole V/F curve rather than clamping a voltage, so the delivered delta moves with frequency and temperature.
     // Stock reads as a plain 0.
+    //
+    // Each rail brings its OWN scale — 2.5 mV a count on the cores, 5 on the graphics rail — so the arithmetic is per
+    // row rather than per section. A rail that has never been measured passes null and shows the bare count: steps are
+    // the hardware's own unit and remain usable, which beats printing a millivolt figure borrowed from a different
+    // rail's measurement, since that would look authoritative and be wrong.
     private string Fmt(double counts)
     {
         var steps = (int)counts;
-        return steps == 0 ? "0" : $"{steps} (≈{(int)Math.Round(steps * _mvPerCount)} mV)";
+        if (steps == 0) return "0";
+        return _mvPerCount is { } mv ? $"{steps} (≈{(int)Math.Round(steps * mv)} mV)" : $"{steps}";
     }
 }

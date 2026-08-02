@@ -159,7 +159,7 @@ internal sealed class AppController
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
             new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
-            new CoSection(d.CurveOptimizer?.Domains.Select(v => v.Label).ToArray() ?? [], _svc.CurrentCoDomains(), SetCo),
+            new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(),
                 _svc.Settings.TurboToggles, SetTurboToggles,

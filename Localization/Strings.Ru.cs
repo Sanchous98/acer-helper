@@ -73,8 +73,8 @@ internal static partial class Strings
             = "Для «{0}» нужен драйвер ядра {1} с {2}. Это сторонняя программа, её используют и другие утилиты настройки, и Acer Helper никогда не будет её обновлять или удалять. Можно установить и вручную.",
         ["{0} installed — restart Acer Helper to use {1}"]
             = "{0} установлен — перезапустите Acer Helper, чтобы использовать {1}",
-        ["Lower voltage at the same clocks, in AVFS steps of roughly 2.5 mV. Too much is unstable — test for hours, and reset if anything crashes."]
-            = "Меньше напряжения на тех же частотах, шагами AVFS примерно по 2.5 мВ. Перебор ведёт к нестабильности — проверяйте часами, при сбоях сбросьте.",
+        ["Lower voltage at the same clocks, in AVFS steps. Too much is unstable — test for hours, and reset if anything crashes."]
+            = "Меньше напряжения на тех же частотах, шагами AVFS. Перебор ведёт к нестабильности — проверяйте часами, при сбоях сбросьте.",
 
         // ---- battery ----
         ["Health"]                  = "Состояние",

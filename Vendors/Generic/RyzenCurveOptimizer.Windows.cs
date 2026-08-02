@@ -5,22 +5,27 @@ using AcerHelper.Features;
 namespace AcerHelper.Vendors.Generic;
 
 /// <summary>
-/// AMD Curve Optimizer (all-core) on Zen 5 mobile — an AVFS voltage-curve offset applied through the SMU's MP1
-/// mailbox, the same path G-Helper drives on this silicon. A negative offset shifts the whole voltage/frequency
-/// curve down: less voltage at every frequency point, so a fixed workload draws less power and runs cooler, and
-/// inside a power-limited envelope the part holds higher clocks. The CPU-side analogue of the GPU clock offset in
-/// <see cref="NvidiaGpu"/>, and just as volatile.
+/// AMD Curve Optimizer on Zen 5 mobile — an AVFS voltage-curve offset applied through the SMU. A negative offset
+/// shifts the whole voltage/frequency curve down: less voltage at every frequency point, so a fixed workload draws
+/// less power and runs cooler, and inside a power-limited envelope the part holds higher clocks. The CPU-side
+/// analogue of the GPU clock offset in <see cref="NvidiaGpu"/>, and just as volatile.
 ///
-/// Constraints this class is built around:
-///  - Opcode 0x4C is inherited from Phoenix in every codebase that models this mailbox; it is NOT confirmed on this
-///    die. Response 0xFE means the firmware has no such command, so the feature latches off for the session.
-///  - There is no trustworthy read-back on this family, and the mailbox is known to acknowledge while the platform's
-///    power mode suppresses the effect. A successful <see cref="Set"/> therefore means the SMU accepted the message
-///    and nothing more; confirming the curve actually moved is a measurement (lower package power at a fixed clock),
-///    which is the user's to make.
-///  - ALL-CORE ONLY. The per-core opcode (0x4B) is unconfirmed here, reported rejected on the sibling Krackan Point,
-///    and would need the core-fuse topology out of a second PawnIO module to know which of the 4 Zen5 + 6 Zen5c
-///    slots are populated — Windows does not expose the cluster split.
+/// THREE rails over TWO mailboxes: the two core clusters are offset on MP1 (0x4B per slot, 0x4C all-core), the
+/// integrated Radeon on RSMU (0x1F to set, 0x20 to read back). One port, because they are one kind of thing — a
+/// curve offset on this package, SMU-resident, re-applied per performance mode — not because they share a path.
+///
+/// What each rail can and cannot promise:
+///  - CORES: no read-back exists, and the mailbox is known to acknowledge while the platform's power mode suppresses
+///    the effect. A successful write means the SMU accepted the message and nothing more. That the curve really moves
+///    was established here by measurement — an all-core -30 dropped every per-core voltage word in the SMU's PM
+///    telemetry table by ~76 mV under constant load — not by trusting the response code.
+///  - iGPU: has a getter, so every write is CONFIRMED by reading the margin back and a mismatch is reported as a
+///    failure. Its scale was measured separately and is NOT the cores': 5 mV per count against their 2.5, so the two
+///    rails cannot share a millivolt figure.
+///
+/// Granularity is per CLUSTER, not per core, and that is hardware rather than simplification: 0x4B does address a
+/// single slot, but a cluster shares a rail whose setpoint is the MAXIMUM of its cores' requests, so the delivered
+/// undervolt is the mildest offset in the cluster and per-core sliders would leave 8 of 10 cores inert.
 ///
 /// The offset is VOLATILE — it lives in SMU state and a power cycle restores stock — so the app is the source of
 /// truth and re-applies per performance mode at startup, on resume, and on each mode switch (see LaptopService),
@@ -34,14 +39,52 @@ namespace AcerHelper.Vendors.Generic;
 /// </summary>
 internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 {
-    // ---- SMU MP1 mailbox (AMD family 0x1A / Strix Point) ----
-    private const uint Mp1Msg = 0x03B10928;
-    private const uint Mp1Rsp = 0x03B10978;
-    private const uint Mp1Arg = 0x03B10998;   // arg n at Mp1Arg + 4n
-    private const int  ArgCount = 6;          // all six are rewritten every transaction, so no stale arg can leak in
+    /// <summary>One SMU mailbox: a message / response / argument-base register triple. There are two on this part and
+    /// they are NOT interchangeable — the CPU curve is on MP1, the graphics curve on RSMU — so the triple travels with
+    /// every transaction instead of being ambient state.</summary>
+    private readonly record struct Mailbox(uint Msg, uint Rsp, uint Arg, string Name);
+
+    // ---- SMU mailboxes (AMD family 0x1A / Strix Point) ----
+    // Both triples agree across RyzenAdj (lib/nb_smu_ops.c), ZenStates-Core and G-Helper. Arg n lives at Arg + 4n.
+    private static readonly Mailbox Mp1  = new(0x03B10928, 0x03B10978, 0x03B10998, "MP1");
+    private static readonly Mailbox Rsmu = new(0x03B10A20, 0x03B10A80, 0x03B10A88, "RSMU");
+
+    private const int ArgCount = 6;           // all six are rewritten every transaction, so no stale arg can leak in
 
     private const uint MsgSetAllCoreCurveOptimizer = 0x4C;
     private const uint MsgSetPerCoreCurveOptimizer = 0x4B;
+
+    // ---- integrated-GPU curve (RSMU) ----
+    // The graphics rail has its own Curve Optimizer, and it is NOT the opcode RyzenAdj's set_cogfx uses: that one
+    // (PSMU 0xB7, inherited from the Rembrandt..Hawk Point lineage) does not list Strix Point at all, and probing it
+    // here answers 0xFD "prerequisites not met" every single time, idle and under GFX load alike — a wrong-opcode
+    // false negative that reads exactly like an absent feature.
+    //
+    // The right numbers come from ZenStates-Core, whose APUSettings1_Strix inherits APUSettings1_Phoenix. What makes
+    // that table trustworthy for THIS die rather than one more guess: the same file carries MP1 SetDldoPsmMargin 0x4B
+    // and SetAllDldoPsmMargin 0x4C — the CPU opcodes already proven to work here.
+    //
+    // Verified on this machine: 0 -> -5 -> 0, every transaction REP_MSG_OK, each step confirmed by reading 0x20 back.
+    private const uint MsgSetGpuPsmMargin = 0x1F;
+    private const uint MsgGetGpuPsmMargin = 0x20;   // read-back — the CPU side has no equivalent
+
+    /// <summary>Sentinel in <see cref="_domainCcd"/> for "this domain is the iGPU, not a CPU cluster".</summary>
+    private const int GpuDomain = -1;
+    private const string GpuDomainKey = "gfx";
+    private const string GpuDomainLabel = "iGPU";
+
+    // Measured on this hardware, and NOT the same as the cores': the graphics rail moves 5 mV per count, exactly
+    // double the 2.5 mV measured on the core clusters (5 counts = 25 mV, 10 = 50, 20 = 100 — strictly linear, read off
+    // the iGPU core voltage under load). Reusing the CPU figure here would have understated every offset by half.
+    private const double GpuMvPerCount = 5.0;
+
+    // The full range ZenStates documents for the PSM margin on Zen 4 and newer, deliberately not narrowed. At 5 mV a
+    // count this floor is -250 mV, and this sample already fell over well before it — but the stable limit is a
+    // property of the individual die, and clipping every machine to one unlucky one would cost the good parts real
+    // headroom. The guard is the label, not the bound: the row reads "-50 (≈-250 mV)", and a figure like that warns
+    // far better than a slider that silently stops somewhere. Undervolt is opt-in, starts at stock, and Reset is one
+    // click away.
+    private const int GpuMinCounts = -50;
 
     // Per-core argument layout: [31:28] = CCD, [23:20] = core within CCD, [15:0] = margin. Confirmed on this part by
     // applying an offset to one slot at a time and watching exactly one per-core voltage word in the SMU's PM
@@ -134,7 +177,9 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     /// the SMU's PM telemetry table from ~1.03 V to ~0.95 V under a constant load, and back on stock — ~76 mV over
     /// 30 counts. (AMD publishes no mV-per-count figure for Zen 5; the community's Zen 3 number was 3-5 mV.) Only a
     /// display aid, since the real delta moves with frequency and temperature.</summary>
-    public double MillivoltsPerCount => 2.5;
+    public double MillivoltsPerCount => MvPerCount;
+
+    private const double MvPerCount = 2.5;
 
     /// <summary>The two Zen 5 clusters, which are independent voltage domains — measured at stock under load Zen 5 sits
     /// near 1.17 V and Zen 5c near 1.02 V, and offsetting one moves only that one. This is the finest granularity the
@@ -166,12 +211,25 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
         var zen5c = physicalCores - Zen5Cores;
         if (zen5c is < 1 or > SlotsPerCcd) { Domains = []; _domainCcd = []; return; }
 
+        // The iGPU rides along as a third domain. It is the same kind of thing as a cluster — an AVFS curve offset on
+        // one rail of this package, volatile, re-applied per performance mode — so it belongs in the same list rather
+        // than in a port of its own; only the mailbox and the argument encoding differ.
+        //
+        // Added unconditionally on a supported Strix Point rather than probed, because probing means opening the
+        // driver and loading a module, and this constructor runs during composition on the UI thread (see TryCreate).
+        // Every Strix Point ships the integrated Radeon, so the assumption is safe; and if some SKU ever refuses, the
+        // write fails loudly through LastError instead of silently doing nothing.
+        //
+        // Deliberately NOT offered when cluster detection failed above: that path falls back to the single all-core
+        // Set(), and a domain list containing only the iGPU would quietly turn the CPU slider into a GPU one.
         Domains =
         [
-            new VoltageDomain($"Zen 5", $"ccd:{Zen5Ccd}"),
-            new VoltageDomain($"Zen 5c", $"ccd:{Zen5cCcd}"),
+            new VoltageDomain($"Zen 5", $"ccd:{Zen5Ccd}", MillivoltsPerCount: MvPerCount),
+            new VoltageDomain($"Zen 5c", $"ccd:{Zen5cCcd}", MillivoltsPerCount: MvPerCount),
+            // Its own scale, not the cores': 5 mV a count against their 2.5 (see GpuMvPerCount).
+            new VoltageDomain(GpuDomainLabel, GpuDomainKey, (GpuMinCounts, 0), GpuMvPerCount),
         ];
-        _domainCcd = [Zen5Ccd, Zen5cCcd];
+        _domainCcd = [Zen5Ccd, Zen5cCcd, GpuDomain];
     }
 
     /// <summary>Probe for a tunable CPU. Returns null — feature hidden — unless this is a CPU whose MP1 mailbox
@@ -205,7 +263,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
             var io = Io();
             if (io == null) { LastError = "the PawnIO driver is not available"; return false; }
 
-            return Accept(io, Transact(io, MsgSetAllCoreCurveOptimizer, Encode(counts)), "all cores");
+            return Accept(io, Transact(io, Mp1, MsgSetAllCoreCurveOptimizer, Encode(counts), out _), "all cores");
         }
     }
 
@@ -255,15 +313,47 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 
             for (var d = 0; d < counts.Count; d++)
             {
+                // The graphics rail is one write on the other mailbox, not eight on this one.
+                if (_domainCcd[d] == GpuDomain)
+                {
+                    if (!SetGpu(io, Math.Clamp(counts[d], GpuMinCounts, 0))) return false;
+                    continue;
+                }
+
                 var arg = Encode(Math.Clamp(counts[d], MinCounts, 0));
                 for (var slot = 0; slot < SlotsPerCcd; slot++)
                 {
-                    var rsp = Transact(io, MsgSetPerCoreCurveOptimizer, CoreArg(_domainCcd[d], slot, arg));
+                    var rsp = Transact(io, Mp1, MsgSetPerCoreCurveOptimizer, CoreArg(_domainCcd[d], slot, arg), out _);
                     if (!Accept(io, rsp, $"{Domains[d].Label} slot {slot}")) return false;
                 }
             }
             return true;
         }
+    }
+
+    /// <summary>Write the integrated GPU's curve offset and CONFIRM it, which is the one thing the CPU side cannot do:
+    /// this rail has a getter, so a write is verified by reading the margin straight back rather than trusted because
+    /// the mailbox said REP_MSG_OK. A mismatch is reported as a failure — an accepted-but-ignored write is exactly the
+    /// failure mode that made the CPU path need statistics to believe.
+    ///
+    /// Mind the ASYMMETRIC encoding, which is easy to get backwards: the SETTER takes a 16-bit two's-complement margin
+    /// (-5 is 0xFFFB), the GETTER answers a full 32-bit signed value (-5 comes back as 0xFFFFFFFB). Sign-extending the
+    /// reply from bit 15 turns a perfectly good -5 into -65541. Caller holds <see cref="_gate"/>.</summary>
+    private bool SetGpu(PawnIo io, int counts)
+    {
+        if (!Accept(io, Transact(io, Rsmu, MsgSetGpuPsmMargin, GpuMargin(counts), out _), GpuDomainLabel))
+            return false;
+
+        var rsp = Transact(io, Rsmu, MsgGetGpuPsmMargin, 0, out var reply);
+        // A missing or refused read-back is not treated as a failed write: the write was acknowledged, and reporting
+        // an error would send the user chasing a problem that may only be in the verification path.
+        if (rsp != RspOk) return true;
+
+        var applied = unchecked((int)reply);
+        if (applied == counts) return true;
+
+        LastError = $"the SMU accepted {GpuDomainLabel} {counts} but reads back {applied}";
+        return false;
     }
 
     public void Dispose()
@@ -302,11 +392,21 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     private static uint CoreArg(int ccd, int slot, uint encodedMargin)
         => ((uint)ccd << 28) | ((uint)(slot % SlotsPerCcd) << 20) | (encodedMargin & 0xFFFF);
 
-    /// <summary>Run one MP1 message to completion and return the SMU's response byte, or <see cref="NoResponse"/>
-    /// when the interlock or a register access failed (with <see cref="LastError"/> already set). Caller holds
-    /// <see cref="_gate"/>.</summary>
-    private uint Transact(PawnIo io, uint message, uint arg0)
+    // The GRAPHICS rail's margin encoding — ZenStates' Utils.MakePsmMarginArg verbatim: 16-bit two's complement.
+    // Deliberately a separate function from Encode above rather than a shared one with a width parameter, because the
+    // two differ in a way that fails silently: the CPU's 20-bit form of -5 is 0xFFFFB, the GPU's is 0xFFFB, and the
+    // mailbox accepts either without complaint while meaning something else entirely.
+    private static uint GpuMargin(int counts)
+        => (uint)((counts < 0 ? 0x100000 : 0) + counts) & 0xFFFF;
+
+    /// <summary>Run one message on <paramref name="mb"/> to completion and return the SMU's response byte, or
+    /// <see cref="NoResponse"/> when the interlock or a register access failed (with <see cref="LastError"/> already
+    /// set). <paramref name="reply0"/> receives argument 0 as the SMU left it, which is where a getter's value comes
+    /// back; it is read INSIDE the PCI interlock, because reading it afterwards would race another tuning tool's
+    /// transaction into our reply. Caller holds <see cref="_gate"/>.</summary>
+    private uint Transact(PawnIo io, in Mailbox mb, uint message, uint arg0, out uint reply0)
     {
+        reply0 = 0;
         Mutex? pci = null;
         var held = false;
         try
@@ -321,17 +421,19 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 
             // Wait for the mailbox to be idle. A zero response means a message is still in flight — someone else's
             // or a leftover — and writing ours on top of it would race.
-            if (!WaitIdle(io)) return NoResponse;
+            if (!WaitIdle(io, mb)) return NoResponse;
 
             // Clear the response, then publish the arguments, then the message. Order matters: the SMU latches on
             // the message write, so the arguments must already be in place, and a stale non-zero response would
             // otherwise be mistaken for this message's answer.
-            if (!Write(io, Mp1Rsp, 0)) return NoResponse;
+            if (!Write(io, mb.Rsp, 0)) return NoResponse;
             for (var i = 0; i < ArgCount; i++)
-                if (!Write(io, Mp1Arg + (uint)(i * 4), i == 0 ? arg0 : 0)) return NoResponse;
-            if (!Write(io, Mp1Msg, message)) return NoResponse;
+                if (!Write(io, mb.Arg + (uint)(i * 4), i == 0 ? arg0 : 0)) return NoResponse;
+            if (!Write(io, mb.Msg, message)) return NoResponse;
 
-            return PollResponse(io);
+            var rsp = PollResponse(io, mb);
+            if (rsp == RspOk) Read(io, mb.Arg, out reply0);
+            return rsp;
         }
         finally
         {
@@ -345,31 +447,33 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
         }
     }
 
-    private bool WaitIdle(PawnIo io)
+    private bool WaitIdle(PawnIo io, in Mailbox mb)
     {
         var deadline = Environment.TickCount64 + ResponseTimeoutMs;
         while (true)
         {
-            if (!Read(io, Mp1Rsp, out var rsp)) return false;
+            if (!Read(io, mb.Rsp, out var rsp)) return false;
             if (rsp != RspInProgress) return true;
-            if (Environment.TickCount64 >= deadline) { LastError = "the SMU mailbox is busy"; return false; }
+            if (Environment.TickCount64 >= deadline) { LastError = $"the {mb.Name} mailbox is busy"; return false; }
             Thread.Sleep(1);
         }
     }
 
-    private uint PollResponse(PawnIo io)
+    private uint PollResponse(PawnIo io, in Mailbox mb)
     {
         var deadline = Environment.TickCount64 + ResponseTimeoutMs;
         var spins = 0;
         while (true)
         {
-            if (!Read(io, Mp1Rsp, out var rsp)) return NoResponse;
+            if (!Read(io, mb.Rsp, out var rsp)) return NoResponse;
             // 0xFC is "busy with other commands, retry" rather than a verdict on our message, so it is polled
             // through like an in-flight response instead of surfaced.
             if (rsp != RspInProgress && rsp != RspBusyOther) return rsp;
             if (Environment.TickCount64 >= deadline)
             {
-                LastError = rsp == RspBusyOther ? "the SMU stayed busy (0xFC)" : "the SMU did not answer";
+                LastError = rsp == RspBusyOther
+                    ? $"the {mb.Name} mailbox stayed busy (0xFC)"
+                    : $"the {mb.Name} mailbox did not answer";
                 return NoResponse;
             }
             if (++spins < 32) Thread.SpinWait(64); else Thread.Sleep(1);

@@ -40,11 +40,12 @@ public sealed record CpuSection(
     string? Initial,
     Action<string> SetCpuPower);
 
-/// <summary>CPU-undervolt section: the labels of the independently tunable voltage domains (empty on a CPU that takes
-/// one offset for everything), the current mode's saved offsets index-aligned with them, and the apply/persist
-/// delegate. Built only when the device exposes an <see cref="ICurveOptimizer"/> port.</summary>
+/// <summary>Undervolt section: the independently tunable voltage domains (empty on a CPU that takes one offset for
+/// everything), the current mode's saved offsets index-aligned with them, and the apply/persist delegate. The whole
+/// domain records travel rather than just their labels, because a domain carries its own range and mV scale — the
+/// graphics rail's differ from the cores'. Built only when the device exposes an <see cref="ICurveOptimizer"/> port.</summary>
 public sealed record CoSection(
-    IReadOnlyList<string> Domains,
+    IReadOnlyList<VoltageDomain> Domains,
     IReadOnlyList<int> Initial,
     Action<int[]> SetCo);
 
