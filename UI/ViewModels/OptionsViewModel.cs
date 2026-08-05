@@ -95,6 +95,10 @@ public sealed class OptionsViewModel : SectionViewModel
         if (device.Clamshell is { } clam)
             vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), clam.Enabled, true, o.SetClamshell));
 
+        // Which profile each power source uses — grouped with the Turbo-key row below, since both are about how
+        // the performance profile is chosen for you rather than about a piece of hardware.
+        foreach (var c in o.ProfileChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
+
         if (device.PowerProfiles?.All.Any(p => p.Kind == ProfileKind.Turbo) ?? false)
             vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), o.TurboToggles, true, o.SetTurboToggles,
                 tip: Loc.T("Otherwise the Turbo key cycles through profiles.")));
@@ -103,6 +107,21 @@ public sealed class OptionsViewModel : SectionViewModel
             vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), auto.IsEnabled(), true, o.SetAutostart));
 
         return vm.Rows.Count > 0 ? vm : null;
+    }
+
+    /// <summary>Re-read every row that can be read back and snap it to reality, for changes made behind the
+    /// drawer's back — a hardware toggle flipped by an Fn key or another tool, or a per-source profile row whose
+    /// slot moved because the user picked that profile by hand. Called when the drawer opens (the rows are built
+    /// once and live for the app's lifetime, so without this they would keep showing their construction-time
+    /// values). Each row's read runs off the UI thread on its own serial worker.</summary>
+    public void Sync()
+    {
+        foreach (var row in Rows)
+            switch (row)
+            {
+                case ToggleRowViewModel t: t.Sync(); break;
+                case ChoiceRowViewModel c: c.Sync(); break;
+            }
     }
 }
 
@@ -183,6 +202,14 @@ public sealed class ToggleRowViewModel : ObservableObject
         });
     }
 
+    /// <summary>Re-read the hardware (no write) and snap the switch to it — for a change made out of band.
+    /// No-op on a row whose value can't be read back.</summary>
+    public void Sync()
+    {
+        if (_read == null) return;
+        _hw.Sync(_read, () => _isOn, actual => { _isOn = actual; OnPropertyChanged(nameof(IsOn)); });
+    }
+
     private async Task ConfirmAndApplyAsync()
     {
         if (await _confirmAsync!()) Apply(true);
@@ -220,6 +247,19 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
     public IReadOnlyList<string> Options { get; }
 
     [ObservableProperty] private int _selectedIndex;
+
+    /// <summary>Re-read the hardware (no write) and snap the dropdown to it — for a change made out of band.
+    /// No-op on a row whose value can't be read back.</summary>
+    public void Sync()
+    {
+        if (_read == null) return;
+        _hw.Sync(_read, () => SelectedIndex, actual =>
+        {
+            _syncing = true;
+            SelectedIndex = actual;   // reflect reality without re-firing the pick
+            _syncing = false;
+        });
+    }
 
     partial void OnSelectedIndexChanged(int value)
     {

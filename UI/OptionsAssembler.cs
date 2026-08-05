@@ -79,6 +79,28 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         return list;
     }
 
+    /// <summary>Which performance profile each power source uses. The app has always remembered a profile per
+    /// source and re-applied it on every AC&lt;-&gt;battery change, but the slots were filled INVISIBLY — by
+    /// whatever you last picked while on that source — so both ended up on the same profile and plugging the
+    /// charger in appeared to do nothing at all. These two rows make the pair explicit and editable.
+    ///
+    /// Semantics stay "the profile this source uses": picking a profile by hand while on a source still updates
+    /// that source's row, so the two can never disagree about what will be applied (the rows re-read when the
+    /// Options drawer opens — see OptionsViewModel.Sync). Setting the row for the source that is live right now
+    /// applies it immediately instead of waiting for the next unplug.</summary>
+    public IReadOnlyList<OptionChoice> PowerSourceProfiles()
+    {
+        if (svc.Device.PowerProfiles is not { } pp || pp.All.Count == 0) return [];
+        var profiles = pp.All;
+        var names = profiles.Select(p => Loc.T(p.DisplayName)).ToList();
+        return [Row(onAc: true, "Profile on AC power:"), Row(onAc: false, "Profile on battery:")];
+
+        OptionChoice Row(bool onAc, string label) => new(
+            Loc.T(label), true, names, IndexOfProfile(profiles, svc.SourceProfile(onAc)),
+            i => RunSet(() => svc.SetSourceProfile(onAc, profiles[i]), "Power-source profile"),
+            Read: () => IndexOfProfile(profiles, svc.SourceProfile(onAc)));
+    }
+
     // Battery controls live in the Battery section (not generic Options).
 
     /// <summary>Vendor battery charging strategy (e.g. Dell Adaptive/Express/Custom) as a dropdown.</summary>
@@ -119,6 +141,17 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         var e = svc.LastError;
         // `what` is the English control name; localize both it and the "… failed" template.
         Dispatcher.UIThread.Post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (e != null ? $": {e}" : "")));
+    }
+
+    // A source with nothing remembered yet (fresh install, before that source was ever seen) has no profile to
+    // point at, so the row shows the first one — it becomes real as soon as the user picks, or as soon as the
+    // source is first seen and the slot is seeded from the hardware.
+    private static int IndexOfProfile(IReadOnlyList<PerformanceProfile> list, PerformanceProfile? p)
+    {
+        for (var i = 0; i < list.Count; i++)
+            if (list[i].Id == p?.Id)
+                return i;
+        return 0;
     }
 
     private static int IndexOf(IReadOnlyList<ChoiceOption> list, string? id)

@@ -59,6 +59,7 @@ public sealed record BatterySection(
 public sealed record OptionsSection(
     IReadOnlyList<OptionToggle> HwToggles,
     IReadOnlyList<OptionChoice> HwChoices,
+    IReadOnlyList<OptionChoice> ProfileChoices,
     bool TurboToggles, Action<bool> SetTurboToggles,
     Action<bool> SetClamshell, Action<bool> SetAutostart,
     AppLanguage Language, Action<AppLanguage> SetLanguage);

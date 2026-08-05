@@ -135,7 +135,12 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand] private void GrantHardwareAccess() => _grantAccess?.Invoke();
 
-    [RelayCommand] private void OpenOptions() => OpenDrawer(Loc.T("Options"), _options);
+    [RelayCommand]
+    private void OpenOptions()
+    {
+        _options?.Sync();   // re-read the rows' real state (hardware toggles, per-source profiles) before showing
+        OpenDrawer(Loc.T("Options"), _options);
+    }
 
     [RelayCommand] private void OpenTuning() => OpenDrawer(Loc.T("Tuning"), _tuning);
 

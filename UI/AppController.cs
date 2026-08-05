@@ -161,7 +161,7 @@ internal sealed class AppController
             new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
             new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
-            new OptionsSection(opts.Toggles(), opts.Choices(),
+            new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.Settings.TurboToggles, SetTurboToggles,
                 b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
                 _svc.Settings.Language, SetLanguage)),

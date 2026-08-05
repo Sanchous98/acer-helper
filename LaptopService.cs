@@ -199,6 +199,52 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         }
     }
 
+    /// <summary>The profile a power source is set to use — what <see cref="SyncPowerSource"/> applies when the
+    /// machine switches to it. Null when nothing is remembered for that source yet (fresh install, before the
+    /// first time it was seen). Turbo used as a switch reports as the Turbo profile, because that is what the
+    /// slot means to the user even though it is stored as base + flag.</summary>
+    public PerformanceProfile? SourceProfile(bool onAc)
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return null;
+        lock (_state)
+        {
+            var slot = onAc ? Settings.OnAc : Settings.OnBattery;
+            if (Settings.TurboToggles && slot.Turbo &&
+                pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo) is { } turbo) return turbo;
+            return pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
+        }
+    }
+
+    /// <summary>Set the profile a power source should use, and apply it right away when that source is the live
+    /// one. Stored exactly the way a manual pick stores it (<see cref="ApplyProfile"/>), so the two can't
+    /// disagree: base id + a Turbo flag, since Turbo is a switch over a base rather than a mode of its own
+    /// while "Turbo toggles" is on. Returns false only if the immediate apply failed.</summary>
+    public bool SetSourceProfile(bool onAc, PerformanceProfile p)
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return false;
+        lock (_state)
+        {
+            var slot = onAc ? Settings.OnAc : Settings.OnBattery;
+            if (Settings.TurboToggles && p.Kind == ProfileKind.Turbo)
+            {
+                // Turbo is not a base: keep whatever base it sits over, falling back to Balanced when this
+                // source has never held one (otherwise dropping Turbo later would leave nothing to return to).
+                slot.Turbo = true;
+                if (slot.BaseId.Length == 0)
+                    slot.BaseId = (pp.All.FirstOrDefault(x => x.Kind == ProfileKind.Balanced)
+                                ?? pp.All.FirstOrDefault(x => x.Kind != ProfileKind.Turbo))?.Id ?? "";
+            }
+            else { slot.BaseId = p.Id; slot.Turbo = false; }
+            Save();
+            // Reference equality against the live slot: exact, and it also covers the "source still unknown"
+            // case (Slot then reads as the AC slot), so setting the AC profile before any battery reading
+            // applies immediately rather than silently waiting for a source change.
+            return !ReferenceEquals(Slot, slot) || ApplyStoredMode();
+        }
+    }
+
     /// <summary>Keep the per-source remembered mode in sync with live battery telemetry. On an AC<->battery
     /// change (and on the first reading, i.e. startup): if this source already has a remembered mode, re-apply
     /// it; if not (fresh install), seed the slot from whatever the hardware is currently set to — never force
@@ -235,15 +281,17 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         Save();
     }
 
-    private void ApplyStoredMode()
+    /// <summary>Apply the live source's remembered mode. Returns false only when a hardware write failed —
+    /// "nothing to do" (already in that mode, nothing remembered) is success.</summary>
+    private bool ApplyStoredMode()
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return;
+        if (pp == null) return false;
         var slot = Slot;
-        if (string.IsNullOrEmpty(slot.BaseId)) return;
+        if (string.IsNullOrEmpty(slot.BaseId)) return true;
 
         var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
-        if (baseP == null) return;
+        if (baseP == null) return true;
 
         var current = pp.Current();
         var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
@@ -258,15 +306,12 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         // active profile, so we don't need to re-drive it while Turbo is engaged.
         if (wantTurbo)
         {
-            if (current?.Kind == ProfileKind.Turbo) return;    // already in Turbo -> nothing to do
-            if (current?.Id != baseP.Id) pp.Set(baseP);        // establish the base we sit over (skip if on it)
-            pp.Set(turbo!);
+            if (current?.Kind == ProfileKind.Turbo) return true;   // already in Turbo -> nothing to do
+            if (current?.Id != baseP.Id) pp.Set(baseP);            // establish the base we sit over (skip if on it)
+            return pp.Set(turbo!);
         }
-        else
-        {
-            if (current?.Id == baseP.Id) return;               // already in the remembered base profile
-            pp.Set(baseP);
-        }
+        if (current?.Id == baseP.Id) return true;                  // already in the remembered base profile
+        return pp.Set(baseP);
     }
 
     /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
