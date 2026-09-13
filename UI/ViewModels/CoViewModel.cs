@@ -1,5 +1,5 @@
+using AcerHelper.Domain;
 using AcerHelper.Localization;
-using Features = AcerHelper.Domain;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -34,7 +34,7 @@ public sealed partial class CoViewModel : SectionViewModel
     public IReadOnlyList<CoRowViewModel> Rows { get; }
 
     public CoViewModel(string name, (int Min, int Max) range, double millivoltsPerCount,
-                       IReadOnlyList<Features.VoltageDomain> domains, IReadOnlyList<int> initial, Action<int[]> apply)
+                       IReadOnlyList<VoltageDomain> domains, IReadOnlyList<int> initial, Action<int[]> apply)
     {
         _loading = true;
         _apply = apply;
