@@ -1,7 +1,7 @@
 using System.IO;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Generic Linux battery charge limit via the standard power_supply node
 /// <c>charge_control_end_threshold</c> — supported by many laptops through the kernel (Dell, Lenovo, ASUS,

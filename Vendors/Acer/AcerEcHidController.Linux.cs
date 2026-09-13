@@ -2,7 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Linux transport for the Acer EC controller: hidraw directly, no HID library — the same approach and the same
 // reason as EneHidController.Linux.cs (this controller sits on HID-over-I2C, which HidSharp's Linux enumeration

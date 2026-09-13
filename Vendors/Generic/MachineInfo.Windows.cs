@@ -1,4 +1,4 @@
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Windows source: WMI Win32_ComputerSystemProduct in root\CIMV2 (via the AOT-safe WMI COM layer).
 public static partial class MachineInfo

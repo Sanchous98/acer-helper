@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 // Linux lid-state monitoring is omitted: clamshell keep-awake itself is unsupported on Linux (the DE's power
 // manager owns the lid — see Clamshell.Linux.cs), so there is never a keep-awake state in which a lit keyboard

@@ -1,8 +1,8 @@
 using System.Threading;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 using AcerHelper.Localization;
 
-namespace AcerHelper;
+namespace AcerHelper.Application;
 
 /// <summary>
 /// Application facade / use-case layer. The UI talks only to this and to the Domain model;

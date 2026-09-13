@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Domain;
 
 /// <summary>A hardware on/off option (checkbox) shown in the Options group.
 /// If <paramref name="Confirm"/> is set, it is asked synchronously before turning the option ON;

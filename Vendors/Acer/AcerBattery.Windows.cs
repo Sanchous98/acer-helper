@@ -1,6 +1,6 @@
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Windows encoding helper for the "BatteryControl" WMI object. The methods mirror the Acer firmware structs
 // (see the acer-wmi-battery Linux driver): the input/output blocks contain packed byte fields, some *arrays*

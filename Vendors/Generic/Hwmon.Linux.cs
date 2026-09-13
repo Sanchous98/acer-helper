@@ -1,8 +1,8 @@
 using System.IO;
 using System.Linq;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Generic laptop telemetry through the Linux hwmon sysfs tree (/sys/class/hwmon). This is the one
 // vendor-independent way to read fan speeds and temperatures: whatever the EC/ACPI driver exposes

@@ -3,7 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 /// <summary>
 /// Per-model Acer quirks, loaded from config (<c>acer-models.json</c>) rather than hardcoded.

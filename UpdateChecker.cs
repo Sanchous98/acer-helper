@@ -1,8 +1,9 @@
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcerHelper.Domain;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Checks GitHub Releases for a newer version and returns it (version + page URL + downloadable
 /// assets). It does NOT download or install — that's delegated to the platform self-updaters

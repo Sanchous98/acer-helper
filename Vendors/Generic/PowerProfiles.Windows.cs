@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Generic Windows performance profiles via the OS power-mode overlay (the taskbar battery-icon

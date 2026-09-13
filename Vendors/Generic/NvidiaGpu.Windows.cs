@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// NVIDIA discrete-GPU clock overclocking via NvAPI (nvapi64.dll) — the same mechanism G-Helper and MSI

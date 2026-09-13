@@ -1,7 +1,7 @@
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Dell;
+namespace AcerHelper.Infrastructure.Vendors.Dell;
 
 // Windows transport for Dell's AGENTLESS BIOS-attribute interface: the ACPI-WMI classes Dell firmware
 // itself publishes in root\dcim\sysman\biosattributes on 2018+ business models (Latitude/Precision/XPS/

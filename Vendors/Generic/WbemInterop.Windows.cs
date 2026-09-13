@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Low-level WMI COM interop, done with SOURCE-GENERATED COM ([GeneratedComInterface]) + raw VARIANT/
 // SAFEARRAY pointers so the whole thing is Native-AOT-safe. This is why we don't use System.Management:

@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Start at logon via a Scheduled Task with highest privileges (so the elevated app launches without a UAC
 // prompt each logon). Task Scheduler (a system service, not user-killable) is the watchdog — no separate,

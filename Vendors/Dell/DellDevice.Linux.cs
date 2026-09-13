@@ -1,7 +1,7 @@
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Dell;
+namespace AcerHelper.Infrastructure.Vendors.Dell;
 
 // Linux: wire the Dell kernel drivers' sysfs to the generic holders (DelegatePorts.cs). Verified on a
 // Latitude 5540 / kernel 7.0: battery charge modes via the power_supply extension (dell-laptop /

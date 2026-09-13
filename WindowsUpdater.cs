@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Self-update for the Windows MSI install: download the release MSI and hand off to msiexec for an
 /// in-place major upgrade (the .wxs carries a fixed UpgradeCode + &lt;MajorUpgrade&gt;), then relaunch. The

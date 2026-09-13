@@ -1,8 +1,8 @@
 using System.IO;
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Linux: create the Linuwu-Sense sysfs transport and wire the generic feature holders (DelegatePorts.cs) to
 // the per-feature encoding methods below. All the Acer-on-Linux encoding lives here (node names + trivial

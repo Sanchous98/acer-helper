@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Keep the laptop awake on lid-close, but only while an external display is connected AND on AC

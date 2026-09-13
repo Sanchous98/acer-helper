@@ -1,7 +1,7 @@
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Dell;
+namespace AcerHelper.Infrastructure.Vendors.Dell;
 
 // Windows: wire Dell's agentless BIOS-attribute WMI (DellBiosWmi) to the generic holders — the same EC
 // knobs the Linux partial reaches through sysfs, one binding per OS. Thermal Management IS Dell's

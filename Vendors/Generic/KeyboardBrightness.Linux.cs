@@ -1,7 +1,7 @@
 using System.IO;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Generic Linux keyboard-backlight brightness via the kernel LED class
 /// (<c>/sys/class/leds/*kbd_backlight/{brightness,max_brightness}</c>) — the vendor-neutral, ACPI/EC-backed

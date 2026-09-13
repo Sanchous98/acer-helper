@@ -1,7 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using AcerHelper.Composition;
+using AcerHelper.Application;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 
 namespace AcerHelper.UI;

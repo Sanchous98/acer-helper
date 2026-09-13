@@ -1,6 +1,6 @@
 using AcerHelper.Localization;
 
-namespace AcerHelper;
+namespace AcerHelper.Domain;
 
 /// <summary>User preferences. Persisted by an <see cref="ISettingsStore"/> (Infrastructure).
 /// Values are vendor-neutral so they survive a hardware/vendor change.</summary>

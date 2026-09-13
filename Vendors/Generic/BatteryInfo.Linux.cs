@@ -1,7 +1,7 @@
 using System.IO;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Linux source: /sys/class/power_supply/BAT*. capacity/status for the live reading;
 // charge_full(_design) or energy_full(_design) for health; cycle_count when present.

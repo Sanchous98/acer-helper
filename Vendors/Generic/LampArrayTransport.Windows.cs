@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Windows transport for the LampArray bridge: the channel to <c>AcerHelperLampArray.sys</c> (driver/), the

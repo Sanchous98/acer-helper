@@ -1,8 +1,8 @@
 using System.Runtime.Intrinsics.X86;
 using System.Text;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// AMD Curve Optimizer on Zen 5 mobile — an AVFS voltage-curve offset applied through the SMU. A negative offset

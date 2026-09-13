@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AcerHelper;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Composition;
+namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>Persists <see cref="Settings"/> as JSON under the per-user app-data folder
 /// (%AppData%\AcerHelper on Windows, ~/.config/AcerHelper on Linux). Source-generated

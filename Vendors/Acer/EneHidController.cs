@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Cross-platform RGB controller: the ENE HID device (VID 0x0CF2 / PID 0x5130, 11-byte feature report id
 // 0xA4) — the same controller OpenRGB drives. The packets are identical on every OS; only the transport

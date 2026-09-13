@@ -1,8 +1,8 @@
 using System.IO;
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 /// <summary>
 /// Acer special keys on Linux via evdev. Only the Nitro/PredatorSense launcher key reaches userspace

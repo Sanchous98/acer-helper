@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Run-at-login. The mechanism is OS-specific (a Scheduled Task on Windows, a freedesktop
 /// autostart .desktop on Linux) and lives in the partial members of Autostart.*.cs; the shared

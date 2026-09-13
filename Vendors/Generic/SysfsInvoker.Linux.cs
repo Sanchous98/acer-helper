@@ -1,7 +1,7 @@
 using System.IO;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Generic Linux sysfs transport scoped to a base directory — the Linux analogue of
 /// <see cref="WmiInvoker"/>: a thin, vendor-agnostic accessor that vendor feature partials receive in

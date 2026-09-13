@@ -1,4 +1,4 @@
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>The single place WMI method invocation is used: a thin, vendor-agnostic wrapper that binds to
 /// one <c>root\WMI</c> class and invokes its methods. Vendor codecs supply the method/parameter names.

@@ -1,7 +1,7 @@
-using AcerHelper.Features;
-using GenericBattery = AcerHelper.Vendors.Generic.BatteryInfo;
+using AcerHelper.Domain;
+using GenericBattery = AcerHelper.Infrastructure.Vendors.Generic.BatteryInfo;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// The generic laptop device: the capabilities any laptop exposes through standard OS APIs — performance

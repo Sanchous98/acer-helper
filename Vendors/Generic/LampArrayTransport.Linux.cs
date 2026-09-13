@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Composition helper: the LampArray transport for this OS, or null where there is none.
 ///

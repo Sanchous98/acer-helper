@@ -1,4 +1,4 @@
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Generic Windows common capabilities: performance profiles via the power-mode overlay, blue-light gamma,
 // and clamshell. (Battery telemetry + autostart are wired cross-platform in GenericDevice.cs.) A vendor

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 // Linux resume hook: systemd-logind broadcasts `PrepareForSleep(false)` on the system bus when the machine
 // wakes from suspend/hibernate. Unlike the one-shot method calls the Busctl helper makes, a signal must be

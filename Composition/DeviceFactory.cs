@@ -1,9 +1,9 @@
-using AcerHelper.Features;
-using AcerHelper.Vendors.Acer;
-using AcerHelper.Vendors.Dell;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Dell;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Composition;
+namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>
 /// Composition root. Its ONLY job is to identify the machine (by DMI manufacturer, via

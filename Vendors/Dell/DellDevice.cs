@@ -1,6 +1,6 @@
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Dell;
+namespace AcerHelper.Infrastructure.Vendors.Dell;
 
 /// <summary>
 /// Dell laptop backend. Extends <see cref="GenericDevice"/> with what Dell firmware exposes beyond the

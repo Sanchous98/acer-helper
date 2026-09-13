@@ -1,6 +1,5 @@
-using AcerHelper;
 
-namespace AcerHelper.Features;
+namespace AcerHelper.Domain;
 
 // Feature ports: one fine-grained interface per laptop capability. Infrastructure implements
 // them; the Application/UI depend only on these. A feature a device lacks is represented by a

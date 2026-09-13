@@ -1,4 +1,4 @@
-namespace AcerHelper.Features;
+namespace AcerHelper.Domain;
 
 /// <summary>Emulated fan-curve controller. Acer has no native fan curves, so in Custom mode the app drives
 /// each fan's duty from a duty%-per-temperature-anchor curve, evaluated against live temps on the sensor

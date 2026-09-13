@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>A short-lived WMI connection to one namespace, built on the source-generated COM interop in
 /// <see cref="Wbem"/>. Deliberately per-operation: WMI COM proxies are apartment-bound and can't be shared

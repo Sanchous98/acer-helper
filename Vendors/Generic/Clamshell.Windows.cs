@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Windows hooks for clamshell: the AC "lid close action" power setting (powrprof), AC state
 // (GetSystemPowerStatus), external-display detection (QueryDisplayConfig), and re-evaluation on

@@ -1,6 +1,6 @@
 using Microsoft.Win32;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 // Windows resume hook: SystemEvents.PowerModeChanged with PowerModes.Resume, which fires on wake from BOTH
 // sleep and hibernation (PBT_APMRESUMEAUTOMATIC / PBT_APMRESUMESUSPEND). See ResumeWatcher.cs.

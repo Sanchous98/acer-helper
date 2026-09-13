@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 /// <summary>
 /// Acer special keys on Windows via RawInput, mapped to generic <see cref="HotkeyAction"/>s.

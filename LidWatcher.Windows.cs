@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 // Windows lid-state hook: RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE) delivers a
 // WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE to the registered window whenever the lid opens or closes — and it

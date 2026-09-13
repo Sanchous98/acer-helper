@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Generic Linux common capabilities: performance profiles via power-profiles-daemon (or the sysfs
 // platform_profile fallback), temperature/RPM monitoring via hwmon, and — where the kernel allows it —

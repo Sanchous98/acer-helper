@@ -1,6 +1,6 @@
 using HidSharp;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Windows transport for the ENE controller: HidSharp over the Win32 HID API. Enumeration by VID/PID plus
 // the feature-report length picks the right interface among the device's collections. Lazily opened.

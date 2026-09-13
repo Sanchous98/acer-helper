@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Windows transport for <b>PawnIO</b> (pawnio.eu) — the signed, sandboxed ring-0 gateway this app uses to reach

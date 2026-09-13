@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Generic, transport-agnostic feature holders shared by all vendors. Every simple vendor capability is
 // "read a value / write a value via a transport" — the transport + encoding is the ONLY thing that differs

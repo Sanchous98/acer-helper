@@ -1,7 +1,7 @@
 using System.IO;
 using System.Net.Http;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Self-update for the Linux AppImage: download the newer .AppImage from the release and atomically
 /// replace the running one in place — so updates work WITHOUT the OS package manager (the point on immutable

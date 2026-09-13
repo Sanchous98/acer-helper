@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Win32;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Detects and, on request, installs <b>PawnIO</b> (pawnio.eu) — the signed ring-0 gateway the CPU-undervolt

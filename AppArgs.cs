@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Domain;
 
 // Command-line switches, centralised so the launcher (Program), the autostart registration (Autostart) and the
 // arg parsing (App) can't drift apart — a mismatch between what gets registered and what gets parsed silently

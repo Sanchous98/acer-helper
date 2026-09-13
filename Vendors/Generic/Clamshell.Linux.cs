@@ -1,4 +1,4 @@
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Linux clamshell is reported unsupported (pending a decision). Empirically, on a DE the lid is owned by
 // the DE's power manager, not logind: e.g. KDE PowerDevil holds a *block* inhibitor on handle-lid-switch

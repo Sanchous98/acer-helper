@@ -1,7 +1,7 @@
 using Avalonia;
 using AcerHelper.UI;
 
-namespace AcerHelper;
+namespace AcerHelper.Bootstrap;
 
 internal static class Program
 {

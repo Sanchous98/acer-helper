@@ -1,4 +1,4 @@
-namespace AcerHelper.Features;
+namespace AcerHelper.Domain;
 
 /// <summary>
 /// The translation layer proper: takes lamp frames a host (Windows Dynamic Lighting, or any LampArray-aware

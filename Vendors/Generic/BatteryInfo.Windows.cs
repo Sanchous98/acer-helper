@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // Windows sources: GetSystemPowerStatus for charge %/state; the standard root\WMI smart-battery
 // classes for design/full capacity (health) and cycle count.

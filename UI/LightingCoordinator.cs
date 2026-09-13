@@ -1,6 +1,8 @@
 using System.Threading.Tasks;
 using Avalonia.Threading;
-using AcerHelper.Features;
+using AcerHelper.Application;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Localization;
 using AcerHelper.UI.ViewModels;
 

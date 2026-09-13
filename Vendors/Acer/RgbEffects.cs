@@ -1,6 +1,6 @@
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 /// <summary>One lighting mode of the ENE controller (verified on Acer Nitro 18).</summary>
 public sealed class RgbEffect(string name, byte modeByte, bool isEffect, bool hasColor, bool hasSpeed, bool hasDirection = false)

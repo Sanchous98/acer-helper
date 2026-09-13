@@ -1,6 +1,6 @@
 using HidSharp;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Windows transport for the Acer EC controller: HidSharp over the Win32 HID API, same shape as
 // EneHidController.Windows.cs. Enumeration by VID/PID plus the feature-report length picks the right interface:

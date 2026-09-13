@@ -1,7 +1,7 @@
 using System.IO;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Generic Linux accessor for the kernel's firmware-attributes class
 /// (<c>/sys/class/firmware-attributes/&lt;device&gt;/</c>) — BIOS settings exposed as sysfs attributes with

@@ -1,7 +1,7 @@
-using AcerHelper.Features;
-using AcerHelper.Vendors.Generic;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 /// <summary>
 /// The Acer device: extends <see cref="GenericDevice"/> and relies on it for the common OS-level ports

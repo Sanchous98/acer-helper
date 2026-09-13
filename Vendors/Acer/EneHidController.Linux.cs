@@ -2,7 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace AcerHelper.Vendors.Acer;
+namespace AcerHelper.Infrastructure.Vendors.Acer;
 
 // Linux transport for the ENE controller: hidraw directly, no HID library. The controller is not
 // necessarily USB — on the Nitro AN18-61 (and other recent models) it sits on HID-over-I2C, which

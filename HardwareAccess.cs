@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Linux-only: installs the udev + tmpfiles permission rules bundled next to the app (AppImage
 /// case — a sandbox-free binary can call pkexec directly) into /etc via a single polkit prompt, so the

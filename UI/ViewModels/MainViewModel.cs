@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
-using AcerHelper;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 using AcerHelper.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;

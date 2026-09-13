@@ -1,5 +1,7 @@
 using System.Diagnostics;
-using AcerHelper.Features;
+using AcerHelper.Application;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;

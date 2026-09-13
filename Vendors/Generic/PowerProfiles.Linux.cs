@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// Generic Linux performance profiles via <b>power-profiles-daemon</b> (or its tuned-ppd shim) over

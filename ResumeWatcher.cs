@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Fires <paramref name="onResume"/> when the machine wakes from sleep or hibernation. The firmware
 /// drops the RGB lighting across a suspend/hibernate cycle, so the app must re-apply it on resume. Windows uses

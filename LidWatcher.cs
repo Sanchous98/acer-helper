@@ -1,4 +1,4 @@
-namespace AcerHelper;
+namespace AcerHelper.Infrastructure;
 
 /// <summary>Fires <paramref name="onLidChanged"/> when the laptop lid opens or closes — the argument is
 /// <c>true</c> when it opened, <c>false</c> when it closed. Used to blank the RGB backlight while the lid is

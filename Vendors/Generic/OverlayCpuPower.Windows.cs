@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// CPU power management via the Windows Power-Mode overlay (the taskbar battery-slider modes: Best power

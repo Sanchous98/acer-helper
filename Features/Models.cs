@@ -1,4 +1,4 @@
-namespace AcerHelper.Features;
+namespace AcerHelper.Domain;
 
 // The ubiquitous language of the app: features expressed as vendor- and OS-agnostic
 // value objects. Infrastructure maps its own encodings to/from these at the boundary.

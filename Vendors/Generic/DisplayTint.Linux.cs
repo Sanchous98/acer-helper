@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using AcerHelper.Features;
+using AcerHelper.Domain;
 
-namespace AcerHelper.Vendors.Generic;
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>Blue-light reduction on X11 via per-output gamma (<c>xrandr --output N --gamma 1:1:B</c>): lower
 /// blue = warmer. Same level scale as the Windows build; Level 0 = off (gamma reset to 1:1:1). Applied to

@@ -1,4 +1,4 @@
-namespace AcerHelper.Features;
+namespace AcerHelper.Domain;
 
 // A small OpenRGB-style RGB framework. A device's lighting is assembled from bricks:
 //   RgbZone        — a controllable region (its effect list + apply ops), optionally split into sub-zones.
