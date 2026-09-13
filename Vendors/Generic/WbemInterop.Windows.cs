@@ -18,6 +18,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // All string parameters are passed as BSTR handles (nint) that the caller allocates with SysAllocString and
 // frees with SysFreeString — a BSTR is null-terminated UTF-16, so it also serves where the API wants a plain
 // LPCWSTR (Get/Put property names). VARIANT/CIMTYPE out-params are passed as raw pointers to caller locals.
+// See docs/wmi-interop.md.
 
 internal static partial class Wbem
 {
@@ -61,7 +62,7 @@ internal static partial class Wbem
     // on the (STA) UI thread then gets Released from the (MTA) finalizer thread — a wrong-apartment Release
     // that can leak the matching server-side object inside the WinMgmt service. This is why the interfaces
     // below return raw nint out-params instead of typed RCWs: the generated marshaller would wrap them
-    // WITHOUT UniqueInstance, making deterministic release impossible.
+    // WITHOUT UniqueInstance, making deterministic release impossible. See docs/wmi-interop.md.
     internal static readonly StrategyBasedComWrappers ComWrappers = new();
 
     /// <summary>Wrap a COM pointer received from an out-parameter into a callable RCW and release the

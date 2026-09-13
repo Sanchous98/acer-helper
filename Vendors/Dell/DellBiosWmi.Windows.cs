@@ -10,9 +10,9 @@ namespace AcerHelper.Infrastructure.Vendors.Dell;
 // Reads = query the *Attribute classes (one instance per BIOS setting); writes = the
 // BIOSAttributeInterface.SetAttribute method, whose Status output is 0 on success (1 Failed, 2 Invalid
 // Parameter, 3 Access Denied — e.g. a BIOS admin password is set, which this transport does not supply).
-// The lighting analogue of WmiInvoker: a thin accessor; the attribute names/values live in
-// DellDevice.Windows.cs. NOTE: exercised only through the shared WmiSession COM layer proven on Acer —
-// not yet verified on Dell-Windows hardware.
+// A thin accessor: the attribute names/values live in DellDevice.Windows.cs.
+// NOTE: exercised only through the shared WmiSession COM layer proven on Acer — not yet verified on
+// Dell-Windows hardware. See docs/dell-firmware.md.
 internal sealed class DellBiosWmi
 {
     private const string Ns = @"root\dcim\sysman\biosattributes";

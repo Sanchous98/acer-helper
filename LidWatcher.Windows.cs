@@ -3,15 +3,13 @@ using System.Runtime.InteropServices;
 namespace AcerHelper.Infrastructure;
 
 // Windows lid-state hook: RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE) delivers a
-// WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE to the registered window whenever the lid opens or closes — and it
-// fires even when the lid-close power action is "do nothing" (clamshell keep-awake), which is exactly the case
-// we care about. This power-setting change is delivered *targeted* to the registered HWND (not via the legacy
-// top-level power broadcast), so it would very likely reach a message-only (HWND_MESSAGE) window too — but
-// Windows only documents/guarantees WM_POWERBROADCAST delivery to top-level windows and doesn't document
-// targeted delivery to message-only ones, so this defensively creates an ordinary top-level window that is
-// never shown (a top-level window receives both broadcast and targeted notifications — a strict superset of a
-// message-only window; WS_EX_TOOLWINDOW keeps it out of the taskbar / Alt-Tab). Created on the UI thread so
-// Avalonia's Win32 message loop dispatches its messages. See LidWatcher.cs.
+// WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE to the registered window whenever the lid opens or closes — and
+// it fires even when the lid-close power action is "do nothing" (clamshell keep-awake), which is exactly the
+// case we care about. The change is delivered TARGETED to the registered HWND, but Windows only documents
+// WM_POWERBROADCAST delivery to TOP-LEVEL windows, so this defensively creates an ordinary top-level window
+// that is never shown (a strict superset of a message-only window; WS_EX_TOOLWINDOW keeps it out of the
+// taskbar / Alt-Tab). Created on the UI thread so Avalonia's Win32 message loop dispatches its messages.
+// See docs/lighting-an18-61.md.
 internal sealed partial class LidWatcher
 {
     private const int  WM_POWERBROADCAST      = 0x0218;

@@ -11,6 +11,7 @@ namespace AcerHelper.Infrastructure.Vendors.Dell;
 /// platform_profile, dell-wmi-sysman firmware-attributes); Windows = Dell's agentless BIOS-attribute
 /// ACPI-WMI (root\dcim\sysman\biosattributes, stock firmware on 2018+ business models — no Dell software
 /// needed). Per-OS wiring lives in DellDevice.{Linux,Windows}.cs; unsupported surfaces simply stay generic.
+/// See docs/dell-firmware.md.
 /// </summary>
 public sealed partial class DellDevice : GenericDevice
 {

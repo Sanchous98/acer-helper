@@ -46,7 +46,7 @@ public sealed partial class AcerDevice
         // profile the hardware reports — deliberately NOT a profile switch. Driving a full pp.Set() here (as
         // 0.28.0 did from LaptopService.ApplyStartupState) re-flashed the lightbar and raced the power-source
         // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
-        // WMI write, no palette flash, and it cannot disagree with what the UI shows.
+        // WMI write, no palette flash, and it cannot disagree with what the UI shows. See docs/power-an18-61.md.
         if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(cur.Kind);
         Sensors       = new SensorsPort(ReadSensors);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
@@ -85,7 +85,7 @@ public sealed partial class AcerDevice
     // the per-mode presets and the lightbar palette all follow it. The EC HID usage mode is what actually moves
     // the power envelope (GPU TGP/CTGP + CPU limits) on models that expose it — on the AN18-61 the WMI byte
     // alone leaves the dGPU at its bare vBIOS default. They are independent; the EC write is only enqueued
-    // (it lands on the controller's writer thread), so it cannot slow this call down.
+    // (it lands on the controller's writer thread), so it cannot slow this call down. See docs/power-an18-61.md.
     private (bool, string?) SetProfile(PerformanceProfile p)
     {
         _ec?.Apply(p.Kind);

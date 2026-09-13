@@ -36,6 +36,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// (<see cref="PawnIoInstaller"/> is what offers to install the driver). The probe is deliberately cheap — CPUID
 /// plus a registry read — because composition runs on the UI thread; the driver handle is opened on first use
 /// instead, off that thread, since loading a module is a kernel-side signature verify.
+/// See docs/curve-optimizer-strix-point.md and docs/pawnio.md.
 /// </summary>
 internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
 {
@@ -65,6 +66,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // and SetAllDldoPsmMargin 0x4C — the CPU opcodes already proven to work here.
     //
     // Verified on this machine: 0 -> -5 -> 0, every transaction REP_MSG_OK, each step confirmed by reading 0x20 back.
+    // See docs/curve-optimizer-strix-point.md.
     private const uint MsgSetGpuPsmMargin = 0x1F;
     private const uint MsgGetGpuPsmMargin = 0x20;   // read-back — the CPU side has no equivalent
 
@@ -78,12 +80,11 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // the iGPU core voltage under load). Reusing the CPU figure here would have understated every offset by half.
     private const double GpuMvPerCount = 5.0;
 
-    // The full range ZenStates documents for the PSM margin on Zen 4 and newer, deliberately not narrowed. At 5 mV a
-    // count this floor is -250 mV, and this sample already fell over well before it — but the stable limit is a
+    // The full range ZenStates documents for the PSM margin on Zen 4 and newer, deliberately not narrowed. At 5 mV
+    // a count this floor is -250 mV, and this sample already fell over well before it — but the stable limit is a
     // property of the individual die, and clipping every machine to one unlucky one would cost the good parts real
-    // headroom. The guard is the label, not the bound: the row reads "-50 (≈-250 mV)", and a figure like that warns
-    // far better than a slider that silently stops somewhere. Undervolt is opt-in, starts at stock, and Reset is one
-    // click away.
+    // headroom. The guard is the LABEL, not the bound: the row reads "-50 (≈-250 mV)", and a figure like that warns
+    // far better than a slider that silently stops somewhere. See docs/curve-optimizer-strix-point.md.
     private const int GpuMinCounts = -50;
 
     // Per-core argument layout: [31:28] = CCD, [23:20] = core within CCD, [15:0] = margin. Confirmed on this part by
@@ -96,7 +97,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // Zen5c on CCD1 slots 2..7, i.e. the LAST six of eight. The rule below reproduces that and extrapolates to the
     // other Strix Point configuration (a Ryzen AI 9 HX 370 is 4+8, so its Zen5c would fill slots 0..7). A wrong guess
     // on some future SKU is benign rather than dangerous — a core would simply get no slider, or a slider would drive
-    // an empty slot and do nothing.
+    // an empty slot and do nothing. See docs/curve-optimizer-strix-point.md.
     private const int SlotsPerCcd = 8;
     private const int Zen5Ccd = 0;
     private const int Zen5cCcd = 1;
@@ -126,6 +127,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // states outright that module APIs are NOT stable across releases — so the version whose call shapes this file
     // is written against has to travel with it. Note the PawnIO installer ships no modules at all, so there is no
     // shared system location to read one from; an explicit override file is honoured for advanced use.
+    // See docs/pawnio.md.
     private const string ModuleFile = "RyzenSMU.bin";
     private const string FnReadReg  = "ioctl_read_smu_register";    // 1 arg in, 1 value out
     private const string FnWriteReg = "ioctl_write_smu_register";   // 2 args in, nothing out
@@ -133,7 +135,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // Cross-process interlock. The mailbox is reached through the PCI config index/data pair on 00:00.0, which
     // HWiNFO, CPU-Z, Ryzen Master and RyzenAdj all poke as well; this is the name that ecosystem agreed on. It is
     // held across the WHOLE transaction, because per-access locking still lets another agent's message execute
-    // against our arguments.
+    // against our arguments. See docs/curve-optimizer-strix-point.md.
     private const string PciMutexName = @"Global\Access_PCI";
     private const int MutexWaitMs = 5000;
 
@@ -150,13 +152,11 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // voltage word in the SMU's PM table from ~1.03 V to ~0.95 V), so -40 is ~100 mV — a normal undervolt target,
     // while the only published failure datum on a sibling Zen 5 die is a crash at -50.
     //
-    // Not lower, for a reason that is not mere caution: an ALL-CORE offset is bounded by the WORST core, which is
-    // exactly why per-core Curve Optimizer exists — and per-core is unreachable here (opcode 0x4B is unconfirmed on
-    // this die, reported rejected on Krackan Point, and there is no way to learn the core-fuse topology). So past
+    // Not lower, for a reason that is not mere caution: an ALL-CORE offset is bounded by the WORST core, so past
     // some point the limit is one weak core, not the average, and the good cores cannot cash in the difference.
     // Undervolt failures on Zen 5 also surface hours later at idle as machine-check errors or silent corruption
     // rather than as an obvious crash under load, so the end of the slider should not be a place a single drag
-    // lands by accident.
+    // lands by accident. See docs/curve-optimizer-strix-point.md.
     private const int MinCounts = -40;
 
     private const string UnsupportedError = "the SMU does not implement this command (0xFE)";
@@ -176,7 +176,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     /// <summary>Measured on this part, not taken from a spec: an all-core -30 moved every per-core voltage word in
     /// the SMU's PM telemetry table from ~1.03 V to ~0.95 V under a constant load, and back on stock — ~76 mV over
     /// 30 counts. (AMD publishes no mV-per-count figure for Zen 5; the community's Zen 3 number was 3-5 mV.) Only a
-    /// display aid, since the real delta moves with frequency and temperature.</summary>
+    /// display aid, since the real delta moves with frequency and temperature. See docs/curve-optimizer-strix-point.md.</summary>
     public double MillivoltsPerCount => MvPerCount;
 
     private const double MvPerCount = 2.5;
@@ -207,7 +207,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
         // The clusters, however, are INDEPENDENT domains: measured at stock under load Zen 5 sits near 1.17 V and
         // Zen 5c near 1.02 V, and offsetting one cluster moves only that cluster. Hence exactly two tunable values.
         // Each is written to every slot of its CCD so that no core is left holding a milder request that the rail
-        // would then follow.
+        // would then follow. See docs/curve-optimizer-strix-point.md.
         var zen5c = physicalCores - Zen5Cores;
         if (zen5c is < 1 or > SlotsPerCcd) { Domains = []; _domainCcd = []; return; }
 
@@ -222,6 +222,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
         //
         // Deliberately NOT offered when cluster detection failed above: that path falls back to the single all-core
         // Set(), and a domain list containing only the iGPU would quietly turn the CPU slider into a GPU one.
+        // See docs/curve-optimizer-strix-point.md.
         Domains =
         [
             new VoltageDomain($"Zen 5", $"ccd:{Zen5Ccd}", MillivoltsPerCount: MvPerCount),
@@ -236,7 +237,8 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     /// layout is known AND PawnIO is installed. The driver check is the registry one, not a device open: it must
     /// stay cheap (composition runs on the UI thread) and it must not depend on elevation. Gating on it keeps the
     /// section honest — without the driver the sliders could appear and then refuse every write.
-    /// <see cref="PawnIoInstaller"/> is what offers to install it. Never throws.</summary>
+    /// <see cref="PawnIoInstaller"/> is what offers to install it. Never throws.
+    /// See docs/curve-optimizer-strix-point.md.</summary>
     public static RyzenCurveOptimizer? TryCreate()
     {
         try
@@ -298,7 +300,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     /// populated or not — because the rail follows the mildest request in the cluster, so a core left un-offset would
     /// undo the setting; and because an empty slot answers REP_MSG_OK and changes nothing (measured), which also makes
     /// this correct on a SKU with a different populated set. A partial failure leaves the clusters inconsistent, so the
-    /// first refusal aborts and is reported rather than pressed on with.</summary>
+    /// first refusal aborts and is reported rather than pressed on with. See docs/curve-optimizer-strix-point.md.</summary>
     public bool SetDomains(IReadOnlyList<int> counts)
     {
         lock (_gate)
@@ -338,7 +340,8 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     ///
     /// Mind the ASYMMETRIC encoding, which is easy to get backwards: the SETTER takes a 16-bit two's-complement margin
     /// (-5 is 0xFFFB), the GETTER answers a full 32-bit signed value (-5 comes back as 0xFFFFFFFB). Sign-extending the
-    /// reply from bit 15 turns a perfectly good -5 into -65541. Caller holds <see cref="_gate"/>.</summary>
+    /// reply from bit 15 turns a perfectly good -5 into -65541. Caller holds <see cref="_gate"/>.
+    /// See docs/curve-optimizer-strix-point.md.</summary>
     private bool SetGpu(PawnIo io, int counts)
     {
         if (!Accept(io, Transact(io, Rsmu, MsgSetGpuPsmMargin, GpuMargin(counts), out _), GpuDomainLabel))
@@ -370,7 +373,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // Opened on first use, never at composition time: loading a PawnIO module makes the kernel verify a signed
     // bytecode blob, which is exactly the kind of blocking call this app keeps off the UI thread (and composition
     // runs there). Cached once open; a failed open is retried on the next call, since the user may install the
-    // driver while the app is running. Caller holds _gate.
+    // driver while the app is running. Caller holds _gate. See docs/curve-optimizer-strix-point.md.
     private PawnIo? Io()
     {
         if (_io != null) return _io;
@@ -383,7 +386,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // Encode an offset as the SMU expects: a 20-bit field, negatives as 0x100000 - |counts|. 0 is sent as a plain 0,
     // NOT as 0x100000 — that would set bit 20, which the per-core form of this message uses as a core selector and
     // is a known source of rejected arguments in other tools. The mask keeps that invariant local rather than
-    // depending on the caller's clamp.
+    // depending on the caller's clamp. See docs/curve-optimizer-strix-point.md.
     internal static uint Encode(int counts)
         => (counts >= 0 ? 0u : 0x100000u - (uint)(-counts)) & 0xFFFFFu;
 
@@ -396,6 +399,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // Deliberately a separate function from Encode above rather than a shared one with a width parameter, because the
     // two differ in a way that fails silently: the CPU's 20-bit form of -5 is 0xFFFFB, the GPU's is 0xFFFB, and the
     // mailbox accepts either without complaint while meaning something else entirely.
+    // See docs/curve-optimizer-strix-point.md.
     internal static uint GpuMargin(int counts)
         => (uint)((counts < 0 ? 0x100000 : 0) + counts) & 0xFFFF;
 
@@ -403,7 +407,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     /// <see cref="NoResponse"/> when the interlock or a register access failed (with <see cref="LastError"/> already
     /// set). <paramref name="reply0"/> receives argument 0 as the SMU left it, which is where a getter's value comes
     /// back; it is read INSIDE the PCI interlock, because reading it afterwards would race another tuning tool's
-    /// transaction into our reply. Caller holds <see cref="_gate"/>.</summary>
+    /// transaction into our reply. Caller holds <see cref="_gate"/>. See docs/curve-optimizer-strix-point.md.</summary>
     private uint Transact(PawnIo io, in Mailbox mb, uint message, uint arg0, out uint reply0)
     {
         reply0 = 0;
@@ -503,7 +507,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // published results diverge (the same opcode is reported rejected on one and effective on the other), so
     // claiming support here would be guessing on someone else's hardware.
     /// <summary>Whether this CPU is one the undervolt supports, independent of whether the driver is installed — so
-    /// the driver-setup offer knows if it is even relevant here.</summary>
+    /// the driver-setup offer knows if it is even relevant here. See docs/curve-optimizer-strix-point.md.</summary>
     public static bool SupportedCpu => IsKnownStrixPoint();
 
     private static bool IsKnownStrixPoint()
@@ -571,7 +575,7 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // uses. The override exists because module APIs are explicitly unstable across releases: if a future blob
     // changes a call shape, someone can pin their own without waiting for a build. It is deliberately an explicit
     // path in the app's own config folder rather than a scan of shared locations, so a stray file elsewhere can
-    // never silently change which bytes get loaded into the kernel.
+    // never silently change which bytes get loaded into the kernel. See docs/pawnio.md.
     private static byte[]? LoadModule()
     {
         foreach (var path in new[]

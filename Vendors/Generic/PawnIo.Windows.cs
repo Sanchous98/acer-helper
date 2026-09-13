@@ -32,7 +32,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// The driver and its module blobs ship SEPARATELY from the app (same arrangement as the LampArray driver, see
 /// <see cref="LampArrayTransport"/>): PawnIO is installed by its own signed installer, and the module is a signed
 /// binary only its author can produce. So this class never installs anything — it probes, and every consumer
-/// treats "absent" as "feature unavailable" rather than as an error.
+/// treats "absent" as "feature unavailable" rather than as an error. See docs/pawnio.md.
 /// </summary>
 internal sealed class PawnIo : IDisposable
 {
@@ -42,6 +42,7 @@ internal sealed class PawnIo : IDisposable
     // device type is PawnIO's own (0xA1B2), not a Windows one: (0xA1B2 << 16) | (fn << 2). Both codes were verified
     // byte-for-byte against an installed PawnIO 2.2.0.0 — they appear in PawnIOLib.dll and adjacently in PawnIO.sys's
     // dispatch switch — so these are the driver's real numbers, not values copied out of a write-up.
+    // See docs/pawnio.md.
     private const uint IoctlLoadBinary = 0xA1B22084;
     private const uint IoctlExecuteFn  = 0xA1B22104;
     private const int  NameField       = 32;   // fixed-size ASCII function-name field that prefixes the args

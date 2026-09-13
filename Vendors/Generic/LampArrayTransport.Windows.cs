@@ -26,7 +26,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// Two handles, on purpose: a synchronous file object serialises its requests, so a STOP issued while
 /// WAIT_FRAME is pending would queue BEHIND it and deadlock until the host happened to send a frame. Control
 /// and frame traffic therefore use separate handles (the driver tears the device down when the last one
-/// closes, so an app crash can't leave a zombie entry in Dynamic Lighting either).
+/// closes, so an app crash can't leave a zombie entry in Dynamic Lighting either). See docs/lamparray.md.
 /// </summary>
 internal sealed class LampArrayTransport : ILampArrayTransport
 {

@@ -37,12 +37,12 @@ internal sealed class LightingCoordinator : IDisposable
     private const int ReapplyTicks = 8;
     // Of those ticks, how many also RE-SEND the profile palette flash. The flash is a global write that briefly
     // repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one more
-    // visible blink of the keyboard and lightbar. It is worth that cost on the RESTORE paths (startup, resume,
-    // lid open, host hand-back), where nothing else re-establishes the palette and the bus may be contended, so
-    // those kicks ask for it. A profile SWITCH does not: the firmware flashes the new palette itself at the
-    // moment of the write and we now send ours in the same instant (see OnProfileApplied), so a re-send 400 ms
-    // later is simply a second blink cycle. Hence the flag on KickReapply. The per-zone KEYBOARD paint (the
-    // actual "half green/half orange" self-heal) still runs on EVERY tick, which is silent when already correct.
+    // visible blink of keyboard and lightbar. Worth that cost on the RESTORE paths (startup, resume, lid open,
+    // host hand-back), where nothing else re-establishes the palette and the bus may be contended, so those
+    // kicks ask for it. A profile SWITCH does not: the firmware flashes the new palette itself at the moment of
+    // the write and we now send ours in the same instant (see OnProfileApplied), so a re-send 400 ms later is
+    // simply a second blink cycle. The per-zone KEYBOARD paint (the actual "half green/half orange" self-heal)
+    // still runs on EVERY tick, which is silent when already correct. See docs/lighting-an18-61.md.
     private const int FlashTicks = 2;
 
     // How long a locally-applied profile may stay unconfirmed by the refresh pass before we stop suppressing
@@ -140,13 +140,13 @@ internal sealed class LightingCoordinator : IDisposable
     }
 
     /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
-    /// profile that actually landed, so nothing has to be read back out of the hardware. Repaint NOW.
+    /// profile that actually landed, so nothing has to be read back out of the hardware. Repaint NOW, in the same
+    /// instant as the firmware's own palette flash, so the two coincide into one.
     ///
-    /// This used to wait for the refresh pass to DISCOVER the change by polling, which is what produced the
-    /// double blink: the firmware flashes the new palette the instant the profile byte is written, and our own
-    /// palette write then landed ~750 ms later as a second, separate flash cycle. Painting here puts our write
-    /// in the same instant as the firmware's, so the two coincide into one — and the burst we kick deliberately
-    /// carries NO further palette re-sends, only the per-zone self-heal.</summary>
+    /// This used to wait for the refresh pass to DISCOVER the change by polling, which is what produced the double
+    /// blink: the firmware flashes the new palette the instant the profile byte is written, and our own palette
+    /// write then landed ~750 ms later as a second, separate flash cycle. The burst we kick here deliberately
+    /// carries NO further palette re-sends, only the per-zone self-heal. See docs/lighting-an18-61.md.</summary>
     public void OnProfileApplied(PerformanceProfile applied)
     {
         _pendingId = applied.Id;          // suppress the stale passes still describing the previous profile
@@ -246,14 +246,14 @@ internal sealed class LightingCoordinator : IDisposable
         if ((now - _lastResume).TotalSeconds < 3) return;
         _lastResume = now;
         Paint();
-        // GPU clock offsets are volatile GPU state too: the dGPU power-cycles across suspend (Optimus D3-cold)
-        // and comes back at 0 offset, so re-assert the current mode's offsets; likewise the CPU power mode.
-        // Off the UI thread — ApplyModeCpuPower reads the EC (profile) which can stall right after wake, and we
-        // must not block the UI. No UI reflect needed (values unchanged); no-op when those ports are absent.
-        // The CPU curve-optimizer offset is volatile in the same way — it lives in SMU state, which the platform
-        // restores to stock across a power transition — so it joins the same off-thread re-assert. Guarded because
-        // the device can be tearing down (an exit racing the wake), and an escaping throw here would be an
-        // unobserved task exception rather than anything anyone sees.
+        // GPU clock offsets and the CPU curve-optimizer offset are both VOLATILE hardware state: the dGPU
+        // power-cycles across suspend (Optimus D3-cold) and comes back at 0 offset, and the Curve Optimizer offset
+        // lives in SMU state the platform restores to stock across a power transition — so re-assert the current
+        // mode's values, together with the CPU power mode. Off the UI thread (ApplyModeCpuPower reads the EC, which
+        // can stall right after wake, and we must not block the UI). No UI reflect needed (values unchanged); no-op
+        // when those ports are absent. Guarded because the device can be tearing down (an exit racing the wake), and
+        // an escaping throw here would be an unobserved task exception.
+        // See docs/nvidia-gpu-oc.md and docs/curve-optimizer-strix-point.md.
         _ = Task.Run(() =>
         {
             try { _svc.ApplyModeGpuOc(); _svc.ApplyModeCpuPower(); _svc.ApplyModeCo(); }

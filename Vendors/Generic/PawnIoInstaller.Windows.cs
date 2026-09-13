@@ -26,7 +26,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// Detection is the ARP registry key, NOT the device handle: opening \\?\GLOBALROOT\Device\PawnIO tells you the
 /// driver is *usable right now* (it fails when not elevated, or when the node is stopped), which is a different
 /// question from whether it is installed — and answering it wrongly would fire the installer at a machine that
-/// already has PawnIO, where it fails with no UI at all.
+/// already has PawnIO, where it fails with no UI at all. See docs/pawnio.md.
 /// </summary>
 internal static class PawnIoInstaller
 {

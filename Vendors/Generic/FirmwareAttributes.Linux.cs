@@ -13,7 +13,8 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// root-only for BOTH read and write, so a feature is only offered when its current value is readable
 /// (<see cref="CanRead"/>). Writes are additionally gated by the firmware: when a BIOS admin password is
 /// configured (<see cref="RequiresPassword"/>), the kernel rejects attribute writes unless the password is
-/// supplied first — which this app doesn't do — so callers should not offer those controls.</summary>
+/// supplied first — which this app doesn't do — so callers should not offer those controls.
+/// See docs/dell-firmware.md.</summary>
 public sealed class FirmwareAttributes
 {
     private readonly string _root;    // /sys/class/firmware-attributes/<device>

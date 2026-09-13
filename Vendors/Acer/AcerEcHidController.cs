@@ -5,42 +5,28 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // Cross-platform Acer EC HID controller: the channel that actually carries the performance envelope on recent
 // Nitro/Predator models (device VID 0x1025 / PID 0x174B, vendor collection on usage page 0xFF05, 65-byte
 // feature reports). The packets are identical on every OS, so this file is the codec and the per-OS partials
-// supply the transport hooks — AcerEcHidController.Windows.cs uses HidSharp, .Linux.cs talks to hidraw (this
-// controller hangs off HID-over-I2C, which HidSharp's Linux enumeration never lists — same story as
-// EneHidController).
+// supply the transport hooks.
 //
-// WHY THIS EXISTS. On the Nitro AN18-61 the gaming-WMI profile byte (SetGamingMiscSetting index 0x0B) turned
-// out to be only an *indicator*: writing it moves the tray state and the lightbar palette but does not touch
-// the power envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit
-// 71 W <-> 108 W while EVERY gaming-WMI value stayed frozen (index 0x0B stuck on Eco the whole time, and
-// GetGamingProfile constant). So the envelope — GPU TGP/CTGP plus the CPU limits — lives in the EC's own
-// "system usage mode", reachable only over this HID interface. Without it the dGPU sits at the bare vBIOS
-// default (70 W base + whatever Dynamic Boost grants, ~78 W sustained) no matter which profile the app shows.
+// WHY THIS EXISTS. On the Nitro AN18-61 the gaming-WMI profile byte (SetGamingMiscSetting index 0x0B) is only
+// an *indicator*: writing it moves the tray state and the lightbar palette but does not touch the power
+// envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit 71 W <-> 108 W
+// while EVERY gaming-WMI value stayed frozen. So the envelope (GPU TGP/CTGP plus the CPU limits) lives in the
+// EC's own "system usage mode", reachable only over this HID interface.
 //
 // WIRE FORMAT: A0 00 A0 <featureId:LE16> <cmdId> <params…>, zero-padded to 65. A GetFeature of report 0xA0
 // answers with byte[2] = 0xE0 when the EC accepted the FRAME — but that is frame-level only: an out-of-range
-// mode is acknowledged the same way and then silently ignored, so there is nothing worth verifying against
-// and this controller is write-only. (The EC also exposes read commands — GetOCProfileTable at featureId
-// 0x0002 / cmdId 0x02 dumps the four per-profile power rows — but nothing needs them at runtime.)
+// mode is acknowledged the same way and then silently ignored, so this controller is WRITE-ONLY.
 //
-// MODE BYTE -> steady dGPU limit, measured on AN18-61 under sustained load, each mode entered from a
-// re-confirmed mode 0 (a descending sweep lies: a mode that is a no-op just leaves the previous level in
-// place, which is exactly how byte 5 first looked valid):
-//     0 = 108 W (TGP 100 + boost)   1 = 93 W (TGP 85)   2 = 79 W (TGP 70 + boost)   3 = 71 W   4 = 71 W
-//     5 and above = acknowledged, then ignored.
-// Five valid values, matching the EC's own reported "system usage mode capability: 5". Modes 3 and 4 are the
-// same GPU row and differ only in the CPU envelope, so Quiet/Eco map to them in that order.
-//
-// The EC LATCHES the mode: it survives this app exiting and needs no resident daemon (verified with all nine
-// Acer services stopped — the limit stayed at 100 W+ with zero Acer processes alive). It does NOT necessarily
-// survive a reboot, which is why LaptopService re-asserts the profile at startup. Acer's own AcerQAAgent, when
-// it is running, re-applies its own mode within a minute or two and will fight these writes — that is an
-// argument for removing the Acer stack, not for polling here.
+// The EC LATCHES the mode: it survives this app exiting and needs no resident daemon. It does NOT necessarily
+// survive a reboot, which is why LaptopService re-asserts the profile at startup (EC-only — a full profile
+// switch there re-flashes the lightbar and cascades at every boot).
 //
 // Writes go through a background writer thread, never the caller's (UI) thread: WriteFeature is a synchronous
-// no-timeout HID write on the same HID-over-I2C bus as the RGB controller, and a contended bus (external USB-C
-// display, worst at boot) can block it for a long time. Only the newest mode matters, so the queue is a single
-// coalescing slot rather than EneHidController's per-region list.
+// no-timeout HID write on the same HID-over-I2C bus as the RGB controller, and a contended bus can block it
+// for a long time. Only the newest mode matters, so the queue is a single coalescing slot.
+//
+// Mode byte -> steady dGPU limit (0 = 108 W, 1 = 93 W, 2 = 79 W, 3 = 71 W, 4 = 71 W, 5+ acknowledged then
+// ignored), the wire format, the measurement methodology and every dead end: see docs/power-an18-61.md.
 internal sealed partial class AcerEcHidController : IDisposable
 {
     private const int VID = 0x1025, PID = 0x174B, FeatureLen = 65;

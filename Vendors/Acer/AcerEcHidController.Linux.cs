@@ -11,9 +11,9 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // Reaching /dev/hidrawN without root relies on the desktop's uaccess ACL (present for built-in HID) or a udev
 // rule — the same prerequisite the RGB controller already documents.
 //
-// NOTE: untested on Linux hardware. The codec is verified on Windows (see AcerEcHidController.cs); if the node
-// is missing or unwritable the controller simply reports Available = false and the profile path keeps its
-// previous behaviour, so a wrong guess here degrades to "no EC envelope control", never to a bad write.
+// NOTE: untested on Linux hardware. A missing or unwritable node degrades to Available = false and the profile
+// path keeps its previous behaviour, so a wrong guess means "no EC envelope control", never a bad write.
+// See docs/power-an18-61.md.
 internal sealed partial class AcerEcHidController
 {
     private FileStream? _dev;

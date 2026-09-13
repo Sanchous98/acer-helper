@@ -131,7 +131,7 @@ public sealed class CoPreset
     public int AllCore { get; set; }
 
     /// <summary>Per-voltage-domain offsets keyed by the domain's hardware identity (see
-    /// <see cref="Features.VoltageDomain.Key"/>) — a domain name rather than a list position, so a preset survives a
+    /// <see cref="VoltageDomain.Key"/>) — a domain name rather than a list position, so a preset survives a
     /// change in how domains are ordered or labelled. Preferred over <see cref="AllCore"/> wherever the CPU exposes
     /// separate domains, because a hybrid part's clusters are separate rails sitting at different voltages, and one
     /// number for both is pinned by whichever gives out first. A missing key means stock (0) for that domain.</summary>

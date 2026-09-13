@@ -124,7 +124,8 @@ public interface IDisplayTint
 /// stock boost curve, each within the driver-reported allowed range. Present only when a controllable NVIDIA
 /// dGPU is detected — the port is null otherwise, so the UI hides the section. The offsets are NOT persisted
 /// by the driver (a reboot/driver-reload zeroes them), so the app is the source of truth and re-applies on
-/// startup, on resume, and on every performance-mode switch (see LaptopService).</summary>
+/// startup, on resume, and on every performance-mode switch (see LaptopService).
+/// See docs/nvidia-gpu-oc.md.</summary>
 public interface IGpuOverclock
 {
     string? LastError { get; }
@@ -145,7 +146,7 @@ public interface IGpuOverclock
 /// G-Helper's driverless CPU axis — this maps a chosen OS power mode to each performance profile. Ids are the
 /// overlay scheme GUID strings; the mode set is the three fixed OS overlays. Present only where the overlay API
 /// responds (probe-and-hide). The voltage-curve axis is separate and needs a driver: see
-/// <see cref="ICurveOptimizer"/>.</summary>
+/// <see cref="ICurveOptimizer"/>. See docs/power-an18-61.md.</summary>
 public interface ICpuPower
 {
     string? LastError { get; }
@@ -159,14 +160,14 @@ public interface ICpuPower
 
 /// <summary>CPU undervolt via AMD's Curve Optimizer: a signed offset in AVFS "counts" applied to the whole
 /// voltage/frequency curve (negative = less voltage at every frequency, 0 = stock). The CPU-side twin of
-/// <see cref="IGpuOverclock"/> — same shape, same volatility, same re-apply duty: the offset lives in SMU state,
-/// so a power cycle restores stock and the app is the source of truth per performance mode.
+/// <see cref="IGpuOverclock"/> — same shape, same volatility, same re-apply duty: the offset lives in SMU
+/// state, so a power cycle restores stock and the app is the source of truth per performance mode.
 ///
 /// Present only on a CPU whose SMU mailbox layout is known AND where the required ring-0 gateway is installed —
-/// null otherwise, so the UI hides the section. Two properties of this port are unusual and deliberate: a
-/// successful <see cref="Set"/> means the SMU <i>accepted</i> the message, not that the curve provably moved
-/// (this hardware offers no trustworthy read-back), and a too-aggressive offset fails hours later at idle rather
-/// than under load — so callers should treat it as opt-in, warn, and default to stock.</summary>
+/// null otherwise, so the UI hides the section. Two properties are unusual and deliberate: a successful
+/// <see cref="Set"/> means the SMU <i>accepted</i> the message, not that the curve provably moved, and a
+/// too-aggressive offset fails hours later at idle rather than under load — so callers must treat it as
+/// opt-in, warn, and default to stock. See docs/curve-optimizer-strix-point.md.</summary>
 public interface ICurveOptimizer
 {
     string? LastError { get; }
@@ -185,7 +186,7 @@ public interface ICurveOptimizer
     /// per-CORE control would leave all but one core per cluster inert. On an APU the integrated GPU is a domain too:
     /// same SMU, same volatility, same per-mode preset, just a different rail and mailbox. A domain may carry its own
     /// <see cref="VoltageDomain.Range"/> / <see cref="VoltageDomain.MillivoltsPerCount"/>, so callers must read those
-    /// per domain and fall back to the port's only when they are null.</summary>
+    /// per domain and fall back to the port's only when they are null. See docs/curve-optimizer-strix-point.md.</summary>
     IReadOnlyList<VoltageDomain> Domains { get; }
 
     /// <summary>Apply one offset per domain, index-aligned with <see cref="Domains"/> (each clamped to
@@ -198,19 +199,19 @@ public interface ICurveOptimizer
     bool Set(int counts);
 }
 
-/// <summary>One independently tunable voltage domain of the processor package — on a hybrid part a core cluster, and on
-/// an APU also the integrated GPU, which is a separate rail on the same SMU. <see cref="Label"/> is for display
-/// (e.g. "Zen 5c", "iGPU") and is an architecture name or a technical abbreviation, so it is not translated.
-/// <see cref="Key"/> is the stable identity used as the settings key: it names the hardware domain rather than a
-/// position in a list, so a preset survives a change in how domains are ordered or labelled.
+/// <summary>One independently tunable voltage domain of the processor package — on a hybrid part a core
+/// cluster, and on an APU also the integrated GPU, which is a separate rail on the same SMU.
+/// <see cref="Label"/> is for display (e.g. "Zen 5c", "iGPU") and is an architecture name or a technical
+/// abbreviation, so it is not translated. <see cref="Key"/> is the stable identity used as the settings key:
+/// it names the hardware domain rather than a position in a list, so a preset survives a change in how
+/// domains are ordered or labelled.
 ///
 /// <see cref="Range"/> overrides the port-wide range for this domain alone; null means "use the port's".
-/// <see cref="MillivoltsPerCount"/> is different — null there means <i>unknown for this domain, show no estimate</i>,
-/// NOT "inherit". Domains are not interchangeable: volts-per-count is a property of one particular rail and has to be
-/// measured on it. On this hardware the graphics rail turned out to move 5 mV per count against the cores' 2.5, so a
-/// domain that borrowed a neighbour's figure would misreport every offset by a factor of two — and a domain nobody has
-/// measured must be able to say so rather than guess. The port-wide
-/// <see cref="ICurveOptimizer.MillivoltsPerCount"/> is the fallback for the domainless (single all-core) case.</summary>
+/// <see cref="MillivoltsPerCount"/> is different — null there means <i>unknown for this domain, show no
+/// estimate</i>, NOT "inherit". Volts-per-count is a property of one particular rail and has to be measured
+/// on it (on this hardware the graphics rail moves 5 mV/count against the cores' 2.5), so a domain that
+/// borrowed a neighbour's figure would misreport every offset by a factor of two.
+/// See docs/curve-optimizer-strix-point.md.</summary>
 public sealed record VoltageDomain(
     string Label,
     string Key,
@@ -223,7 +224,7 @@ public sealed record VoltageDomain(
 ///
 /// Deliberately an offer, not an action taken on the user's behalf: installing a kernel driver is the user's
 /// decision, it is somebody else's software, and it may be shared with other tools on the machine. Nothing here
-/// upgrades or removes anything.</summary>
+/// upgrades or removes anything. See docs/pawnio.md.</summary>
 public interface IDriverSetup
 {
     /// <summary>What is being installed, for the prompt (e.g. "PawnIO").</summary>

@@ -5,25 +5,17 @@ namespace AcerHelper.Domain;
 /// app) writes to our virtual HID device and turns them into this device's zone writes — and arbitrates
 /// ownership of the backlight while it does, so the app and the OS don't fight over it.
 ///
-/// Three problems make this more than a memcpy, all of them properties of the hardware rather than of
-/// LampArray (see docs/lighting-an18-61.md):
-///
-///  1. RATE. A host paints at 30–60 Hz. The ENE controller hangs off HID-over-I2C and a full keyboard apply
-///     is several feature reports; bursts land corrupted on a bus a display is contending (that is what the
-///     10 ms pacing and the coalescing in EneHidController exist for). So frames are rate-limited HERE, to
-///     the same interval the layout ADVERTISES as MinUpdateInterval — a well-behaved host then throttles
-///     itself and we simply enforce it for the rest. Frames are last-one-wins in the transport, so slowing
-///     down never builds a backlog; it drops intermediate frames, which is exactly right for lighting.
-///  2. WRITE COUNT. Per-sub-zone writes are one report each, but a uniform colour across the whole zone is a
-///     single all-zones report. Most host effects (solid colour, breathing, "match my accent colour") are
-///     uniform, so collapsing them removes 3 of every 4 reports — the same trick LightViewModel.ApplyNow
-///     uses, for the same reason. Unchanged sub-zones are skipped outright.
-///  3. OWNERSHIP. While the host drives the surface, the app must stop painting it (G HUB likewise refuses to
-///     configure LIGHTSYNC while Dynamic Lighting is on) — otherwise every profile switch, resume and 400 ms
-///     re-apply tick would stomp the host's frame. <see cref="HostOwnsLighting"/> is that gate, and
-///     <see cref="Reassert"/> is its counterpart: the EC forces the keyboard back to its amber profile-flash
-///     on every profile switch and drops RGB across sleep, so after those events SOMEONE has to repaint —
-///     and while the host owns the surface, that someone is us, from the last frame it sent.
+/// Three problems make this more than a memcpy, all properties of the hardware (docs/lamparray.md):
+///  1. RATE. A host paints at 30–60 Hz; the ENE controller is on HID-over-I2C and a full keyboard apply is
+///     several feature reports (hence EneHidController's pacing and coalescing). Frames are rate-limited HERE
+///     to the interval the layout ADVERTISES as MinUpdateInterval, and are last-one-wins, so slowing down
+///     drops intermediate frames rather than building a backlog.
+///  2. WRITE COUNT. A uniform colour across a zone is ONE all-zones report instead of one per sub-zone;
+///     unchanged sub-zones (±ColorEpsilon per channel) are skipped outright.
+///  3. OWNERSHIP. While the host drives the surface the app must stop painting it, or every profile switch,
+///     resume and re-apply tick would stomp the host's frame. <see cref="HostOwnsLighting"/> is that gate;
+///     <see cref="Reassert"/> is its counterpart, repainting the host's last frame after the EC clobbers the
+///     surface on a profile switch or across sleep.
 ///
 /// Threading: one long-lived worker thread pumps the transport (a blocking wait) and applies frames; the zone
 /// writes it makes are themselves non-blocking (EneHidController queues them onto its own writer). Public
@@ -134,11 +126,10 @@ public sealed class LampArrayBridge : IDisposable
         ReleaseOwnership();
     }
 
-    /// <summary>Repaint the hardware from the host's last frame, ignoring the dedupe. Call after anything that
-    /// clobbers the EC's RGB behind our back — a performance-profile switch (the EC forces its amber
-    /// profile-flash), a resume from sleep, a lid-open restore. No-op unless a host currently owns the surface
-    /// and has actually sent a frame. Runs on the caller's thread; the writes it issues are queued, not
-    /// blocking, so this is safe from the UI thread.</summary>
+    /// <summary>Repaint the hardware from the host's last frame, ignoring the dedupe — for the events where the
+    /// EC or the OS clobbers the surface (a profile switch forces the amber OPMODE flash and wipes the RGB, sleep
+    /// drops it, a clamshell lid-open restores from black) and the host is the rightful owner of what should be
+    /// showing. See docs/lamparray.md.</summary>
     public void Reassert()
     {
         if (!Enabled || !HostOwnsLighting) return;

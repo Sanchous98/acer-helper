@@ -6,20 +6,21 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace AcerHelper.UI.ViewModels;
 
-/// <summary>CPU-undervolt section: one Curve-Optimizer offset slider per independently tunable voltage domain (on a
-/// hybrid part, "Zen 5" and "Zen 5c" — separate rails measured near 1.17 V and 1.02 V, so one number for both is pinned
-/// by whichever gives out first), or a single all-core slider on a CPU with one domain. Per-CORE is deliberately not
-/// offered: within a rail the delivered voltage follows the mildest core's request, so all but one core per cluster
-/// would be inert. Applies on change (debounced) and persists PER performance mode — switching mode reloads that
-/// mode's offsets (see
+/// <summary>CPU-undervolt section: one Curve-Optimizer offset slider per independently tunable voltage domain
+/// (on a hybrid part, "Zen 5" and "Zen 5c" — separate rails measured near 1.17 V and 1.02 V, so one number for
+/// both is pinned by whichever gives out first — and on an APU also the iGPU), or a single all-core slider on
+/// a CPU with one domain. Per-CORE is deliberately not offered: within a rail the delivered voltage follows
+/// the mildest core's request, so all but one core per cluster would be inert. Applies on change (debounced)
+/// and persists PER performance mode — switching mode reloads that mode's offsets (see
 /// <see cref="Load"/>), and an unconfigured mode is stock. Only built when the device exposes an
-/// <see cref="Features.ICurveOptimizer"/> port.
+/// <see cref="ICurveOptimizer"/> port.
 ///
-/// Shaped like <see cref="GpuViewModel"/>, with one difference that matters: applying is slow here (an SMU mailbox
-/// transaction per core slot, waiting on a machine-wide lock), so the <c>apply</c> delegate this receives is expected
-/// to hand the work off a thread itself — see AppController.SetCo. Nothing in this class may block. All rows are
-/// applied together on one debounce tick rather than per row, so dragging one slider does not re-write the others'
-/// cores one transaction at a time.</summary>
+/// Shaped like <see cref="GpuViewModel"/>, with one difference that matters: applying is slow here (an SMU
+/// mailbox transaction per core slot, waiting on a machine-wide lock), so the <c>apply</c> delegate this
+/// receives is expected to hand the work off a thread itself — see AppController.SetCo. Nothing in this class
+/// may block. All rows are applied together on one debounce tick rather than per row, so dragging one slider
+/// does not re-write the others' cores one transaction at a time.
+/// See docs/curve-optimizer-strix-point.md.</summary>
 public sealed partial class CoViewModel : SectionViewModel
 {
     private readonly Action<int[]> _apply;
@@ -122,15 +123,16 @@ public sealed partial class CoRowViewModel : ObservableObject
     partial void OnOffsetChanged(double value) { OffsetLabel = Fmt(value); _changed(); }
 
     // AVFS step count first — it is what the hardware takes and what every tool and write-up talks in — with the
-    // millivolts it works out to in brackets, since that is the unit an undervolt is actually thought about in. The
-    // mV figure carries "≈" on purpose: a count is only approximately a fixed voltage, because the offset shifts the
-    // whole V/F curve rather than clamping a voltage, so the delivered delta moves with frequency and temperature.
-    // Stock reads as a plain 0.
+    // millivolts it works out to in brackets, since that is the unit an undervolt is actually thought about in.
+    // The mV figure carries "≈" on purpose: a count is only approximately a fixed voltage, because the offset
+    // shifts the whole V/F curve rather than clamping a voltage, so the delivered delta moves with frequency and
+    // temperature. Stock reads as a plain 0.
     //
-    // Each rail brings its OWN scale — 2.5 mV a count on the cores, 5 on the graphics rail — so the arithmetic is per
-    // row rather than per section. A rail that has never been measured passes null and shows the bare count: steps are
-    // the hardware's own unit and remain usable, which beats printing a millivolt figure borrowed from a different
-    // rail's measurement, since that would look authoritative and be wrong.
+    // Each rail brings its OWN scale — 2.5 mV a count on the cores, 5 on the graphics rail — so the arithmetic is
+    // per row rather than per section. A rail that has never been measured passes null and shows the bare count:
+    // steps are the hardware's own unit and remain usable, which beats printing a millivolt figure borrowed from a
+    // different rail's measurement, since that would look authoritative and be wrong.
+    // See docs/curve-optimizer-strix-point.md.
     private string Fmt(double counts)
     {
         var steps = (int)counts;

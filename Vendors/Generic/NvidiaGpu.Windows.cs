@@ -10,8 +10,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// frequency delta, which shifts the whole voltage/frequency boost curve. NvAPI exposes exactly one real DLL
 /// export, <c>nvapi_QueryInterface</c>, which resolves each function's pointer by a stable hex ID; those
 /// pointers are then invoked through unmanaged function pointers (<c>delegate* unmanaged</c>) over blittable
-/// structs — no runtime-generated marshalling and no COM, so it is Native-AOT-safe (unlike System.Management,
-/// which is why this app hand-rolls all its native interop).
+/// structs — no runtime-generated marshalling and no COM, so it is Native-AOT-safe.
 ///
 /// The offset is VOLATILE — the driver zeroes it on every reboot / driver reload / dGPU power-cycle (an
 /// Optimus laptop dGPU going D3-cold), so the app is the source of truth: LaptopService persists the user's
@@ -19,7 +18,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// offset needs the process elevated (the app already runs as admin for the EC/WMI controls).
 ///
 /// Windows-only: nvapi64.dll ships with the NVIDIA driver and is simply absent on AMD/Intel-only laptops,
-/// where <see cref="TryCreate"/> returns null and the UI hides the GPU section.
+/// where <see cref="TryCreate"/> returns null and the UI hides the GPU section. See docs/nvidia-gpu-oc.md.
 /// </summary>
 internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
 {
@@ -39,7 +38,7 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
     // Safety caps on the exposed offset range (MHz), applied even if the driver reports more headroom — a
     // single slider drag to an extreme offset can hang or corrupt the GPU (NVIDIA XID 62). The memory value is
     // the RAW memory-clock offset, matching G-Helper's convention (it writes the number as-is, no GDDR6
-    // doubling); an Afterburner "effective" figure is ~2× this.
+    // doubling); an Afterburner "effective" figure is ~2× this. See docs/nvidia-gpu-oc.md.
     private const int CoreCap = 300;
     private const int MemCap  = 1500;
 

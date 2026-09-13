@@ -37,13 +37,14 @@ public partial class GenericDevice
 
     // CPU power management via the Windows power-mode overlay — the one CPU-power knob that needs no driver at all
     // (ring-0 PPT is out of reach; the ring-0 undervolt axis is the separate CurveOptimizer port wired in
-    // InitPlatform, and Acer exposes no WMI power path). Wired here (after the vendor backend has finalized the
-    // profile port) rather than in InitPlatform, and ONLY when the performance profiles are NOT themselves the
-    // Windows overlay: OverlayCpuPower and OverlayPowerProfiles drive the SAME overlay with the SAME GUIDs, so
-    // if the profile picker already IS the overlay (generic laptop, or a vendor whose WMI/BIOS profile path was
-    // unavailable) a CPU-power control would fight it — and, since the per-mode key is then the overlay GUID,
-    // corrupt the per-profile store. So it's an independent axis only when a vendor WMI/EC profile port took
-    // over. Null (section hidden) otherwise, and on an OS without the overlay API.
+    // InitPlatform, and Acer exposes no WMI power path — it bakes the whole envelope into its fixed EC profiles).
+    // Wired here (after the vendor backend has finalized the profile port) rather than in InitPlatform, and ONLY
+    // when the performance profiles are NOT themselves the Windows overlay: OverlayCpuPower and
+    // OverlayPowerProfiles drive the SAME overlay with the SAME GUIDs, so if the profile picker already IS the
+    // overlay (generic laptop, or a vendor whose WMI/BIOS profile path was unavailable) a CPU-power control would
+    // fight it — and, since the per-mode key is then the overlay GUID, corrupt the per-profile store. So it's an
+    // independent axis only when a vendor WMI/EC profile port took over. Null (section hidden) otherwise, and on
+    // an OS without the overlay API. See docs/power-an18-61.md.
     partial void FinalizeCompositionPlatform()
     {
         if (PowerProfiles is OverlayPowerProfiles) return;

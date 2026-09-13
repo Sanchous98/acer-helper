@@ -9,16 +9,10 @@ namespace AcerHelper.Domain;
 //                     --ILampArrayTransport-->  LampArrayBridge  -->  RgbZone.ApplySubZone / ApplyEffect
 //
 // Windows only enumerates lighting devices that expose the HID LampArray usage page (0x59) — there is NO
-// user-mode "register a LampArray" API — so the device itself has to be a small kernel driver. That is
-// exactly what Logitech's translation layer is (logi_lamparray.sys + vhf as a lower filter + a user-mode
-// service doing the protocol conversion). Everything ABOVE the driver lives here and in LampArrayBridge, so
-// the LampArray semantics, the geometry and the rate limiting can be iterated on in C# without rebuilding —
-// let alone re-signing — a driver.
+// user-mode "register a LampArray" API — so the device itself has to be a small kernel driver. Everything
+// ABOVE it lives in C# so the semantics, geometry and rate limiting iterate without re-signing a driver.
 //
-// Field/report semantics follow "Lighting And Illumination Page (0x59)" of HID Usage Tables 1.4 and
-// Microsoft's reference implementation (github.com/microsoft/ArduinoHidForWindows, MIT). The units ON THE
-// WIRE are micrometres and microseconds — hence the µm/µs in this model; conversion from mm/ms happens here,
-// once, so neither the driver nor the bridge has to think about it.
+// Units ON THE WIRE are micrometres and microseconds; the conversion from mm/ms happens once, here.
 // ---------------------------------------------------------------------------------------------------------
 
 /// <summary>What kind of thing the lamps are attached to. Reported in the LampArrayAttributes report;
@@ -44,7 +38,7 @@ public readonly record struct LampColor(byte R, byte G, byte B, byte Intensity)
     /// <summary>The colour to actually render. We advertise <c>IntensityLevelCount = 1</c> (this hardware has
     /// no per-lamp gain — brightness is a per-write byte for the whole keyboard), which per spec means the
     /// intensity channel degenerates to on/off and the host bakes brightness into RGB. So: intensity 0 is
-    /// "lamp off", anything else means "render RGB as sent".</summary>
+    /// "lamp off", anything else means "render RGB as sent". See docs/lamparray.md.</summary>
     public AccentColor Rgb => Intensity == 0 ? new AccentColor(0, 0, 0) : new AccentColor(R, G, B);
 
     /// <summary>Near-equality, used to drop no-op writes. The host re-sends whole frames at its own frame
@@ -103,8 +97,8 @@ public sealed class LampArrayLayout
     // Nominal physical geometry. The Acer controllers expose ZONES, not keys, and nothing in firmware, WMI or
     // acer-models.json reports the keyboard's real dimensions — so we describe a plausible full-size gaming
     // keyboard and spread the zones across it. What matters to the host is not absolute accuracy but that the
-    // lamps are laid out left-to-right in the right proportions: that is what makes a "wave" sweep across the
-    // keyboard the right way round and a "gradient" fall in the right direction.
+    // lamps are laid out left-to-right in the right PROPORTIONS: that is what makes a "wave" sweep the right way
+    // round. See docs/lamparray.md.
     private const int KeyboardWidthMm = 330, KeyboardHeightMm = 110;
     // A secondary zone (the Acer lightbar) sits on the front edge, below the keyboard: a shallow strip. Giving
     // it its own Y band (rather than folding it into the keyboard rectangle) keeps spatial effects sane — a
@@ -149,10 +143,9 @@ public sealed class LampArrayLayout
     /// out zones the app must not drive (the Acer lightbar while it "follows the performance profile" — the
     /// firmware owns it then). Returns null when nothing is left to expose.
     ///
-    /// Layout rule: the FIRST included zone is treated as the keyboard and gets the full keyboard rectangle,
-    /// its sub-zones spread evenly left-to-right; every further zone becomes a strip below it. That is
-    /// vendor-neutral (no zone-name matching) and matches the physical reality of these laptops, where the
-    /// multi-zone surface is the keyboard and anything extra is a front/rear lightbar.</summary>
+    /// Layout rule: the FIRST included zone is treated as the keyboard and gets the full keyboard rectangle, its
+    /// sub-zones spread evenly left-to-right; every further zone becomes a strip below it. That is vendor-neutral
+    /// (no zone-name matching) and matches these laptops physically. See docs/lamparray.md.</summary>
     public static LampArrayLayout? Build(IRgbDevice rgb, Func<RgbZone, bool>? include = null,
                                          int minUpdateIntervalMs = 100)
     {

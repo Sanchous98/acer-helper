@@ -8,7 +8,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// across threads, and our callers run on both the UI thread (sensor polling) and thread-pool threads
 /// (set operations). Rather than marshal proxies between apartments, each call opens its own session on the
 /// calling thread (CoInitialize + connect + proxy-blanket) and tears it down. Connecting costs ~a few ms —
-/// negligible for our low-frequency use.</summary>
+/// negligible for our low-frequency use. See docs/wmi-interop.md.</summary>
 internal sealed class WmiSession : IDisposable
 {
     // ExecQuery flags: forward-only + return-immediately give a cheap in-proc enumerator.
@@ -25,6 +25,7 @@ internal sealed class WmiSession : IDisposable
     // spans all sessions/threads/classes (gaming, battery, APGe all hit the same EC). Each call still holds
     // it only for its own transaction (released in between), so reads and writes just interleave, never
     // overlap; the ~ms of blocking on the UI-thread poll is negligible.
+    // See docs/wmi-interop.md.
     private static readonly Lock Gate = new();
 
     private readonly IWbemServices _svc;
@@ -236,7 +237,7 @@ public sealed class WmiObject : IDisposable
     /// arrays go in as a SAFEARRAY of VT_UI1 (Acer's firmware blocks expect uint8[] — uReserved[], etc.).
     /// 64-bit CIM integers must be a VT_BSTR decimal string (WMI's representation — a VT_I4/VT_UI8 there is
     /// silently rejected, which is what broke every Set*/Get* with a UInt64 gmInput/gmOutput). Everything
-    /// else goes in as VT_I4, which WMI coerces to the property's 8/16/32-bit type.</summary>
+    /// else goes in as VT_I4, which WMI coerces to the property's 8/16/32-bit type. See docs/wmi-interop.md.</summary>
     public void PutValue(string name, object value)
     {
         if (value is byte[] arr) { PutBytes(name, arr); return; }

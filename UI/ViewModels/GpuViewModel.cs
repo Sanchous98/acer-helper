@@ -8,7 +8,7 @@ namespace AcerHelper.UI.ViewModels;
 /// <summary>GPU-overclock section: a core-clock and a memory-clock offset slider (MHz), each bounded by the
 /// range the driver reports. Applies on change (debounced) and persists PER performance mode — switching mode
 /// reloads that mode's offsets (see <see cref="Load"/>), and an unconfigured mode is stock 0/0. Only built
-/// when the device exposes an <see cref="Features.IGpuOverclock"/> port (an NVIDIA dGPU that allows tuning).</summary>
+/// when the device exposes an <see cref="IGpuOverclock"/> port (an NVIDIA dGPU that allows tuning).</summary>
 public sealed partial class GpuViewModel : SectionViewModel
 {
     private readonly Action<int, int> _set;                 // (core MHz, mem MHz) -> apply + persist for the current mode

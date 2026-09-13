@@ -34,7 +34,7 @@ public sealed record GpuSection(
 
 /// <summary>CPU-power section: the available power-mode overlays, the current mode's chosen id (or the live
 /// effective overlay when unconfigured), and the apply/persist delegate. Built only when the device exposes an
-/// <see cref="Features.ICpuPower"/> port.</summary>
+/// <see cref="ICpuPower"/> port.</summary>
 public sealed record CpuSection(
     IReadOnlyList<ChoiceOption> Modes,
     string? Initial,
