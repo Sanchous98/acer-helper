@@ -154,3 +154,129 @@ STATIC colour (`A4 65`, since the lightbar ignores the brightness byte). It writ
 per-zone state is untouched, so lid-open restores the exact previous look. When clamshell is off a lid-close just
 sleeps the machine, so the lid handler no-ops and the normal resume re-apply handles the wake. Linux is a no-op
 (clamshell keep-awake itself is unsupported there — see `Clamshell.Linux.cs`).
+
+### Why the lid watcher creates a real (hidden) window
+
+`RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE)` delivers a `WM_POWERBROADCAST` /
+`PBT_POWERSETTINGCHANGE` to the registered window whenever the lid opens or closes — **and it fires even when the
+lid-close power action is "do nothing"** (clamshell keep-awake), which is exactly the case we care about.
+
+The notification is delivered **targeted** to the registered `HWND`, not via the legacy top-level power
+broadcast — so it would *very likely* reach a message-only (`HWND_MESSAGE`) window too. But Windows only
+**documents and guarantees** `WM_POWERBROADCAST` delivery to **top-level** windows; targeted delivery to
+message-only ones is not documented. So the watcher **defensively creates an ordinary top-level window that is
+never shown**:
+
+- a top-level window receives **both** the broadcast and the targeted notification — a strict superset of a
+  message-only window's behaviour;
+- `WS_EX_TOOLWINDOW` keeps it out of the taskbar and Alt-Tab;
+- it is created on the **UI thread** so Avalonia's Win32 message loop dispatches its messages.
+
+The notification's `Data` is a DWORD: `0` = lid closed, `1` = lid open.
+
+## The re-apply regime: ticks, the double blink, and the self-heal
+
+A profile switch does two things to the lighting at once: it makes the firmware repaint the **palette flash**
+across keyboard + lightbar, which clobbers the per-zone colours, and (on a contended HID-over-I2C bus) the app's
+own first apply can land **corrupted** — the *"half green / half orange"* or amber-fallback failure. So a kick
+schedules a **bounded burst of re-applies**, not one.
+
+- **`ReapplyTicks = 8`** at the **400 ms** interval ≈ **3 s** of retries. Two jobs: (1) restore the per-zone
+  colours the firmware's own palette repaint clobbers, and (2) **self-heal** a corrupted apply — each retry is a
+  fresh chance to hit a clean bus window, and **once one lands it sticks** (the device is last-write-wins; the
+  idle state isn't re-corrupted). Bounded on purpose: if the bus is corrupting **constantly** (no clean window)
+  this retries for ~3 s and stops, rather than flickering forever. Re-asserting an already-correct colour is
+  **visually silent** — the firmware re-latches the same value.
+- **`FlashTicks = 2`** of those ticks also **re-send the profile palette flash**. The flash is a **global** write
+  that briefly repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one
+  more visible blink of keyboard and lightbar. That cost is worth paying on the **restore paths** (startup,
+  resume, lid open, host hand-back), where nothing else re-establishes the palette and the bus may be contended.
+  A **profile switch does not** pay it: the firmware flashes the new palette itself at the moment of the write,
+  and the app now sends its own in the **same instant**, so a re-send 400 ms later is just a **second blink
+  cycle**. The per-zone **keyboard** paint (the actual self-heal) still runs on **every** tick, which is silent
+  when already correct.
+
+### Why applying on the switch instant matters (the double blink)
+
+Applying used to **wait for the refresh pass to discover the change by polling**. That produced a **double
+blink**: the firmware flashes the new palette the instant the profile byte is written, and the app's own palette
+write then landed **~750 ms later** as a second, separate flash cycle. Painting at the switch instant puts both
+writes in the same moment so they **coincide into one** — and the burst kicked there deliberately carries **no**
+further palette re-sends, only the per-zone self-heal.
+
+## How the app drives the ENE controller — implementation notes
+
+`EneHidController` is a **cross-platform codec** (the `A4` packet plus the zone model) with per-OS transport
+partials. It is the **same controller OpenRGB drives**: `VID 0x0CF2` / `PID 0x5130`, **11-byte feature reports,
+report id `0xA4`**. The packets are identical on every OS; only the transport differs.
+
+- **Windows**: HidSharp (Win32 HID API).
+- **Linux**: **hidraw directly** — HidSharp's Linux enumeration only sees **USB** HID, and on several models
+  (e.g. the Nitro AN18-61) this controller hangs off **HID-over-I2C**.
+
+Regions are exposed as `RgbZone` bricks: `"Keyboard"` (multi sub-zone) and, on models that have it, `"Lightbar"`.
+**Keyboard brightness read-back is not on this HID interface** — it is the gaming WMI's job (Windows only) — so
+that reader is **injected by `AcerDevice`** and is `null` on Linux. The stream is opened lazily; the class is
+`IDisposable`.
+
+Constants worth knowing (they are the wire, and the zone masks are per-target):
+
+```
+ReportId 0xA4   TgtKeyboard 0x21   TgtLightbar 0x65   OpMode 0x06
+FlagStatic 0x01   FlagEffect 0x02   FullBright 0x64
+keyboard zones 4 (mask 0x0F = all)     lightbar zones 5 (mask 0x1F = all)
+```
+
+### Report byte 5 is the effect DIRECTION
+
+For a **directional** effect (e.g. Wave) it is the user's choice (`1`/`2`). Otherwise it is the **mode default
+the firmware expects**: `0x02` for animated effects, `0x01` for static.
+
+### The lightbar ignores the brightness byte
+
+Unlike the keyboard, the lightbar does **not** honour the HID brightness byte. Brightness is therefore emulated
+by **scaling the colour** and sending at full brightness (`0x64`). That works for colour modes; self-cycling
+effects generate their own colours and are unaffected.
+
+### `Blank()` while the lid is shut
+
+The keyboard honours the brightness byte, so a STATIC write at **brightness 0** darkens it. The lightbar ignores
+that byte, so it is darkened with a **black STATIC colour** instead. A **follows-profile** lightbar (which has no
+lamp/panel of its own) is included too — its palette is repainted from the profile flash on the restore.
+`Blank()` writes hardware only; **stored state is untouched**, so lid-open restores the exact previous look.
+
+### `SetProfileFlash()` does not route through `Send()`
+
+The performance-profile "operating mode" flash is a **global** write (keyboard target `0x21`, mode `0x06`) that
+paints **both** the keyboard and the lightbar at once. Unlike the arbitrary-colour paths — which the firmware
+renders **R,G,B** — the OPMODE handler recognises its per-profile palette in **B,G,R** and whitelists it; anything
+else reverts to amber. So this path emits the palette colour in B,G,R **directly**, reproducing byte-for-byte what
+NitroSense sends, and **is not routed through `Send()`** (which applies the R,G,B arbitrary order).
+
+### Serialised background writer, and the 10 ms pacing
+
+Every feature report is enqueued and written by **one long-lived worker thread**, never the caller's (UI) thread.
+`WriteFeature` (the per-OS transport) is a **synchronous, no-timeout** HID write that can block hard on a contended
+HID-over-I2C bus; off the UI thread that stall freezes only the worker, so the app stays responsive. **Doing it on
+the UI thread froze the whole app until the bus freed** (observed when a monitor was unplugged).
+
+- `SetFeature` is **fire-and-forget**: it only enqueues.
+- Writes **coalesce by region** so a stalled worker can't accumulate — and won't *replay* — a flood of stale
+  writes: when the bus frees it applies just the **latest state per region**. A superseded same-region write is
+  **moved to the tail** rather than dropped in place. (There is a hard cap of 32 pending as a backstop only;
+  coalescing keeps it to a handful.)
+- A **single in-flight write** is also the de-facto circuit breaker — the worker cannot issue a second write while
+  one blocks — which keeps the app's bus contention minimal.
+
+**Pacing: `PacingMs = 10`** between consecutive feature reports, on the worker only (it can never stall the UI
+thread). A full keyboard apply is several back-to-back reports (profile-flash + per-zone paints + lightbar). On a
+HID-over-I2C bus that an externally-booted display is contending, a **tight burst tends to land some reports
+corrupted** (amber fallback) and others clean — the *"half green / half orange"* failure. Spacing the reports
+**decorrelates** them so they don't all fall inside one contention window.
+
+Be honest about what that buys: pacing **cannot phase-lock** to the display's traffic, it only randomises phase —
+so it **reduces the odds of a fully corrupt apply rather than guaranteeing a clean one**. `5 reports × 10 ms`
+stays well under the **~120 ms** apply debounce, so a normal apply is still visually instant. `0` disables it.
+
+This gate is **pacing and coalescing, not serialisation**, and must not be merged into the WMI EC gate (see
+`docs/wmi-interop.md` and the constraints in `docs/refactoring-plan.md`).

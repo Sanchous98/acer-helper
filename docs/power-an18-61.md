@@ -149,3 +149,95 @@ Instrument with `nvidia-smi --query-gpu=enforced.power.limit` under load. *Max P
   `…\Packages\ULICTekInc.NitroSenseforNotebook_*\LocalCache\Roaming\acernitrosense\logs\nitrosense.log`.
   Confirms the app itself only ever sends `SET_DEVICE_DATA: OPERATING_MODE,v:N` (plus `FAN_CONTROL`) over
   TCP `127.0.0.1:46933`; all EC work happens inside the Acer services.
+
+## The CPU-power axis on this machine: the OS overlay, nothing else
+
+There is **no firmware CPU-power setter on this platform**, and that shapes the whole CPU-power design:
+
+- Real **PPT / STAPM / TDP** is **ring-0** (RyzenAdj / SMU) — unreachable without a kernel driver.
+- **Acer — unlike ASUS — exposes NO WMI/ACPI CPU-power setter.** It bakes the whole CPU envelope into its
+  **fixed EC profiles** (that is the `System usage mode` table above).
+
+So the only CPU-power knob available **with no driver at all** is the **Windows Power-Mode overlay** (the
+taskbar battery-slider modes: *Best power efficiency* / *Balanced* / *Best performance*), driven through
+`powrprof.dll`'s `PowerSetActiveOverlayScheme`. Mirroring G-Helper's driverless CPU axis, the app **maps an OS
+power mode to each performance profile**. The overlay GUIDs are the documented ones (Balanced is the all-zero
+GUID; Best power efficiency is `961cc777-2547-4f9d-8174-7d86181b8a7a`); the same set `OverlayPowerProfiles`
+uses. **No elevation is needed** for the overlay (the app runs elevated anyway for the EC/WMI controls).
+
+The **voltage-curve axis is a separate port** and does need a ring-0 gateway — see
+`docs/curve-optimizer-strix-point.md` and `docs/pawnio.md`.
+
+### Why it does not fight the EC
+
+The overlay is an axis **orthogonal** to the Acer performance profile: **the Acer WMI profile write carries no
+overlay GUID and touches no Windows power scheme**. So setting the overlay per profile does not fight the EC.
+
+### Wiring constraint (easy to get wrong)
+
+The port is wired **after** the vendor backend has finalized the profile port (`FinalizeCompositionPlatform`),
+**not** in `InitPlatform`, and **only when the performance profiles are NOT themselves the Windows overlay**.
+
+`OverlayCpuPower` and `OverlayPowerProfiles` drive the **same** overlay with the **same** GUIDs. If the profile
+picker already *is* the overlay — a generic laptop, or a vendor whose WMI/BIOS profile path was unavailable —
+then a CPU-power control would **fight it**, and, since the per-mode key is *then* the overlay GUID, **corrupt
+the per-profile store**. So the CPU-power axis exists as an independent control **only when a vendor WMI/EC
+profile port took over**. Null (section hidden) otherwise, and on any OS without the overlay API.
+
+## How the app drives it (`AcerEcHidController`) — implementation notes
+
+The class is a **cross-platform codec** (`AcerEcHidController.cs`) with **per-OS transport partials**. The
+packets are identical on every OS — only the transport hooks differ (`OpenTransport` / `WriteFeature` /
+`CloseTransport`).
+
+- **Windows**: HidSharp (Win32 HID API).
+- **Linux**: **hidraw directly**, no HID library — this controller hangs off **HID-over-I2C**, which HidSharp's
+  Linux enumeration **never lists** (the same reason `EneHidController` has a Linux partial). One hidraw node
+  covers *all* of a device's collections, so matching the parent hid device's `HID_ID`
+  (`bus:vendor:product`) is enough; the report id in byte 0 selects the vendor collection's report. Reaching
+  `/dev/hidrawN` without root relies on the desktop's **uaccess ACL** (present for built-in HID) or a udev rule —
+  the same prerequisite the RGB controller documents.
+- **Linux is untested on hardware.** The codec is verified on Windows. A missing or unwritable node degrades to
+  `Available = false` and the profile path keeps its previous behaviour — so a wrong guess here means "no EC
+  envelope control", **never** a bad write.
+
+### Mode mapping per app profile class
+
+| app profile | EC mode byte |
+|---|---|
+| Turbo | 0 |
+| Performance | 1 |
+| Balanced | 2 |
+| Quiet | 3 |
+| Eco | 4 |
+| **Other** (unrecognised vendor profile) | **none — the EC is left alone** |
+
+An unrecognised vendor profile deliberately gets **no** mode: inventing a power envelope for it would be worse
+than not touching the EC.
+
+### Writes never happen on the caller's (UI) thread
+
+`WriteFeature` is a **synchronous, no-timeout** HID write on the **same HID-over-I2C bus as the RGB
+controller**. A contended bus (external USB-C display, worst at boot) can block it for a long time. Doing that on
+the UI thread freezes the app until the bus frees — which is exactly what was observed (frozen until the monitor
+was unplugged). So all writes go through a **long-lived background writer thread**.
+
+**Only the newest mode matters**, so the queue is a **single coalescing slot**, not per-region: a burst of
+profile switches collapses to the last one. (Contrast `EneHidController`, which needs a per-region list because
+different regions must each keep their latest state.)
+
+Two further details:
+
+- `Apply` is **fire-and-forget**: it only enqueues, so `true` means *"accepted for sending"*, **not** *"the EC
+  applied it"*.
+- The worker **drops the transport handle on a write failure** so the next write re-opens it. A handle opened in
+  a bad state during boot-with-display would otherwise stay broken until restart. The worker never dies on an
+  exception (`catch` keeps it alive).
+- `Dispose` does a **bounded 1-second join**: a worker stuck inside a blocked write is a background thread and
+  cannot keep the process alive, so it proceeds and lets `CloseTransport` unstick it — disposing the handle
+  faults the pending write.
+
+The `_gate` here is a plain `object`, **not** `System.Threading.Lock`: the worker parks on
+`Monitor.Wait`/`Monitor.Pulse`, which `Lock` does not support. This gate is **pacing and coalescing, not
+serialisation** — it must not be merged into the WMI EC gate (see `docs/wmi-interop.md` and the constraints in
+`docs/refactoring-plan.md`).

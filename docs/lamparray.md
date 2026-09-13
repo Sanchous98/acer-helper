@@ -191,3 +191,102 @@ and the feature is absent. It is, however, the *cheaper* side to build if that c
 plain user-space process create a HID device with an arbitrary report descriptor and answer GET/SET_REPORT
 itself — same interface (`ILampArrayTransport`), no kernel module, no code signing. The kernel's own virtual
 LampArray for TUXEDO NB04 laptops is the same idea done in-kernel.
+
+## Implementation notes
+
+Details that are load-bearing but do not fit the narrative above. Numbers here are the ones on the wire.
+
+### Spec provenance and units
+
+Field and report semantics follow **"Lighting And Illumination Page (0x59)" of HID Usage Tables 1.4** and
+Microsoft's **reference implementation** (`github.com/microsoft/ArduinoHidForWindows`, MIT). The units **on the
+wire** are **micrometres and microseconds** — hence the µm/µs in the C# model; the conversion from mm/ms happens
+**once**, where the layout is built, so neither the driver nor the bridge has to think about it.
+
+### Hand-written structs, kept in sync by hand
+
+`protocol` is kept **byte-for-byte in sync with `driver/AcerHelperLampArray/public.h` — if you change one, change
+both.** The C# side writes the same fixed-size structs **by hand** (`BinaryPrimitives`), so there is **no
+struct-layout marshalling to get wrong**; field order and sizes are load-bearing and asserted with `C_ASSERT` on
+the C side.
+
+```
+device path   \\.\AcerHelperLampArray
+service id    AcerHelperLampArray          hardware id  AcerHelperLampArray
+MaxLamps 64   LampSize 28   LayoutSize 1820 (= 28 + 64*28)   FrameSize 268 (= 12 + 64*4)
+DeviceType 0xB007 (vendor range)   LayoutVersion 1
+IOCTL = (DeviceType << 16) | (access << 14) | (function << 2)
+  SET_LAYOUT  Ctl(0x800, write)   WAIT_FRAME  Ctl(0x801, read)   STOP  Ctl(0x802, write)
+```
+
+Frame layout: `seq` (u32), `autonomous` (u32), `count` (u32), then `count` × RGBA bytes. Lamp count is clamped
+to the layout's `_lampCount`, so a host frame can never index past the published table.
+
+### Geometry actually published
+
+- Keyboard: a nominal **330 × 110 mm** rectangle, sub-zones spread evenly left-to-right (**zone-mask bit 0 =
+  leftmost**), each lamp at **half the height** of the band.
+- Any further zone: a **12 mm** strip **18 mm** below the keyboard band. The separate Y band (rather than folding
+  the strip into the keyboard rectangle) is what keeps a vertical wipe reaching it **last**, like the real
+  hardware.
+- Lamp **purposes**: keyboard lamps get `Illumination | Accent`; strip lamps get `Accent` only. Advisory, but
+  honest values cost nothing.
+- Every lamp reports the **same latency: 30 ms** (`LampLatencyMs`). That is honest because the ENE write path is a
+  **queued, paced** feature report (`PacingMs = 10` on the worker, see
+  [lighting-an18-61.md](lighting-an18-61.md)) — so ~30 ms from *"host wrote a frame"* to *"LEDs changed"* is a
+  realistic figure, not a placeholder.
+
+Nothing reports the keyboard's real dimensions (not SMBIOS, not the WMI, not `acer-models.json`), so the geometry
+is nominal. What matters to the host is the **proportions and order**, which decide which way a wave sweeps — not
+absolute accuracy.
+
+### `DriverInstalled` — a driver-store check, not a device probe
+
+The whole feature (and its Options row) is **hidden until the driver package is staged** on this machine: the
+driver ships **separately from the app** because it needs a signature Windows will load **without test-signing**,
+so most installs won't have it.
+
+The check looks for the package in the **driver store** — that is what `pnputil /add-driver` creates, and it is
+**true before any device node exists**. That ordering matters: the app creates the node itself, so there is **no
+device to interrogate yet**. The `System32\drivers` copy is accepted too, for a package built with `DIRID 12`.
+
+### Device-node creation (and why it is not a permanent node)
+
+The node is created **root-parented** by the app (`SwDeviceCreate`, enumerator `AcerHelper`, parent
+`HTREE\ROOT\0`, instance id `AcerHelperLampArray`, description *"Acer Helper keyboard lighting"*, hardware ids as
+a **double-NUL-terminated MULTI_SZ**). Capability flags:
+
+| flag | reason |
+|---|---|
+| `Removable` | so PnP is happy to see it come and go |
+| `SilentInstall` + `NoDisplayInUI` | keep it out of the user's face — it is plumbing, not a device they plugged in |
+| `DriverRequired` | tells PnP to actually match our INF instead of leaving a raw devnode |
+
+Two waits are needed because nothing here is synchronous:
+
+1. `SwDeviceCreate` **reports its outcome through a callback, not its return value** — the result is polled
+   briefly (sentinel `int.MinValue` = callback not seen yet), and a negative result closes the handle.
+2. After that, **PnP still has to start the device and the driver has to create its symbolic link** — both happen
+   *after* the callback. So the transport **polls for the device for up to 25 × 200 ms** rather than assuming.
+
+If the node appears but the driver never starts, the node is **destroyed again** and the error says so
+(*"device node created but the driver did not start"*). A permanently installed node (`devgen`/`devcon`) was
+rejected: it would leave a **dead lighting device** listed in Dynamic Lighting whenever the app isn't running.
+
+### `Stop()` ordering
+
+`CancelIoEx` is **not itself an I/O request**, so it does **not** queue behind the pending `WAIT_FRAME` on the
+frame handle — it **unblocks** it. Only then is `STOP` safe to send. A `WAIT_FRAME` that fails with
+`ERROR_OPERATION_ABORTED` (**995**) is our own `Stop()` cancelling the wait, **not** a failure, and must not be
+reported as one.
+
+Closing the handles destroys the device node (the driver tears the device down when the **last** one closes), so
+an app crash cannot leave a zombie entry in Dynamic Lighting.
+
+### `LampArrayLayout.Build` — the layout rule
+
+The first **included** zone is treated as the keyboard and gets the full keyboard rectangle, its sub-zones spread
+evenly left-to-right; every further zone becomes a strip below it. That rule is **vendor-neutral** (no zone-name
+matching) and matches the physical reality of these laptops, where the multi-zone surface is the keyboard and
+anything extra is a front/rear lightbar. `include` filters out zones the app must not drive — notably the Acer
+lightbar while it "follows the performance profile", because the firmware owns it then.
