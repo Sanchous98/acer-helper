@@ -311,7 +311,7 @@ public sealed class WmiObject : IDisposable
         fixed (Variant* pv = &v) Wbem.VariantClear((nint)pv);
     }
 
-    private static ulong ToU64(in Variant v) => v.vt switch
+    internal static ulong ToU64(in Variant v) => v.vt switch
     {
         Wbem.VT_I1 => (ulong)v.cVal,
         Wbem.VT_UI1 => v.bVal,
@@ -327,7 +327,7 @@ public sealed class WmiObject : IDisposable
         _ => 0UL,
     };
 
-    private static ulong ParseBstr(nint bstr)
+    internal static ulong ParseBstr(nint bstr)
     {
         if (bstr == 0) return 0;
         var s = Marshal.PtrToStringBSTR(bstr);

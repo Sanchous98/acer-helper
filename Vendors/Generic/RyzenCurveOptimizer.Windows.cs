@@ -384,19 +384,19 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // NOT as 0x100000 — that would set bit 20, which the per-core form of this message uses as a core selector and
     // is a known source of rejected arguments in other tools. The mask keeps that invariant local rather than
     // depending on the caller's clamp.
-    private static uint Encode(int counts)
+    internal static uint Encode(int counts)
         => (counts >= 0 ? 0u : 0x100000u - (uint)(-counts)) & 0xFFFFFu;
 
     // Per-core argument: the CCD/slot selector in the high nibbles, the margin in the low 16 bits. The margin is
     // masked to 16 bits here because the selector occupies the bits an all-core value would otherwise run into.
-    private static uint CoreArg(int ccd, int slot, uint encodedMargin)
+    internal static uint CoreArg(int ccd, int slot, uint encodedMargin)
         => ((uint)ccd << 28) | ((uint)(slot % SlotsPerCcd) << 20) | (encodedMargin & 0xFFFF);
 
     // The GRAPHICS rail's margin encoding — ZenStates' Utils.MakePsmMarginArg verbatim: 16-bit two's complement.
     // Deliberately a separate function from Encode above rather than a shared one with a width parameter, because the
     // two differ in a way that fails silently: the CPU's 20-bit form of -5 is 0xFFFFB, the GPU's is 0xFFFB, and the
     // mailbox accepts either without complaint while meaning something else entirely.
-    private static uint GpuMargin(int counts)
+    internal static uint GpuMargin(int counts)
         => (uint)((counts < 0 ? 0x100000 : 0) + counts) & 0xFFFF;
 
     /// <summary>Run one message on <paramref name="mb"/> to completion and return the SMU's response byte, or

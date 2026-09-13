@@ -36,7 +36,7 @@ public sealed class FanCurveEngine
 
     /// <summary>Interpolate a duty% for <paramref name="temp"/> from the per-anchor curve (linear between
     /// anchors, flat beyond the ends). Unknown temperature (-1) holds the last value (or the idle duty).</summary>
-    private static int EvalCurve(int[] duties, int temp, int fallback)
+    internal static int EvalCurve(int[] duties, int temp, int fallback)
     {
         var a = Anchors;
         if (duties == null || duties.Length < a.Length) duties = DefaultCurve;

@@ -45,6 +45,21 @@
     <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
   </ItemGroup>
 
+  <!-- The tests live in their own project under tests/, but the SDK's implicit **/*.cs glob would otherwise
+       compile every test source INTO the shipped app (and its Avalonia/Native-AOT closure). Excluded here so
+       the test tree is invisible to both TFMs of this project. -->
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+  </ItemGroup>
+
+  <!-- The silent-failure targets are private by design (they are internal encodings, not API), so the test
+       assembly is granted access rather than each helper being widened to public. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>AcerHelper.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- Per-model Acer quirks DB (friendly name + RGB layout); loaded at runtime, user-overridable. -->
   <ItemGroup>
     <EmbeddedResource Include="acer-models.json" />
