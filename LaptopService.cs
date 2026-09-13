@@ -32,6 +32,15 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
 
     private void Save() { lock (_state) store.Save(Settings); }
 
+    // Locked reads of the few Settings SCALARS the UI needs, so it never reaches into the graph itself. The
+    // invariant above forbids unguarded Settings access, and AppController reads these on the UI thread AND on the
+    // background pass; a bool/int cannot tear today, but the read that WOULD tear the moment one of them stops
+    // being a scalar is exactly the read this removes (TogglePerformance already does it this way, with a local).
+    // `public Settings Settings { get; }` stays exposed, so this is convention, not a compile-time guarantee.
+    public bool TurboToggles { get { lock (_state) return Settings.TurboToggles; } }
+    public AppLanguage Language { get { lock (_state) return Settings.Language; } }
+    public int Bluelight { get { lock (_state) return Settings.Bluelight; } }
+
     /// <summary>Re-apply persisted state that the OS doesn't remember on its own.</summary>
     public void ApplyStartupState()
     {

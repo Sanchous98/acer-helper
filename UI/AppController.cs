@@ -157,16 +157,16 @@ internal sealed class AppController
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
         var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         var vm = new MainViewModel(d, new UiActions(
-            new ProfileActions(ApplyProfile, _svc.Settings.TurboToggles, SetTurbo),
+            new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
             new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
             new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
-                _svc.Settings.TurboToggles, SetTurboToggles,
+                _svc.TurboToggles, SetTurboToggles,
                 b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
-                _svc.Settings.Language, SetLanguage)),
+                _svc.Language, SetLanguage)),
             lighting);
 
         var windows = new FlyoutCoordinator(vm);
@@ -181,7 +181,7 @@ internal sealed class AppController
     // about to tear down, so let this event unwind first.
     private void SetLanguage(AppLanguage language)
     {
-        if (language == _svc.Settings.Language) return;
+        if (language == _svc.Language) return;
         _svc.SetLanguage(language);
         Dispatcher.UIThread.Post(RebuildForLanguage);
     }
@@ -196,7 +196,7 @@ internal sealed class AppController
         _tray.Dispose();       // remove the old tray icon
         _windows.Dispose();    // close + unhook the old flyout window for good
 
-        Loc.Use(_svc.Settings.Language);
+        Loc.Use(_svc.Language);
         (_vm, _windows, _tray, _lighting) = BuildUi();
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         var cur = _svc.CurrentProfile();
@@ -467,7 +467,7 @@ internal sealed class AppController
             // guard leaves the status line alone and a transient Notify() survives (a device StatusMessage, when
             // present, is a latched startup diagnostic — localized and shown; it never reverts to null).
             var status = _svc.Device.StatusMessage is { } m ? Loc.T(m) : null;
-            var turbo = _svc.Settings.TurboToggles;
+            var turbo = _svc.TurboToggles;
 
             bool modeChanged = modeKey != _lastModeKey;
             bool profileChanged = profileId != _lastProfileId;

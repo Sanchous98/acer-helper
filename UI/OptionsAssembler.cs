@@ -72,7 +72,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         {
             string[] all = ["Off", "Low", "Medium", "High", "Long-use"];
             var names = all.Take(tint.Levels).Select(n => Loc.T(n)).ToList();
-            int idx = Math.Clamp(svc.Settings.Bluelight, 0, names.Count - 1);
+            int idx = Math.Clamp(svc.Bluelight, 0, names.Count - 1);
             list.Add(new OptionChoice(Loc.T("Blue-light filter:"), true, names, idx,
                 i => svc.SetBlueLight(i)));
         }
