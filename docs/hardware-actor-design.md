@@ -242,7 +242,7 @@ serializes *everyone's*.
 | T6 | `LampArray.Enable` pool task | `LaptopService.cs:57` | G9, PnP | driver start, seconds | No |
 | T7 | Resume re-assert pool task | `LightingCoordinator.cs:255` | G7/G1/G2 | 5 s | No |
 | T8 | `ene-hid-writer` | `EneHidController.cs:39` | `_pending` under G10, then a HID write | `Monitor.Wait`; the HID write | No — but it raises `OwnerChanged`? (no: the bridge does) |
-| T9 | `acer-ec-hid-writer` | `AcerEcHidController.cs:65` | `_pending` under G11, `LastError` **unlocked** (`:127,128`) | `Monitor.Wait` | No — `LastError` read by UI at `OptionsAssembler`/`LaptopService` |
+| T9 | `acer-ec-hid-writer` | `AcerEcHidController.cs:65` | `_pending` under G11, `LastError` **unlocked** (`:127,128`) | `Monitor.Wait` | No — `LastError` written at `:113,114` and **read nowhere** (corrected 2026-09-14: no reader exists in the tree) |
 | T10 | `lamparray-bridge` | `LampArrayBridge.cs:106` | `_apply`, `_written`, `_frame`, `HostOwnsLighting`, `LastError`, `Enabled` | `WaitFrame` (blocking), 100 ms min interval | Yes — `OwnerChanged` → `LightingCoordinator.cs:113` |
 | T11 | `acer-hotkeys` (Linux) | `AcerHotkeys.Linux.cs:47` | `_closing` | `read()` | Yes — `AppController.cs:382,305` |
 | T12 | `SystemEvents` window thread | `ResumeWatcher.Windows.cs:9`, `Clamshell.Windows` | `Clamshell._sync` | — | Yes — `LightingCoordinator.cs:99` |
@@ -293,17 +293,27 @@ Also violating the spirit of the same invariant, without the plan saying so:
   read outside `_state` is a consequence of this, not an independent mistake. This is the root cause of D1-D5.
 - `LaptopService.cs:20` — `public string? LastError { get; private set; }`, written under `_state` on some
   paths and outside it on others (e.g. `WmiInvoker`'s port results), read from the UI thread at
-  `AppController.cs:320,329,352,359,372`. Reference writes are atomic so nothing tears; the *value* can still
-  be another operation's error. This is the "wrong error message" class of bug, and it is invisible.
+  `AppController.cs:322,331,354,361,373` and `OptionsAssembler.cs:142`. Reference writes are atomic so nothing
+  tears; the *value* can still be another operation's error. This is the "wrong error message" class of bug, and
+  it is invisible.
+  **Confirmed 2026-09-14 by a dedicated trace — and it is the only `LastError` in this codebase that is
+  genuinely read cross-thread.** No reader takes `_state`, so the lock orders nothing here. `volatile` is not
+  the remedy: it cannot be applied to a property without rewriting it as a backing field, and on x64 it changes
+  nothing observable (a store followed by a load of the same address from the same thread cannot be reordered, so
+  a reader already sees at least its own write). All six races found are of the form "the reader picks up
+  *another* call's error", with windows a few instructions wide — and `volatile` makes that *more*
+  deterministic, not rarer, because it guarantees the reader sees the newest write, including the other
+  thread's. The fix is to remove the shared side channel (return the error from the call), not to widen its
+  visibility.
 
 ## 3.2 State guarded by nothing, touched from more than one thread
 
 | # | Site | State | Writers | Readers | Severity |
 |---|---|---|---|---|---|
-| **D6** | `Features/LampArrayBridge.cs:78` | `LastError` | **worker thread, no lock** (`:160`); UI thread under G4 (`:91,94,96`) | `LaptopService.cs:105`, `OptionsAssembler` | A torn/stale string; the user sees "Dynamic Lighting failed" for a *previous* failure, or no error for the current one. Reference writes mean no memory corruption — the failure is silence. |
+| **D6** | `Features/LampArrayBridge.cs:70` | `LastError` | worker at `:151` (unlocked); `Enable()` at `:83,86,88` under G4 — but `Enable()` **never runs on the UI thread** (corrected 2026-09-14: it is reached only via `OptionsAssembler.RunSet` on an `HwSerial` continuation, or `LaptopService.cs:57` on a `Task.Run`) | `LaptopService.cs:105`, and only on a *failed* `Enable` — i.e. when no worker is live | **Not reachable.** The worker exists only between a successful `Enable` and its own exit, and `Enable` returns early (`if (Enabled) return true`) while a worker is live, so the two writes cannot overlap a read. Downgraded to a latent hazard on the zombie-worker path: if `Disable`'s 1 s join times out (`:121`), the survivor can re-arm the transport's write. |
 | **D7** | `Features/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. |
-| **D8** | `Vendors/Acer/AcerEcHidController.cs:59` | `LastError` | worker thread (`:127,128`), unlocked | UI | Same shape as D6. |
-| **D9** | `Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | `HwSerial` worker (T15) | UI thread (`LaptopService` methods, `OptionsAssembler`) | Same shape. There is no `volatile` and no lock on any of them. |
+| **D8** | `Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. |
+| **D9** | `Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | the port's own caller, through `Set` (`:21,33,43,44,58,67`) | the **same** thread — `LaptopService.Run` (`:746`) | **Corrected 2026-09-14: no race in three of the five.** The write and the copy-out happen on the same `HwSerial` continuation, and `FlagPort`/`ChoicePort`/`LevelPort` are single-threaded by construction (each row owns its own port instance). The genuine `DelegatePorts` races are `ProfilesPort` (`:54`) and `FanPort` (`:41`) — UI vs POLL, a shape this table did not list. |
 | **D10** | `UI/ViewModels/LightingViewModel.cs:345` (`SaveState()`) | `LightSettings` fields | UI thread | `BackgroundPass` → `Save()` → `JsonSettingsStore` | `EnsureLightZone` (`LaptopService.cs:473-480`) exists to make the *structural* insert safe, and the comment says per-field edits "stay unguarded". That is true only because a per-field write cannot restructure the dictionary — the JSON serializer can still observe a half-updated `LightSettings` and persist it. Low impact (one debounce interval of stale brightness), but it is an unguarded cross-thread read of a mutable object. |
 
 ## 3.3 Overlapping / redundant guards
