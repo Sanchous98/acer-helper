@@ -377,12 +377,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
 
     /// <summary>The stored preset for the current mode, created on first write (user is configuring it).
     /// Caller holds _state.</summary>
-    private FanPreset StoredFan()
-    {
-        var key = CurrentModeKey();
-        if (!Settings.FanPresets.TryGetValue(key, out var f)) Settings.FanPresets[key] = f = new FanPreset();
-        return f;
-    }
+    private FanPreset StoredFan() => GetOrAdd(Settings.FanPresets, CurrentModeKey());
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
     /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
@@ -460,8 +455,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         lock (_state)
         {
             var key = CurrentModeKey();
-            if (!Settings.LightPresets.TryGetValue(key, out var p)) Settings.LightPresets[key] = p = new LightPreset();
-            return p.Zones;
+            return GetOrAdd(Settings.LightPresets, key).Zones;
         }
     }
 
@@ -474,8 +468,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     {
         lock (_state)
         {
-            if (!zones.TryGetValue(name, out var s)) zones[name] = s = new LightSettings();
-            return s;
+            return GetOrAdd(zones, name);
         }
     }
 
@@ -483,12 +476,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
 
     /// <summary>The stored GPU-OC preset for the current mode, created on first write (user is configuring it).
     /// Caller holds _state.</summary>
-    private GpuOcPreset StoredGpuOc()
-    {
-        var key = CurrentModeKey();
-        if (!Settings.GpuOcPresets.TryGetValue(key, out var g)) Settings.GpuOcPresets[key] = g = new GpuOcPreset();
-        return g;
-    }
+    private GpuOcPreset StoredGpuOc() => GetOrAdd(Settings.GpuOcPresets, CurrentModeKey());
 
     /// <summary>The GPU-OC preset for the current mode, or stock (0/0) if none is saved yet (not stored).</summary>
     public GpuOcPreset CurrentGpuOc()
@@ -564,12 +552,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
 
     /// <summary>The stored Curve-Optimizer preset for the current mode, created on first write (user is
     /// configuring it). Caller holds _state.</summary>
-    private CoPreset StoredCo()
-    {
-        var key = CurrentModeKey();
-        if (!Settings.CoPresets.TryGetValue(key, out var c)) Settings.CoPresets[key] = c = new CoPreset();
-        return c;
-    }
+    private CoPreset StoredCo() => GetOrAdd(Settings.CoPresets, CurrentModeKey());
 
     /// <summary>The Curve-Optimizer preset for the current mode, or stock (0) if none is saved yet (not stored).</summary>
     public CoPreset CurrentCo()
@@ -736,6 +719,15 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     }
 
     public void EvaluateClamshell() => device.Clamshell?.Evaluate();
+
+    /// <summary>Look up <paramref name="key"/> in <paramref name="map"/>, creating and inserting a default
+    /// instance when it is absent — the per-mode "preset, created on first write" idiom the Stored* and
+    /// per-mode accessors above all share.</summary>
+    private static T GetOrAdd<T>(Dictionary<string, T> map, string key) where T : new()
+    {
+        if (!map.TryGetValue(key, out var value)) map[key] = value = new T();
+        return value;
+    }
 
     private bool Run<T>(T? svc, Func<T, bool> set, Func<T, string?> err) where T : class
     {
