@@ -10,13 +10,31 @@ namespace AcerHelper.Application;
 /// All orchestration (profile cycling/toggling, persistence of changes) lives here, never in
 /// the UI or in Infrastructure.
 /// </summary>
-public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArrayTransport? lampArray = null)
-    : IDisposable
+public sealed class LaptopService : IDisposable
 {
+    // Explicit fields instead of a primary constructor. A primary constructor's parameters are in scope only in
+    // the part that declares them, so while one was in use this class could not be split across partial files
+    // (LaptopService.*.cs) — which is the point of the change. The field names are deliberately the former
+    // parameter names, so not one call site in the file moved.
+    private readonly IDevice device;
+    private readonly ISettingsStore store;
+    private readonly ILampArrayTransport? lampArray;
+
+    public LaptopService(IDevice device, ISettingsStore store, ILampArrayTransport? lampArray = null)
+    {
+        this.device = device;
+        this.store = store;
+        this.lampArray = lampArray;
+        // Assigned in the body rather than as `Settings { get; } = store.Load()`. Field and property initializers
+        // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
+        // this class reads Settings, so loading it here rather than there is observably the same order.
+        Settings = store.Load();
+    }
+
     /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
     public IDevice Device => device;
-    public Settings Settings { get; } = store.Load();
+    public Settings Settings { get; }
     public string? LastError { get; private set; }
 
     // Guards ALL access to the mutable Settings graph (its collections + scalars), the per-source slots,
