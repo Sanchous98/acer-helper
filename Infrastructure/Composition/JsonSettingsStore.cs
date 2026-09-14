@@ -9,7 +9,21 @@ namespace AcerHelper.Infrastructure.Composition;
 /// (de)serialization keeps it trimming/AOT-safe.</summary>
 public sealed class JsonSettingsStore : ISettingsStore
 {
-    private static string FilePath => Path.Combine(
+    private readonly string filePath;
+
+    /// <summary>The real location. Kept as the parameterless constructor so the composition root reads
+    /// <c>new JsonSettingsStore()</c> and nothing about production changes.</summary>
+    public JsonSettingsStore() : this(DefaultFilePath) { }
+
+    /// <summary>Point the store somewhere else — a scratch directory, in practice. This seam exists because
+    /// <see cref="Load"/> MOVES a corrupt file aside, so pointing a test of that path at the real location
+    /// would consume the user's actual settings.json; that is precisely why this file had no coverage. The
+    /// path is a constructor argument rather than a constant for the same reason the publication delegate in
+    /// <c>OptionsAssembler</c> is one: the behaviour worth testing is unreachable while the destination is
+    /// fixed at a compile-time location.</summary>
+    public JsonSettingsStore(string filePath) => this.filePath = filePath;
+
+    private static string DefaultFilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "AcerHelper", "settings.json");
 
@@ -17,15 +31,15 @@ public sealed class JsonSettingsStore : ISettingsStore
     {
         try
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize(File.ReadAllText(FilePath), SettingsJsonContext.Default.Settings) ?? new Settings();
+            if (File.Exists(filePath))
+                return JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.Settings) ?? new Settings();
         }
         catch (JsonException)
         {
             // Corrupt content: set it aside instead of leaving it in place, where the next Save()
             // would silently overwrite it with the defaults we're about to return. The .bad copy
             // keeps the user's data recoverable; the rescue itself is best-effort.
-            try { File.Move(FilePath, FilePath + ".bad", overwrite: true); } catch { }
+            try { File.Move(filePath, filePath + ".bad", overwrite: true); } catch { }
         }
         catch { /* locked/unreadable — fall back to defaults */ }
         return new Settings();
@@ -35,13 +49,13 @@ public sealed class JsonSettingsStore : ISettingsStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
             // Write-to-temp + rename, never truncate in place: Save() runs on every profile/fan/light
             // change, and a laptop is exactly the machine that loses power mid-write. flushToDisk
             // before the rename so the swap can't be reordered ahead of the data hitting disk
             // (the classic zero-length-file-after-crash failure); same-directory rename = same volume,
             // so the replace is atomic on both NTFS and POSIX.
-            var tmp = FilePath + ".tmp";
+            var tmp = filePath + ".tmp";
             using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
             using (var w = new StreamWriter(fs))
             {
@@ -49,7 +63,7 @@ public sealed class JsonSettingsStore : ISettingsStore
                 w.Flush();
                 fs.Flush(flushToDisk: true);
             }
-            File.Move(tmp, FilePath, overwrite: true);
+            File.Move(tmp, filePath, overwrite: true);
         }
         catch { /* best effort */ }
     }

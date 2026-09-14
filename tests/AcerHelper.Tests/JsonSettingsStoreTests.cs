@@ -1,0 +1,319 @@
+using System.Text.Json;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Localization;
+
+namespace AcerHelper.Tests;
+
+/// <summary>
+/// The settings store, which had no coverage at all until its path became a constructor argument.
+///
+/// It is worth covering because it is the substrate of every feature: a per-mode fan curve, a GPU offset, a
+/// Curve-Optimizer preset and a light zone are all just fields in <see cref="Settings"/>, so a field that
+/// fails to survive Save → Load is a FEATURE that silently forgets. That failure is invisible to the rest of
+/// this suite, which injects <see cref="Fakes.FakeSettingsStore"/> and therefore never serializes anything.
+///
+/// The seam is not a convenience. <see cref="JsonSettingsStore.Load"/> MOVES a corrupt file aside and
+/// <see cref="JsonSettingsStore.Save"/> renames over the live one, so a test of either path pointed at the
+/// real %AppData% location would consume the user's settings. Every test here runs in its own scratch
+/// directory — see <see cref="TempDir"/>.
+/// </summary>
+public class JsonSettingsStoreTests
+{
+    /// <summary>Every field populated, because the round trip has to have something to lose in each one. The
+    /// values are deliberately NOT the defaults: a default is exactly what a failed deserialization leaves
+    /// behind, so a test built from defaults would pass against a store that dropped everything.
+    ///
+    /// The KEYS are the real ones the app writes — <c>ccd:0</c>/<c>gfx</c> from the Curve Optimizer's
+    /// <c>VoltageDomain.Key</c>, <c>Keyboard</c>/<c>Lightbar</c> for the two light zones, and
+    /// <c>acer.lightbarFollowsProfile</c> for the device flag — taken from a real settings.json rather than
+    /// invented. They are opaque strings either way, so this is fidelity rather than coverage: the test reads
+    /// as the file the user actually has.</summary>
+    private static Settings Populated() => new()
+    {
+        Language = AppLanguage.Russian,
+        TurboToggles = true,
+        Clamshell = true,
+        Bluelight = 4,
+        DynamicLighting = true,
+        OnAc = new ProfileMemory { BaseId = "balanced", Turbo = true },
+        OnBattery = new ProfileMemory { BaseId = "power-saver" },
+        FanPresets =
+        {
+            ["balanced"] = new FanPreset
+            {
+                Mode = 3, Cpu = 55, Gpu = 60,
+                CpuUseCurve = true, GpuUseCurve = false,
+                CpuCurve = [30, 40, 50, 60, 70],
+                GpuCurve = [35, 45, 55, 65, 75],
+            },
+        },
+        LightPresets =
+        {
+            ["balanced"] = new LightPreset
+            {
+                Zones =
+                {
+                    ["Keyboard"] = new LightSettings
+                    {
+                        Configured = true, EffectIndex = 2, Brightness = 80,
+                        Speed = 7, Direction = 2, Color = 0x00FF00,
+                        ZoneColors = [0x111111, 0x222222],
+                    },
+                },
+            },
+        },
+        GpuOcPresets = { ["balanced"] = new GpuOcPreset { Core = 300, Mem = 1500 } },
+        CoPresets =
+        {
+            ["balanced"] = new CoPreset
+            {
+                AllCore = -30,
+                Domains = { ["ccd:0"] = -20, ["ccd:1"] = -20, ["gfx"] = -16 },
+            },
+        },
+        CpuPowerModes = { ["balanced"] = "best-performance" },
+        DeviceSettings = { ["acer.lightbarFollowsProfile"] = "1" },
+    };
+
+    /// <summary>Fetch a key that must be present, failing with the key's name rather than a
+    /// <c>KeyNotFoundException</c>. The three assertions that use it are the ones that catch a per-mode preset
+    /// that did not survive serialization, so the failure has to say which mode went missing.</summary>
+    private static TValue Present<TValue>(IReadOnlyDictionary<string, TValue> map, string key)
+    {
+        Assert.True(map.TryGetValue(key, out var value), $"'{key}' did not survive the round trip");
+        return value!;
+    }
+
+    [Fact]
+    public void EverySettingSurvivesTheRoundTrip()
+    {
+        using var dir = new TempDir();
+        new JsonSettingsStore(dir.SettingsPath).Save(Populated());
+
+        // A SECOND store, so nothing survives merely by being the same object in memory.
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+
+        Assert.Equal(AppLanguage.Russian, loaded.Language);
+        Assert.True(loaded.TurboToggles);
+        Assert.True(loaded.Clamshell);
+        Assert.Equal(4, loaded.Bluelight);
+        Assert.True(loaded.DynamicLighting);
+
+        Assert.Equal("balanced", loaded.OnAc.BaseId);
+        Assert.True(loaded.OnAc.Turbo);
+        Assert.Equal("power-saver", loaded.OnBattery.BaseId);
+        Assert.False(loaded.OnBattery.Turbo);
+
+        var fan = Present(loaded.FanPresets, "balanced");
+        Assert.Equal(3, fan.Mode);
+        Assert.Equal(55, fan.Cpu);
+        Assert.Equal(60, fan.Gpu);
+        Assert.True(fan.CpuUseCurve);
+        Assert.False(fan.GpuUseCurve);
+        Assert.Equal([30, 40, 50, 60, 70], fan.CpuCurve);
+        Assert.Equal([35, 45, 55, 65, 75], fan.GpuCurve);
+
+        // Two levels of nesting (mode -> zone -> per-zone colours): the deepest shape in Settings, and the
+        // one a change to the JSON context would break first.
+        var zone = Present(Present(loaded.LightPresets, "balanced").Zones, "Keyboard");
+        Assert.True(zone.Configured);
+        Assert.Equal(2, zone.EffectIndex);
+        Assert.Equal(80, zone.Brightness);
+        Assert.Equal(7, zone.Speed);
+        Assert.Equal(2, zone.Direction);
+        Assert.Equal(0x00FF00, zone.Color);
+        Assert.Equal([0x111111, 0x222222], zone.ZoneColors);
+
+        var gpu = Present(loaded.GpuOcPresets, "balanced");
+        Assert.Equal(300, gpu.Core);
+        Assert.Equal(1500, gpu.Mem);
+
+        var co = Present(loaded.CoPresets, "balanced");
+        Assert.Equal(-30, co.AllCore);                                          // sign survives
+        Assert.Equal(-20, Present(co.Domains, "ccd:0"));
+        Assert.Equal(-20, Present(co.Domains, "ccd:1"));
+        Assert.Equal(-16, Present(co.Domains, "gfx"));
+
+        Assert.Equal("best-performance", Present(loaded.CpuPowerModes, "balanced"));
+        Assert.Equal("1", Present(loaded.DeviceSettings, "acer.lightbarFollowsProfile"));
+    }
+
+    /// <summary>Scope, stated narrowly because a mutation showed the obvious claim is false: source-gen picks
+    /// up a newly ADDED property on its own, so this does NOT catch "someone added a field" (adding one by hand
+    /// left every test here green). What it catches is a member that stops being persisted while remaining on
+    /// the type — <c>[JsonIgnore]</c>, or a setter the serializer can no longer use. Verified red by putting
+    /// <c>[JsonIgnore]</c> on <see cref="Settings.DynamicLighting"/>.
+    ///
+    /// Its reason to exist alongside the round trip is that the round trip's field list is hand-written and
+    /// therefore goes stale silently as the type grows: this compares the JSON's own property names against the
+    /// type's, so a member that stops persisting fails BY NAME even if <see cref="Populated"/> never mentioned it.</summary>
+    [Fact]
+    public void NoPropertyOfSettingsIsLeftOutOfTheJson()
+    {
+        var json = JsonSerializer.Serialize(new Settings(), SettingsJsonContext.Default.Settings);
+        using var doc = JsonDocument.Parse(json);
+
+        var onDisk = doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray();
+        var declared = typeof(Settings).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray();
+
+        Assert.Equal(declared, onDisk);
+    }
+
+    [Fact]
+    public void AMissingFileYieldsDefaults()
+    {
+        using var dir = new TempDir();
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+
+        Assert.Equal(AppLanguage.System, loaded.Language);
+        Assert.False(loaded.TurboToggles);
+        Assert.False(loaded.Clamshell);
+        Assert.Empty(loaded.FanPresets);
+        Assert.Empty(loaded.LightPresets);
+        Assert.Empty(loaded.GpuOcPresets);
+        Assert.Empty(loaded.CoPresets);
+        Assert.Empty(loaded.CpuPowerModes);
+        Assert.Empty(loaded.DeviceSettings);
+        Assert.False(File.Exists(dir.SettingsPath));   // a read creates nothing
+    }
+
+    /// <summary>The rescue the source comment promises, asserted instead of described: the defaults come back,
+    /// the corrupt bytes are still readable at <c>.bad</c>, and the original path is left free so the next
+    /// <c>Save</c> cannot silently overwrite what was just rescued.</summary>
+    [Fact]
+    public void CorruptJsonYieldsDefaultsAndPreservesTheBadCopy()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(dir.SettingsPath, "{ this is not json");
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+
+        Assert.Equal(AppLanguage.System, loaded.Language);
+        Assert.Empty(loaded.FanPresets);
+        Assert.Equal("{ this is not json", File.ReadAllText(dir.SettingsPath + ".bad"));
+        Assert.False(File.Exists(dir.SettingsPath));
+    }
+
+    /// <summary>Pins <c>overwrite: true</c> on the rescue. Without it the second <c>File.Move</c> throws into
+    /// the same empty <c>catch</c> that protects the first, so the store would quietly keep the FIRST
+    /// corruption as the recoverable copy while the second is the one the user actually wants back.</summary>
+    [Fact]
+    public void ASecondCorruptionReplacesTheEarlierRescue()
+    {
+        using var dir = new TempDir();
+        var store = new JsonSettingsStore(dir.SettingsPath);
+
+        File.WriteAllText(dir.SettingsPath, "first corruption");
+        store.Load();
+        File.WriteAllText(dir.SettingsPath, "second corruption");
+        store.Load();
+
+        Assert.Equal("second corruption", File.ReadAllText(dir.SettingsPath + ".bad"));
+    }
+
+    /// <summary>The temp file is the one part of the atomic swap observable from outside: if the rename did
+    /// not happen, <c>.tmp</c> is still lying there and the real file is not the one that was written.</summary>
+    [Fact]
+    public void SaveLeavesNoTempFileBehind()
+    {
+        using var dir = new TempDir();
+
+        new JsonSettingsStore(dir.SettingsPath).Save(Populated());
+
+        Assert.True(File.Exists(dir.SettingsPath));
+        Assert.False(File.Exists(dir.SettingsPath + ".tmp"));
+    }
+
+    [Fact]
+    public void SaveCreatesTheFolderItNeeds()
+    {
+        using var dir = new TempDir();
+        var nested = Path.Combine(dir.Root, "does", "not", "exist", "settings.json");
+
+        new JsonSettingsStore(nested).Save(new Settings());
+
+        Assert.True(File.Exists(nested));
+    }
+
+    /// <summary>settings.json outlives the binary, so the on-disk ENCODING is a compatibility surface, not an
+    /// internal detail. <see cref="Settings.Language"/> is read and written as the enum's NUMBER (see its own
+    /// comment, which gives Native AOT as the reason). This is the READING half: a file that spells the
+    /// language as a number must still load, which is what keeps an existing settings.json usable.
+    ///
+    /// Honest scope — the reading half alone does NOT forbid a string converter, because
+    /// <c>JsonStringEnumConverter</c> accepts integer values unless it is told not to. The half a converter
+    /// change would actually break is the WRITE direction, pinned separately by
+    /// <see cref="TheLanguageIsWrittenAsANumber_NotAName"/>; the two together are what hold the encoding.
+    ///
+    /// The file is literal text on purpose. Reading back something the same serializer just produced would
+    /// assert self-consistency, not compatibility — and compatibility is the whole claim.</summary>
+    [Fact]
+    public void AFileWrittenByAnEarlierVersionStillLoads()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(dir.SettingsPath, """
+            {
+              "Language": 1,
+              "TurboToggles": true,
+              "Bluelight": 2,
+              "FanPresets": { "balanced": { "Mode": 3, "Cpu": 44, "Gpu": 45 } }
+            }
+            """);
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+
+        Assert.Equal(AppLanguage.English, loaded.Language);   // 1 == English, not a string
+        Assert.True(loaded.TurboToggles);
+        Assert.Equal(2, loaded.Bluelight);
+        Assert.Equal(44, Present(loaded.FanPresets, "balanced").Cpu);
+
+        // A property the file does not mention keeps its default rather than throwing. This is the other half
+        // of compatibility, and the reason a partial file is not mistaken for a corrupt one.
+        Assert.False(loaded.DynamicLighting);
+        Assert.Empty(loaded.CpuPowerModes);
+        Assert.False(File.Exists(dir.SettingsPath + ".bad"));
+    }
+
+    /// <summary>The write half of the same claim, and the one that actually bites: an OLDER build reading a
+    /// file written by a NEWER one. Numeric is what every shipped version writes, so a change to a string
+    /// converter would make this release's files unreadable to the previous release — silently, as a
+    /// <c>JsonException</c> into the corrupt-file rescue, i.e. the user's settings replaced by factory
+    /// defaults and a <c>.bad</c> file they would have to notice.
+    ///
+    /// Asserting the JSON VALUE KIND rather than comparing text: the property order or indentation of the
+    /// document is not the claim, and a test that broke when they moved would be noise.</summary>
+    [Fact]
+    public void TheLanguageIsWrittenAsANumber_NotAName()
+    {
+        using var dir = new TempDir();
+        new JsonSettingsStore(dir.SettingsPath).Save(new Settings { Language = AppLanguage.Russian });
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(dir.SettingsPath));
+
+        Assert.Equal(JsonValueKind.Number, doc.RootElement.GetProperty("Language").ValueKind);
+    }
+}
+
+/// <summary>A scratch directory per test, under the system temp folder. Non-negotiable rather than tidy:
+/// <see cref="JsonSettingsStore.Load"/> moves corrupt content aside and <c>Save</c> renames over the live
+/// file, so a test pointed at the real location would destroy the user's settings.</summary>
+internal sealed class TempDir : IDisposable
+{
+    public TempDir()
+    {
+        Root = Path.Combine(Path.GetTempPath(), "acer-helper-store-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Root);
+    }
+
+    public string Root { get; }
+
+    /// <summary>The settings.json path inside this directory.</summary>
+    public string SettingsPath => Path.Combine(Root, "settings.json");
+
+    public void Dispose()
+    {
+        try { Directory.Delete(Root, recursive: true); } catch { /* temp dir; best effort */ }
+    }
+}
