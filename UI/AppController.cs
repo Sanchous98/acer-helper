@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Diagnostics;
 using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
@@ -52,7 +53,12 @@ internal sealed class AppController
         // Re-apply persisted device state (clamshell keep-awake, blue-light tint) NOW, before the option
         // view-models below read it — otherwise the "Stay awake when lid closed" toggle captures the pre-startup
         // default (off) and shows off after every restart even though the setting is persisted (Settings.Clamshell).
+        // Timed (see GateStats): the delta is the hardware time this block spent on the UI thread, which is the
+        // "before" number wave 6 exists to move. It is a delta of the gate counters, so it measures blocked-on-EC
+        // time, not wall time.
+        var startupHw0 = GateStats.NonPoolTicks();
         _svc.ApplyStartupState();
+        GateStatsLog.RecordStartup(GateStats.NonPoolTicks() - startupHw0);
 
         // The lighting re-apply / lid-blank / resume machine lives in its own coordinator. Created up front —
         // before the UI — so the follows-profile toggle lambda built in BuildUi can reach it, and so it persists
@@ -62,7 +68,9 @@ internal sealed class AppController
         // Build the string-baked UI (view-models, flyout window, tray). It reads all its text via Loc at
         // construction, so a live language switch simply tears this down and rebuilds it in the new language
         // (RebuildForLanguage). Everything set up AFTER this point holds no localized text and survives the swap.
+        var buildHw0 = GateStats.NonPoolTicks();
         (_vm, _windows, _tray, _lighting) = BuildUi();
+        GateStatsLog.RecordBuild(GateStats.NonPoolTicks() - buildHw0);   // see the startup sample above
         _lightingCoord.Attach(_vm, _lighting);
         var cur0 = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
@@ -87,7 +95,10 @@ internal sealed class AppController
 
         Refresh();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        _timer.Tick += (_, _) => Refresh();
+        // The periodic gate-stats write rides the poll's own timer (it self-throttles to a line a minute), so
+        // instrumentation costs no timer of its own. Periodic and not only on exit: a killed process never
+        // reaches ExitApp, and an owner's real session is exactly the one worth measuring.
+        _timer.Tick += (_, _) => { Refresh(); GateStatsLog.MaybeWrite(); };
         _timer.Start();
 
         // Heal a stale run-at-logon entry from an older build (wrong launch command) so an in-place upgrade
@@ -544,6 +555,7 @@ internal sealed class AppController
     private void ExitApp()
     {
         _timer.Stop();
+        GateStatsLog.Write();   // inline, not queued: a task started here might never get to run
         _lightingCoord.Dispose();
         _tray.Dispose();
         _svc.Dispose();

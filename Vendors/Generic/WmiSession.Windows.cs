@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using AcerHelper.Infrastructure.Diagnostics;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 
@@ -26,6 +27,10 @@ internal sealed class WmiSession : IDisposable
     // it only for its own transaction (released in between), so reads and writes just interleave, never
     // overlap; the ~ms of blocking on the UI-thread poll is negligible.
     // See docs/wmi-interop.md.
+    //
+    // That last claim — "the ~ms of blocking on the UI-thread poll is negligible" — is what GateStats exists
+    // to test rather than assume: both acquisitions below are timed, split pool vs UI thread. See
+    // docs/refactoring-plan.md, waves 5-6.
     private static readonly Lock Gate = new();
 
     private readonly IWbemServices _svc;
@@ -81,8 +86,13 @@ internal sealed class WmiSession : IDisposable
     /// method call and for plain data queries (Win32_*, smart-battery classes).</summary>
     public WmiObject? QueryFirst(string wql, out string? error)
     {
+        // Timed from here to the end of the method: the wait is how long the UI thread (or the poll) stood
+        // blocked, the hold is how long this transaction itself kept the EC. Inert when re-entered from
+        // InvokeMethod below, so one EC transaction stays one sample.
+        using var wait = GateStats.Waiting();
         lock (Gate)
         {
+            using var hold = wait.Acquired();
             error = null;
             nint bLang = 0, bQuery = 0;
             try
@@ -114,8 +124,12 @@ internal sealed class WmiSession : IDisposable
     public WmiObject? InvokeMethod(string className, string method,
         IReadOnlyDictionary<string, object>? args, out string? error)
     {
+        // This is the sample for the whole method call: the nested QueryFirst below sees the flag already set
+        // and stays inert, so the EC transaction is counted once, hold included.
+        using var wait = GateStats.Waiting();
         lock (Gate)   // one EC transaction at a time (re-entrant: the QueryFirst below re-takes it safely)
         {
+            using var hold = wait.Acquired();
             // The method's in-parameter signature comes from the CLASS definition — IWbemClassObject::GetMethod
             // is invalid on an instance (returns an error), which silently aborted every method call. The
             // instance is still needed for its __PATH, which ExecMethod runs against.
