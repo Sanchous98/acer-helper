@@ -8,13 +8,21 @@ namespace AcerHelper.Domain;
 /// <paramref name="Read"/>, when supplied, reads the option's CURRENT hardware state. The row uses it to
 /// verify a write: after <paramref name="OnChange"/> it re-reads and snaps the switch to the real value, so
 /// a WMI write that silently didn't take corrects itself instead of leaving the switch lying. Options whose
-/// write can't be read back (or don't touch hardware) leave it null and apply inline on the UI thread.</summary>
+/// write can't be read back (or don't touch hardware) leave it null and apply inline on the UI thread.
+/// <paramref name="Prime"/>, when supplied, is the read the row performs ONCE at startup to replace
+/// <paramref name="Initial"/> — which is then only a placeholder, holding the value a FAILED read would have
+/// produced. A row that has a <paramref name="Read"/> needs no separate delegate (its prime is that same
+/// read); only one with no readback at all needs it, which is why LCD overdrive passes it explicitly. The
+/// point is that these reads, which used to run on the UI thread while the UI was being built, now land on
+/// the row's own serial worker. See docs/refactoring-plan.md, wave 6.</summary>
 public sealed record OptionToggle(string Label, bool Supported, bool Initial, Action<bool> OnChange,
                                   Func<bool>? Read = null,
-                                  Func<bool>? Confirm = null, Func<Task<bool>>? ConfirmAsync = null);
+                                  Func<bool>? Confirm = null, Func<Task<bool>>? ConfirmAsync = null,
+                                  Func<bool>? Prime = null);
 
 /// <summary>A hardware multi-choice option (dropdown) shown in the Options group. <paramref name="Read"/>
 /// is the readback equivalent of <see cref="OptionToggle.Read"/>: it returns the index (into
-/// <paramref name="Options"/>) that the hardware is actually in, used to verify a pick.</summary>
+/// <paramref name="Options"/>) that the hardware is actually in, used to verify a pick.
+/// <paramref name="Prime"/> is the readback equivalent of <see cref="OptionToggle.Prime"/>.</summary>
 public sealed record OptionChoice(string Label, bool Supported, IReadOnlyList<string> Options, int InitialIndex,
-                                  Action<int> OnChange, Func<int>? Read = null);
+                                  Action<int> OnChange, Func<int>? Read = null, Func<int>? Prime = null);

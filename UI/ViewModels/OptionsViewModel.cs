@@ -104,7 +104,11 @@ public sealed class OptionsViewModel : SectionViewModel
                 tip: Loc.T("Otherwise the Turbo key cycles through profiles.")));
 
         if (device.Autostart is { } auto)
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), auto.IsEnabled(), true, o.SetAutostart));
+            // Placeholder + a deferred read: IsEnabled() shells out to schtasks.exe and waits up to 5 s, so on
+            // the UI thread it used to freeze the app at logon. Note there is deliberately no Read: that would
+            // move the WRITE onto the serial worker too and add a snap-back, which is a behaviour change.
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), false, true, o.SetAutostart,
+                prime: auto.IsEnabled));
 
         return vm.Rows.Count > 0 ? vm : null;
     }
@@ -114,13 +118,24 @@ public sealed class OptionsViewModel : SectionViewModel
     /// slot moved because the user picked that profile by hand. Called when the drawer opens (the rows are built
     /// once and live for the app's lifetime, so without this they would keep showing their construction-time
     /// values). Each row's read runs off the UI thread on its own serial worker.</summary>
-    public void Sync()
+    public void Sync() => Visit(static t => t.Sync(), static c => c.Sync());
+
+    /// <summary>Fill in the rows that were built with a placeholder, once, right after the UI is built — the
+    /// reads that used to run on the UI thread during that construction, now on each row's own serial worker.
+    /// Mirrors <see cref="Sync"/>. Called by <c>AppController</c> rather than by this constructor, for two
+    /// reasons: the ordering guarantee at the top of <c>AppController</c> (persisted device state re-applied
+    /// BEFORE any row reads it) stays explicit and greppable, and a test can assert that construction alone
+    /// performs no device read, without racing a read the constructor had just started. See
+    /// docs/refactoring-plan.md, wave 6.</summary>
+    public void Prime() => Visit(static t => t.Prime(), static c => c.Prime());
+
+    private void Visit(Action<ToggleRowViewModel> toggle, Action<ChoiceRowViewModel> choice)
     {
         foreach (var row in Rows)
             switch (row)
             {
-                case ToggleRowViewModel t: t.Sync(); break;
-                case ChoiceRowViewModel c: c.Sync(); break;
+                case ToggleRowViewModel t: toggle(t); break;
+                case ChoiceRowViewModel c: choice(c); break;
             }
     }
 }
@@ -132,17 +147,20 @@ public sealed class ToggleRowViewModel : ObservableObject
 {
     private readonly Action<bool> _onChange;
     private readonly Func<bool>? _read;
+    private readonly Func<bool>? _prime;
     private readonly Func<bool>? _confirm;
     private readonly Func<Task<bool>>? _confirmAsync;
     private readonly VerifiedHwValue<bool> _hw = new();
     private bool _isOn;
 
     public ToggleRowViewModel(OptionToggle t)
-        : this(t.Label, t.Initial, t.Supported, t.OnChange, read: t.Read, confirm: t.Confirm, confirmAsync: t.ConfirmAsync) { }
+        : this(t.Label, t.Initial, t.Supported, t.OnChange, read: t.Read, confirm: t.Confirm,
+               confirmAsync: t.ConfirmAsync, prime: t.Prime) { }
 
     public ToggleRowViewModel(string label, bool initial, bool enabled, Action<bool> onChange,
                               string? tip = null, Func<bool>? read = null,
-                              Func<bool>? confirm = null, Func<Task<bool>>? confirmAsync = null)
+                              Func<bool>? confirm = null, Func<Task<bool>>? confirmAsync = null,
+                              Func<bool>? prime = null)
     {
         Label = label;
         IsEnabled = enabled;
@@ -151,6 +169,7 @@ public sealed class ToggleRowViewModel : ObservableObject
         _hw.Latch(initial);
         _onChange = onChange;
         _read = read;
+        _prime = prime;
         _confirm = confirm;
         _confirmAsync = confirmAsync;
     }
@@ -204,10 +223,17 @@ public sealed class ToggleRowViewModel : ObservableObject
 
     /// <summary>Re-read the hardware (no write) and snap the switch to it — for a change made out of band.
     /// No-op on a row whose value can't be read back.</summary>
-    public void Sync()
+    public void Sync() => ReadInto(_read);
+
+    /// <summary>Replace the construction-time placeholder with the real value, off the UI thread. A row with
+    /// a <see cref="OptionToggle.Read"/> uses that same read; only a row with no readback needs its own
+    /// <see cref="OptionToggle.Prime"/>. No-op on a row that can't be read at all.</summary>
+    public void Prime() => ReadInto(_prime ?? _read);
+
+    private void ReadInto(Func<bool>? read)
     {
-        if (_read == null) return;
-        _hw.Sync(_read, () => _isOn, actual => { _isOn = actual; OnPropertyChanged(nameof(IsOn)); });
+        if (read == null) return;
+        _hw.Sync(read, () => _isOn, actual => { _isOn = actual; OnPropertyChanged(nameof(IsOn)); });
     }
 
     private async Task ConfirmAndApplyAsync()
@@ -228,6 +254,7 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
 {
     private readonly Action<int> _onPick;
     private readonly Func<int>? _read;
+    private readonly Func<int>? _prime;
     private readonly VerifiedHwValue<int> _hw = new();
     private bool _syncing;     // guards the readback snap-back so it doesn't re-fire OnChange
 
@@ -238,6 +265,7 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
         Options = c.Options;
         _onPick = c.OnChange;
         _read = c.Read;
+        _prime = c.Prime;
         _selectedIndex = Math.Clamp(c.InitialIndex, 0, c.Options.Count - 1);   // direct write -> no pick fired
         _hw.Latch(_selectedIndex);
     }
@@ -250,10 +278,16 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
 
     /// <summary>Re-read the hardware (no write) and snap the dropdown to it — for a change made out of band.
     /// No-op on a row whose value can't be read back.</summary>
-    public void Sync()
+    public void Sync() => ReadInto(_read);
+
+    /// <summary>Replace the construction-time placeholder with the real value, off the UI thread. See
+    /// <see cref="ToggleRowViewModel.Prime"/>.</summary>
+    public void Prime() => ReadInto(_prime ?? _read);
+
+    private void ReadInto(Func<int>? read)
     {
-        if (_read == null) return;
-        _hw.Sync(_read, () => SelectedIndex, actual =>
+        if (read == null) return;
+        _hw.Sync(read, () => SelectedIndex, actual =>
         {
             _syncing = true;
             SelectedIndex = actual;   // reflect reality without re-firing the pick

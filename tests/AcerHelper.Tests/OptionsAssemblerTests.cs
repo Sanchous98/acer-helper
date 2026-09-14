@@ -173,6 +173,12 @@ public class OptionsAssemblerFailureTests
 /// readback is what corrects a switch (or a dropdown) after a write the firmware accepted but did not apply,
 /// so a <c>Read</c> that answers from a copy taken at build time would leave the UI lying about the hardware
 /// — the exact bug the readback exists to remove (Options.cs:8-11).
+///
+/// WAVE 6 MOVED WHERE THE FIRST READ HAPPENS: these delegates are now also what the row's PRIME calls, and the
+/// build itself reads nothing — <c>Initial</c>/<c>InitialIndex</c> are placeholders. The assertions below
+/// therefore start their counts at 0 and get the live value through <c>Read()</c> rather than out of the row's
+/// construction-time value; the delegate's contract (ask the port, every time, answer live) is unchanged, and
+/// that is the point — the deferral reused this machinery instead of adding a second one.
 /// </summary>
 public class OptionsAssemblerReadbackTests
 {
@@ -185,8 +191,11 @@ public class OptionsAssemblerReadbackTests
         h.F.Device.FnLock = fn;
 
         var row = AssemblerRows.Toggle(h, "Fn lock");
-        Assert.True(row.Initial);
-        Assert.Equal(1, fn.GetCount);        // the Initial value came from the port, once
+        Assert.False(row.Initial);           // placeholder: what a FAILED read would have shown
+        Assert.Equal(0, fn.GetCount);        // ...and the build cost no transaction at all
+
+        Assert.True(row.Read!());            // the live answer, asked for on demand
+        Assert.Equal(1, fn.GetCount);
 
         fn.State = false;                    // the hardware changed under us (a hotkey, another app)
         Assert.False(row.Read!());
@@ -205,7 +214,7 @@ public class OptionsAssemblerReadbackTests
     public void TheLcdRowHasNoReadback_BecauseItsWriteSelfConfirms()
     {
         var h = new OptionsAssemblerHarness();
-        var lcd = new FakeFlagPort();
+        var lcd = new FakeFlagPort { State = true };
         h.F.Device.LcdOverdrive = lcd;
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
@@ -213,7 +222,11 @@ public class OptionsAssemblerReadbackTests
 
         row.OnChange(true);
 
-        Assert.Equal(1, lcd.GetCount);       // the Initial read only; nothing re-reads after the write
+        Assert.Equal([true], lcd.SetCalls);  // the write went through
+        Assert.Equal(0, lcd.GetCount);       // ...and read nothing back: the write self-confirms, and the build defers
+        Assert.NotNull(row.Prime);           // so the row carries the one explicit Prime instead
+        Assert.True(row.Prime!());           // which is exactly the port's Get
+        Assert.Equal(1, lcd.GetCount);       // one transaction — and only because a prime was asked for
     }
 
     /// <summary>A dropdown's <c>Read</c> answers with the INDEX of what the port reports now, not the id
@@ -235,7 +248,10 @@ public class OptionsAssemblerReadbackTests
         h.F.Device.UsbCharging = usb;
 
         var row = AssemblerRows.Choice(h, "USB charging when off:");
-        Assert.Equal(expected, row.InitialIndex);
+        Assert.Equal(0, row.InitialIndex);   // placeholder — the build does not ask, so it cannot know
+        Assert.Equal(0, usb.GetCount);
+
+        Assert.Equal(expected, row.Read!()); // the mapping, asked for on demand
         Assert.Equal(1, usb.GetCount);
 
         usb.CurrentId = "10";                // the hardware moved after the row was built
@@ -253,7 +269,7 @@ public class OptionsAssemblerReadbackTests
         var h = new OptionsAssemblerHarness(LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced));
         var row = AssemblerRows.Choice(h, "Profile on AC power:");
 
-        Assert.Equal(0, row.InitialIndex);                       // nothing remembered yet -> first entry
+        Assert.Equal(0, row.InitialIndex);                       // placeholder, not a reading — see wave 6
 
         h.F.Store.Settings.OnAc.BaseId = "performance";
         Assert.Equal(3, row.Read!());

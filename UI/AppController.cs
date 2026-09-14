@@ -72,6 +72,11 @@ internal sealed class AppController
         (_vm, _windows, _tray, _lighting) = BuildUi();
         GateStatsLog.RecordBuild(GateStats.NonPoolTicks() - buildHw0);   // see the startup sample above
         _lightingCoord.Attach(_vm, _lighting);
+        // Fill in the option rows' placeholder values, off the UI thread: these reads used to happen right here,
+        // on the UI thread, while the UI was being built (wave 6). Deliberately AFTER ApplyStartupState above —
+        // the clamshell row takes its state from the device object the takeover just touched, and must see the
+        // applied value, which is why that row has no deferred read at all.
+        _vm.OptionsPage?.Prime();
         var cur0 = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = cur0?.Id ?? "";
@@ -212,6 +217,7 @@ internal sealed class AppController
         Loc.Use(_svc.Language);
         (_vm, _windows, _tray, _lighting) = BuildUi();
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
+        _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
         var cur = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";

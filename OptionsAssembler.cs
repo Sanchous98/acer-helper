@@ -16,21 +16,27 @@ namespace AcerHelper.Application;
 internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration,
                                        Action<Action> post)
 {
+    /// <summary>Builds the toggle rows. <c>Initial</c> here is a PLACEHOLDER, not a reading: it is the value a
+    /// failed read would produce (a flag port answers false when the EC won't answer), and the row fills in the
+    /// real state via its prime once the UI is built — off the UI thread, on the row's own serial worker. That
+    /// is why no <c>Get()</c> appears in this method. See docs/refactoring-plan.md, wave 6.</summary>
     public IReadOnlyList<OptionToggle> Toggles()
     {
         var d = svc.Device;
         var list = new List<OptionToggle>();
         // LCD overdrive's write (SetGamingProfile) returns a status byte, so it self-confirms — no readback
-        // (a second EC transaction the user hears as a second "click").
+        // (a second EC transaction the user hears as a second "click"). It is the one row that needs an explicit
+        // Prime: with no Read there is nothing for the prime to fall back on. This costs ONE EC transaction at
+        // startup (and on a language rebuild) and still ZERO per write, so the reason Read is absent stands.
         if (d.LcdOverdrive is { } lcd)
-            list.Add(new OptionToggle(Loc.T("LCD overdrive"), true, lcd.Get(),
-                v => RunSet(() => svc.SetFlag(lcd, v), "LCD overdrive")));
+            list.Add(new OptionToggle(Loc.T("LCD overdrive"), true, false,
+                v => RunSet(() => svc.SetFlag(lcd, v), "LCD overdrive"), Prime: lcd.Get));
         // Keyboard-backlight timeout uses SetFunction, which returns nothing about the result -> read back.
         if (d.KeyboardBacklight is { } kbd)
-            list.Add(new OptionToggle(Loc.T("Keyboard backlight timeout"), true, kbd.Get(),
+            list.Add(new OptionToggle(Loc.T("Keyboard backlight timeout"), true, false,
                 v => RunSet(() => svc.SetFlag(kbd, v), "Backlight timeout"), Read: kbd.Get));
         if (d.FnLock is { } fn)
-            list.Add(new OptionToggle(Loc.T("Fn lock"), true, fn.Get(),
+            list.Add(new OptionToggle(Loc.T("Fn lock"), true, false,
                 v => RunSet(() => svc.SetFlag(fn, v), "Fn lock"), Read: fn.Get));
 
         // Publish the keyboard's zones as a virtual HID LampArray, so Windows Dynamic Lighting and
@@ -45,6 +51,9 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         return list;
     }
 
+    /// <summary>Builds the dropdown rows. As in <see cref="Toggles"/>, <c>InitialIndex</c> is a placeholder:
+    /// index 0 is what <see cref="IndexOf"/> returns when the read finds nothing, so it is exactly what the row
+    /// shows today when a read fails — the deferral introduces no new kind of lie.</summary>
     public IReadOnlyList<OptionChoice> Choices()
     {
         var d = svc.Device;
@@ -54,7 +63,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         {
             var levels = usb.Options;
             var names = levels.Select(l => Loc.T(l.DisplayName)).ToList();
-            list.Add(new OptionChoice(Loc.T("USB charging when off:"), true, names, IndexOf(levels, usb.Get()),
+            list.Add(new OptionChoice(Loc.T("USB charging when off:"), true, names, 0,
                 i => RunSet(() => svc.SetChoice(usb, levels[i].Id), "USB charging"),
                 Read: () => IndexOf(levels, usb.Get())));
         }
@@ -67,7 +76,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         {
             var opts = to.Options;
             var names = opts.Select(o => Loc.T(o.DisplayName)).ToList();
-            list.Add(new OptionChoice(Loc.T("Keyboard backlight timeout:"), true, names, IndexOf(opts, to.Get()),
+            list.Add(new OptionChoice(Loc.T("Keyboard backlight timeout:"), true, names, 0,
                 i => RunSet(() => svc.SetChoice(to, opts[i].Id), "Backlight timeout"),
                 Read: () => IndexOf(opts, to.Get())));
         }
@@ -114,21 +123,21 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (svc.Device.BatteryChargeMode is not { } mode) return null;
         var modes = mode.Options;
         var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
-        return new OptionChoice(Loc.T("Charge mode"), true, names, IndexOf(modes, mode.Get()),
+        return new OptionChoice(Loc.T("Charge mode"), true, names, 0,
             i => RunSet(() => svc.SetChoice(mode, modes[i].Id), "Charge mode"),
             Read: () => IndexOf(modes, mode.Get()));
     }
 
     public OptionToggle? BatteryLimit()
         => svc.Device.BatteryChargeLimit is { } limit
-            ? new OptionToggle(Loc.T("Charge limit (~80%)"), true, limit.Get(),
+            ? new OptionToggle(Loc.T("Charge limit (~80%)"), true, false,
                 v => RunSet(() => svc.SetFlag(limit, v), "Battery limit"), Read: limit.Get)
             : null;
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
     public OptionToggle? BatteryCalibration()
         => svc.Device.BatteryCalibration is { } cal
-            ? new OptionToggle(Loc.T("Calibration (full cycle)"), true, cal.Get(),
+            ? new OptionToggle(Loc.T("Calibration (full cycle)"), true, false,
                 v => RunSet(() => svc.SetFlag(cal, v), "Battery calibration"),
                 Read: cal.Get, ConfirmAsync: confirmCalibration)
             : null;
