@@ -27,7 +27,7 @@ public class LaptopServiceCoClampTests
     // ---- SetCo: the ALL-CORE path, clamped against the port's range BEFORE it is persisted ----
 
     /// <summary>Out of range is stored CLAMPED, not raw: the port clamps what it sends to the SMU anyway
-    /// (Features/Ports.cs:196-199), so a raw value on disk would make the app report an undervolt the
+    /// (Domain/Ports.cs:196-199), so a raw value on disk would make the app report an undervolt the
     /// hardware never got (`LaptopService.Tuning.cs` `SetCo` — the port-range clamp before persisting).</summary>
     [Theory]
     [InlineData(-100, -30)]      // below the port's Min
@@ -267,7 +267,7 @@ public class LaptopServiceCoKeyingTests
         Assert.Equal(new[] { -20, -10 }, co.SetDomainsCalls[1]); // the SMU is told the reordered values too
     }
 
-    /// <summary>Relabelling a domain (Label is display-only, Features/Ports.cs:205-208) must keep its value:
+    /// <summary>Relabelling a domain (Label is display-only, Domain/Ports.cs:205-208) must keep its value:
     /// the key is what the preset is filed under.</summary>
     [Fact]
     public void PerDomainValues_SurviveARelabelledDomain()
@@ -467,7 +467,7 @@ public class LaptopServiceCoCountTests
 
 /// <summary>
 /// <see cref="LaptopService.CurrentCoDomains"/> — the read the UI renders its rows from. It must answer in
-/// the port's own shape (Features/Ports.cs:183-190) without ever creating a preset, and it must not confuse
+/// the port's own shape (Domain/Ports.cs:183-190) without ever creating a preset, and it must not confuse
 /// "no Curve-Optimizer port at all" (nothing to show) with "a CPU that takes one offset" (one row).
 /// </summary>
 public class LaptopServiceCurrentCoDomainsTests

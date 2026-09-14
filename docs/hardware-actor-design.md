@@ -11,6 +11,25 @@ each passage was written and have already drifted; treat the symbol names as the
 The tree has also been reorganised since: `LaptopService` is now six `LaptopService*.cs` partial files, and
 `OptionsAssembler` has moved from `UI/` to the repo root (`namespace AcerHelper.Application`).
 
+**Paths were also reorganised (2026-09-15), and this document predates that.** Every path quoted below was
+written against the old layout; `namespace` now equals the folder path verbatim, and 85 files moved. The
+substitutions a reader needs:
+
+| quoted here (pre-2026-09-15) | actually now |
+|---|---|
+| `Vendors/…` | `Infrastructure/Vendors/…` |
+| `Composition/…` | `Infrastructure/Composition/…` |
+| `Diagnostics/…` | `Infrastructure/Diagnostics/…` |
+| `Features/…`, and the bare `Settings.cs` / `Options.cs` / `AppArgs.cs` at the root | `Domain/…` |
+| `LaptopService*.cs` / `OptionsAssembler.cs` at the root | `Application/…` |
+| `Program.cs` at the root | `Bootstrap/Program.cs` |
+| `Os/…` | `Infrastructure/Vendors/Generic/…` (the folder no longer exists) |
+| `AcerHelper.Features`, `AcerHelper.Vendors.*`, `AcerHelper.Os`, `AcerHelper.Composition`, `AcerHelper.Diagnostics` | `AcerHelper.Domain`, `AcerHelper.Infrastructure.Vendors.*`, `AcerHelper.Infrastructure.*` |
+
+The *analysis* is unaffected — no claim in this document rests on a folder's name, and the one path that
+mattered to a defect (`WmiSession`'s gate) is identified by symbol. Only the addresses moved. Rationale and the
+resulting `Vendors/Generic` naming oddity: `docs/refactoring-plan.md`, "Целевая структура".
+
 ## Scope
 
 This is an inventory and a design, not a patch. Nothing here is implemented. Two boundaries are load-bearing
@@ -60,35 +79,35 @@ Scope column: **HW** = the gate is held across hardware I/O; **MEM** = in-memory
 
 | # | Gate | Declared | Protects | Serialises against | Scope |
 |---|---|---|---|---|---|
-| G1 | `WmiSession.Gate` | `Vendors/Generic/WmiSession.Windows.cs:28` | nothing in-process — it is a pure interlock | every other WMI/EC transaction in the process; **all 4 other WMI-using layers** | HW |
+| G1 | `WmiSession.Gate` | `Infrastructure/Vendors/Generic/WmiSession.Windows.cs:28` | nothing in-process — it is a pure interlock | every other WMI/EC transaction in the process; **all 4 other WMI-using layers** | HW |
 | G2 | `LaptopService._state` | `LaptopService.cs` `_state` | the whole `Settings` graph (`Settings.cs`), `_onAc`, the per-source slots, `_fanCurve`, and `Save()` | G1 (nested, always after), `_lampGate` (never held together), and every UI-thread action | BOTH |
 | G3 | `LaptopService._lampGate` | `LaptopService.Lighting.cs` `_lampGate` | `_lampArray`, `_lampArrayBuilt` (lazy build) | nothing — deliberately NOT `_state` | MEM |
-| G4 | `LampArrayBridge._gate` | `Features/LampArrayBridge.cs:51` | `Enabled`, `_worker`, `_layout`, `_written`, `_frame`, `_stopping` | G5 (never held together) | MEM |
-| G5 | `LampArrayBridge._apply` | `Features/LampArrayBridge.cs:52` | a frame apply (worker thread) vs `Reassert` (caller thread) — both write the same zones through `_rgb` | G4 (never held together) | HW |
-| G6 | `PawnIo._gate` | `Vendors/Generic/PawnIo.Windows.cs:51` | the module handle: `Execute` vs `Dispose` | nothing in-process — the real interlock is the `Global\Access_PCI` mutex in G12 | HW |
-| G7 | `RyzenCurveOptimizer._gate` | `Vendors/Generic/RyzenCurveOptimizer.Windows.cs:165` | lazy `Io()` construction + `Dispose` + the whole `Transact` sequence | the cross-process mutex (see 1.4) | HW |
-| G8 | `Clamshell._sync` | `Vendors/Generic/Clamshell.cs:19` | `_applied`, `Enabled`, and `Clamshell.Windows`'s `_originalLidAction` | nothing — but `Evaluate()` runs from **three** threads: two `SystemEvents` callbacks, the UI thread, and the background refresh pass | BOTH |
-| G9 | `LampArrayTransport._gate` | `Vendors/Generic/LampArrayTransport.Windows.cs:50` | `_control`, `_frames`, `_swDevice` handles | nothing | HW |
-| G10 | `EneHidController._gate` | `Vendors/Acer/EneHidController.cs:124` | `_pending` (`List<byte[]>`), `_stopping`, `_worker` + the `Monitor.Wait`/`Pulse` park | nothing — the writer thread is the only consumer | MEM (+HW on the writer thread) |
-| G11 | `AcerEcHidController._gate` | `Vendors/Acer/AcerEcHidController.cs:100` | `byte? _pending`, `_stopping`, `_worker` + `Monitor.Wait`/`Pulse` | nothing | MEM (+HW on the writer thread) |
+| G4 | `LampArrayBridge._gate` | `Domain/LampArrayBridge.cs:51` | `Enabled`, `_worker`, `_layout`, `_written`, `_frame`, `_stopping` | G5 (never held together) | MEM |
+| G5 | `LampArrayBridge._apply` | `Domain/LampArrayBridge.cs:52` | a frame apply (worker thread) vs `Reassert` (caller thread) — both write the same zones through `_rgb` | G4 (never held together) | HW |
+| G6 | `PawnIo._gate` | `Infrastructure/Vendors/Generic/PawnIo.Windows.cs:51` | the module handle: `Execute` vs `Dispose` | nothing in-process — the real interlock is the `Global\Access_PCI` mutex in G12 | HW |
+| G7 | `RyzenCurveOptimizer._gate` | `Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:165` | lazy `Io()` construction + `Dispose` + the whole `Transact` sequence | the cross-process mutex (see 1.4) | HW |
+| G8 | `Clamshell._sync` | `Infrastructure/Vendors/Generic/Clamshell.cs:19` | `_applied`, `Enabled`, and `Clamshell.Windows`'s `_originalLidAction` | nothing — but `Evaluate()` runs from **three** threads: two `SystemEvents` callbacks, the UI thread, and the background refresh pass | BOTH |
+| G9 | `LampArrayTransport._gate` | `Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs:50` | `_control`, `_frames`, `_swDevice` handles | nothing | HW |
+| G10 | `EneHidController._gate` | `Infrastructure/Vendors/Acer/EneHidController.cs:124` | `_pending` (`List<byte[]>`), `_stopping`, `_worker` + the `Monitor.Wait`/`Pulse` park | nothing — the writer thread is the only consumer | MEM (+HW on the writer thread) |
+| G11 | `AcerEcHidController._gate` | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:100` | `byte? _pending`, `_stopping`, `_worker` + `Monitor.Wait`/`Pulse` | nothing | MEM (+HW on the writer thread) |
 | G12 | `HwSerial._gate` | `UI/ViewModels/OptionsViewModel.cs:14` | `_tail` — the `Task.ContinueWith` chain | nothing | MEM |
 | G13 | `LightViewModel._readGate` | `UI/ViewModels/LightingViewModel.cs:135` | `_reading`, `_readPending` — coalescing of the off-thread brightness read | nothing | MEM |
 
 ### Gate → call sites
 
 ```
-G1  2   Vendors/Generic/WmiSession.Windows.cs:83,116
+G1  2   Infrastructure/Vendors/Generic/WmiSession.Windows.cs:83,116
 G2  33  the 33 `lock (_state)` statements in the six `LaptopService*.cs` parts — note the count is
         stale: it predates three added scalar accessors and the locking fixes; measured today: 38
 G3  1   `LaptopService.Lighting.cs` `LampArray` (its getter's `lock (_lampGate)`)
-G4  2   Features/LampArrayBridge.cs:88,117
-G5  3   Features/LampArrayBridge.cs:145,178,182
-G6  2   Vendors/Generic/PawnIo.Windows.cs:92,125
-G7  3   Vendors/Generic/RyzenCurveOptimizer.Windows.cs:258,304,361
-G8  3   Vendors/Generic/Clamshell.cs:30,41,54
-G9  2   Vendors/Generic/LampArrayTransport.Windows.cs:84,119
-G10 3+4 Vendors/Acer/EneHidController.cs:145,176,195 + Monitor 156,159,178,195
-G11 3+3 Vendors/Acer/AcerEcHidController.cs:88,110,135 + Monitor 92,112,135
+G4  2   Domain/LampArrayBridge.cs:88,117
+G5  3   Domain/LampArrayBridge.cs:145,178,182
+G6  2   Infrastructure/Vendors/Generic/PawnIo.Windows.cs:92,125
+G7  3   Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:258,304,361
+G8  3   Infrastructure/Vendors/Generic/Clamshell.cs:30,41,54
+G9  2   Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs:84,119
+G10 3+4 Infrastructure/Vendors/Acer/EneHidController.cs:145,176,195 + Monitor 156,159,178,195
+G11 3+3 Infrastructure/Vendors/Acer/AcerEcHidController.cs:88,110,135 + Monitor 92,112,135
 G12 1   UI/ViewModels/OptionsViewModel.cs:19
 G13 2   UI/ViewModels/LightingViewModel.cs:209,221
 ```
@@ -130,11 +149,11 @@ replaces wholesale**, and the re-entrancy is the part that must survive.
 | Field | Where | Written by | Read by | Correct? |
 |---|---|---|---|---|
 | `_lastModeKey`, `_lastProfileId` | `AppController.cs:34,35` | background pass | background pass, seeded on UI thread in ctor and `RebuildForLanguage` | Yes — single-flight makes it effectively single-threaded |
-| `_stopping` | `Features/LampArrayBridge.cs:54` | UI thread under G4 | worker thread, unlocked | Yes — a benign one-way flag |
-| `_stopped` | `Vendors/Generic/LampArrayTransport.Windows.cs:55` | `Stop()` | `WaitFrame` | Yes |
+| `_stopping` | `Domain/LampArrayBridge.cs:54` | UI thread under G4 | worker thread, unlocked | Yes — a benign one-way flag |
+| `_stopped` | `Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs:55` | `Stop()` | `WaitFrame` | Yes |
 | `_createResult` | `LampArrayTransport.Windows.cs:354` | `[UnmanagedCallersOnly] CreateCallback` (driver thread) | `Open()` poll loop | Yes — the only cross-thread field the actor cannot own; the callback is invoked by the OS |
 | `_stopped` | `ResumeWatcher.Linux.cs:15` | UI thread | gdbus stdout pump thread | Yes |
-| `_closing` | `Vendors/Acer/AcerHotkeys.Linux.cs:21` | UI thread | evdev reader thread | Yes |
+| `_closing` | `Infrastructure/Vendors/Acer/AcerHotkeys.Linux.cs:21` | UI thread | evdev reader thread | Yes |
 
 Counter-example worth noting: `EneHidController._stopping` (`:127`) and `AcerEcHidController._stopping`
 (`:103`) are **not** volatile, and are correct because they are only ever touched under G10/G11 — including
@@ -144,10 +163,10 @@ inside the `Monitor.Wait` predicate, which is the one place a plain bool is safe
 
 | Thread | Started | Owns | Termination |
 |---|---|---|---|
-| `lamparray-bridge` | `Features/LampArrayBridge.cs:106` | blocking `WaitFrame` + paced zone apply | `_stopping` + `_transport.Stop()` + 1 s join (`:129`) |
-| `ene-hid-writer` | `Vendors/Acer/EneHidController.cs:39` | draining `_pending`, 10 ms pacing | `Monitor.Pulse` + 1 s bounded join |
-| `acer-ec-hid-writer` | `Vendors/Acer/AcerEcHidController.cs:65` | draining the single `_pending` slot | same |
-| `acer-hotkeys` | `Vendors/Acer/AcerHotkeys.Linux.cs:47` | evdev read loop | `_closing` |
+| `lamparray-bridge` | `Domain/LampArrayBridge.cs:106` | blocking `WaitFrame` + paced zone apply | `_stopping` + `_transport.Stop()` + 1 s join (`:129`) |
+| `ene-hid-writer` | `Infrastructure/Vendors/Acer/EneHidController.cs:39` | draining `_pending`, 10 ms pacing | `Monitor.Pulse` + 1 s bounded join |
+| `acer-ec-hid-writer` | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:65` | draining the single `_pending` slot | same |
+| `acer-hotkeys` | `Infrastructure/Vendors/Acer/AcerHotkeys.Linux.cs:47` | evdev read loop | `_closing` |
 
 Plus two OS-owned pumps that are not threads the app creates: the gdbus stdout pump
 (`ResumeWatcher.Linux.cs:33-36`) and `SystemEvents`' hidden window thread, and the LidWatcher top-level
@@ -212,8 +231,8 @@ hardware. **Out of scope** — leave them alone.
 |---|---|---|---|
 | X1 | `Global\Access_PCI` | `RyzenCurveOptimizer.Windows.cs:137`, opened at `:606`, held across the whole transaction at `:410-448` | It is a **named global mutex shared with Ryzen Master, HWiNFO, RyzenAdj** and anything else poking the SMU mailbox. The code's own comment (`:442`) says per-access locking would let another agent's message execute against our arguments — so the mutex covers *the transaction*, not one register write. An actor serializing only this process changes nothing about the other processes. |
 | X2 | SMU mailbox state on the die | same file, `WaitIdle`/`PollResponse` | The mailbox is a physical resource. The mutex is only advisory; a tool that ignores it still corrupts. The 5 s `MutexWaitMs` (`:138`) is a *contention budget against other applications* — the actor must not shorten it. |
-| X3 | PawnIO kernel driver | `Vendors/Generic/PawnIo.Windows.cs` | A shared machine-wide driver (signed ring-0 modules). `_gate` protects our handle; the driver is not ours. |
-| X4 | LampArray virtual device node | `Vendors/Generic/LampArrayTransport.Windows.cs` | Other processes *write frames to our device* — that is the whole point (Windows Dynamic Lighting, G HUB-style apps). The actor owns the transport handle; it does not own the frame producer, and `LampArrayBridge._apply` (G5) exists precisely because the caller and the worker race on the same zones. |
+| X3 | PawnIO kernel driver | `Infrastructure/Vendors/Generic/PawnIo.Windows.cs` | A shared machine-wide driver (signed ring-0 modules). `_gate` protects our handle; the driver is not ours. |
+| X4 | LampArray virtual device node | `Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs` | Other processes *write frames to our device* — that is the whole point (Windows Dynamic Lighting, G HUB-style apps). The actor owns the transport handle; it does not own the frame producer, and `LampArrayBridge._apply` (G5) exists precisely because the caller and the worker race on the same zones. |
 | X5 | Single-instance mutex | `Program.cs:11,16`, `AbandonedMutexException` at `:24` | Deliberately inter-process: it is what makes the self-update restart race safe. |
 | X6 | `SystemEvents` / `RegisterPowerSettingNotification` | `ResumeWatcher.Windows.cs:9`, `LidWatcher.Windows.cs:70` | OS-delivered events. The actor can be a **consumer**; it cannot own the delivery. |
 
@@ -315,10 +334,10 @@ Also violating the spirit of the same invariant, without the plan saying so:
 
 | # | Site | State | Writers | Readers | Severity |
 |---|---|---|---|---|---|
-| **D6** | `Features/LampArrayBridge.cs:70` | `LastError` | worker at `:151` (unlocked); `Enable()` at `:83,86,88` under G4 — but `Enable()` **never runs on the UI thread** (corrected 2026-09-14: it is reached only via `OptionsAssembler.RunSet` on an `HwSerial` continuation, or `LaptopService.cs` `ApplyStartupState` on a `Task.Run`) | `LaptopService.Lighting.cs` `SetDynamicLighting`, and only on a *failed* `Enable` — i.e. when no worker is live | **Not reachable.** The worker exists only between a successful `Enable` and its own exit, and `Enable` returns early (`if (Enabled) return true`) while a worker is live, so the two writes cannot overlap a read. Downgraded to a latent hazard on the zombie-worker path: if `Disable`'s 1 s join times out (`:121`), the survivor can re-arm the transport's write. |
-| **D7** | `Features/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. |
-| **D8** | `Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. |
-| **D9** | `Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | the port's own caller, through `Set` (`:21,33,43,44,58,67`) | the **same** thread — `LaptopService.cs` `Run` | **Corrected 2026-09-14: no race in three of the five.** The write and the copy-out happen on the same `HwSerial` continuation, and `FlagPort`/`ChoicePort`/`LevelPort` are single-threaded by construction (each row owns its own port instance). The genuine `DelegatePorts` races are `ProfilesPort` (`:54`) and `FanPort` (`:41`) — UI vs POLL, a shape this table did not list. |
+| **D6** | `Domain/LampArrayBridge.cs:70` | `LastError` | worker at `:151` (unlocked); `Enable()` at `:83,86,88` under G4 — but `Enable()` **never runs on the UI thread** (corrected 2026-09-14: it is reached only via `OptionsAssembler.RunSet` on an `HwSerial` continuation, or `LaptopService.cs` `ApplyStartupState` on a `Task.Run`) | `LaptopService.Lighting.cs` `SetDynamicLighting`, and only on a *failed* `Enable` — i.e. when no worker is live | **Not reachable.** The worker exists only between a successful `Enable` and its own exit, and `Enable` returns early (`if (Enabled) return true`) while a worker is live, so the two writes cannot overlap a read. Downgraded to a latent hazard on the zombie-worker path: if `Disable`'s 1 s join times out (`:121`), the survivor can re-arm the transport's write. |
+| **D7** | `Domain/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. |
+| **D8** | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. |
+| **D9** | `Infrastructure/Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | the port's own caller, through `Set` (`:21,33,43,44,58,67`) | the **same** thread — `LaptopService.cs` `Run` | **Corrected 2026-09-14: no race in three of the five.** The write and the copy-out happen on the same `HwSerial` continuation, and `FlagPort`/`ChoicePort`/`LevelPort` are single-threaded by construction (each row owns its own port instance). The genuine `DelegatePorts` races are `ProfilesPort` (`:54`) and `FanPort` (`:41`) — UI vs POLL, a shape this table did not list. |
 | **D10** | `UI/ViewModels/LightingViewModel.cs:345` (`SaveState()`) | `LightSettings` fields | UI thread | `BackgroundPass` → `Save()` → `JsonSettingsStore` | `LaptopService.Lighting.cs` `EnsureLightZone` exists to make the *structural* insert safe, and the comment says per-field edits "stay unguarded". That is true only because a per-field write cannot restructure the dictionary — the JSON serializer can still observe a half-updated `LightSettings` and persist it. Low impact (one debounce interval of stale brightness), but it is an unguarded cross-thread read of a mutable object. |
 
 ## 3.3 Overlapping / redundant guards
@@ -414,7 +433,7 @@ Three ways the actor introduces one:
 | **D21** | `LaptopService.cs` `ApplyStartupState` (the `Task.Run` calling `la.Enable()`) | `la.Enable()` | Virtual LampArray doesn't appear; `Settings.DynamicLighting` stays true, so the Options row claims a device that isn't there — until `Read: () => lamps.Enabled` (`OptionsAssembler.cs` `Toggles`, the Dynamic Lighting row's `Read`) snaps it back on first open. Recoverable, but only by looking. |
 | **D22** | `AppController.cs:492` | `ApplyModeCo()` on every mode switch | Same as D20, per switch. |
 | **D23** | `LightingCoordinator.cs:255` | GPU OC + CPU power + CO on resume | All three volatile states silently stay at their post-sleep values. The comment says "the next resume or mode switch re-asserts" — true, but a user who never switches mode never gets their offsets back. |
-| **D24** | `Vendors/Acer/AcerDevice.Windows.cs:91` (in `SetProfile`, `:89`) and `:50` (`InitVendor`) | `_ec?.Apply(p.Kind)` then the WMI write | Two transports, one logical operation, no readback of either. If the HID write lands and the WMI one fails (or vice versa), the profile is half-applied and the app has no way to know. `docs/power-an18-61.md` says these two carry *different* things. |
+| **D24** | `Infrastructure/Vendors/Acer/AcerDevice.Windows.cs:91` (in `SetProfile`, `:89`) and `:50` (`InitVendor`) | `_ec?.Apply(p.Kind)` then the WMI write | Two transports, one logical operation, no readback of either. If the HID write lands and the WMI one fails (or vice versa), the profile is half-applied and the app has no way to know. `docs/power-an18-61.md` says these two carry *different* things. |
 | **D25** | `LaptopService.ApplyModeGpuOc/ApplyModeCpuPower/ApplyModeFan` | hardware writes | Return the preset for UI reflection; the hardware result is folded into the shared `LastError`, which a later unrelated operation can overwrite (see 3.1). |
 
 The pattern: **the app cannot distinguish "applied" from "accepted for sending"**. `AcerEcHidController.Apply`

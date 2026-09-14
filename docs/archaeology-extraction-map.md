@@ -43,7 +43,7 @@ The tree has also been reorganised since: `LaptopService` is now six `LaptopServ
 
 # Part A — blocks of 8 or more comment lines
 
-## `Features/LampArray.cs`
+## `Domain/LampArray.cs`
 
 ### `3-22` → `docs/lamparray.md` — *Why a driver is unavoidable*, *Layers*, *Wire format*
 
@@ -76,7 +76,7 @@ The tree has also been reorganised since: `LaptopService` is now six `LaptopServ
 /// (no zone-name matching) and matches these laptops physically. See docs/lamparray.md.</summary>
 ```
 
-## `Features/LampArrayBridge.cs`
+## `Domain/LampArrayBridge.cs`
 
 ### `3-32` → `docs/lamparray.md` — *What makes this more than a memcpy*, *Ownership*
 
@@ -107,7 +107,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Features/Ports.cs`
+## `Domain/Ports.cs`
 
 ### `160-169` → `docs/curve-optimizer-strix-point.md` — *Port contract*
 
@@ -240,7 +240,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // See docs/curve-optimizer-strix-point.md.
 ```
 
-## `Vendors/Acer/AcerEcHidController.Linux.cs`
+## `Infrastructure/Vendors/Acer/AcerEcHidController.Linux.cs`
 
 ### `7-16` → `docs/power-an18-61.md` — *How the app drives it (`AcerEcHidController`)*
 
@@ -257,7 +257,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // See docs/power-an18-61.md.
 ```
 
-## `Vendors/Acer/AcerEcHidController.cs`
+## `Infrastructure/Vendors/Acer/AcerEcHidController.cs`
 
 ### `5-43` → `docs/power-an18-61.md` — *Device and wire format*, *Mode byte → measured dGPU power*, *It is a latch, not a daemon*, *How the app drives it*
 
@@ -289,7 +289,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // ignored), the wire format, the measurement methodology and every dead end: see docs/power-an18-61.md.
 ```
 
-## `Vendors/Acer/EneHidController.cs`
+## `Infrastructure/Vendors/Acer/EneHidController.cs`
 
 ### `5-13` → `docs/lighting-an18-61.md` — *Device*, *How the app drives the ENE controller*
 
@@ -330,7 +330,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // this delay stays well under the ~120 ms apply debounce. 0 disables. See docs/lighting-an18-61.md.
 ```
 
-## `Vendors/Dell/DellBiosWmi.Windows.cs`
+## `Infrastructure/Vendors/Dell/DellBiosWmi.Windows.cs`
 
 ### `6-15` → `docs/dell-firmware.md` — *Windows: `root\dcim\sysman\biosattributes`*
 
@@ -347,7 +347,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // Dell-Windows hardware. See docs/dell-firmware.md.
 ```
 
-## `Vendors/Dell/DellDevice.cs`
+## `Infrastructure/Vendors/Dell/DellDevice.cs`
 
 ### `5-14` → `docs/dell-firmware.md` — whole document
 
@@ -365,7 +365,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/FirmwareAttributes.Linux.cs`
+## `Infrastructure/Vendors/Generic/FirmwareAttributes.Linux.cs`
 
 ### `6-16` → `docs/dell-firmware.md` — *Linux: `/sys/class/firmware-attributes/<device>/`*
 
@@ -384,7 +384,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// See docs/dell-firmware.md.</summary>
 ```
 
-## `Vendors/Generic/GenericDevice.Windows.cs`
+## `Infrastructure/Vendors/Generic/GenericDevice.Windows.cs`
 
 ### `38-46` → `docs/power-an18-61.md` — *The CPU-power axis on this machine: the OS overlay, nothing else*
 
@@ -401,7 +401,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // an OS without the overlay API. See docs/power-an18-61.md.
 ```
 
-## `Vendors/Generic/LampArrayTransport.Linux.cs`
+## `Infrastructure/Vendors/Generic/LampArrayTransport.Linux.cs`
 
 ### `5-14` → `docs/lamparray.md` — *Linux*
 
@@ -417,7 +417,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// all. See docs/lamparray.md.</summary>
 ```
 
-## `Vendors/Generic/LampArrayTransport.Windows.cs`
+## `Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs`
 
 ### `8-30` → `docs/lamparray.md` — *Why a driver is unavoidable*, *App ↔ driver IOCTLs*, *Implementation notes*
 
@@ -447,7 +447,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/NvidiaGpu.Windows.cs`
+## `Infrastructure/Vendors/Generic/NvidiaGpu.Windows.cs`
 
 ### `7-23` → `docs/nvidia-gpu-oc.md` — whole document
 
@@ -470,7 +470,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/OverlayCpuPower.Windows.cs`
+## `Infrastructure/Vendors/Generic/OverlayCpuPower.Windows.cs`
 
 ### `6-20` → `docs/power-an18-61.md` — *The CPU-power axis on this machine: the OS overlay, nothing else*
 
@@ -493,7 +493,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/PawnIo.Windows.cs`
+## `Infrastructure/Vendors/Generic/PawnIo.Windows.cs`
 
 ### `7-36` → `docs/pawnio.md` — whole document
 
@@ -530,7 +530,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/PawnIoInstaller.Windows.cs`
+## `Infrastructure/Vendors/Generic/PawnIoInstaller.Windows.cs`
 
 ### `7-30` → `docs/pawnio.md` — *Installing it: the redistributable, and the three rules*
 
@@ -561,7 +561,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// </summary>
 ```
 
-## `Vendors/Generic/RyzenCurveOptimizer.Windows.cs`
+## `Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs`
 
 ### `7-39` → `docs/curve-optimizer-strix-point.md` — whole document
 
@@ -723,7 +723,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 /// See docs/curve-optimizer-strix-point.md.</summary>
 ```
 
-## `Vendors/Generic/WbemInterop.Windows.cs`
+## `Infrastructure/Vendors/Generic/WbemInterop.Windows.cs`
 
 ### `6-20` → `docs/wmi-interop.md` — *Why not `System.Management`*, *Rule 1 — vtable order is load-bearing*
 
@@ -760,7 +760,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // WITHOUT UniqueInstance, making deterministic release impossible. See docs/wmi-interop.md.
 ```
 
-## `Vendors/Generic/WmiSession.Windows.cs`
+## `Infrastructure/Vendors/Generic/WmiSession.Windows.cs`
 
 ### `19-27` → `docs/wmi-interop.md` — *`WmiSession.Gate` — one EC transaction at a time, process-wide*
 
@@ -785,7 +785,7 @@ These are below the plan's "longer than 8 lines" threshold but each holds a meas
 or a licence constraint that belongs in the document, not in the body. Same format; the replacement is a
 2–4 line invariant.
 
-## `Features/LampArray.cs`
+## `Domain/LampArray.cs`
 
 ### `44-47` → `docs/lamparray.md` — *The lamp model*
 
@@ -806,7 +806,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // round. See docs/lamparray.md.
 ```
 
-## `Features/LampArrayBridge.cs`
+## `Domain/LampArrayBridge.cs`
 
 ### `137-141` → `docs/lamparray.md` — *Ownership*
 
@@ -817,7 +817,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 /// showing. See docs/lamparray.md.</summary>
 ```
 
-## `Features/Ports.cs`
+## `Domain/Ports.cs`
 
 ### `123-127` → `docs/nvidia-gpu-oc.md` — *Volatility*
 
@@ -866,7 +866,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 /// upgrades or removes anything. See docs/pawnio.md.</summary>
 ```
 
-## `Vendors/Acer/AcerDevice.Windows.cs`
+## `Infrastructure/Vendors/Acer/AcerDevice.Windows.cs`
 
 ### `44-49` → `docs/power-an18-61.md` — *It is a latch, not a daemon*
 
@@ -889,7 +889,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // (it lands on the controller's writer thread), so it cannot slow this call down. See docs/power-an18-61.md.
 ```
 
-## `Vendors/Acer/AcerProfiles.cs`
+## `Infrastructure/Vendors/Acer/AcerProfiles.cs`
 
 ### `17-22` → `docs/lighting-an18-61.md` — *OPMODE colour is a hard firmware WHITELIST*
 
@@ -902,7 +902,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // OPMODE wire order (B,G,R), which differs from the R,G,B order of the arbitrary-colour writes.
 ```
 
-## `Vendors/Acer/EneHidController.cs`
+## `Infrastructure/Vendors/Acer/EneHidController.cs`
 
 ### `18-24` → `docs/lighting-an18-61.md` — *HID protocol*, *Device*
 
@@ -963,7 +963,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // colour. See docs/lighting-an18-61.md.
 ```
 
-## `Vendors/Generic/LampArrayTransport.Windows.cs`
+## `Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs`
 
 ### `59-65` → `docs/lamparray.md` — *`DriverInstalled` — a driver-store check, not a device probe*
 
@@ -986,7 +986,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // — would leave a dead lighting device listed whenever the app isn't running (see docs/lamparray.md).
 ```
 
-## `Vendors/Generic/NvidiaGpu.Windows.cs`
+## `Infrastructure/Vendors/Generic/NvidiaGpu.Windows.cs`
 
 ### `39-42` → `docs/nvidia-gpu-oc.md` — *Safety caps, and the raw-vs-effective memory figure*
 
@@ -997,7 +997,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // doubling); an Afterburner "effective" figure is ~2× this. See docs/nvidia-gpu-oc.md.
 ```
 
-## `Vendors/Generic/PawnIo.Windows.cs`
+## `Infrastructure/Vendors/Generic/PawnIo.Windows.cs`
 
 ### `41-44` → `docs/pawnio.md` — *Protocol: one device, two IOCTLs*
 
@@ -1009,7 +1009,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // See docs/pawnio.md.
 ```
 
-## `Vendors/Generic/RyzenCurveOptimizer.Windows.cs`
+## `Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs`
 
 ### `81-86` → `docs/curve-optimizer-strix-point.md` — *The iGPU floor: `-50`*
 
@@ -1120,7 +1120,7 @@ or a licence constraint that belongs in the document, not in the body. Same form
 // never silently change which bytes get loaded into the kernel. See docs/pawnio.md.
 ```
 
-## `Vendors/Generic/WmiSession.Windows.cs`
+## `Infrastructure/Vendors/Generic/WmiSession.Windows.cs`
 
 ### `6-11` → `docs/wmi-interop.md` — *`WmiSession.Gate` — one EC transaction at a time, process-wide*
 
@@ -1155,11 +1155,11 @@ Not in the map, and why.
 | `LaptopService.cs` `_state` (its declaration comment) | This **is** the locking invariant ("`_state` guards the whole mutable `Settings` graph"). It is the rule a future editor must not break — it *is* the 1–2 line statement, at length. |
 | `Options.cs:3-11` | The `OptionToggle` contract (Read-back after a write; only one of `Confirm`/`ConfirmAsync`). Pure API semantics, no hardware claim. |
 | `UI/MainWindow.axaml.cs:8-15` | Avalonia window behaviour (fixed size; resizing on X11 races repositioning). UI framework, not hardware. |
-| `Vendors/Acer/AcerDevice.cs:6-13` | Layering/ownership summary ("relies on Generic where possible"; null port = capability absent). |
-| `Vendors/Acer/AcerHotkeys.Linux.cs:7-14` | Carries real reverse engineering (scancode `E0 75` → `KEY_PRESENTATION`; the Turbo key is consumed in-kernel by `linuwu_sense`'s `cycle_gaming_thermal_profile`; `/dev/input/event*` is `root:input`, hence the udev `uaccess` tag). It is **Linux-only and the only block on the subject** — there is no Acer-Linux document to append to, and creating one for a single 8-line block would be a near-duplicate of nothing. Left for a future Acer-Linux doc. |
-| `Vendors/Acer/AcerModel.cs:8-17` | Class summary whose only hardware claim is a **negative** one ("profiles and fan topology are NOT per-model on Acer"), already implied by `AcerProfiles.cs` and `power-an18-61.md`. |
-| `Vendors/Generic/GenericDevice.cs:6-13` | The generic-device layering contract (`protected set` ports; `InitPlatform` per OS). |
-| `Vendors/Generic/KeyboardBrightness.Linux.cs:6-13` | Kernel LED-class doc, already ends with its own consequence. The single hardware datum (Dell Latitude levels `0..2` = Off/Dim/Bright) is a Dell detail that would sit oddly in any current doc. |
+| `Infrastructure/Vendors/Acer/AcerDevice.cs:6-13` | Layering/ownership summary ("relies on Generic where possible"; null port = capability absent). |
+| `Infrastructure/Vendors/Acer/AcerHotkeys.Linux.cs:7-14` | Carries real reverse engineering (scancode `E0 75` → `KEY_PRESENTATION`; the Turbo key is consumed in-kernel by `linuwu_sense`'s `cycle_gaming_thermal_profile`; `/dev/input/event*` is `root:input`, hence the udev `uaccess` tag). It is **Linux-only and the only block on the subject** — there is no Acer-Linux document to append to, and creating one for a single 8-line block would be a near-duplicate of nothing. Left for a future Acer-Linux doc. |
+| `Infrastructure/Vendors/Acer/AcerModel.cs:8-17` | Class summary whose only hardware claim is a **negative** one ("profiles and fan topology are NOT per-model on Acer"), already implied by `AcerProfiles.cs` and `power-an18-61.md`. |
+| `Infrastructure/Vendors/Generic/GenericDevice.cs:6-13` | The generic-device layering contract (`protected set` ports; `InitPlatform` per OS). |
+| `Infrastructure/Vendors/Generic/KeyboardBrightness.Linux.cs:6-13` | Kernel LED-class doc, already ends with its own consequence. The single hardware datum (Dell Latitude levels `0..2` = Off/Dim/Bright) is a Dell detail that would sit oddly in any current doc. |
 | every block under 4 comment lines | Not mapped. Most are 1–3 line invariants that already say the rule and nothing else. |
 
 # Candidates for deletion rather than extraction
@@ -1173,7 +1173,7 @@ narrate a past refactor. Relocating these to `docs/` would create a document wit
 | `UI/ViewModels/MainViewModel.cs:60-68` (9L) | Avalonia drawer re-hosting bug (pages were previously re-created; now each has its own host in `MainWindow.axaml`) | Compress to one line stating "each drawer page has its own host; do not re-create them", or delete — the reason is historical. |
 | `OptionsAssembler.cs` `PowerSourceProfiles` (9L) | Semantics of the per-power-source profile rows | Keep the invariant (one row per power source; the row's value is the profile), drop the narration. |
 | `UI/LightingCoordinator.cs:11-22` (12L) | Class summary describing which `AppController` members forward into it | Delete most of it: it is a call-graph description that `AppController` itself already shows. Keep the two real invariants (built before any UI exists; does no hardware reads of its own). |
-| `Vendors/Generic/Autostart.Windows.cs:8-16` (9L) | Task Scheduler design, including a **rejected** approach (`RestartOnFailure` was tried and dropped) | The keep-alive *invariant* (1-minute repeat + `MultipleInstancesPolicy=IgnoreNew` is the watchdog; there is no second process) belongs in the code. The `RestartOnFailure` post-mortem is the one part worth keeping — it is a dead end, and dead ends are what `docs/` is for; either move just that sentence or drop it. |
+| `Infrastructure/Vendors/Generic/Autostart.Windows.cs:8-16` (9L) | Task Scheduler design, including a **rejected** approach (`RestartOnFailure` was tried and dropped) | The keep-alive *invariant* (1-minute repeat + `MultipleInstancesPolicy=IgnoreNew` is the watchdog; there is no second process) belongs in the code. The `RestartOnFailure` post-mortem is the one part worth keeping — it is a dead end, and dead ends are what `docs/` is for; either move just that sentence or drop it. |
 | `UpdateChecker.cs:22-27` (6L) | AOT assembly-version reflection constraint | Compress to one line. |
 | `WindowsUpdater.cs:41-47` (7L) | Staging-dir TOCTOU reasoning (random name vs fixed name in `%TEMP%`) | This is a genuine security invariant and is **already stated in the code path**; compress to two lines rather than relocate. (Compare `Autostart.Windows.cs:47-52`, the same reasoning, which was *not* flagged for extraction.) |
 
@@ -1181,7 +1181,7 @@ narrate a past refactor. Relocating these to `docs/` would create a document wit
 
 Reported, **not fixed**. The extraction step should not carry any of these claims into a replacement.
 
-1. **`Vendors/Generic/RyzenCurveOptimizer.Windows.cs:152-156` — the per-core claim is false.** It says per-core is
+1. **`Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:152-156` — the per-core claim is false.** It says per-core is
    "unreachable here (opcode `0x4B` is unconfirmed on this die, reported rejected on Krackan Point, and there is
    no way to learn the core-fuse topology)". The same file contradicts it three times: `:65` calls `0x4B`/`0x4C`
    "the CPU opcodes already proven to work here"; `:89-99` says the per-core argument layout was "Confirmed on
@@ -1189,19 +1189,19 @@ Reported, **not fixed**. The extraction step should not carry any of these claim
    by ~78 mV"; and `SetDomains` (`:314-329`) writes `0x4B` to **every slot of each CCD** — that is the live path
    the 3-domain UI uses. Per-core *sliders* may still be the wrong UI, but per-core *writes* are in production.
    Handled in the map by omitting the sentence.
-2. **`Features/LampArrayBridge.cs:44-46` — stale, and misplaced.** *"How long the worker keeps re-trying after
+2. **`Domain/LampArrayBridge.cs:44-46` — stale, and misplaced.** *"How long the worker keeps re-trying after
    the transport fails (driver unloaded, device removed): it just stops."* documents a retry-duration constant
    that no longer exists, and the comment sits directly above the unrelated field
    `private readonly IRgbDevice _rgb;`. `WorkerLoop` simply breaks out of the loop; re-enabling is a user action.
    **Fix: delete the block** (not extract — there is no content left).
-3. **`Features/Ports.cs:160-169` — over-generalisation.** "this hardware offers no trustworthy read-back" is true
+3. **`Domain/Ports.cs:160-169` — over-generalisation.** "this hardware offers no trustworthy read-back" is true
    of the CPU clusters and false of the iGPU, which has a getter (`0x20`) and is verified on every write
    (`SetGpu`, `:342-357`). Handled in the map by not repeating the clause.
 4. **Minor numeric drift, same experiment.** The all-core `-30` result is quoted as **~76 mV** at `:20` and
    `:177`, and as **~78 mV** at `:91` (single-slot offset). Both are honest measurements of the same die, but the
    two numbers sitting in one file will read as a contradiction. The document records them explicitly as two
    views of one experiment.
-5. **`Vendors/Generic/RyzenCurveOptimizer.Windows.cs:419` — the offset silently does not apply.** After the
+5. **`Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:419` — the offset silently does not apply.** After the
    5-second PCI-mutex wait times out, the write is abandoned with *"another tool is holding the PCI access
    lock"* and the setting is never applied; users read this as "the undervolt doesn't hold". Already recorded in
    `docs/refactoring-plan.md` ("Известные нарушения") — not repeated here as a new finding, but the *comment*

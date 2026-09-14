@@ -44,15 +44,24 @@ reboot while the EC mode behind it does not. Full protocol, the measured mode→
 
 ## Architecture
 
-One project, organised by module; **namespaces match the directories** (`AcerHelper` + path):
+One project, organised by layer; **namespaces match the directories** (`AcerHelper` + path):
 
-- **`Features/`** (`AcerHelper.Features`) — the vendor- and OS-agnostic core: model
+- **`Domain/`** (`AcerHelper.Domain`) — the vendor- and OS-agnostic core: model
   (`PerformanceProfile`, `FanMode`, `SensorSnapshot`, `HotkeyAction`, …) and one fine-grained
   *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `ILcdOverdrive`,
   `IBatteryChargeLimit`, `IUsbCharging`, `IKeyboardBacklight`, `ILighting`, `IHotkeys`,
   `IDisplayTint`, `IAutostart`, `IClamshell`). The aggregate `IDevice` exposes each port as
   **nullable** — `null` means the feature is absent, so the UI shows exactly what the hardware has.
-- **`Vendors/Acer/`** (`AcerHelper.Vendors.Acer`) — Acer feature implementations. There is **no
+  Also the pieces that are logic rather than I/O: `FanCurveEngine`, `LampArrayBridge`, the
+  compile-time version constant.
+- **`Application/`** (`AcerHelper.Application`) — the use cases, and nothing else: `LaptopService`
+  (split across `LaptopService.*.cs` partials, one per feature family) and `OptionsAssembler`.
+  This is the only layer the UI talks to.
+- **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
+  `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
+  `ResumeWatcher`, plus `Composition/`, `Diagnostics/` and `Vendors/`.
+- **`Infrastructure/Vendors/Acer/`** (`AcerHelper.Infrastructure.Vendors.Acer`) — Acer feature
+  implementations. There is **no
   separate platform layer**: the OS access is folded into the vendor implementation, split per OS
   by file name — `AcerGaming.Windows.cs` (WMI), and future `*.Linux.cs` (sysfs) sit side by side.
   Within Acer, capabilities are **probed at runtime** (RGB device present? EC supported-profile
@@ -62,25 +71,35 @@ One project, organised by module; **namespaces match the directories** (`AcerHel
   default + optional user override at `%AppData%/AcerHelper` / `~/.config/AcerHelper`), matched by
   DMI product name via `AcerModels.Detect`. (Design validated against Linuwu-Sense and G-Helper:
   probe-first, with a thin per-model quirks/override table.)
-- **`Os/`** (`AcerHelper.Os`) — genuinely vendor-agnostic OS services: **performance profiles via
-  standard OS APIs** (Windows power-mode overlay / Linux ACPI `platform_profile`), blue-light
-  gamma, autostart, clamshell + a small WMI helper, also split by `*.Windows.cs` / `*.Linux.cs`.
-- **`Composition/`** (`AcerHelper.Composition`) — `DeviceFactory.Windows.cs` / `DeviceFactory.Linux.cs`
+- **`Infrastructure/Vendors/Generic/`** (`AcerHelper.Infrastructure.Vendors.Generic`) — the
+  genuinely vendor-agnostic backend: **performance profiles via standard OS APIs** (Windows
+  power-mode overlay / Linux ACPI `platform_profile`), blue-light gamma, autostart, clamshell,
+  battery, keyboard brightness, hwmon sensors + a small WMI helper, again split by
+  `*.Windows.cs` / `*.Linux.cs`. It is a *vendor* only in the sense that its "vendor" is the OS —
+  which is why it lives beside `Acer/` rather than in a layer of its own.
+- **`Infrastructure/Vendors/Dell/`** (`AcerHelper.Infrastructure.Vendors.Dell`) — the second vendor
+  backend, the one that proves the split is real rather than Acer-shaped.
+- **`Infrastructure/Composition/`** (`AcerHelper.Infrastructure.Composition`) —
+  `DeviceFactory.Windows.cs` / `DeviceFactory.Linux.cs`
   detect the device and assemble an `IDevice`; `CompositeDevice`, `JsonSettingsStore`. When no
   vendor backend matches (a non-Acer laptop, or no elevation), it falls back to a **generic
   device** offering those OS-standard basics — so the app is useful on any laptop. (Validated on a
   Dell Latitude 5540 on Linux: shows the firmware's cool/quiet/balanced/performance profiles.)
-- **root** (`AcerHelper`) — the application use cases (`LaptopService`, `Settings`) and the
-  Avalonia UI (tray + windows), capability-driven (binds to `Features` only).
+- **`Infrastructure/Diagnostics/`** (`AcerHelper.Infrastructure.Diagnostics`) — the always-on
+  gate counters (`GateStats`, `GateStatsLog`) and the log they append to.
+- **`Bootstrap/`** (`AcerHelper.Bootstrap`) — `Program.cs`: the entry point, single-instance
+  mutex, command-line parsing.
+- **`UI/`**, **`Localization/`** — the Avalonia tray + windows (capability-driven; binds to
+  `Application` and `Domain`, never to a vendor), and the string tables.
 - **`driver/`** — the one piece that can't be C#: `AcerHelperLampArray.sys`, a KMDF HID *source* driver over the
   in-box Virtual HID Framework that publishes the keyboard's zones as a **HID LampArray** so Windows Dynamic
   Lighting can paint them. Windows only enumerates lighting devices as LampArray HID collections, so a driver
   has to exist; it is kept deliberately dumb (static report descriptor + a lamp table pushed down over three
-  IOCTLs) with all the logic in `Features/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
+  IOCTLs) with all the logic in `Domain/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
 
 OS-specific code is selected by the `*.Windows.cs` / `*.Linux.cs` file-name suffix (MSBuild
 `<Compile Remove>` globs per target framework) — **no preprocessor directives**. Adding a laptop
-vendor = a new set of files under `Vendors/`; adding an OS = `*.Linux.cs` siblings. The UI never changes.
+vendor = a new set of files under `Infrastructure/Vendors/`; adding an OS = `*.Linux.cs` siblings. The UI never changes.
 
 ## Windows Dynamic Lighting (LampArray)
 

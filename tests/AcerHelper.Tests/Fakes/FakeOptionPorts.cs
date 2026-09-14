@@ -9,7 +9,7 @@ namespace AcerHelper.Tests.Fakes;
 /// THROWS, which the ports survive by different paths (see <see cref="FakeThrowingPowerProfiles"/>).
 ///
 /// <see cref="FakeFlagPort"/> implements every on/off feature port at once, and <see cref="FakeChoicePort"/>
-/// every pick-one-of-N port, because in Features/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
+/// every pick-one-of-N port, because in Domain/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
 /// <see cref="IChoicePort"/> and nothing more — so one fake is dropped into whichever slot the row under test
 /// reads, and a test says which row it means by its label rather than by its port type.
 ///

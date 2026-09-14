@@ -7,8 +7,9 @@
 против ревизии, актуальной на момент каждого абзаца, и часть уже устарела —
 в том числе из-за самого рефакторинга. Якорь — имя символа, а не число:
 искать по имени. Что изменилось в дереве: `LaptopService` теперь шесть частичных
-файлов `LaptopService*.cs`, а `OptionsAssembler` переехал из `UI/` в корень
-(`namespace AcerHelper.Application`).
+файлов `LaptopService*.cs` (в `Application/`), а `OptionsAssembler` переехал из
+`UI/` в `Application/`. С 2026-09-15 namespace'ы совпадают с путями дословно —
+см. «Целевая структура».
 
 ## Зачем
 
@@ -61,9 +62,25 @@
 
 ## Целевая структура
 
-Namespace выводится из **папки**, никогда из имени файла: проект разделяет
-платформы по суффиксу (`*.Windows.cs` / `*.Linux.cs`) через `<Compile Remove>`,
-и попадание суффикса в namespace сломало бы это разделение.
+**Сделано 2026-09-15.** Правило: namespace выводится из **папки** — корневой
+namespace плюс относительный путь, дословно. Исключений нет, «по слоям» больше
+ничего не раскладывается.
+
+Причина правки: до неё namespace'ы были выведены из **слоя**, а не из папки, и
+это уже разъехалось — `Diagnostics/**` и `Composition/**` лежали в
+`AcerHelper.Infrastructure.*`, а `Os/**` — в `AcerHelper.Os`; файлы же,
+переехавшие в корень в Волне 1, остались без слоя. То есть таблица ниже не
+описывала дерево, а задавала желаемое, и расхождение никто не проверял. Теперь
+инвариант — `folder == namespace`, и он проверяем одной командой.
+
+Почему это **сначала, а не после Волны 5**: правка трогает почти каждый `.cs`
+(85 переименований), а правки Волны 5 в `LaptopService.*` ещё не начаты. Сделав
+её первой, диффы Волны 5 остаются чистыми — иначе каждый из них тянул бы за
+собой переезд.
+
+Namespace **не выводится из имени файла**: проект разделяет платформы по суффиксу
+(`*.Windows.cs` / `*.Linux.cs`) через `<Compile Remove>`, и попадание суффикса в
+namespace сломало бы это разделение.
 
 Отсюда же — **правило для частей `LaptopService.*.cs`**: их суффиксы (`.Profiles`,
 `.Tuning`, `.Fans`, `.Lighting`, `.Toggles`) выбраны так, чтобы не совпасть ни с
@@ -74,24 +91,47 @@ Namespace выводится из **папки**, никогда из имени
 
 | Папка | Namespace |
 |---|---|
-| `Features/**` | `AcerHelper.Domain` |
-| `Settings.cs`, `Options.cs` | `AcerHelper.Domain` |
-| `LaptopService.cs` + его части `LaptopService.*.cs` | `AcerHelper.Application` |
-| `OptionsAssembler.cs` | `AcerHelper.Application` |
-| `Vendors/**` | `AcerHelper.Infrastructure.Vendors.**` |
-| `Composition/**`, `Os/**`, прочие корневые инфра-папки | `AcerHelper.Infrastructure.**` |
-| `Program.cs` | `AcerHelper.Bootstrap` |
+| `Domain/**` | `AcerHelper.Domain` |
+| `Application/**` | `AcerHelper.Application` |
+| `Infrastructure/**` (сама папка) | `AcerHelper.Infrastructure` |
+| `Infrastructure/Composition/**` | `AcerHelper.Infrastructure.Composition` |
+| `Infrastructure/Diagnostics/**` | `AcerHelper.Infrastructure.Diagnostics` |
+| `Infrastructure/Vendors/{Acer,Dell,Generic}/**` | `AcerHelper.Infrastructure.Vendors.**` |
+| `Bootstrap/**` | `AcerHelper.Bootstrap` |
 | `UI/**` | `AcerHelper.UI.**` — **без изменений** |
 | `Localization/**` | `AcerHelper.Localization` — **без изменений** |
+
+Корень `AcerHelper` теперь пуст: в нём не объявлено ни одного типа, и это то,
+ради чего Волна 1 существовала. Тесты (`tests/AcerHelper.Tests`, namespace
+`AcerHelper.Tests`) — единственное место, где папка и namespace расходятся по
+регистру `T`; это стандартная раскладка `tests/<ProjectName>/`, и трогать её
+незачем.
+
+### Следствие, которое стоит назвать
+
+`Vendors/Generic/**` — это бывшая папка `Os/`: **сервисы на стандартных API ОС**
+(power-mode overlay, гамма, автостарт, clamshell, hwmon). Они попали под
+`Vendors/`, потому что их namespace уже был `AcerHelper.Infrastructure.Vendors.Generic`
+и переезд делался «файлы к namespace'ам», а не наоборот. Читается это странно:
+«vendor», у которого вендор — операционная система.
+
+Это принято сознательно, а не проглядено. Обратный вариант (папка `Os/` +
+namespace `AcerHelper.Infrastructure.Os`) означал бы переименование namespace у 36
+файлов и правку всех `using` — то есть ровно тот дифф, который эта правка
+убирала. Если название начнёт мешать, это отдельный коммит «`Generic/` → `Os/`»,
+и он же — единственный случай, когда переезд папки оправдан. Функционально оба
+варианта эквивалентны, поэтому решено не платить сейчас.
 
 ### Отклонено: `UI/ → AcerHelper.Presentation`
 
 `AcerHelper.UI.*` и `AcerHelper.Localization` уже существуют как под-namespace'ы,
 и на них ссылаются ~40 `.axaml` через `x:Class` / `clr-namespace`. Для опустошения
-корня их переименование **не требуется** — они и так не корень. То есть это ~80
-правок XAML, каждая из которых может сломать компилируемые биндинги
+корня их переименование **не требуется** — они и так не корень, а после правки
+2026-09-15 ещё и совпадают с путём дословно. То есть это ~80 правок XAML, каждая
+из которых может сломать компилируемые биндинги
 (`AvaloniaUseCompiledBindingsByDefault=true`), ради нулевого выигрыша в изоляции.
 Косметика не стоит риска.
+
 
 ## Ворота проверки
 
@@ -136,7 +176,7 @@ dotnet test tests\AcerHelper.Tests\AcerHelper.Tests.csproj
 3. Миграция `using`-директив.
 4. Сборка обеих TFM → ошибки «type not found» **и есть список скрытых
    зависимостей**, которые до этого маскировались вложенностью. Известный пример:
-   `Features/FanCurveEngine.cs` использует `FanPreset` (объявлен в `Settings.cs`)
+   `Domain/FanCurveEngine.cs` использует `FanPreset` (объявлен в `Settings.cs`)
    без `using`.
 
 Только namespace и using. Ни одной правки логики, форматирования или тела
@@ -403,7 +443,7 @@ alias-`using` (`using X = ...;`). Плюс появляется риск CS0104 
 
 **Оставлено в коде намеренно (8 блоков ≥8 строк)** — это контракты API и слоёв,
 а не археология: `LaptopService.cs` (это и есть инвариант блокировки),
-`Options.cs:3-11`, `UI/MainWindow.axaml.cs:8-15`, `Vendors/Acer/AcerDevice.cs:6-13`,
+`Options.cs:3-11`, `UI/MainWindow.axaml.cs:8-15`, `Infrastructure/Vendors/Acer/AcerDevice.cs:6-13`,
 `AcerModel.cs:8-17`, `GenericDevice.cs:6-13`, `KeyboardBrightness.Linux.cs:6-13`.
 
 **Отложено до решения владельца:**
@@ -413,7 +453,7 @@ alias-`using` (`using X = ...;`). Плюс появляется риск CS0104 
   `UI/LightingCoordinator.cs:11-22`, `OptionsAssembler.cs` `PowerSourceProfiles`
   (его `/// <summary>`),
   `UI/ViewModels/MainViewModel.cs:60-68`,
-  `Vendors/Generic/Autostart.Windows.cs:8-16` (оставить только пост-мортем про
+  `Infrastructure/Vendors/Generic/Autostart.Windows.cs:8-16` (оставить только пост-мортем про
   убранный `RestartOnFailure`), `UpdateChecker.cs:22-27`,
   `WindowsUpdater.cs:41-47`. Переносить их в документ значило бы переместить
   проблему, а удаление — потеря информации, поэтому решает владелец.
@@ -460,11 +500,11 @@ alias-`using` (`using X = ...;`). Плюс появляется риск CS0104 
 **Пересматривать только по замерам**, не по вкусу: шаг 0 дизайна —
 инструментировать ожидания на `Gate`, чтобы решение опиралось на числа.
 
-**Шаг 0 сделан — `4ba84cf`.** `Diagnostics/GateStats.cs` (без суффикса платформы;
+**Шаг 0 сделан — `4ba84cf`.** `Infrastructure/Diagnostics/GateStats.cs` (без суффикса платформы;
 на Linux счётчики остаются нулевыми, `WmiSession` там нет) считает захваты,
 суммарное и максимальное ожидание, удержание и «стойла» (удержание > 50 мс) в
 двух корзинах — пул и не-пул (`IsThreadPoolThread`). Инструментированы оба
-`lock (Gate)` в `Vendors/Generic/WmiSession.Windows.cs`; вложенный захват
+`lock (Gate)` в `Infrastructure/Vendors/Generic/WmiSession.Windows.cs`; вложенный захват
 (`InvokeMethod` → `QueryFirst`, реентерабельный) считается один раз — флаг
 `[ThreadStatic]`, образец принадлежит внешней области, иначе одна EC-транзакция
 дала бы два числа. `AppController` снимает дельту не-пуловой корзины вокруг
@@ -827,7 +867,7 @@ Balanced, а не в `_modes[0]` (Best power efficiency — туда увели 
 
 ### 1. `Encode` схлопывает любой неотрицательный вход в 0
 
-`Vendors/Generic/RyzenCurveOptimizer.Windows.cs:388`:
+`Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:388`:
 
 ```csharp
 => (counts >= 0 ? 0u : 0x100000u - (uint)(-counts)) & 0xFFFFFu;
@@ -865,7 +905,7 @@ not offered». Обе шкалы (`MinCounts = -40`, `GpuMinCounts = -50`) вы�
 
 ### 2. `EvalCurve` берёт `duties[^1]` вместо дежурства последнего якоря
 
-`Features/FanCurveEngine.cs:45`. Все остальные обращения по якорям в том же
+`Domain/FanCurveEngine.cs:45`. Все остальные обращения по якорям в том же
 методе индексируются **якорным** индексом (`duties[0]` в `:43`/`:44`,
 `duties[i-1]`/`duties[i]` в цикле), а ветка «на последнем якоре и выше» берёт
 последний элемент массива. Ограничитель в `:42` отбраковывает только
@@ -882,7 +922,7 @@ not offered». Обе шкалы (`MinCounts = -40`, `GpuMinCounts = -50`) вы�
 
 ### 3. Дедбенд `Step` проверяет только `_cpu` (наблюдение, тестами не закреплено)
 
-`Features/FanCurveEngine.cs:33` — ограничитель проверяет лишь `_cpu >= 0`,
+`Domain/FanCurveEngine.cs:33` — ограничитель проверяет лишь `_cpu >= 0`,
 поэтому состояние `_cpu >= 0 && _gpu == -1` отключило бы дедбенд GPU целиком.
 Недостижимо: `Commit` пишет оба вентилятора, `Reset` очищает оба. Закреплять
 тестом не стали — недостижимый путь, а утверждение про него было бы
@@ -935,11 +975,11 @@ not offered». Обе шкалы (`MinCounts = -40`, `GpuMinCounts = -50`) вы�
    в каждый слот каждого CCD на живом UI-пути. Ложное — только вводное
    предложение; рассуждение «all-core ограничен худшим ядром» остаётся верным и
    сохранено.
-2. **`Features/LampArrayBridge.cs:44-46` устарел и стоит не на месте** —
+2. **`Domain/LampArrayBridge.cs:44-46` устарел и стоит не на месте** —
    описывает константу длительности ретрая, которой больше нет, и находится
    прямо над не относящимся к делу полем `private readonly IRgbDevice _rgb;`.
    `WorkerLoop` просто выходит из цикла.
-3. **`Features/Ports.cs:160-169` верен наполовину** — «no trustworthy
+3. **`Domain/Ports.cs:160-169` верен наполовину** — «no trustworthy
    read-back» верно для кластеров CPU, но неверно для iGPU, который
    проверяется чтением `0x20` обратно после каждой записи.
 4. **Числовой разъезд.** Один и тот же эксперимент «all-core −30» описан как
@@ -950,10 +990,10 @@ not offered». Обе шкалы (`MinCounts = -40`, `GpuMinCounts = -50`) вы�
 
 ## Что признано хорошим и не трогается
 
-- `Vendors/Generic/DelegatePorts.cs` — 5 тонких классов (`FlagPort`,
+- `Infrastructure/Vendors/Generic/DelegatePorts.cs` — 5 тонких классов (`FlagPort`,
   `ChoicePort`, `FanPort`, `ProfilesPort`, `LevelPort`, `SensorsPort`) делят одну
   реализацию между несколькими портами.
-- `Features/Ports.cs` — один узкий интерфейс на возможность, `null`-порт
+- `Domain/Ports.cs` — один узкий интерфейс на возможность, `null`-порт
   означает отсутствие возможности.
 - WMI через source-generated COM interop вместо `System.Management` (тот не
   AOT-совместим).
@@ -1002,6 +1042,7 @@ not offered». Обе шкалы (`MinCounts = -40`, `GpuMinCounts = -50`) вы�
 | `4f41cfc` | Волна 6, шаг 4: профиль читается один раз на путь старта | 0/0, 527 → **532**; `LightsForCurrentModeTests`; перегрузка проверена мутацией |
 | `8b2eb67` | план: шаги 3–4 в журнале + счётчик как условие проверяемости | — |
 | `—` | **Волна 6 закрыта.** Решение по Волне 5 (актор) — открыто, ждёт одного запуска на машине владельца: `gate-stats.log` не существует, инструментированная сборка там ни разу не шла | — |
+| `—` | namespace'ы приведены к путям: 85 файлов переехали (`git mv`), 0 изменений содержимого в переезде; отдельным проходом — 57 устаревших ссылок в комментариях, `README.md`, `AcerHelper.csproj` | 0/0, 532; `folder == namespace` — 0 исключений в дереве приложения (скрипт-инвариант, не глазами); `git diff -M --numstat` по переезду — пусто |
 
 Тесты появились — и это меняет очередь. `LaptopService` был без покрытия вовсе;
 теперь есть сетка на режимы/профили/источники и на пресеты с клампами. Причина,

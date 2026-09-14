@@ -281,7 +281,7 @@ public class OptionsAssemblerReadbackTests
 
 /// <summary>
 /// Which rows exist. A null port is the capability model's "this machine cannot do that"
-/// (Features/Ports.cs:265-269), so a row that appears without its port promises the user a control that
+/// (Domain/Ports.cs:265-269), so a row that appears without its port promises the user a control that
 /// cannot work — and one that fails to appear hides a feature the machine does have.
 /// </summary>
 public class OptionsAssemblerPresenceTests
@@ -484,7 +484,7 @@ internal sealed class OptionsAssemblerHarness
 
 /// <summary>
 /// Row lookup and port wiring by LABEL, because the row — not the port — is what the user sees, and one
-/// fake serves several slots (Features/Ports.cs: every on/off port is exactly <see cref="IFlagPort"/>).
+/// fake serves several slots (Domain/Ports.cs: every on/off port is exactly <see cref="IFlagPort"/>).
 ///
 /// Every helper takes the ENGLISH text that <c>Loc.T</c> looks up, not a translated label: the keys are
 /// stable, the labels are not.

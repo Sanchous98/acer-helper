@@ -4,7 +4,7 @@ namespace AcerHelper.Tests.Fakes;
 
 /// <summary>
 /// Hand-written <see cref="IDevice"/>. EVERY port is a settable auto-property defaulting to
-/// <c>null</c> = "this device does not have that feature" (Features/Ports.cs:270-297), so a test
+/// <c>null</c> = "this device does not have that feature" (Domain/Ports.cs:270-297), so a test
 /// declares exactly the hardware its scenario needs and nothing else:
 ///
 ///     var f = new LaptopServiceFixture();

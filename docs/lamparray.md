@@ -35,14 +35,14 @@ Windows Settings / a game / any LampArray app
 AcerHelperLampArray.sys  ── driver/                     virtual HID device via vhf.sys; owns the report descriptor
         │  3 IOCTLs (driver/AcerHelperLampArray/public.h)
         ▼
-LampArrayTransport       ── Vendors/Generic/*.Windows.cs  device node (SwDeviceCreate) + IOCTL channel
+LampArrayTransport       ── Infrastructure/Vendors/Generic/*.Windows.cs  device node (SwDeviceCreate) + IOCTL channel
         ▼
-LampArrayBridge          ── Features/LampArrayBridge.cs   rate limit, write collapsing, ownership arbitration
+LampArrayBridge          ── Domain/LampArrayBridge.cs   rate limit, write collapsing, ownership arbitration
         ▼
-RgbZone.ApplySubZone /   ── Features/Rgb.cs               the existing zone model
+RgbZone.ApplySubZone /   ── Domain/Rgb.cs               the existing zone model
 RgbZone.ApplyEffect
         ▼
-EneHidController         ── Vendors/Acer/                 A4 feature reports over HID-over-I2C
+EneHidController         ── Infrastructure/Vendors/Acer/                 A4 feature reports over HID-over-I2C
 ```
 
 Deliberate split: the driver is as dumb as possible (static descriptor, a lamp table pushed down from user

@@ -305,7 +305,7 @@ write**: the write was acknowledged, and reporting an error would send the user 
 exist in the verification path. A **mismatch** is a failure:
 *"the SMU accepted iGPU {counts} but reads back {applied}"*.
 
-## Port contract (`Features/Ports.cs`)
+## Port contract (`Domain/Ports.cs`)
 
 - `Set`/`SetDomains` returning true means the SMU **accepted the message**, not that the curve provably moved.
 - A too-aggressive offset fails **hours later at idle** rather than under load, so callers must treat it as
