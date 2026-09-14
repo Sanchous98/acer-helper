@@ -34,7 +34,9 @@ public sealed record GpuSection(
 
 /// <summary>CPU-power section: the available power-mode overlays, the current mode's chosen id (or the live
 /// effective overlay when unconfigured), and the apply/persist delegate. Built only when the device exposes an
-/// <see cref="ICpuPower"/> port.</summary>
+/// <see cref="ICpuPower"/> port. <c>Initial</c> is a PLACEHOLDER (null → Balanced), not a read: this is the one
+/// member of <see cref="UiActions"/> that used to cost a hardware read on the UI thread, and wave 6 moved the
+/// read into the first background pass — see <see cref="CpuViewModel.Load"/> for where it lands.</summary>
 public sealed record CpuSection(
     IReadOnlyList<ChoiceOption> Modes,
     string? Initial,

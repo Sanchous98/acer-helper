@@ -36,6 +36,10 @@ internal sealed class AppController
     // passes race on them.
     private volatile string? _lastModeKey;    // preset key we last loaded (Turbo shares its base mode's key)
     private volatile string? _lastProfileId;  // actual hardware profile last seen (distinct for base vs Turbo)
+    // The CPU-power row is built with a PLACEHOLDER, not a read (wave 6), so it needs a real value from the first
+    // pass that follows each UI build — same shape as the two seeds above, and reset in the same place. Written by
+    // the background pass, cleared by RebuildForLanguage (on the UI thread) when it puts a fresh placeholder back.
+    private volatile bool _cpuPrimed;
     private int _busy;                         // 0/1 single-flight guard for the refresh background pass (Interlocked)
     private int _rerun;                        // set when a Refresh() arrives mid-pass -> run exactly once more (coalesced)
     private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
@@ -84,6 +88,7 @@ internal sealed class AppController
         var cur0 = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = cur0?.Id ?? "";
+        _cpuPrimed = false;                         // the fresh CPU-power row holds a placeholder — prime it
 
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch. The
@@ -182,7 +187,13 @@ internal sealed class AppController
             new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
-            new CpuSection(d.CpuPower?.Modes ?? [], _svc.CurrentCpuPower(), SetCpuPower),
+            // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
+            // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
+            // maps an unknown id to Balanced. The real value arrives from the first background pass (see the
+            // prime in BackgroundPass / `_cpuPrimed`). Nothing else in this record list is deferred because
+            // nothing else is a hardware read: fan/GPU presets come from the Settings graph, and the option
+            // rows under Battery/Options are primed by OptionsViewModel.Prime() right after this returns.
+            new CpuSection(d.CpuPower?.Modes ?? [], null, SetCpuPower),
             new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
@@ -226,6 +237,7 @@ internal sealed class AppController
         var cur = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";
+        _cpuPrimed = false;                       // ...and the rebuilt CPU-power row holds a placeholder again
         _lightingCoord.ApplyFollowLighting(cur?.FlashColor, _svc.LightsForCurrentMode());
         ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
         ApplyHardwareAccessBanner();
@@ -443,11 +455,14 @@ internal sealed class AppController
     // One poll's worth of state, read on the background pass and consumed on the UI pass. Immutable snapshot so
     // the UI thread never re-touches the hardware (that's what used to freeze the app when the ACPI-EC stalled
     // during a display connect). Lights is the live per-mode dict (only the UI thread touches it after hand-off).
+    // CpuPrimed says the CPU-power row has a value to take and is NOT a mode change (wave 6): its row is built
+    // with a placeholder, so without this the first pass's value would be dropped and the row would sit on
+    // Balanced until the user switched profile.
     private readonly record struct Tick(
         PerformanceProfile? Current, IReadOnlyList<PerformanceProfile> Selectable, PerformanceProfile? Base,
         SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
         bool ModeChanged, FanPreset? Fan, GpuOcPreset? Gpu, string? CpuId, int[]? Co,
-        bool ProfileChanged, AccentColor? Flash,
+        bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
         Dictionary<string, LightSettings>? Lights);
 
     // Kick a refresh. All hardware I/O runs on a pool thread (BackgroundPass) so a stalled EC/WMI read can never
@@ -525,11 +540,26 @@ internal sealed class AppController
                 flash = current?.FlashColor;
             }
 
+            // ---- the CPU-power row's prime (wave 6) ----
+            // The row is built with a placeholder because its read used to run on the UI thread during BuildUi;
+            // this is that read, moved here, once per UI build. Deliberately NOT ApplyModeCpuPower: the app does
+            // not write an overlay at startup and must not start — the mode-change block above is the only place
+            // that applies, and it wins when it fired (it hands back what the hardware holds after applying).
+            // Two independent sources can produce a value, and the UI pass must be told about either, because a
+            // first pass after a UI build is not a mode change. `_cpuPrimed` is "this row already holds a real
+            // value": RebuildForLanguage clears it, since a rebuild puts a fresh placeholder back.
+            // Keyed on modeChanged and NOT on `cpu != null`, so the mode-change path reloads the row even when
+            // the overlay came back unreadable — that is what it did before the prime existed, and `null` has a
+            // meaning there (Balanced) rather than being a reason to skip the reload.
+            var cpuPrimed = modeChanged || !_cpuPrimed;
+            if (cpu == null && !_cpuPrimed) cpu = _svc.CurrentCpuPower();
+            _cpuPrimed = true;   // the prime has run; an unreadable overlay stays unreadable, so no per-tick retry
+
             _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
             var baseP = _svc.BaseProfile(current);
 
             var t = new Tick(current, selectable, baseP, sensors, battery, status, turbo,
-                             modeChanged, fan, gpu, cpu, co, profileChanged, flash, lights);
+                             modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights);
             Dispatcher.UIThread.Post(() => UiPass(t));
         }
         catch { /* transient hardware error — next tick retries */ }
@@ -549,9 +579,14 @@ internal sealed class AppController
         {
             if (t.Fan is { } fan) _vm.ReloadFans(fan);
             if (t.Gpu is { } gpu) _vm.ReloadGpuOc(gpu);
-            _vm.ReloadCpuPower(t.CpuId);
             if (t.Co is { } co) _vm.ReloadCo(co);
         }
+        // CPU power is reloaded on its OWN flag rather than under the mode change above, because the two are
+        // independent: a mode change does not fill the row's placeholder (a fresh UI's first pass does, and is
+        // not a mode change), and the prime does not need a mode change to have happened. CpuId is null when the
+        // overlay was unreadable, and is still loaded: `Load` maps it to Balanced, which is what this row has
+        // always shown for an overlay it cannot read.
+        if (t.CpuPrimed) _vm.ReloadCpuPower(t.CpuId);
         // ONE lighting hand-off for both kinds of change (Lights is non-null whenever either fired). Two separate
         // calls made the coordinator paint twice per switch and let a mode change repaint from a flash colour the
         // profile hand-off had not updated yet.

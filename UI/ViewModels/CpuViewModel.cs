@@ -28,6 +28,9 @@ public sealed partial class CpuViewModel : SectionViewModel
         _modes = modes;
         _set = set;
         ModeNames = modes.Select(m => Loc.T(m.DisplayName)).ToList();
+        // initialId is a placeholder at startup (wave 6): `null` here, which IndexOf maps to Balanced — exactly
+        // what a failed read would have shown. Load(id) replaces it from the first background pass. Assigned
+        // through the field, so a placeholder can never look like a user pick (same idiom as ChoiceRowViewModel).
         _selectedIndex = IndexOf(initialId);
         _loading = false;
     }
@@ -38,8 +41,10 @@ public sealed partial class CpuViewModel : SectionViewModel
         if (value >= 0 && value < _modes.Count) _set(_modes[value].Id);
     }
 
-    /// <summary>Reflect a profile's chosen (or live effective) overlay without applying — the service already
-    /// set the hardware on the mode switch. The <c>_loading</c> guard neuters the change hook.</summary>
+    /// <summary>Reflect a profile's chosen (or live effective) overlay without applying — on a mode switch the
+    /// service has already set the hardware, and on the constructor-placeholder prime (wave 6) there is nothing
+    /// to set: the value being reflected is a read, and this must never turn it into a write. The <c>_loading</c>
+    /// guard neuters the change hook.</summary>
     public void Load(string? id)
     {
         _loading = true;

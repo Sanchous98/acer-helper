@@ -158,7 +158,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Reflect a mode's GPU-OC preset in the GPU section (called when the performance mode changes).</summary>
     public void ReloadGpuOc(GpuOcPreset preset) => _tuning?.Gpu?.Load(preset);
 
-    /// <summary>Reflect a mode's CPU power choice in the CPU section (called when the performance mode changes).</summary>
+    /// <summary>Reflect a mode's CPU power choice in the CPU section — on a performance-mode change, and on the
+    /// pass that fills the row's construction placeholder (wave 6: <c>AppController</c>'s <c>Tick.CpuPrimed</c>).
+    /// The two are separate events, which is why the caller does not gate this on the mode change.</summary>
     public void ReloadCpuPower(string? id) => _tuning?.Cpu?.Load(id);
 
     /// <summary>Reflect a mode's undervolt offsets in the CPU section (called when the performance mode changes).
