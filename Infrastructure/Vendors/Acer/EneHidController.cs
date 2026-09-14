@@ -102,7 +102,14 @@ internal sealed partial class EneHidController : IRgbController
 
     // Report byte[5] is the effect DIRECTION. For a directional effect (e.g. Wave) it's the user's choice
     // (1/2); otherwise it's the mode default the firmware expects — 0x02 for animated effects, 0x01 for static.
-    private static byte Dir(RgbEffect e, byte direction)
+    /// <summary>The value for report byte[5]: a directional effect reports the user's 1/2 and anything else as
+    /// STATIC (the firmware has no third direction), every other effect reports its mode default. Wrong is
+    /// silent — a Wave that sweeps the other way, or an animated effect the firmware reads as static.
+    ///
+    /// Widened from <c>private</c> to <c>internal</c>, visibility only, so a test can pin the defaults without a
+    /// hardware transport — the same precedent as <c>RyzenCurveOptimizer.Encode</c>/<c>CoreArg</c>/<c>GpuMargin</c>
+    /// (see SmuOffsetEncodingTests.cs).</summary>
+    internal static byte Dir(RgbEffect e, byte direction)
         => e.HasDirection ? (direction is 1 or 2 ? direction : FlagStatic)
                           : (e.IsEffect ? FlagEffect : FlagStatic);
 
@@ -110,7 +117,16 @@ internal sealed partial class EneHidController : IRgbController
         => SetFeature([ReportId, target, mode, brightness, isEffect ? speed : (byte)0,
                        direction, c.R, c.G, c.B, zoneMask, 0x00]);   // arbitrary colours render R,G,B on the wire
 
-    private static AccentColor Scale(AccentColor c, byte brightness)
+    /// <summary>Brightness emulation for a surface whose firmware ignores the HID brightness byte (see
+    /// ApplyLightbar): scale the colour by the requested percentage and send at full brightness. The clamp is
+    /// the whole point — the parameter is a byte (0..255) but a percentage is 0..100, so without it a maximum
+    /// request scales to 650 and WRAPS through the byte cast to 0x8A, i.e. the lightbar goes dim when asked for
+    /// brightest. Integer division truncates, so the scaling is not exactly reversible.
+    ///
+    /// Widened from <c>private</c> to <c>internal</c>, visibility only, so a test can pin the arithmetic without
+    /// a hardware transport — the same precedent as <c>RyzenCurveOptimizer.Encode</c>/<c>CoreArg</c>/<c>GpuMargin</c>
+    /// (see SmuOffsetEncodingTests.cs).</summary>
+    internal static AccentColor Scale(AccentColor c, byte brightness)
     {
         var b = Math.Clamp((int)brightness, 0, 100);
         return new AccentColor((byte)(c.R * b / 100), (byte)(c.G * b / 100), (byte)(c.B * b / 100));
@@ -167,7 +183,17 @@ internal sealed partial class EneHidController : IRgbController
     // collapses to its latest value. The profile-flash (mode 0x06, which no keyboard effect uses) and each
     // keyboard sub-zone (distinct zone masks) are their own regions, so a flash never collapses a paint and
     // vice-versa; their relative order is handled by the move-to-tail coalescing in SetFeature.
-    private static bool SameRegion(byte[] a, byte[] b)
+    /// <summary>True when two reports describe the same REGION — same target (byte 1), mode (byte 2) and zone
+    /// mask (byte 9) — so the queue can drop the superseded one. Deliberately blind to brightness/speed/
+    /// direction/colour: those are the fields a drag or slider changes, and comparing them would let the queue
+    /// grow with every frame of a drag instead of collapsing to the latest state. Getting the KEY wrong is the
+    /// failure the comment above records — a flash the paint no longer sits on top of, leaving the keyboard on
+    /// the profile palette instead of the chosen colour.
+    ///
+    /// Widened from <c>private</c> to <c>internal</c>, visibility only, so a test can pin the key without a
+    /// hardware transport — the same precedent as <c>RyzenCurveOptimizer.Encode</c>/<c>CoreArg</c>/<c>GpuMargin</c>
+    /// (see SmuOffsetEncodingTests.cs).</summary>
+    internal static bool SameRegion(byte[] a, byte[] b)
         => a.Length > 9 && b.Length > 9 && a[1] == b[1] && a[2] == b[2] && a[9] == b[9];
 
     private void WorkerLoop()
