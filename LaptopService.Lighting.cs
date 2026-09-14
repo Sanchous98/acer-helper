@@ -1,0 +1,84 @@
+using System.Threading;
+using AcerHelper.Domain;
+using AcerHelper.Localization;
+
+namespace AcerHelper.Application;
+
+public sealed partial class LaptopService
+{
+    // ---- LampArray / Windows Dynamic Lighting ----
+
+    private LampArrayBridge? _lampArray;
+    private bool _lampArrayBuilt;
+    // Its OWN lock, deliberately not _state: this property is read from the UI thread on every lighting repaint
+    // (LightingCoordinator.Paint), and _state is held across blocking EC/WMI work by the background pass — so
+    // sharing it would put an ACPI-EC stall in front of a UI-thread paint. Nothing here touches Settings.
+    private readonly Lock _lampGate = new();
+
+    /// <summary>The LampArray bridge (Features/LampArrayBridge.cs), or null when this build/OS/device can't
+    /// offer it: no transport for the OS, no driver installed, or no RGB zones at all. Built lazily — creating
+    /// it is free, but it must not happen before the settings are loaded, and most runs never need it.</summary>
+    public LampArrayBridge? LampArray
+    {
+        get
+        {
+            lock (_lampGate)
+            {
+                if (_lampArrayBuilt) return _lampArray;
+                _lampArrayBuilt = true;
+                if (lampArray != null && device.Lighting is { } rgb)
+                    _lampArray = new LampArrayBridge(rgb, lampArray, ZoneAvailableToHost);
+                return _lampArray;
+            }
+        }
+    }
+
+    // Which zones a host may paint. A "follows performance profile" lightbar is the firmware's while that flag
+    // is on (the app doesn't drive it either — see LightingViewModel), so it is not offered as lamps; flipping
+    // the flag off and re-enabling the bridge picks it up.
+    private bool ZoneAvailableToHost(RgbZone zone)
+        => !(zone.CanFollowProfile && device.Lighting?.ProfileFollowKey is { } key && GetDeviceFlag(key, true));
+
+    /// <summary>Turn the virtual LampArray on/off and persist the choice. Returns false if it could not be
+    /// published (see <see cref="LampArrayBridge.LastError"/>) — the setting is then left off, so the UI row
+    /// snaps back on its next read instead of claiming a device that isn't there. Blocking (opens the driver);
+    /// call off the UI thread — the Options rows already do.</summary>
+    public bool SetDynamicLighting(bool on)
+    {
+        var la = LampArray;
+        if (la == null) return false;
+
+        var ok = true;
+        if (on) ok = la.Enable();
+        else la.Disable();
+        if (!ok) LastError = la.LastError;
+
+        lock (_state) { Settings.DynamicLighting = on && ok; Save(); }
+        return ok;
+    }
+
+    // ---- lighting (per-mode) ----
+
+    /// <summary>The per-zone lighting state for the current mode (created empty on first use).</summary>
+    public Dictionary<string, LightSettings> LightsForCurrentMode()
+    {
+        lock (_state)
+        {
+            var key = CurrentModeKey();
+            return GetOrAdd(Settings.LightPresets, key).Zones;
+        }
+    }
+
+    /// <summary>Create-if-missing a per-zone lighting entry, UNDER _state. The lighting view-models mutate the
+    /// live Zones dict (returned above) on the UI thread; Save() now runs on the background pass and enumerates
+    /// that same dict, so this structural insert must share _state with Save — otherwise a "collection modified"
+    /// throws mid-serialization and the settings write is silently dropped. (Per-field edits to a LightSettings
+    /// don't restructure the dict, so those stay unguarded.)</summary>
+    public LightSettings EnsureLightZone(Dictionary<string, LightSettings> zones, string name)
+    {
+        lock (_state)
+        {
+            return GetOrAdd(zones, name);
+        }
+    }
+}
