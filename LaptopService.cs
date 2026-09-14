@@ -317,10 +317,14 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         {
             if (current?.Kind == ProfileKind.Turbo) return true;   // already in Turbo -> nothing to do
             if (current?.Id != baseP.Id) pp.Set(baseP);            // establish the base we sit over (skip if on it)
-            return pp.Set(turbo!);
+            if (pp.Set(turbo!)) return true;
+            LastError = pp.LastError;
+            return false;
         }
         if (current?.Id == baseP.Id) return true;                  // already in the remembered base profile
-        return pp.Set(baseP);
+        if (pp.Set(baseP)) return true;
+        LastError = pp.LastError;
+        return false;
     }
 
     /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
