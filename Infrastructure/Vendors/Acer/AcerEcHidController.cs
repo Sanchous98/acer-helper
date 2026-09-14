@@ -40,10 +40,6 @@ internal sealed partial class AcerEcHidController : IDisposable
     /// through the EC. False on models without it, where the caller keeps its previous behaviour.</summary>
     public bool Available { get; }
 
-    /// <summary>Last write error, or null. Written by the writer thread and read by the UI; a reference
-    /// assignment is atomic and this is only ever surfaced as a diagnostic string, so it needs no lock.</summary>
-    public string? LastError { get; private set; }
-
     public AcerEcHidController()
     {
         Available = OpenTransport();
@@ -110,8 +106,15 @@ internal sealed partial class AcerEcHidController : IDisposable
 
             // WriteFeature drops the transport handle on failure so the next write re-opens it — a handle
             // opened in a bad state at boot-with-display would otherwise stay broken until restart.
-            try { LastError = WriteFeature(report) ? null : "Acer EC HID write failed"; }
-            catch (Exception e) { LastError = e.Message; }   // keep the worker alive
+            //
+            // The failure itself goes nowhere, and that is pre-existing, not new: this used to assign a
+            // `LastError` property here, which nothing in the tree ever read (verified by git grep) and whose own
+            // doc comment wrongly claimed "read by the UI". Deleting the dead field removes the false impression
+            // that an EC write failure is surfaced — it is not. Apply() reports "accepted for sending", not "the
+            // EC applied it", and its bool is about the queue, not the write. Recorded as an open gap in
+            // docs/refactoring-plan.md rather than papered over with a field nobody reads.
+            try { WriteFeature(report); }
+            catch { /* keep the worker alive */ }
         }
     }
 

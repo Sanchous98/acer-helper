@@ -52,7 +52,22 @@ public sealed partial class LaptopService : IDisposable
     /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
     public IDevice Device => device;
-    public Settings Settings { get; }
+
+    /// <summary>The mutable settings graph. <c>internal</c> as a SIGNPOST, not a fence — and the difference
+    /// matters, so it is stated rather than implied. This is ONE assembly: <c>AcerHelper.csproj</c> compiles
+    /// Domain/, Application/, Infrastructure/, UI/ and Bootstrap/ together, so <c>internal</c> is visible to
+    /// every one of them and stops nothing inside this repo. What it does is take the property off the public
+    /// surface, so it stops reading as an invitation, and it makes the eventual assembly split — the only thing
+    /// that WOULD enforce a layer boundary, see the plan's Wave 1 note — mechanical instead of a redesign.
+    ///
+    /// Honest limit: the accessors that hand back a LIVE preset from this graph still let a caller mutate
+    /// settings without holding the lock — <c>CurrentFan</c>, <c>ApplyModeFan</c>, <c>CurrentGpuOc</c>,
+    /// <c>ApplyModeGpuOc</c>, <c>CurrentCo</c>, <c>ApplyModeCo</c>, both forms of <c>LightsForCurrentMode</c>,
+    /// and <c>EnsureLightZone</c>. The lighting one is the widest door in the tree:
+    /// <c>LightingViewModel</c> keeps the returned dictionary and writes into it in place. Sealing those means
+    /// returning copies, which is a redesign of the lighting path, not a visibility change.</summary>
+    internal Settings Settings { get; }
+
     public string? LastError { get; private set; }
 
     // Guards ALL access to the mutable Settings graph (its collections + scalars), the per-source slots,
@@ -72,26 +87,53 @@ public sealed partial class LaptopService : IDisposable
     // invariant above forbids unguarded Settings access, and AppController reads these on the UI thread AND on the
     // background pass; a bool/int cannot tear today, but the read that WOULD tear the moment one of them stops
     // being a scalar is exactly the read this removes (TogglePerformance already does it this way, with a local).
-    // `public Settings Settings { get; }` stays exposed, so this is convention, not a compile-time guarantee.
+    // `Settings` is `internal`, which in a single-assembly project is a signpost rather than a fence — see the
+    // note on the property for exactly what it does and does not cover. The lock, not the visibility, is what
+    // makes these three safe.
     public bool TurboToggles { get { lock (_state) return Settings.TurboToggles; } }
     public AppLanguage Language { get { lock (_state) return Settings.Language; } }
     public int Bluelight { get { lock (_state) return Settings.Bluelight; } }
 
+    /// <summary>Test seam: true when the calling thread already holds <c>_state</c>. Exists so a test can assert
+    /// that a hardware call happens OUTSIDE the lock — a property no fake can otherwise observe, because a fake
+    /// sees the call, not the lock state around it. <c>System.Threading.Lock</c> is re-entrant and answers this
+    /// per-thread, so a port called from inside a lock this thread already holds sees <c>true</c>, and one called
+    /// from a thread holding nothing sees <c>false</c>.</summary>
+    internal bool StateHeld => _state.IsHeldByCurrentThread;
+
     /// <summary>Re-apply persisted state that the OS doesn't remember on its own.</summary>
     public void ApplyStartupState()
     {
-        bool dynamicLighting;
+        // Every hardware call here is made OUTSIDE _state, and every value it needs is read inside it. The lock
+        // exists to guard the Settings graph and the slots, not to serialise hardware (design doc D17: this method
+        // runs on the UI thread, and it used to hold _state across four hardware calls — two powrprof, one gdi32,
+        // one NvAPI — so any other thread's _state acquirer waited behind all four).
+        //
+        // Hoisting the CALLS rather than their arguments is what makes this safe, and the distinction is the whole
+        // point: ApplyModeGpuOc and ApplyModeCpuPower re-read the current mode under their own _state acquisition,
+        // so moving them out of this outer lock cannot leave them applying a stale mode — it only shortens the
+        // hold. (Hoisting the *argument* of a hardware write is a different change and not safe in general: it
+        // lets a concurrent writer land first and be overwritten by the stale execution. That is why ApplyCustom
+        // and ApplyModeCpuPower's own cp.Set are left alone — see docs/refactoring-plan.md, Wave 5.)
+        //
+        // The ordering these four had relative to each other is preserved: they are still sequential on this
+        // thread, and "clamshell takeover before the option rows read it" (its own comment below) still holds.
+        bool clamshell, dynamicLighting;
+        int bluelight;
         lock (_state)
         {
-            if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
-            if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
-            ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
-            ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
+            clamshell = Settings.Clamshell;
+            bluelight = Settings.Bluelight;
             // Read here rather than at its use below, so this is a guarded read of the graph like every other one
             // in this file. Not a race in practice — this runs before the coordinator, the UI and the 3s pass
             // exist, so there is no writer yet — but the invariant declared above admits no unguarded access.
             dynamicLighting = Settings.DynamicLighting;
         }
+
+        if (clamshell) device.Clamshell?.SetEnabled(true);
+        if (bluelight > 0) device.DisplayTint?.Apply(bluelight);
+        ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
+        ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
 
         // Re-apply the current mode's CPU undervolt. Deliberately OUTSIDE the _state lock and off the caller's (UI)
         // thread: unlike the GPU offsets above (a fast NvAPI call), an SMU mailbox transaction waits on the

@@ -300,6 +300,13 @@ this as "the actor removes the marshalling" would be the single most likely way 
 
 ## 3.1 Confirmed invariant violations
 
+**Corrected 2026-09-15: D1-D5 are FIXED and this table describes the state before `303beca`.** The commit
+"пять незаблокированных чтений графа `Settings`" (Wave 2) took all five through the locked accessors that
+already existed. Verified against the tree today: `UI/AppController.cs` contains **zero** `.Settings`
+occurrences, and `OptionsAssembler` reads `svc.Bluelight` (the locked scalar accessor) rather than
+`svc.Settings.Bluelight`. The table is kept because it is what the fix was judged against — read it as history,
+not as a to-do list. What remains of the *root cause* is recorded below it.
+
 The invariant declared at `LaptopService.cs` `_state` (its declaration comment) is: *"Guards ALL access to the mutable Settings graph (its
 collections + scalars) … because these are now touched from TWO threads."* Five sites violate it.
 
@@ -315,6 +322,16 @@ Also violating the spirit of the same invariant, without the plan saying so:
 
 - `LaptopService.cs` `Settings` — `public Settings Settings { get; }` hands the whole mutable graph to anyone. Every
   read outside `_state` is a consequence of this, not an independent mistake. This is the root cause of D1-D5.
+  **Addressed 2026-09-15, and the address is weaker than it sounds:** the property is now `internal`, but this is
+  **one assembly** — `AcerHelper.csproj` compiles `Domain/`, `Application/`, `Infrastructure/`, `UI/` and
+  `Bootstrap/` together — so `internal` is visible to all of them and enforces nothing inside the repo. It
+  removes the *invitation* and makes a future assembly split (the only real enforcement; see the plan's Wave 1
+  note) mechanical. The door that stays open is wider than the property ever was: eight accessors return a **live**
+  preset out of the graph — `CurrentFan`, `ApplyModeFan`, `CurrentGpuOc`, `ApplyModeGpuOc`, `CurrentCo`,
+  `ApplyModeCo`, both `LightsForCurrentMode` forms, `EnsureLightZone` — and `LightingViewModel` keeps the
+  dictionary `LightsForCurrentMode` hands it and writes into it in place. Closing those means returning copies,
+  which is a redesign of the lighting path (writing into the graph *is* the feature there), not a visibility
+  change.
 - `LaptopService.cs` `LastError` — `public string? LastError { get; private set; }`, written under `_state` on some
   paths and outside it on others (e.g. `WmiInvoker`'s port results), read from the UI thread at
   `AppController` (`ApplyProfile`, `SetTurbo`, `SetGpuOc`, `SetCpuPower`, `SetCo`) and `OptionsAssembler.cs` `RunSet`. Reference writes are atomic so nothing
@@ -386,6 +403,12 @@ serialization.
 `ApplyCustom` (`LaptopService.Fans.cs` `ApplyCustom`) holds G2 while calling `ApplyFan` → G1. `LaptopService.cs` `ApplyStartupState`
 holds G2 across `ApplyModeGpuOc` and `ApplyModeCpuPower` — both hardware writes — and is called
 from the **UI thread** (`AppController.cs:53`). `LaptopService.Tuning.cs` `SetGpuOc` holds G2 across `Save()`.
+
+**Partly fixed 2026-09-15 (Wave 5, step 5).** `ApplyStartupState` now reads its three scalars under G2 and makes
+all four hardware calls outside it — see the plan for why hoisting the *calls* is safe here while hoisting an
+*argument* is not, and for the three sites left alone on that rule. `ApplyCustom` and `ApplyModeCpuPower`'s own
+`cp.Set` still hold G2 across a write; `ApplyModeCpuPower` is now the only remaining site of this shape that a
+concurrent caller can contend (UI thread vs `LightingCoordinator`'s `Task.Run`).
 
 Consequence: any UI-thread acquirer of G2 (D16's `CurrentGpuOc` etc., and every `SetFan`/`SetTurbo` from a
 slider) can block for as long as a full EC transaction, because the background pass's G2 is held across one.
