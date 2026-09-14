@@ -154,7 +154,9 @@ internal sealed class AppController
                                            _lightingCoord.OnFollowsProfileFlipped(); },
                                     d.KeyboardBrightness, _svc.SetKeyboardBrightness)
             : null;
-        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync);
+        // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
+        // layer now (see docs/refactoring-plan.md, "Целевая структура"), which must not reference a UI toolkit.
+        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a));
         var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
         var vm = new MainViewModel(d, new UiActions(
             new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),

@@ -1,16 +1,20 @@
-using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
-using Avalonia.Threading;
 
-namespace AcerHelper.UI;
+namespace AcerHelper.Application;
 
 /// <summary>Builds the generic <see cref="OptionToggle"/>/<see cref="OptionChoice"/> models from whatever
 /// hardware the device exposes, wrapping each setter so failures are reported via <paramref name="notify"/>
-/// (off the UI thread, then posted back). This is the one place that knows the device's option ports, so
-/// <see cref="AppController"/> doesn't; the produced models are plain data handed to the view-models,
-/// which stay free of the service.</summary>
-internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration)
+/// (off the UI thread, then handed to <paramref name="post"/> to get back onto it). This is the one place
+/// that knows the device's option ports, so <see cref="AppController"/> doesn't; the produced models are
+/// plain data handed to the view-models, which stay free of the service.
+///
+/// <paramref name="post"/> is a parameter rather than a direct <c>Dispatcher.UIThread.Post</c> call so this
+/// file — the last one that would have kept the Application layer Avalonia-bound — needs no toolkit at all.
+/// It also makes <see cref="RunSet"/>'s failure path testable: its only observable effect is what it hands
+/// to that delegate, which a test can capture without a UI thread.</summary>
+internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration,
+                                       Action<Action> post)
 {
     public IReadOnlyList<OptionToggle> Toggles()
     {
@@ -141,7 +145,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (ok) return;
         var e = svc.LastError;
         // `what` is the English control name; localize both it and the "… failed" template.
-        Dispatcher.UIThread.Post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (e != null ? $": {e}" : "")));
+        post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (e != null ? $": {e}" : "")));
     }
 
     // A source with nothing remembered yet (fresh install, before that source was ever seen) has no profile to
