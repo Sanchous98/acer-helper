@@ -5,6 +5,11 @@ Mechanical worklist for the edit step: for every comment block whose narrative n
 who never opens the document still has to know the rule they must not break — plus a link to where the
 reasoning, the measurements and the dead ends now live.
 
+**Line numbers here are not maintained (noted 2026-09-14).** They were written against the revision current when
+each entry was written and have already drifted; treat the symbol names as the anchor and re-locate by name.
+The tree has also been reorganised since: `LaptopService` is now six `LaptopService*.cs` partial files, and
+`OptionsAssembler` has moved from `UI/` to the repo root (`namespace AcerHelper.Application`).
+
 ## How to use this
 
 - Entries are grouped **by file**, and files are alphabetical, so a `.cs` file is opened once.
@@ -1147,7 +1152,7 @@ Not in the map, and why.
 
 | location | why |
 |---|---|
-| `LaptopService.cs:22-30` | This **is** the locking invariant ("`_state` guards the whole mutable `Settings` graph"). It is the rule a future editor must not break — it *is* the 1–2 line statement, at length. |
+| `LaptopService.cs` `_state` (its declaration comment) | This **is** the locking invariant ("`_state` guards the whole mutable `Settings` graph"). It is the rule a future editor must not break — it *is* the 1–2 line statement, at length. |
 | `Options.cs:3-11` | The `OptionToggle` contract (Read-back after a write; only one of `Confirm`/`ConfirmAsync`). Pure API semantics, no hardware claim. |
 | `UI/MainWindow.axaml.cs:8-15` | Avalonia window behaviour (fixed size; resizing on X11 races repositioning). UI framework, not hardware. |
 | `Vendors/Acer/AcerDevice.cs:6-13` | Layering/ownership summary ("relies on Generic where possible"; null port = capability absent). |
@@ -1166,7 +1171,7 @@ narrate a past refactor. Relocating these to `docs/` would create a document wit
 |---|---|---|
 | `Localization/Loc.cs:8-20` (13L) | Why the app uses built-in tables instead of `.resx` (satellite assemblies break Native AOT, dotnet/runtime#86651) | Compress to **one line + the issue link**. The rest is prose about a decision already made. |
 | `UI/ViewModels/MainViewModel.cs:60-68` (9L) | Avalonia drawer re-hosting bug (pages were previously re-created; now each has its own host in `MainWindow.axaml`) | Compress to one line stating "each drawer page has its own host; do not re-create them", or delete — the reason is historical. |
-| `UI/OptionsAssembler.cs:83-91` (9L) | Semantics of the per-power-source profile rows | Keep the invariant (one row per power source; the row's value is the profile), drop the narration. |
+| `OptionsAssembler.cs` `PowerSourceProfiles` (9L) | Semantics of the per-power-source profile rows | Keep the invariant (one row per power source; the row's value is the profile), drop the narration. |
 | `UI/LightingCoordinator.cs:11-22` (12L) | Class summary describing which `AppController` members forward into it | Delete most of it: it is a call-graph description that `AppController` itself already shows. Keep the two real invariants (built before any UI exists; does no hardware reads of its own). |
 | `Vendors/Generic/Autostart.Windows.cs:8-16` (9L) | Task Scheduler design, including a **rejected** approach (`RestartOnFailure` was tried and dropped) | The keep-alive *invariant* (1-minute repeat + `MultipleInstancesPolicy=IgnoreNew` is the watchdog; there is no second process) belongs in the code. The `RestartOnFailure` post-mortem is the one part worth keeping — it is a dead end, and dead ends are what `docs/` is for; either move just that sentence or drop it. |
 | `UpdateChecker.cs:22-27` (6L) | AOT assembly-version reflection constraint | Compress to one line. |
