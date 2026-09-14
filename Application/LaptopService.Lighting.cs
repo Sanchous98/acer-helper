@@ -15,7 +15,7 @@ public sealed partial class LaptopService
     // sharing it would put an ACPI-EC stall in front of a UI-thread paint. Nothing here touches Settings.
     private readonly Lock _lampGate = new();
 
-    /// <summary>The LampArray bridge (Features/LampArrayBridge.cs), or null when this build/OS/device can't
+    /// <summary>The LampArray bridge (Domain/LampArrayBridge.cs), or null when this build/OS/device can't
     /// offer it: no transport for the OS, no driver installed, or no RGB zones at all. Built lazily — creating
     /// it is free, but it must not happen before the settings are loaded, and most runs never need it.</summary>
     public LampArrayBridge? LampArray

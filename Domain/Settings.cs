@@ -28,7 +28,7 @@ public sealed class Settings
     public int Bluelight { get; set; }       // 0=off, 1=Low, 2=Medium, 3=High, 4=Long-use
 
     // Publish the keyboard's zones as a virtual HID LampArray so Windows Dynamic Lighting (and any
-    // LampArray-aware app) can paint them — see Features/LampArrayBridge.cs and docs/lamparray.md. Off by
+    // LampArray-aware app) can paint them — see Domain/LampArrayBridge.cs and docs/lamparray.md. Off by
     // default: it needs the separately-installed driver, and while a host holds the surface the app's own
     // per-mode lighting is not what's on the keyboard.
     public bool DynamicLighting { get; set; }
@@ -62,7 +62,7 @@ public sealed class Settings
 
     // Vendor-specific device flags, keyed by an opaque string the owning backend defines (e.g. Acer's lightbar
     // "follows performance profile"). Kept as a neutral bag so Settings stays vendor-agnostic — on different
-    // hardware the unused keys just sit inert. The key + its meaning live in the backend (Vendors/*); access
+    // hardware the unused keys just sit inert. The key + its meaning live in the backend (Infrastructure/Vendors/*); access
     // via LaptopService.GetDeviceFlag / SetDeviceFlag.
     public Dictionary<string, string> DeviceSettings { get; set; } = new();
 }

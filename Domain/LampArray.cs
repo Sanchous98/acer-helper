@@ -69,7 +69,7 @@ public readonly record struct LampFrame(uint Sequence, bool AutonomousMode, Lamp
 
 /// <summary>The transport that makes a <see cref="LampArrayLayout"/> visible to the OS as a real HID
 /// LampArray device and hands back the frames the host writes to it. On Windows this is the VHF driver
-/// channel (Vendors/Generic/LampArrayTransport.Windows.cs); it is <c>null</c> where no such transport exists
+/// channel (Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs); it is <c>null</c> where no such transport exists
 /// (Linux would use /dev/uhid — see docs/lamparray.md), which simply leaves the feature absent.</summary>
 public interface ILampArrayTransport : IDisposable
 {

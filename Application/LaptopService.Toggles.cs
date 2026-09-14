@@ -50,7 +50,7 @@ public sealed partial class LaptopService
     public void PersistLighting() => Save();
 
     /// <summary>Read a vendor-specific device flag from the neutral <see cref="Settings.DeviceSettings"/> bag
-    /// (the key is owned by the backend, e.g. Vendors/Acer). Missing key -> <paramref name="fallback"/>.</summary>
+    /// (the key is owned by the backend, e.g. Infrastructure/Vendors/Acer). Missing key -> <paramref name="fallback"/>.</summary>
     public bool GetDeviceFlag(string key, bool fallback)
     {
         lock (_state)
