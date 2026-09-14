@@ -44,10 +44,17 @@ public static class AcerModels
 
     /// <summary>Pick the quirks for a product name (manufacturer already known Acer). User config
     /// entries take precedence over the built-in DB; unmatched products use the default entry.</summary>
-    public static AcerModel Detect(string? product)
+    public static AcerModel Detect(string? product) => Detect(product, Load());
+
+    /// <summary>The matcher itself, split out from <see cref="Detect(string?)"/> so the three precedence
+    /// rules above can be pinned by tests. Splitting is what makes them reachable at all: the public entry
+    /// point reads the embedded resource and the user's override file, and a test of THAT is testing the two
+    /// files rather than the rules. Identical behaviour — the public overload is a one-line call to this.</summary>
+    internal static AcerModel Detect(string? product, AcerModelConfig cfg)
     {
-        var cfg = Load();
         var p = product ?? string.Empty;
+        // `!string.IsNullOrEmpty(s)` is load-bearing, not defensive: an empty pattern in the DB or in a user
+        // override would otherwise match EVERY product name and shadow every other entry. Tested.
         foreach (var m in cfg.Models)
             if (m.Match.Any(s => !string.IsNullOrEmpty(s) && p.Contains(s, StringComparison.OrdinalIgnoreCase)))
                 return m;
@@ -92,17 +99,28 @@ public static class AcerModels
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "AcerHelper", "acer-models.json");
             if (!File.Exists(path)) return;
-            var json = File.ReadAllText(path);
-            var user = JsonSerializer.Deserialize(json, AcerModelJsonContext.Default.AcerModelConfig);
-            if (user == null) return;
-            cfg.Models.InsertRange(0, user.Models);
-            // Adopt the user default only when the file actually carries a (non-null) "default" object:
-            // key presence distinguishes "user customized only Zones/Lightbar" (Name stays "Acer") from
-            // "no default section" (keep the built-in), while the null check stops `"default": null` from
-            // nulling cfg.Default — Detect() returns it for unmatched products and callers deref it (NRE).
-            if (user.Default != null && HasDefaultKey(json)) cfg.Default = user.Default;
+            Merge(cfg, File.ReadAllText(path));
         }
         catch { /* ignore a bad user config */ }
+    }
+
+    /// <summary>Apply a user override from its raw JSON — which is where every rule the comment above
+    /// promises actually lives. Split from the file read for the same reason as
+    /// <see cref="Detect(string?, AcerModelConfig)"/>: the alternative is a test that depends on whether the
+    /// machine running it happens to have a file at %AppData%, which is not a test of the rules.
+    ///
+    /// The caller owns failure: this throws on malformed JSON, and <see cref="MergeUserOverride"/> is what
+    /// turns that into "ignore a bad user config".</summary>
+    internal static void Merge(AcerModelConfig cfg, string json)
+    {
+        var user = JsonSerializer.Deserialize(json, AcerModelJsonContext.Default.AcerModelConfig);
+        if (user == null) return;
+        cfg.Models.InsertRange(0, user.Models);
+        // Adopt the user default only when the file actually carries a (non-null) "default" object:
+        // key presence distinguishes "user customized only Zones/Lightbar" (Name stays "Acer") from
+        // "no default section" (keep the built-in), while the null check stops `"default": null` from
+        // nulling cfg.Default — Detect() returns it for unmatched products and callers deref it (NRE).
+        if (user.Default != null && HasDefaultKey(json)) cfg.Default = user.Default;
     }
 
     private static bool HasDefaultKey(string json)
