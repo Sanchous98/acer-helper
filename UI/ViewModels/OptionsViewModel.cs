@@ -70,12 +70,17 @@ internal sealed class VerifiedHwValue<T>(Action<Action>? post = null)
 
 /// <summary>Options section: hardware toggles/choices plus clamshell, Turbo-key behaviour and
 /// autostart — whichever the device exposes. <see cref="TryCreate"/> returns null when there is
-/// nothing to show, so the shell can omit the section.</summary>
+/// nothing to show, so the shell can omit the section.
+///
+/// <paramref name="post"/> is the UI-thread marshaller every row is built with; it defaults to
+/// <c>Dispatcher.UIThread.Post</c> and exists so a test can build the whole section with a synchronous poster
+/// and observe a row's deferred read without a dispatcher. Same seam, same reason, as
+/// <c>OptionsAssembler</c>'s (OptionsAssembler.cs:16-17).</summary>
 public sealed class OptionsViewModel : SectionViewModel
 {
     public ObservableCollection<ObservableObject> Rows { get; } = [];
 
-    public static OptionsViewModel? TryCreate(IDevice device, OptionsSection o)
+    public static OptionsViewModel? TryCreate(IDevice device, OptionsSection o, Action<Action>? post = null)
     {
         var vm = new OptionsViewModel();
 
@@ -86,29 +91,29 @@ public sealed class OptionsViewModel : SectionViewModel
         string[] langNames = [Loc.T("System"), "English", "Русский"];
         var langIndex = Math.Max(0, Array.IndexOf(langValues, o.Language));
         vm.Rows.Add(new ChoiceRowViewModel(new OptionChoice(Loc.T("Language"), true, langNames, langIndex,
-            i => o.SetLanguage(langValues[i]))));
+            i => o.SetLanguage(langValues[i])), post));
 
-        foreach (var t in o.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t));
-        foreach (var c in o.HwChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
+        foreach (var t in o.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t, post));
+        foreach (var c in o.HwChoices) vm.Rows.Add(new ChoiceRowViewModel(c, post));
 
         // Enabled state read straight off the port (we have the device) — no separate Func needed.
         if (device.Clamshell is { } clam)
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), clam.Enabled, true, o.SetClamshell));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T(clam.Label), clam.Enabled, true, o.SetClamshell, post: post));
 
         // Which profile each power source uses — grouped with the Turbo-key row below, since both are about how
         // the performance profile is chosen for you rather than about a piece of hardware.
-        foreach (var c in o.ProfileChoices) vm.Rows.Add(new ChoiceRowViewModel(c));
+        foreach (var c in o.ProfileChoices) vm.Rows.Add(new ChoiceRowViewModel(c, post));
 
         if (device.PowerProfiles?.All.Any(p => p.Kind == ProfileKind.Turbo) ?? false)
             vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), o.TurboToggles, true, o.SetTurboToggles,
-                tip: Loc.T("Otherwise the Turbo key cycles through profiles.")));
+                tip: Loc.T("Otherwise the Turbo key cycles through profiles."), post: post));
 
         if (device.Autostart is { } auto)
             // Placeholder + a deferred read: IsEnabled() shells out to schtasks.exe and waits up to 5 s, so on
             // the UI thread it used to freeze the app at logon. Note there is deliberately no Read: that would
             // move the WRITE onto the serial worker too and add a snap-back, which is a behaviour change.
             vm.Rows.Add(new ToggleRowViewModel(Loc.T(auto.Label), false, true, o.SetAutostart,
-                prime: auto.IsEnabled));
+                prime: auto.IsEnabled, post: post));
 
         return vm.Rows.Count > 0 ? vm : null;
     }
@@ -150,22 +155,26 @@ public sealed class ToggleRowViewModel : ObservableObject
     private readonly Func<bool>? _prime;
     private readonly Func<bool>? _confirm;
     private readonly Func<Task<bool>>? _confirmAsync;
-    private readonly VerifiedHwValue<bool> _hw = new();
+    private readonly VerifiedHwValue<bool> _hw;
     private bool _isOn;
 
-    public ToggleRowViewModel(OptionToggle t)
+    public ToggleRowViewModel(OptionToggle t, Action<Action>? post = null)
         : this(t.Label, t.Initial, t.Supported, t.OnChange, read: t.Read, confirm: t.Confirm,
-               confirmAsync: t.ConfirmAsync, prime: t.Prime) { }
+               confirmAsync: t.ConfirmAsync, prime: t.Prime, post: post) { }
 
+    /// <param name="post">The UI-thread marshaller the row's serial worker posts corrections through; defaults
+    /// to <c>Dispatcher.UIThread.Post</c>. Injectable so a test can drive a whole prime/write/readback without
+    /// a dispatcher.</param>
     public ToggleRowViewModel(string label, bool initial, bool enabled, Action<bool> onChange,
                               string? tip = null, Func<bool>? read = null,
                               Func<bool>? confirm = null, Func<Task<bool>>? confirmAsync = null,
-                              Func<bool>? prime = null)
+                              Func<bool>? prime = null, Action<Action>? post = null)
     {
         Label = label;
         IsEnabled = enabled;
         Tip = tip;
         _isOn = initial;
+        _hw = new VerifiedHwValue<bool>(post);
         _hw.Latch(initial);
         _onChange = onChange;
         _read = read;
@@ -255,10 +264,11 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
     private readonly Action<int> _onPick;
     private readonly Func<int>? _read;
     private readonly Func<int>? _prime;
-    private readonly VerifiedHwValue<int> _hw = new();
+    private readonly VerifiedHwValue<int> _hw;
     private bool _syncing;     // guards the readback snap-back so it doesn't re-fire OnChange
 
-    public ChoiceRowViewModel(OptionChoice c)
+    /// <param name="post">See <see cref="ToggleRowViewModel(string, bool, bool, Action{bool}, string?, Func{bool}?, Func{bool}?, Func{Task{bool}}?, Func{bool}?, Action{Action}?)"/>.</param>
+    public ChoiceRowViewModel(OptionChoice c, Action<Action>? post = null)
     {
         Label = c.Label;
         IsEnabled = c.Supported;
@@ -266,6 +276,7 @@ public sealed partial class ChoiceRowViewModel : ObservableObject
         _onPick = c.OnChange;
         _read = c.Read;
         _prime = c.Prime;
+        _hw = new VerifiedHwValue<int>(post);
         _selectedIndex = Math.Clamp(c.InitialIndex, 0, c.Options.Count - 1);   // direct write -> no pick fired
         _hw.Latch(_selectedIndex);
     }

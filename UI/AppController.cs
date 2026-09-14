@@ -77,6 +77,10 @@ internal sealed class AppController
         // the clamshell row takes its state from the device object the takeover just touched, and must see the
         // applied value, which is why that row has no deferred read at all.
         _vm.OptionsPage?.Prime();
+        // ...and the lighting section with them: the plain-backlight slider is built with a placeholder too. The
+        // RGB panels' brightness is NOT deferred (its construction value is what the startup re-apply sends to the
+        // device), but Sync re-reads it off the UI thread all the same, so this is where its slider is settled.
+        _lighting?.Sync();
         var cur0 = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = cur0?.Id ?? "";
@@ -218,6 +222,7 @@ internal sealed class AppController
         (_vm, _windows, _tray, _lighting) = BuildUi();
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
+        _lighting?.Sync();                        // ...and so does the backlight slider
         var cur = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";

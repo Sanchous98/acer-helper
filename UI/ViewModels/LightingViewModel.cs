@@ -170,6 +170,14 @@ public sealed partial class LightViewModel : ObservableObject
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
         _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
+        // WAVE 6: THE ONE CONSTRUCTION-TIME READ IN THIS FILE THAT STAYS SYNCHRONOUS, deliberately. The reason is
+        // not the slider. `Brightness` is ALSO what the startup re-apply below sends to the device — the single
+        // value the app pushes at launch — so a placeholder here would change what the HARDWARE is told, not only
+        // what the user sees. And the placeholder this wave uses everywhere else, 0, is the one value that must
+        // not go in: the keyboard would come up dark on a configured zone, because the prime only re-reads the
+        // slider and never re-applies. Deferring this read therefore means deferring the startup apply with it —
+        // a device-visible change that cannot be checked without the machine (docs/refactoring-plan.md, wave 6,
+        // step 2). The price of leaving it: one EC transaction on the UI thread at BuildUi.
         _brightness = Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100);   // hardware value wins if readable
         _speed = state.Speed;
         _reverseDirection = state.Direction == 2;
@@ -373,7 +381,7 @@ public sealed partial class BacklightViewModel : ObservableObject
 {
     private readonly IKeyboardBrightness _port;
     private readonly Func<int, bool> _apply;
-    private readonly VerifiedHwValue<int> _hw = new();
+    private readonly VerifiedHwValue<int> _hw;
     private bool _syncing;
 
     public int MaxLevel { get; }
@@ -382,13 +390,23 @@ public sealed partial class BacklightViewModel : ObservableObject
     [ObservableProperty] private double _level;
     [ObservableProperty] private string _levelName = "";
 
-    public BacklightViewModel(IKeyboardBrightness port, Func<int, bool> apply)
+    /// <param name="post">The UI-thread marshaller the serial worker posts corrections through; defaults to
+    /// <c>Dispatcher.UIThread.Post</c>. Injectable so a test can observe a prime without a dispatcher — see
+    /// <see cref="VerifiedHwValue{T}"/>.</param>
+    public BacklightViewModel(IKeyboardBrightness port, Func<int, bool> apply, Action<Action>? post = null)
     {
         _port = port;
         _apply = apply;
+        _hw = new VerifiedHwValue<int>(post);
         MaxLevel = port.MaxLevel;
         Names = NamesFor(MaxLevel);
-        _level = Math.Clamp(port.Get(), 0, MaxLevel);
+        // WAVE 6: a PLACEHOLDER, not a reading — 0 is what a failed read gives (LightingViewModel.cs, the same
+        // rule as the option rows). Unlike an RGB zone's brightness, this one is safe to defer: a backlight's
+        // construction writes nothing to the device (the latch below is a field write, and no apply fires until
+        // the user moves the slider), so the placeholder cannot leak outward. The prime is SyncFromHardware —
+        // already wired to the drawer opening and to Fn-key changes, and called once at startup from
+        // LightingViewModel.Sync.
+        _level = 0;
         _hw.Latch((int)_level);
         UpdateName();
     }

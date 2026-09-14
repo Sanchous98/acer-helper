@@ -2,7 +2,6 @@ using AcerHelper.Domain;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;
 using AcerHelper.UI.ViewModels;
-using Avalonia.Threading;
 
 namespace AcerHelper.Tests;
 
@@ -20,11 +19,13 @@ namespace AcerHelper.Tests;
 /// <item>a click that lands between the build and that arrival is not lost.</item>
 /// </list>
 ///
-/// HOW THE POST IS DRAINED: the correction a prime produces is POSTed, so the row only moves when the queue
-/// runs — <c>Dispatcher.UIThread.RunJobs(null)</c> runs it on the calling thread. This works in a bare xUnit
-/// process (Avalonia's UI dispatcher is created on first touch and needs no platform/AppBuilder for this);
-/// that was verified by execution, not assumed, because the fallback — threading a <c>post</c> seam out
-/// through the rows — would have been a production change made for the test's sake.
+/// HOW THE CORRECTION GETS BACK: the rows post it through <c>Dispatcher.UIThread.Post</c>, and these tests
+/// replace that with a synchronous poster (<see cref="Eventually.Sync"/>) — the seam
+/// <see cref="VerifiedHwValue{T}"/> already had, now carried by the rows too. Driving the real dispatcher with
+/// <c>RunJobs</c> was tried FIRST and failed: it is thread-affine, and the bare xUnit process creates it from
+/// whichever thread first touches it — a worker thread here, not the test thread — so every <c>RunJobs</c>
+/// from a test throws. See <see cref="Eventually"/> for the full account. The read still runs on the row's own
+/// serial worker, so the tests still WAIT for it; what is gone is Avalonia's queue, not the asynchrony.
 ///
 /// These are the gates WITHOUT hardware. What they cannot show is listed in the wave-6 notes: that the
 /// deferred reads return what the synchronous ones did, and that the placeholder is never visible at real
@@ -124,14 +125,14 @@ public class OptionsPrimeTests
         var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = true };
         h.F.Device.FnLock = fn;
-        var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"));
+        var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"), Eventually.Sync);
 
         Assert.False(row.IsOn);
         Assert.Equal(0, fn.GetCount);
 
         row.Prime();
 
-        Assert.True(PumpUntil(() => row.IsOn), "the deferred read never reached the row");
+        Assert.True(Eventually.Until(() => row.IsOn), "the deferred read never reached the row");
         Assert.Equal(1, fn.GetCount);                // once — a prime reads, it does not poll
     }
 
@@ -150,12 +151,12 @@ public class OptionsPrimeTests
         Assert.Null(toggle.Read);                    // still NO readback — that is a deliberate, audible choice
         Assert.NotNull(toggle.Prime);
 
-        var row = new ToggleRowViewModel(toggle);
+        var row = new ToggleRowViewModel(toggle, Eventually.Sync);
         Assert.False(row.IsOn);
 
         row.Prime();
 
-        Assert.True(PumpUntil(() => row.IsOn), "the prime never reached the row");
+        Assert.True(Eventually.Until(() => row.IsOn), "the prime never reached the row");
         Assert.Equal(1, lcd.GetCount);
         Assert.Empty(lcd.SetCalls);                  // a prime reads; it must never write
     }
@@ -169,13 +170,13 @@ public class OptionsPrimeTests
         var h = new OptionsAssemblerHarness();
         var usb = new FakeChoicePort("off", "10", "20", "30") { CurrentId = "20" };
         h.F.Device.UsbCharging = usb;
-        var row = new ChoiceRowViewModel(AssemblerRows.Choice(h, "USB charging when off:"));
+        var row = new ChoiceRowViewModel(AssemblerRows.Choice(h, "USB charging when off:"), Eventually.Sync);
 
         Assert.Equal(0, row.SelectedIndex);
 
         row.Prime();
 
-        Assert.True(PumpUntil(() => row.SelectedIndex == 2), "the deferred read never reached the row");
+        Assert.True(Eventually.Until(() => row.SelectedIndex == 2), "the deferred read never reached the row");
         Assert.Empty(usb.SetCalls);
     }
 
@@ -192,7 +193,7 @@ public class OptionsPrimeTests
         vm.Prime();
 
         Assert.Equal(0, auto.IsEnabledCalls);        // still nothing: the read is on the row's worker
-        Assert.True(PumpUntil(() => AutostartRow(vm, auto).IsOn), "the deferred read never reached the row");
+        Assert.True(Eventually.Until(() => AutostartRow(vm, auto).IsOn), "the deferred read never reached the row");
         Assert.Equal(1, auto.IsEnabledCalls);
     }
 
@@ -206,7 +207,7 @@ public class OptionsPrimeTests
         var vm = Shell(new FakeAutostart(), clam);
 
         vm.Prime();
-        Pump(50);
+        Thread.Sleep(50);
 
         Assert.Equal(1, clam.EnabledReads);          // the construction read, and nothing since
         Assert.True(ClamshellRow(vm, clam).IsOn);
@@ -226,14 +227,14 @@ public class OptionsPrimeTests
         var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = false };
         h.F.Device.FnLock = fn;
-        var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"));
+        var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"), Eventually.Sync);
 
         row.Prime();        // reads the hardware — it is off, and the row shows the placeholder
         row.IsOn = true;    // the user clicks while that read is still in flight
 
-        Assert.True(PumpUntil(() => fn.SetCalls.Count == 1 && fn.GetCount >= 2),
+        Assert.True(Eventually.Until(() => fn.SetCalls.Count == 1 && fn.GetCount >= 2),
                     "the click's write and its readback never ran");
-        Pump(50);           // let the trailing corrections reach the row
+        Thread.Sleep(50);   // let any trailing correction land
 
         Assert.True(row.IsOn);                       // the click won
         Assert.Equal([true], fn.SetCalls);           // ...and it won by writing, not by being ignored
@@ -245,7 +246,7 @@ public class OptionsPrimeTests
     /// file is about the app-level rows and about rows built directly, so the section carries nothing.</summary>
     private static OptionsViewModel Shell(IAutostart auto, IClamshell clam)
     {
-        var vm = OptionsViewModel.TryCreate(new FakeDevice { Autostart = auto, Clamshell = clam }, Section());
+        var vm = OptionsViewModel.TryCreate(new FakeDevice { Autostart = auto, Clamshell = clam }, Section(), Eventually.Sync);
         Assert.NotNull(vm);
         return vm;
     }
@@ -261,29 +262,4 @@ public class OptionsPrimeTests
 
     private static ToggleRowViewModel ClamshellRow(OptionsViewModel vm, FakeClamshell clam)
         => vm.Rows.OfType<ToggleRowViewModel>().Single(r => r.Label == Loc.T(clam.Label));
-
-    /// <summary>Run the queued UI-thread work until <paramref name="condition"/> holds, or give up after the
-    /// budget. The read itself runs on the thread pool (the row's serial worker); only the correction it
-    /// produces is posted, so the row cannot move until the queue is drained.</summary>
-    private static bool PumpUntil(Func<bool> condition, int budgetMs = 3000)
-    {
-        var deadline = Environment.TickCount64 + budgetMs;
-        while (true)
-        {
-            Pump(10);
-            if (condition()) return true;
-            if (Environment.TickCount64 >= deadline) return false;
-        }
-    }
-
-    private static void Pump(int ms)
-    {
-        var deadline = Environment.TickCount64 + ms;
-        do
-        {
-            Dispatcher.UIThread.RunJobs(null);
-            Thread.Sleep(2);
-        }
-        while (Environment.TickCount64 < deadline);
-    }
 }
