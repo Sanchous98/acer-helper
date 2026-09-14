@@ -44,12 +44,17 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     /// <summary>Re-apply persisted state that the OS doesn't remember on its own.</summary>
     public void ApplyStartupState()
     {
+        bool dynamicLighting;
         lock (_state)
         {
             if (Settings.Clamshell) device.Clamshell?.SetEnabled(true);
             if (Settings.Bluelight > 0) device.DisplayTint?.Apply(Settings.Bluelight);
             ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
             ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
+            // Read here rather than at its use below, so this is a guarded read of the graph like every other one
+            // in this file. Not a race in practice — this runs before the coordinator, the UI and the 3s pass
+            // exist, so there is no writer yet — but the invariant declared above admits no unguarded access.
+            dynamicLighting = Settings.DynamicLighting;
         }
 
         // Re-apply the current mode's CPU undervolt. Deliberately OUTSIDE the _state lock and off the caller's (UI)
@@ -62,7 +67,7 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
         // Bring the virtual LampArray back up if the user left it on. Off the caller's (UI) thread on purpose:
         // publishing it creates a PnP device node and waits for the driver to start — up to a few seconds on a
         // cold boot. Failure is not surfaced here; the Options row reads the bridge's real state when shown.
-        if (Settings.DynamicLighting && LampArray is { } la)
+        if (dynamicLighting && LampArray is { } la)
             _ = Task.Run(() => { try { la.Enable(); } catch { /* stays off */ } });
     }
 
@@ -519,8 +524,19 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     /// Called on a mode change, at startup, and on resume.</summary>
     public GpuOcPreset ApplyModeGpuOc()
     {
-        var g = CurrentGpuOc();
-        device.GpuOverclock?.Set(g.Core, g.Mem);
+        // CurrentGpuOc() hands back a LIVE preset from the Settings graph, so the pair is copied out under _state
+        // and the hardware call is made with the captured values, outside it — dereferencing the reference after
+        // the lock is released races SetGpuOc's write of these same two fields. (That write cannot tear an int,
+        // but it can leave the two read a beat apart, so the driver would get core from one edit and mem from
+        // another.)
+        int core, mem;
+        GpuOcPreset g;
+        lock (_state)
+        {
+            g = CurrentGpuOc();
+            core = g.Core; mem = g.Mem;
+        }
+        device.GpuOverclock?.Set(core, mem);
         return g;
     }
 
@@ -601,11 +617,18 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     {
         var co = device.CurveOptimizer;
         if (co == null) return [];
-        var c = CurrentCo();
-        if (co.Domains.Count == 0) return [c.AllCore];
-        var counts = new int[co.Domains.Count];
-        for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
-        return counts;
+        // The read happens under _state because CurrentCo() hands back a LIVE preset: the Dictionary read below
+        // races SetCoDomains' STRUCTURAL write of that same dictionary, and a read concurrent with an insert can
+        // throw or spin on a resize rather than merely read stale. Values, not the reference, cross the boundary.
+        // co.Domains is an immutable descriptor list built in the port's constructor, so no I/O is held here.
+        lock (_state)
+        {
+            var c = CurrentCo();
+            if (co.Domains.Count == 0) return [c.AllCore];
+            var counts = new int[co.Domains.Count];
+            for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
+            return counts;
+        }
     }
 
     /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
@@ -650,7 +673,10 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
     /// because the mailbox transaction can wait seconds on the shared PCI lock.</summary>
     public CoPreset ApplyModeCo()
     {
+        var co = device.CurveOptimizer;
         CoPreset c;
+        int[]? counts = null;
+        int allCore;
         lock (_state)
         {
             // Never configured on this install -> never talk to the SMU at all. An empty store means the user has
@@ -660,17 +686,25 @@ public sealed class LaptopService(IDevice device, ISettingsStore store, ILampArr
             // to a mode with no preset still clears the previous mode's undervolt.
             if (Settings.CoPresets.Count == 0) return new CoPreset();
             c = Settings.CoPresets.TryGetValue(CurrentModeKey(), out var s) ? s : new CoPreset();
+            // c is a LIVE reference into the graph, so the values the SMU call needs are copied out HERE — the
+            // dictionary read races SetCoDomains' structural write of the same dictionary exactly as in
+            // CurrentCoDomains above. The transaction below stays outside _state on purpose: it can block for
+            // seconds on the machine-wide PCI lock, and holding _state across it would stall the background pass.
+            allCore = c.AllCore;
+            if (co != null && co.Domains.Count > 0)
+            {
+                counts = new int[co.Domains.Count];
+                for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
+            }
         }
-        if (device.CurveOptimizer is not { } co) return c;
+        if (co == null) return c;
         // Per-domain wins where the CPU has separate rails: one number for both clusters is pinned by whichever gives
         // out first, so the per-domain values are the real setting and AllCore is only the single-domain fallback.
-        if (co.Domains.Count > 0)
+        if (counts != null)
         {
-            var counts = new int[co.Domains.Count];
-            for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
             if (!co.SetDomains(counts)) LastError = co.LastError;
         }
-        else if (!co.Set(c.AllCore)) LastError = co.LastError;
+        else if (!co.Set(allCore)) LastError = co.LastError;
         return c;
     }
 
