@@ -69,11 +69,19 @@ internal sealed class AppController
         // untouched across a live language rebuild (only its view-model targets are re-pointed, via Attach).
         _lightingCoord = new LightingCoordinator(_svc);
 
+        // Read the current hardware profile ONCE, and before the UI is built, so everything that keys off the
+        // current mode derives it from this one read instead of each doing its own EC round-trip: BuildUi's
+        // lighting lookup, the two seeds below and the follow-lighting hand-off. Hoisting it above BuildUi is safe
+        // because BuildUi only READS the device — the state changes live in ApplyStartupState above, which has
+        // already run — and it keeps the read outside the gate-stats window below, whose subject is the time
+        // BuildUi itself spends blocked on hardware.
+        var cur0 = _svc.CurrentProfile();
+
         // Build the string-baked UI (view-models, flyout window, tray). It reads all its text via Loc at
         // construction, so a live language switch simply tears this down and rebuilds it in the new language
         // (RebuildForLanguage). Everything set up AFTER this point holds no localized text and survives the swap.
         var buildHw0 = GateStats.NonPoolTicks();
-        (_vm, _windows, _tray, _lighting) = BuildUi();
+        (_vm, _windows, _tray, _lighting) = BuildUi(cur0);
         GateStatsLog.RecordBuild(GateStats.NonPoolTicks() - buildHw0);   // see the startup sample above
         _lightingCoord.Attach(_vm, _lighting);
         // Fill in the option rows' placeholder values, off the UI thread: these reads used to happen right here,
@@ -85,7 +93,6 @@ internal sealed class AppController
         // RGB panels' brightness is NOT deferred (its construction value is what the startup re-apply sends to the
         // device), but Sync re-reads it off the UI thread all the same, so this is where its slider is settled.
         _lighting?.Sync();
-        var cur0 = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = cur0?.Id ?? "";
         _cpuPrimed = false;                         // the fresh CPU-power row holds a placeholder — prime it
@@ -93,7 +100,7 @@ internal sealed class AppController
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch. The
         // flash colour + mode lights are read here and handed to the coordinator, which caches them.
-        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor, _svc.LightsForCurrentMode());
+        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor, _svc.LightsForCurrentMode(cur0));
 
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
         ApplyHardwareAccessBanner();
@@ -158,7 +165,9 @@ internal sealed class AppController
     // Assemble the localized UI: the lighting view-model, the dashboard view-model (with its UiActions), the
     // flyout window and the tray. Returns them for the caller to store — kept side-effect-free (no field writes
     // beyond what the closures capture) so it can run both at startup and on a live language rebuild.
-    private (MainViewModel, FlyoutCoordinator, TrayController, LightingViewModel?) BuildUi()
+    // <paramref name="cur"/> is the current hardware profile, already read by the caller: the lighting view-model
+    // keys its per-mode state off it, and passing it in means that lookup costs no second EC round-trip.
+    private (MainViewModel, FlyoutCoordinator, TrayController, LightingViewModel?) BuildUi(PerformanceProfile? cur)
     {
         var d = _svc.Device;
 
@@ -169,7 +178,7 @@ internal sealed class AppController
         // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
         var followKey = d.Lighting?.ProfileFollowKey;
         var lighting = d.Lighting != null || d.KeyboardBrightness != null
-            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(), _svc.EnsureLightZone, _svc.PersistLighting,
+            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(cur), _svc.EnsureLightZone, _svc.PersistLighting,
                                     followKey != null && _svc.GetDeviceFlag(followKey, true),
                                     // On flip: persist the flag (AppController owns the vendor key), then have the
                                     // coordinator kick the re-apply so the lightbar repaints now (ON -> this
@@ -230,15 +239,15 @@ internal sealed class AppController
         _windows.Dispose();    // close + unhook the old flyout window for good
 
         Loc.Use(_svc.Language);
-        (_vm, _windows, _tray, _lighting) = BuildUi();
+        var cur = _svc.CurrentProfile();          // read once, before the UI — see the same hoist in the constructor
+        (_vm, _windows, _tray, _lighting) = BuildUi(cur);
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
         _lighting?.Sync();                        // ...and so does the backlight slider
-        var cur = _svc.CurrentProfile();
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";
         _cpuPrimed = false;                       // ...and the rebuilt CPU-power row holds a placeholder again
-        _lightingCoord.ApplyFollowLighting(cur?.FlashColor, _svc.LightsForCurrentMode());
+        _lightingCoord.ApplyFollowLighting(cur?.FlashColor, _svc.LightsForCurrentMode(cur));
         ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
         ApplyHardwareAccessBanner();
         Refresh();                                 // push live state into the fresh view-models + tray
@@ -511,8 +520,10 @@ internal sealed class AppController
             bool modeChanged = modeKey != _lastModeKey;
             bool profileChanged = profileId != _lastProfileId;
             // The current mode's per-zone lights, read once and shared by both the mode- and profile-change paths
-            // (same dict). Only read when something changed — the coordinator caches it for its re-paints.
-            var lights = (modeChanged || profileChanged) ? _svc.LightsForCurrentMode() : null;
+            // (same dict). Only read when something changed — the coordinator caches it for its re-paints. Keyed
+            // off the profile read above rather than re-read: until this passed `current` in, the "ONE hardware
+            // profile read this pass" claim two lines up was not true — this lookup did its own, inside the lock.
+            var lights = (modeChanged || profileChanged) ? _svc.LightsForCurrentMode(current) : null;
 
             FanPreset? fan = null; GpuOcPreset? gpu = null; string? cpu = null; int[]? co = null;
             AccentColor? flash = null;

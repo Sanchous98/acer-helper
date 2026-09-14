@@ -34,7 +34,16 @@ public sealed class FakePowerProfiles : IPowerProfiles
     /// <summary>What <see cref="Current"/> reports. Set it directly to arrange a scenario.</summary>
     public PerformanceProfile? CurrentProfile { get; set; }
 
-    public PerformanceProfile? Current() => CurrentProfile;
+    /// <summary>How many times <see cref="Current"/> has been read. On the real port each read is an EC
+    /// round-trip, so a test uses this to assert that a caller which ALREADY has the profile does not read it
+    /// again — the whole point of the <c>CurrentModeKey(cur)</c> / <c>LightsForCurrentMode(cur)</c> pair.</summary>
+    public int CurrentCount { get; private set; }
+
+    public PerformanceProfile? Current()
+    {
+        CurrentCount++;
+        return CurrentProfile;
+    }
 
     public string? LastError { get; set; }
 

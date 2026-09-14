@@ -59,12 +59,20 @@ public sealed partial class LaptopService
 
     // ---- lighting (per-mode) ----
 
-    /// <summary>The per-zone lighting state for the current mode (created empty on first use).</summary>
-    public Dictionary<string, LightSettings> LightsForCurrentMode()
+    /// <summary>The per-zone lighting state for the current mode (created empty on first use). Reads the
+    /// current profile itself — prefer the overload below wherever the caller has just read it.</summary>
+    public Dictionary<string, LightSettings> LightsForCurrentMode() =>
+        LightsForCurrentMode(device.PowerProfiles?.Current());
+
+    /// <summary>As <see cref="LightsForCurrentMode()"/> but reusing an already-read current profile, so a caller
+    /// that has just read it does not pay a second EC round-trip for the key. Same shape and same reason as
+    /// <see cref="CurrentModeKey(PerformanceProfile?)"/>; the two must agree, or a caller that amortized the read
+    /// would key its lighting off a different mode than its presets.</summary>
+    public Dictionary<string, LightSettings> LightsForCurrentMode(PerformanceProfile? cur)
     {
         lock (_state)
         {
-            var key = CurrentModeKey();
+            var key = CurrentModeKey(cur);
             return GetOrAdd(Settings.LightPresets, key).Zones;
         }
     }
