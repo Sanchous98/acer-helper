@@ -5,7 +5,7 @@ using AcerHelper.Tests.Fakes;
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// The Curve Optimizer write path (LaptopService.cs:564-675) — the one axis where an out-of-range value is
+/// The Curve Optimizer write path (`LaptopService.Tuning.cs` `StoredCo`-`ApplyModeCo`) — the one axis where an out-of-range value is
 /// not merely cosmetic. The offset is applied to the SMU; a value the user did not ask for is an undervolt
 /// they did not ask for, and the failure mode of too aggressive an offset is an instability hours later at
 /// idle rather than an error at the call. So the three things pinned here are the ones that decide what the
@@ -28,7 +28,7 @@ public class LaptopServiceCoClampTests
 
     /// <summary>Out of range is stored CLAMPED, not raw: the port clamps what it sends to the SMU anyway
     /// (Features/Ports.cs:196-199), so a raw value on disk would make the app report an undervolt the
-    /// hardware never got (LaptopService.cs:583-585).</summary>
+    /// hardware never got (`LaptopService.Tuning.cs` `SetCo` — the port-range clamp before persisting).</summary>
     [Theory]
     [InlineData(-100, -30)]      // below the port's Min
     [InlineData(100, 0)]         // above the port's Max
@@ -66,10 +66,10 @@ public class LaptopServiceCoClampTests
     }
 
     /// <summary>NOTE the asymmetry, derived from the code: <c>SetCo</c> persists unconditionally
-    /// (LaptopService.cs:586-591 — the port is only consulted afterwards, at 592), so on a machine whose
+    /// (`LaptopService.Tuning.cs` `SetCo` — the persist block; the port is only consulted afterwards), so on a machine whose
     /// Curve-Optimizer port was probed away a <c>SetCo</c> still writes a preset and returns false, and the
-    /// value is NOT clamped (585 is guarded by <c>co != null</c>). <c>SetCoDomains</c> does the opposite: it
-    /// returns before persisting (625). Pinned as shipped; see LaptopServiceCoCountTests.</summary>
+    /// value is NOT clamped (the clamp in `LaptopService.Tuning.cs` `SetCo` is guarded by <c>co != null</c>). <c>SetCoDomains</c> does the opposite: it
+    /// returns before persisting (`LaptopService.Tuning.cs` `SetCoDomains` — the port and count guard). Pinned as shipped; see LaptopServiceCoCountTests.</summary>
     [Fact]
     public void SetCo_WithNoPort_ReturnsFalse_ButStillPersistsTheUnclampedValue()
     {
@@ -122,7 +122,7 @@ public class LaptopServiceCoClampTests
 /// <summary>
 /// The PER-DOMAIN path: the rail each number is stored under, and the bounds each number is clamped to.
 /// Both are the kind of bug that produces a plausible-looking offset on the wrong rail — which is why the
-/// clamp reads <c>Domains[i].Range ?? Range</c> per domain (LaptopService.cs:629-634) rather than the port's
+/// clamp reads <c>Domains[i].Range ?? Range</c> per domain (`LaptopService.Tuning.cs` `SetCoDomains` — the per-domain clamp loop) rather than the port's
 /// range for the whole array.
 /// </summary>
 public class LaptopServiceCoDomainClampTests
@@ -222,7 +222,7 @@ public class LaptopServiceCoDomainClampTests
 
 /// <summary>
 /// The keying rule: a per-domain offset is stored under <see cref="VoltageDomain.Key"/>, never under its
-/// position in the list (LaptopService.cs:607, 639, 670). The two are indistinguishable until the list
+/// position in the list (`LaptopService.Tuning.cs` `CurrentCoDomains`, `SetCoDomains`, `ApplyModeCo`). The two are indistinguishable until the list
 /// moves — which it does whenever a backend enumerates its rails in another order, renames a label, or the
 /// machine's firmware reports the domains differently after an update. Getting this wrong silently applies
 /// the cores' undervolt to the iGPU.
@@ -348,7 +348,7 @@ public class LaptopServiceCoCountTests
         new VoltageDomain("Zen 5c", "small"));
 
     /// <summary>The counts are index-aligned with <c>co.Domains</c>, so a length disagreement has no correct
-    /// interpretation — and the call is refused BEFORE anything is stored or sent (LaptopService.cs:625).</summary>
+    /// interpretation — and the call is refused BEFORE anything is stored or sent (`LaptopService.Tuning.cs` `SetCoDomains` — the port and count guard).</summary>
     [Theory]
     [InlineData(1)]              // one short
     [InlineData(3)]              // one too many
@@ -367,7 +367,7 @@ public class LaptopServiceCoCountTests
     }
 
     /// <summary>...and with no port the guard fires first too — the exact opposite of <c>SetCo</c>, which
-    /// persists before it looks (LaptopService.cs:625 vs 586). Pinned as shipped: the two halves of the
+    /// persists before it looks (`LaptopService.Tuning.cs` `SetCoDomains` vs `SetCo`). Pinned as shipped: the two halves of the
     /// same feature disagree about what an unwritable install should remember.</summary>
     [Fact]
     public void SetCoDomains_WithNoPort_ReturnsFalse_AndPersistsNothing()
@@ -384,10 +384,10 @@ public class LaptopServiceCoCountTests
     /// array agrees length-wise (<c>0 != 0</c> is false), so the call is accepted — it inserts an empty preset
     /// and sends the SMU a <c>SetDomains</c> carrying nothing. The consequence is larger than the message: the
     /// store is no longer empty, which permanently disarms the never-configured guard in
-    /// <c>ApplyModeCo</c> (LaptopService.cs:661), so every later mode switch, startup and resume now talks to
+    /// <c>ApplyModeCo</c> (`LaptopService.Tuning.cs` `ApplyModeCo`), so every later mode switch, startup and resume now talks to
     /// the SMU on an install whose user never configured an undervolt. Pinned as shipped; unreachable from the
     /// shipped UI, which only ever calls <c>SetCoValues</c> (UI/AppController.cs:372) and that refuses an
-    /// empty array at 615.</summary>
+    /// empty array (`LaptopService.Tuning.cs` `SetCoValues` — the empty-count refusal).</summary>
     [Fact]
     public void SetCoDomains_WithADomainlessCpuAndNoCounts_IsAccepted_AndDisarmsTheNeverConfiguredGuard()
     {
@@ -404,7 +404,7 @@ public class LaptopServiceCoCountTests
     }
 
     /// <summary>SetCoValues is the single entry point the UI uses, and it picks the path from the PORT:
-    /// domains present -> per-domain, none -> all-core (LaptopService.cs:613-618).</summary>
+    /// domains present -> per-domain, none -> all-core (`LaptopService.Tuning.cs` `SetCoValues`).</summary>
     [Fact]
     public void SetCoValues_WithoutDomains_RoutesToTheAllCoreSet()
     {
@@ -542,8 +542,8 @@ public class LaptopServiceCurrentCoDomainsTests
 /// <see cref="LaptopService.ApplyModeCo"/> — the mode-change / startup / resume re-apply. Two contracts live
 /// here and they pull in opposite directions, which is why both are pinned:
 ///
-/// (a) an install that has NEVER configured a Curve Optimizer must not talk to the SMU at all — the guard at
-///     LaptopService.cs:661, so a user who never opted into undervolting never gets an unconfirmed mailbox
+/// (a) an install that has NEVER configured a Curve Optimizer must not talk to the SMU at all — the guard in
+///     `LaptopService.Tuning.cs` `ApplyModeCo`, so a user who never opted into undervolting never gets an unconfirmed mailbox
 ///     message on their CPU; and
 /// (b) once anything IS configured, a mode with no preset is definitely stock and MUST be actively cleared,
 ///     because the offset is SMU-resident and a stale one carried into a profile the user never configured

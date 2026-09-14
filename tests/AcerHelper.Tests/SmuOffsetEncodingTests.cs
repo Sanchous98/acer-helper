@@ -61,7 +61,7 @@ public class SmuOffsetEncodingTests
     ///     saying nothing about non-zero positives. That counter-evidence is why this is still open.
     ///
     /// Unreachable on today's call paths: <c>Set</c> (:256), <c>SetDomains</c> (:319, :323),
-    /// <c>Range</c> (:174), CoViewModel.cs:115 and LaptopService.cs:589 all clamp to [MinCounts, 0].
+    /// <c>Range</c> (:174), CoViewModel.cs:115 and the clamp in `LaptopService.Tuning.cs` `SetCo` all clamp to [MinCounts, 0].
     /// A latent trap, not a live defect — exactly the shape a later widening of the range, or a new
     /// caller passing an unclamped value, would fall into silently.
     ///

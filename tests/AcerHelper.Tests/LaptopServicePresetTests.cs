@@ -19,7 +19,7 @@ internal static class PresetGraph
 /// The read/write asymmetry the whole per-mode preset graph rests on: a <c>Current*</c> accessor is a READER
 /// that hands back a default when the mode has no preset and must leave the graph exactly as it found it,
 /// while its <c>Set*</c> twin is a WRITER that creates the entry — "created on first write, the user is
-/// configuring it" (LaptopService.cs:391-393 for fans, repeated at 490 for GPU offsets and 566 for the
+/// configuring it" (`LaptopService.Fans.cs` `StoredFan` for fans, repeated in `LaptopService.Tuning.cs` `StoredGpuOc` for GPU offsets and `LaptopService.Tuning.cs` `StoredCo` for the
 /// Curve Optimizer).
 ///
 /// Every assertion below is on the settings dictionaries' Count (and their contents) around the call, plus
@@ -131,7 +131,7 @@ public class LaptopServicePresetReadTests
     }
 
     /// <summary>The CPU-power axis has no default of its own to hand back on an unconfigured mode, so it
-    /// reflects the LIVE overlay instead (LaptopService.cs:531-536) — reality, not a forced value. It still
+    /// reflects the LIVE overlay instead (`LaptopService.Tuning.cs` `CurrentCpuPower`) — reality, not a forced value. It still
     /// must not record a choice the user never made.</summary>
     [Fact]
     public void CurrentCpuPower_OnAnUnconfiguredMode_ReportsTheLiveOverlay_AndCreatesNoEntry()
@@ -248,11 +248,11 @@ public class LaptopServicePresetReadTests
     }
 
     /// <summary>NOTE the ordering, derived from the code and not from the doc prose: every <c>Set*</c>
-    /// persists BEFORE it consults the port (LaptopService.cs:502-513, 539-550, 580-595), so a machine whose
+    /// persists BEFORE it consults the port (`LaptopService.Tuning.cs` `SetGpuOc`, `SetCpuPower`, `SetCo`), so a machine whose
     /// port is missing — the feature was probed away — still records the user's choice and reports the write
     /// as failed. Losing the setting as well would be the surprising outcome; this is the behaviour as
     /// shipped, and it is the exact opposite of <c>SetCoDomains</c>, which returns before persisting when the
-    /// port is null (624-625). See LaptopServiceCoTests for that half of the asymmetry.</summary>
+    /// port is null (`LaptopService.Tuning.cs` `SetCoDomains` — the port guard). See LaptopServiceCoTests for that half of the asymmetry.</summary>
     [Theory]
     [InlineData("gpu-oc")]
     [InlineData("co")]
@@ -330,7 +330,7 @@ public class LaptopServicePresetReadTests
 /// (or fall back) and push it to the hardware; the graph is left exactly as it was, and nothing is saved.
 ///
 /// That is deliberate rather than incidental: these run on every profile switch AND on the startup/resume
-/// re-apply paths (LaptopService.cs:51-52, 60), so an inserting implementation would mint a preset for every
+/// re-apply paths (`LaptopService.cs` `ApplyStartupState` — the re-apply calls), so an inserting implementation would mint a preset for every
 /// mode the machine ever passed through, and save on every boot. The asymmetry with the <c>Set*</c> methods
 /// is the whole point of this file.
 /// </summary>
@@ -438,7 +438,7 @@ public class LaptopServiceApplyModeGraphTests
 
     /// <summary>Custom is the exception to the "push it now" rule: the manual speeds are driven from the
     /// temperature curve on every refresh, so the mode CHANGE only switches behaviour — driving a fixed
-    /// speed here would fight the curve (LaptopService.cs:432-434, 448-461).</summary>
+    /// speed here would fight the curve (`LaptopService.Fans.cs` `ApplyModeFan`, `ApplyCustom`).</summary>
     [Fact]
     public void ApplyModeFan_WithACustomPreset_DefersToTheSensorLoop()
     {
@@ -531,7 +531,7 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(1, a.F.Store.SaveCount);
     }
 
-    /// <summary>NOTE: the port is checked BEFORE the store (LaptopService.cs:557-558), so on a machine whose
+    /// <summary>NOTE: the port is checked BEFORE the store (`LaptopService.Tuning.cs` `ApplyModeCpuPower` — the port check first), so on a machine whose
     /// overlay API does not answer, a mode the user DID configure reports as nothing at all rather than as
     /// its stored id. Pinned as shipped; the stored choice is still on disk and still reappears if the port
     /// comes back.</summary>
@@ -549,7 +549,7 @@ public class LaptopServiceApplyModeGraphTests
 }
 
 /// <summary>
-/// <c>GetOrAdd</c> (LaptopService.cs:736-743) — the "look up, create and INSERT when absent, otherwise hand
+/// <c>GetOrAdd</c> (`LaptopService.cs` `GetOrAdd`) — the "look up, create and INSERT when absent, otherwise hand
 /// back the instance already there" idiom every per-mode preset shares — plus its one reader that DOES
 /// insert: <see cref="LaptopService.LightsForCurrentMode"/>. That one is the documented exception to the
 /// rule the previous classes pin, and it is worth its own assertions precisely because it looks like the
@@ -568,7 +568,7 @@ public class LaptopServicePresetGetOrAddTests
         Assert.Equal(["balanced"], f.Store.Settings.LightPresets.Keys);
         // NOTE: this read DOES mutate the graph (it is the one exception) but it does NOT persist — the
         // lighting view-models mutate the live Zones dict and call PersistLighting() once they are done
-        // (LaptopService.cs:465-473, 718).
+        // (`LaptopService.Lighting.cs` `LightsForCurrentMode`, `LaptopService.Toggles.cs` `PersistLighting`).
         Assert.Equal(0, f.Store.SaveCount);
     }
 
@@ -700,7 +700,7 @@ public class LaptopServicePresetGetOrAddTests
 
     /// <summary>The key handed to GetOrAdd is <c>CurrentModeKey()</c>, read at call time — so with Turbo
     /// used as a switch the preset lands in the BASE profile's bucket, which is what makes the base's fans
-    /// and lighting apply while Turbo sits over it (LaptopService.cs:130-144).</summary>
+    /// and lighting apply while Turbo sits over it (`LaptopService.Profiles.cs` `CurrentModeKey` — both overloads).</summary>
     [Theory]
     [InlineData("fan")]
     [InlineData("gpu-oc")]

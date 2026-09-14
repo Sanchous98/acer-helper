@@ -6,7 +6,7 @@ namespace AcerHelper.Tests;
 
 /// <summary>
 /// <see cref="LaptopService.TogglePerformance"/> — the performance hotkey — and through it the
-/// profile-cycling rule <c>NextSelectable</c> (LaptopService.cs:342).
+/// profile-cycling rule <c>NextSelectable</c> (`LaptopService.Profiles.cs` `NextSelectable`).
 ///
 /// NOT COVERED DIRECTLY: <c>NextSelectable</c> is <c>private static</c>, so InternalsVisibleTo (which
 /// grants access to <c>internal</c> only) does not reach it. Every assertion below therefore goes through
@@ -60,7 +60,7 @@ public class LaptopServiceProfileCycleTests
 
     /// <summary>NOTE: with nothing readable as current, <c>start</c> stays 0 and the first candidate is
     /// <c>all[1]</c> — the hotkey SKIPS the first profile rather than entering the ring at it. Derived from
-    /// the code (NextSelectable, LaptopService.cs:348-350), not from the prose doc.</summary>
+    /// the code (`LaptopService.Profiles.cs` `NextSelectable` — the `start` index scan), not from the prose doc.</summary>
     [Fact]
     public void WithNoReadableCurrentProfile_StartsAtTheSecondProfile_NotTheFirst()
     {
@@ -100,7 +100,7 @@ public class LaptopServiceProfileCycleTests
         Assert.Equal(TestProfiles.Quiet, landed);          // Turbo and the head of the list are all skipped
     }
 
-    /// <summary>The <c>Ok</c> predicate is <c>sel.Count == 0 || sel.Any(...)</c> (LaptopService.cs:359),
+    /// <summary>The <c>Ok</c> predicate is <c>sel.Count == 0 || sel.Any(...)</c> (`LaptopService.Profiles.cs` `NextSelectable` — the local `Ok`),
     /// so an EMPTY selectable list means "every profile is selectable", not "none is". A device that
     /// reports no subset must not have its hotkey freeze.</summary>
     [Fact]
@@ -143,7 +143,7 @@ public class LaptopServiceProfileCycleTests
 
     /// <summary>NOTE: <c>Selectable</c> non-empty but DISJOINT from <c>All</c> is the one shape the loop
     /// cannot answer. It never matches, the loop exhausts, and the fallback <c>return current ?? all[0]</c>
-    /// (LaptopService.cs:357) hands back a profile that is NOT selectable — which the hotkey then applies
+    /// (`LaptopService.Profiles.cs` `NextSelectable`) hands back a profile that is NOT selectable — which the hotkey then applies
     /// to the hardware. Silent: the caller gets a profile back and no error.</summary>
     [Fact]
     public void ASelectableListDisjointFromAll_FallsBackToTheCurrentProfile_WhichIsNotSelectable()
@@ -475,7 +475,7 @@ public class LaptopServiceModeKeyTests
         Assert.Equal("quiet", f.Service.CurrentModeKey());
     }
 
-    /// <summary>NOTE the asymmetry, derived from <c>Slot</c> (LaptopService.cs:125): on a fresh service
+    /// <summary>NOTE the asymmetry, derived from <c>Slot</c> (`LaptopService.Profiles.cs` `Slot`): on a fresh service
     /// <c>_onAc</c> is null, so the AC slot is the live one and a remembered mode for BATTERY alone has no
     /// effect on the key. The machine may well be on battery — the first reading is what tells the service.</summary>
     [Fact]
@@ -607,7 +607,7 @@ public class LaptopServiceBaseProfileTests
     }
 
     /// <summary>NOTE: the remembered-base lookup filters by ID ONLY — there is no kind check
-    /// (LaptopService.cs:180). A slot holding the Turbo profile's own id therefore resolves to Turbo,
+    /// (`LaptopService.Profiles.cs` `BaseProfile`). A slot holding the Turbo profile's own id therefore resolves to Turbo,
     /// which is reachable whenever a Turbo profile is picked directly (<c>ApplyProfile</c> stores any id)
     /// while the Turbo switch is on. The fallbacks behind it would have answered Balanced.</summary>
     [Fact]
@@ -904,7 +904,7 @@ public class LaptopServicePowerSourceTests
     }
 
     /// <summary>NOTE: when the device does not offer Turbo right now, <c>ApplyStoredMode</c> refuses to
-    /// apply it (LaptopService.cs:307-308) and applies only the base — yet the slot still records
+    /// apply it (`LaptopService.Profiles.cs` `ApplyStoredMode` — the `wantTurbo` gate) and applies only the base — yet the slot still records
     /// <c>Turbo = true</c>. SourceProfile then reports Turbo while the hardware sits on Balanced, so the
     /// UI names a mode the machine is not in, with no error anywhere.</summary>
     [Fact]
@@ -1124,7 +1124,7 @@ public class LaptopServicePowerSourceTests
 
     /// <summary>NOTE — PROBABLE BUG, derived from the code rather than observed in the app.
     ///
-    /// <c>SeedSlotFromHardware</c> (LaptopService.cs:283-288) records <c>Turbo = true</c> + a GUESSED base
+    /// <c>SeedSlotFromHardware</c> (`LaptopService.Profiles.cs` `SeedSlotFromHardware` — the Turbo branch) records <c>Turbo = true</c> + a GUESSED base
     /// (Balanced) whenever the hardware is in Turbo — without consulting <c>Settings.TurboToggles</c>. With
     /// the switch OFF, <c>ApplyStoredMode</c> ignores the flag (wantTurbo is false) and applies the base it
     /// finds. So: machine booted into Turbo, first reading seeds the slot with the guess, and the NEXT
