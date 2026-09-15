@@ -64,8 +64,8 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>A write that lands must not notify at all. Pinned because the failure branch is one `if`
-    /// away from firing on every write, and because <c>LastError</c> is only read AFTER a set has failed —
-    /// see the stale-error test below.</summary>
+    /// away from firing on every write — a successful set returns <c>(true, null)</c>, so there is no reason to
+    /// carry and nothing to read back afterwards.</summary>
     [Fact]
     public void ASuccessfulSet_PostsNothing_AndNotifiesNothing()
     {
@@ -555,7 +555,9 @@ internal static class AssemblerRows
     /// <summary>A device with every option port present and every write REFUSED — the arrangement the
     /// per-row failure theory needs. One refusing fake serves all five on/off slots and one serves all three
     /// dropdown slots: the rows are built and invoked one case at a time, so sharing them cannot cross cases.
-    /// No <c>LastError</c> is set, so the message is exactly "&lt;name&gt; failed" for every row.</summary>
+    /// No port carries a reason (their <c>LastError</c> stays null), so the message is exactly
+    /// "&lt;name&gt; failed" for every row — and the rows are built and invoked one case at a time, so sharing
+    /// the fakes cannot cross cases.</summary>
     public static OptionsAssemblerHarness AllRefusing()
     {
         var h = new OptionsAssemblerHarness();

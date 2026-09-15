@@ -1,0 +1,63 @@
+{
+  "Language": 2,
+  "TurboToggles": true,
+  "Clamshell": true,
+  "OnAc": {
+    "BaseId": "balanced",
+    "Turbo": true
+  },
+  "OnBattery": {
+    "BaseId": "power-saver",
+    "Turbo": false
+  },
+  "FanPresets": {
+    "balanced": {
+      "Mode": 3,
+      "Cpu": 55,
+      "Gpu": 60,
+      "CpuUseCurve": true,
+      "GpuUseCurve": false,
+      "CpuCurve": [30, 40, 50, 60, 70],
+      "GpuCurve": [35, 45, 55, 65, 75]
+    }
+  },
+  "Bluelight": 4,
+  "DynamicLighting": true,
+  "LightPresets": {
+    "balanced": {
+      "Zones": {
+        "Keyboard": {
+          "Configured": true,
+          "EffectIndex": 2,
+          "Brightness": 80,
+          "Speed": 7,
+          "Direction": 2,
+          "Color": 65280,
+          "ZoneColors": [1118481, 2236962]
+        }
+      }
+    }
+  },
+  "GpuOcPresets": {
+    "balanced": {
+      "Core": 300,
+      "Mem": 1500
+    }
+  },
+  "CoPresets": {
+    "balanced": {
+      "AllCore": -30,
+      "Domains": {
+        "ccd:0": -20,
+        "ccd:1": -20,
+        "gfx": -16
+      }
+    }
+  },
+  "CpuPowerModes": {
+    "balanced": "best-performance"
+  },
+  "DeviceSettings": {
+    "acer.lightbarFollowsProfile": "1"
+  }
+}

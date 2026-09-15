@@ -6,11 +6,28 @@ namespace AcerHelper.Tests;
 
 /// <summary>The per-mode preset bags of <see cref="Settings"/>, counted as ONE value so a test can assert the
 /// whole graph around a call in a single line, and so a bag added to the graph later cannot be silently
-/// left out of the "a read must not mutate" assertions.</summary>
+/// left out of the "a read must not mutate" assertions.
+///
+/// That promise used to be prose: <see cref="Counts"/> listed the five bags by hand, so a sixth would have
+/// been omitted in silence. It is now built from <see cref="ModeAxisTable.All"/> and the switch below is
+/// exhaustive over <see cref="ModeAxis"/>, with a test that iterates every enum value — so a new axis throws
+/// here instead of quietly dropping out of the assertions.</summary>
 internal static class PresetGraph
 {
+    /// <summary>The bag one axis is stored in.</summary>
+    internal static int CountFor(Settings s, ModeAxis axis) => axis switch
+    {
+        ModeAxis.Fans => s.FanPresets.Count,
+        ModeAxis.GpuOc => s.GpuOcPresets.Count,
+        ModeAxis.CpuPower => s.CpuPowerModes.Count,
+        ModeAxis.Co => s.CoPresets.Count,
+        ModeAxis.Lights => s.LightPresets.Count,
+        _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "a new ModeAxis needs a bag here"),
+    };
+
     internal static (int Fan, int GpuOc, int Co, int CpuPower, int Light) Counts(Settings s) =>
-        (s.FanPresets.Count, s.GpuOcPresets.Count, s.CoPresets.Count, s.CpuPowerModes.Count, s.LightPresets.Count);
+        (CountFor(s, ModeAxis.Fans), CountFor(s, ModeAxis.GpuOc), CountFor(s, ModeAxis.Co),
+         CountFor(s, ModeAxis.CpuPower), CountFor(s, ModeAxis.Lights));
 
     internal static readonly (int, int, int, int, int) Empty = (0, 0, 0, 0, 0);
 }
@@ -223,7 +240,7 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        Assert.True(a.F.Service.SetGpuOc(150, 800));
+        Assert.True(a.F.Service.SetGpuOc(150, 800).ok);
 
         var stored = Assert.Single(a.F.Store.Settings.GpuOcPresets);
         Assert.Equal("balanced", stored.Key);
@@ -238,7 +255,7 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        Assert.True(a.F.Service.SetCpuPower("best-performance"));
+        Assert.True(a.F.Service.SetCpuPower("best-performance").ok);
 
         var stored = Assert.Single(a.F.Store.Settings.CpuPowerModes);
         Assert.Equal("balanced", stored.Key);
@@ -261,7 +278,7 @@ public class LaptopServicePresetReadTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);   // no ports at all
 
-        var ok = which switch
+        var r = which switch
         {
             "gpu-oc"    => f.Service.SetGpuOc(150, 800),
             "co"        => f.Service.SetCo(-12),
@@ -269,7 +286,8 @@ public class LaptopServicePresetReadTests
             _           => throw new ArgumentOutOfRangeException(nameof(which)),
         };
 
-        Assert.False(ok);
+        Assert.False(r.ok);
+        Assert.Null(r.error);                       // no port -> nothing was attempted, so there is no reason
         Assert.Equal(1, CountOf(f.Store.Settings, which));
         Assert.Equal(["balanced"], KeysOf(f.Store.Settings, which));
         Assert.Equal(1, f.Store.SaveCount);
@@ -419,10 +437,10 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(0, a.F.Store.SaveCount);
     }
 
-    /// <summary>It hands back the STORED instance (not a copy), which is what the UI reflects — so the
-    /// caller sees the user's setting, not a default.</summary>
+    /// <summary>It hands back a SNAPSHOT of the stored preset, not the stored instance — the caller sees the
+    /// user's setting (not a default) without being able to reach into the graph through what it was handed.</summary>
     [Fact]
-    public void ApplyModeFan_WithAPreset_ReappliesIt_AndReturnsTheStoredInstance()
+    public void ApplyModeFan_WithAPreset_ReappliesIt_AndReturnsASnapshot()
     {
         var a = Setup();
         a.F.Service.SetFan(FanMode.Max, 42, 84);
@@ -430,7 +448,10 @@ public class LaptopServiceApplyModeGraphTests
 
         var applied = a.F.Service.ApplyModeFan();
 
-        Assert.Same(a.F.Store.Settings.FanPresets["balanced"], applied);
+        var stored = a.F.Store.Settings.FanPresets["balanced"];
+        Assert.NotSame(stored, applied);
+        Assert.Equal(stored.Mode, applied!.Mode);                // ...and it says the same thing
+        Assert.Equal(stored.Cpu, applied.Cpu);
         Assert.Equal([FanMode.Max], a.Fan.ModeCalls);
         Assert.Single(a.F.Store.Settings.FanPresets);            // still the one entry the writer made
         Assert.Equal(1, a.F.Store.SaveCount);                    // ...and still the one save
@@ -450,10 +471,51 @@ public class LaptopServiceApplyModeGraphTests
 
         var applied = f.Service.ApplyModeFan();
 
-        Assert.Same(settings.FanPresets["balanced"], applied);
+        Assert.NotSame(settings.FanPresets["balanced"], applied);
+        Assert.Equal(settings.FanPresets["balanced"].Mode, applied!.Mode);
         Assert.Empty(fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);
         Assert.Equal(0, f.Store.SaveCount);
+    }
+
+    /// <summary>The DEPTH of the snapshot, which is the part that is easy to get wrong and the reason
+    /// <c>FanPreset.Snapshot</c> duplicates the curve ARRAYS rather than sharing them. A copy that took the
+    /// fields but kept the arrays would still let a view-model rewrite the user's fan curve in place, with no
+    /// Set method and no lock — the widest remaining door of exactly the kind this closes.</summary>
+    [Fact]
+    public void AMutatedSnapshotNeverReachesTheStoredPreset_NotEvenThroughItsArrays()
+    {
+        var a = Setup();
+        a.F.Service.SetFanCurve(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
+
+        var snapshot = a.F.Service.CurrentFan();
+        snapshot.CpuCurve[0] = 99;
+        snapshot.Cpu = 1;
+        snapshot.CpuUseCurve = false;
+
+        var stored = a.F.Store.Settings.FanPresets["balanced"];
+        Assert.Equal(10, stored.CpuCurve[0]);                    // the array is a copy...
+        Assert.NotEqual(1, stored.Cpu);                          // ...and so is every field
+        Assert.True(stored.CpuUseCurve);
+    }
+
+    /// <summary>The same claim for the Curve Optimizer, whose snapshot has a dictionary rather than arrays. The
+    /// preset is seeded directly rather than through a Set method, so BOTH halves of the type carry a non-default
+    /// value: the dictionary is the deep part, and the scalar beside it must be copied too.</summary>
+    [Fact]
+    public void AMutatedCoSnapshotNeverReachesTheStoredPreset()
+    {
+        var settings = new Settings();
+        settings.CoPresets["balanced"] = new CoPreset { AllCore = -15, Domains = { ["big"] = -10 } };
+        var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
+
+        var snapshot = f.Service.CurrentCo();
+        snapshot.Domains["big"] = 0;
+        snapshot.AllCore = 0;
+
+        var stored = settings.CoPresets["balanced"];
+        Assert.Equal(-10, stored.Domains["big"]);                // the dictionary is a copy...
+        Assert.Equal(-15, stored.AllCore);                       // ...and so is the scalar beside it
     }
 
     /// <summary>GPU offsets follow the OPPOSITE contract to fans (Settings.cs:42-47): an unconfigured mode
@@ -475,7 +537,7 @@ public class LaptopServiceApplyModeGraphTests
     }
 
     [Fact]
-    public void ApplyModeGpuOc_WithAPreset_WritesTheStoredOffsets_AndReturnsTheStoredInstance()
+    public void ApplyModeGpuOc_WithAPreset_WritesTheStoredOffsets_AndReturnsASnapshot()
     {
         var a = Setup();
         a.F.Service.SetGpuOc(150, 800);
@@ -483,7 +545,10 @@ public class LaptopServiceApplyModeGraphTests
 
         var applied = a.F.Service.ApplyModeGpuOc();
 
-        Assert.Same(a.F.Store.Settings.GpuOcPresets["balanced"], applied);
+        var stored = a.F.Store.Settings.GpuOcPresets["balanced"];
+        Assert.NotSame(stored, applied);
+        Assert.Equal(stored.Core, applied.Core);
+        Assert.Equal(stored.Mem, applied.Mem);
         Assert.Equal(new[] { (150, 800) }, a.Gpu.SetCalls);
         Assert.Single(a.F.Store.Settings.GpuOcPresets);
         Assert.Equal(1, a.F.Store.SaveCount);

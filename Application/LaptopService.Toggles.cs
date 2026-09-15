@@ -10,14 +10,19 @@ public sealed partial class LaptopService
 
     public BatteryInfoSnapshot ReadBatteryInfo() => device.BatteryInfo?.Read() ?? new BatteryInfoSnapshot();
 
-    // ---- hardware toggles (return success; LastError holds the reason on failure) ----
+    // ---- hardware toggles (each returns the write's outcome AND its reason) ----
 
     // Every simple on/off or pick-one control routes through one of these two: the port carries its own
     // error channel, so the caller (OptionsAssembler) passes the device's nullable port + the new value.
     // SetKeyboardBrightness stays its own method — it's a LevelPort (an int), not a flag/choice.
-    public bool SetFlag(IFlagPort? port, bool on)       => Run(port, x => x.Set(on), x => x.LastError);
-    public bool SetChoice(IChoicePort? port, string id) => Run(port, x => x.Set(id), x => x.LastError);
-    public bool SetKeyboardBrightness(int level)        => Run(device.KeyboardBrightness, x => x.Set(level), x => x.LastError);
+    public (bool ok, string? error) SetFlag(IFlagPort? port, bool on)
+        => port == null ? (false, null) : Attempt(() => port.Set(on), () => port.LastError);
+
+    public (bool ok, string? error) SetChoice(IChoicePort? port, string id)
+        => port == null ? (false, null) : Attempt(() => port.Set(id), () => port.LastError);
+
+    public (bool ok, string? error) SetKeyboardBrightness(int level)
+        => device.KeyboardBrightness is { } kb ? Attempt(() => kb.Set(level), () => kb.LastError) : (false, null);
 
     public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 

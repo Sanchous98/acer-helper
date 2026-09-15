@@ -146,15 +146,18 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     // the row already serializes a control's writes + readback and runs them off the UI thread, and the WMI
     // layer serializes across controls, so this just runs the set inline and posts any error to the UI. The
     // row's own readback is what corrects the switch when a write silently doesn't take.
-    private void RunSet(Func<bool> set, string what)
+    //
+    // The setter hands back BOTH halves of its failure, so the message carries the reason of THIS write. It used
+    // to read a shared LastError field afterwards, which is a different thing: this runs on a row's own worker
+    // while the UI thread and the background pass write the same field, so the reason shown could belong to
+    // another call entirely (docs/open-decisions.md §2).
+    private void RunSet(Func<(bool ok, string? error)> set, string what)
     {
-        bool ok;
-        try { ok = set(); }
-        catch { ok = false; }
-        if (ok) return;
-        var e = svc.LastError;
-        // `what` is the English control name; localize both it and the "… failed" template.
-        post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (e != null ? $": {e}" : "")));
+        (bool ok, string? error) result;
+        try { result = set(); }
+        catch { result = (false, null); }
+        if (result.ok) return;
+        post(() => notify(Loc.T("{0} failed", Loc.T(what)) + (result.error != null ? $": {result.error}" : "")));
     }
 
     // A source with nothing remembered yet (fresh install, before that source was ever seen) has no profile to

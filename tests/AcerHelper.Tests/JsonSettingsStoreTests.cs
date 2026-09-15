@@ -1,4 +1,7 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
@@ -94,6 +97,16 @@ public class JsonSettingsStoreTests
         // A SECOND store, so nothing survives merely by being the same object in memory.
         var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
 
+        AssertNothingWasLost(loaded);
+    }
+
+    /// <summary>Every value the two tests around this one can lose, asserted in ONE place so that a file this
+    /// build just wrote and a file the shipped build wrote are held to the same standard: however the settings
+    /// arrived, none of these may come back as a default. Split out because the two failures differ — a writer
+    /// that stops emitting a field, versus a reader that no longer recognises a name — while the claim is
+    /// identical, and duplicating it would let the two guards drift apart.</summary>
+    private static void AssertNothingWasLost(Settings loaded)
+    {
         Assert.Equal(AppLanguage.Russian, loaded.Language);
         Assert.True(loaded.TurboToggles);
         Assert.True(loaded.Clamshell);
@@ -139,26 +152,79 @@ public class JsonSettingsStoreTests
         Assert.Equal("1", Present(loaded.DeviceSettings, "acer.lightbarFollowsProfile"));
     }
 
-    /// <summary>Scope, stated narrowly because a mutation showed the obvious claim is false: source-gen picks
-    /// up a newly ADDED property on its own, so this does NOT catch "someone added a field" (adding one by hand
-    /// left every test here green). What it catches is a member that stops being persisted while remaining on
-    /// the type — <c>[JsonIgnore]</c>, or a setter the serializer can no longer use. Verified red by putting
-    /// <c>[JsonIgnore]</c> on <see cref="Settings.DynamicLighting"/>.
+    /// <summary>THE RENAME GUARD — the one this file was missing, and the reason it is a FILE rather than a list
+    /// of names written in this one. settings.json outlives the binary, so the NAME of a persisted property is a
+    /// compatibility surface: renaming one silently drops that value from every file already on disk, and the next
+    /// Save writes the loss back as though the user had made it.
     ///
-    /// Its reason to exist alongside the round trip is that the round trip's field list is hand-written and
-    /// therefore goes stale silently as the type grows: this compares the JSON's own property names against the
-    /// type's, so a member that stops persisting fails BY NAME even if <see cref="Populated"/> never mentioned it.</summary>
+    /// WHY A FIXTURE, NOT A LITERAL ARRAY. The obvious guard was written first — a literal array of the shipped
+    /// names, right here — and a mutation killed it: renaming <see cref="Settings.DynamicLighting"/> across the
+    /// repo (a find-and-replace over <c>*.cs</c>, which is what a rename IS) rewrote the guard's own literal along
+    /// with the property, so the guard renamed itself and stayed green. The names therefore have to live where a
+    /// rename of the C# type cannot reach them, and a JSON file is that place.
+    ///
+    /// The claim is the one a user cares about: a settings file written by the SHIPPED build loads with every value
+    /// intact. The fixture's values are deliberately NOT defaults — a default is what a failed deserialization
+    /// leaves behind, so a file built from defaults would pass against a store that dropped everything.
+    ///
+    /// A rename migrated the right way — <c>[JsonPropertyName("oldName")]</c>, leaving the old name on disk —
+    /// PASSES. The test this replaced compared the JSON against the type's own property names and went RED on
+    /// precisely that fix, which is how the wrong repair (deleting the guard) comes to look like the right one.
+    ///
+    /// Verified red by renaming <see cref="Settings.DynamicLighting"/>; verified GREEN by renaming it AND adding
+    /// <c>[JsonPropertyName("DynamicLighting")]</c> — the second mutation is the one that matters.</summary>
     [Fact]
-    public void NoPropertyOfSettingsIsLeftOutOfTheJson()
+    public void AFullSettingsFileFromAShippedVersionStillLoads()
     {
-        var json = JsonSerializer.Serialize(new Settings(), SettingsJsonContext.Default.Settings);
-        using var doc = JsonDocument.Parse(json);
+        using var dir = new TempDir();
+        File.Copy(Fixture("settings-0.33.0.json"), dir.SettingsPath);
 
-        var onDisk = doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray();
-        var declared = typeof(Settings).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
 
-        Assert.Equal(declared, onDisk);
+        Assert.False(File.Exists(dir.SettingsPath + ".bad"));   // a readable file, not a rescued one
+        AssertNothingWasLost(loaded);
     }
+
+    /// <summary>THE OMISSION GUARD, kept because the rename guard alone does not cover it: a member can sit on the
+    /// type and still not reach the disk — <c>[JsonIgnore]</c>, or a setter the serializer can no longer use — and
+    /// no literal list knows about a property that was just added. This reads each property's CONTRACTED json name
+    /// and requires it on disk.
+    ///
+    /// Reading the attribute is what keeps this from being the tautology it replaced: because
+    /// <c>[JsonPropertyName]</c> is honoured here, a rename migrated with an alias passes BOTH guards, so the two
+    /// agree instead of contradicting each other. Scope: the top-level type only — the nested types are pinned by
+    /// name in the test above rather than by reflection here.</summary>
+    [Fact]
+    public void EveryDeclaredPropertyStillReachesTheDisk()
+    {
+        using var doc = JsonDocument.Parse(FullyPopulatedJson());
+        var onDisk = doc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+
+        var missing = typeof(Settings).GetProperties()
+            .Where(p => !onDisk.Contains(JsonNameOf(p)))
+            .Select(p => $"{p.Name} (as \"{JsonNameOf(p)}\")")
+            .ToArray();
+
+        Assert.True(missing.Length == 0,
+            "these members are on Settings but no longer reach settings.json: " + string.Join(", ", missing));
+    }
+
+    /// <summary>The document both guards read: a FULLY populated Settings, serialized through the same
+    /// source-generated context <see cref="JsonSettingsStore.Save"/> uses.</summary>
+    private static string FullyPopulatedJson()
+        => JsonSerializer.Serialize(Populated(), SettingsJsonContext.Default.Settings);
+
+    /// <summary>A committed file of the test project, located from the COMPILER's path rather than the current
+    /// directory: the test host runs with its working directory set to the output folder, and the fixture is not
+    /// copied there. Reading it from the source tree is also what makes it a guard — a persisted name can be
+    /// renamed across <c>*.cs</c> without touching this file (see the test above).</summary>
+    private static string Fixture(string name, [CallerFilePath] string thisFile = "")
+        => Path.Combine(Path.GetDirectoryName(thisFile)!, "Fixtures", name);
+
+    /// <summary>The json name the serializer is contracted to write for a member: its <c>[JsonPropertyName]</c>
+    /// when it carries one, otherwise its CLR name.</summary>
+    private static string JsonNameOf(PropertyInfo p)
+        => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? p.Name;
 
     [Fact]
     public void AMissingFileYieldsDefaults()

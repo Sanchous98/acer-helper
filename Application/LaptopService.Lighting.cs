@@ -43,18 +43,16 @@ public sealed partial class LaptopService
     /// published (see <see cref="LampArrayBridge.LastError"/>) — the setting is then left off, so the UI row
     /// snaps back on its next read instead of claiming a device that isn't there. Blocking (opens the driver);
     /// call off the UI thread — the Options rows already do.</summary>
-    public bool SetDynamicLighting(bool on)
+    public (bool ok, string? error) SetDynamicLighting(bool on)
     {
         var la = LampArray;
-        if (la == null) return false;
+        if (la == null) return (false, null);
 
-        var ok = true;
-        if (on) ok = la.Enable();
-        else la.Disable();
-        if (!ok) LastError = la.LastError;
+        // Disable() reports nothing and cannot fail; only Enable has an outcome to report.
+        var (ok, error) = on ? Attempt(la.Enable, () => la.LastError) : (true, (string?)null);
 
         lock (_state) { Settings.DynamicLighting = on && ok; Save(); }
-        return ok;
+        return (ok, error);
     }
 
     // ---- lighting (per-mode) ----

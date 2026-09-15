@@ -197,16 +197,20 @@ public class LaptopServiceProfileCycleTests
     }
 
     [Fact]
-    public void AFailedSet_ReturnsNull_PropagatesThePortsError_AndRemembersNothing()
+    public void AFailedSet_ReturnsNull_AndRemembersNothing()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
         f.Pp!.SetResult = false;
         f.Pp.LastError = "EC refused";
 
         Assert.Null(f.Service.TogglePerformance());
-        Assert.Equal("EC refused", f.Service.LastError);
         Assert.Equal("", f.Store.Settings.OnAc.BaseId);       // ApplyProfile stores only after a successful Set
         Assert.Equal(0, f.Store.SaveCount);
+
+        // The reason comes back FROM the call rather than being parked in a field for whoever reads it last, and
+        // the hotkey drops it — its caller shows no message. So the propagation claim is asserted on the path
+        // that HAS a reader: a direct ApplyProfile, which is what the profile row uses.
+        Assert.Equal("EC refused", f.Service.ApplyProfile(TestProfiles.Performance).error);
     }
 }
 
@@ -273,8 +277,7 @@ public class LaptopServiceTurboToggleTests
                           all: [TestProfiles.Quiet, TestProfiles.Balanced, TestProfiles.Performance]);
 
         Assert.Null(f.Service.TogglePerformance());
-        Assert.Empty(f.Pp!.SetCalls);
-        Assert.Null(f.Service.LastError);
+        Assert.Empty(f.Pp!.SetCalls);                          // nothing was attempted, so there is no failure to report
         Assert.Equal(0, f.Store.SaveCount);
     }
 
@@ -303,7 +306,7 @@ public class LaptopServiceTurboToggleTests
                           },
                           TestProfiles.Turbo);
 
-        Assert.Equal(TestProfiles.Turbo, f.Service.SetTurbo(true));
+        Assert.Equal(TestProfiles.Turbo, f.Service.SetTurbo(true).applied);
         Assert.Equal(["turbo"], f.Pp!.SetCallIds);              // re-applied, not skipped
         Assert.Equal("balanced", f.Store.Settings.OnAc.BaseId);  // a Turbo current captures nothing
     }
@@ -333,8 +336,9 @@ public class LaptopServiceTurboToggleTests
         f.Pp.LastError = "EC refused";
 
         Assert.Null(f.Service.TogglePerformance());
-        Assert.Equal("EC refused", f.Service.LastError);
         Assert.True(f.Store.Settings.OnAc.Turbo);              // ApplyProfile returns before clearing it
+        // No reason to assert: this path is the Turbo switch, whose caller (the hotkey) shows nothing, so the
+        // failure is dropped here by design — the flag staying set is what the assertion above pins.
     }
 
     /// <summary>The setting itself is read fresh on every press, so flipping it switches the hotkey's
@@ -670,7 +674,7 @@ public class LaptopServicePowerSourceTests
 
         Assert.Null(f.Service.SourceProfile(true));
         Assert.Null(f.Service.SourceProfile(false));
-        Assert.False(f.Service.SetSourceProfile(true, TestProfiles.Balanced));
+        Assert.False(f.Service.SetSourceProfile(true, TestProfiles.Balanced).ok);
     }
 
     [Fact]
@@ -769,7 +773,7 @@ public class LaptopServicePowerSourceTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
-        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Performance));
+        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Performance).ok);
 
         Assert.Equal("performance", f.Store.Settings.OnAc.BaseId);
         Assert.False(f.Store.Settings.OnAc.Turbo);
@@ -796,7 +800,7 @@ public class LaptopServicePowerSourceTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
-        Assert.True(f.Service.SetSourceProfile(false, TestProfiles.Quiet));
+        Assert.True(f.Service.SetSourceProfile(false, TestProfiles.Quiet).ok);
 
         Assert.Equal("quiet", f.Store.Settings.OnBattery.BaseId);
         Assert.Empty(f.Pp!.SetCallIds);                  // nothing written
@@ -808,7 +812,7 @@ public class LaptopServicePowerSourceTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
-        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Balanced));
+        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Balanced).ok);
 
         // ApplyStoredMode short-circuits on "already in that profile": the firmware re-flashes the
         // keyboard palette on every Set, so re-applying the same mode would blink the keyboard for nothing.
@@ -835,8 +839,10 @@ public class LaptopServicePowerSourceTests
         f.Pp!.SetResult = false;
         f.Pp.LastError = "EC refused";
 
-        Assert.False(f.Service.SetSourceProfile(true, TestProfiles.Performance));
-        Assert.Equal("EC refused", f.Service.LastError);
+        var r = f.Service.SetSourceProfile(true, TestProfiles.Performance);
+
+        Assert.False(r.ok);
+        Assert.Equal("EC refused", r.error);                          // the reason travels WITH the result
         Assert.Equal("performance", f.Store.Settings.OnAc.BaseId);   // the choice is still remembered
     }
 
@@ -849,7 +855,7 @@ public class LaptopServicePowerSourceTests
             settings: new Settings { TurboToggles = true },
             current: TestProfiles.Quiet);
 
-        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo));
+        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo).ok);
 
         Assert.Equal("balanced", f.Store.Settings.OnAc.BaseId);   // seeded: Turbo is not a base
         Assert.True(f.Store.Settings.OnAc.Turbo);
@@ -865,7 +871,7 @@ public class LaptopServicePowerSourceTests
             settings: new Settings { TurboToggles = true },
             current: TestProfiles.Balanced);
 
-        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo));
+        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo).ok);
 
         Assert.Equal(["turbo"], f.Pp!.SetCallIds);                // the base is already on
         Assert.Equal("balanced", f.Store.Settings.OnAc.BaseId);
@@ -915,7 +921,7 @@ public class LaptopServicePowerSourceTests
             selectable: [TestProfiles.Quiet, TestProfiles.Balanced, TestProfiles.Performance],
             current: TestProfiles.Quiet);
 
-        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo));
+        Assert.True(f.Service.SetSourceProfile(true, TestProfiles.Turbo).ok);
 
         Assert.Equal(["balanced"], f.Pp!.SetCallIds);          // Turbo was never written
         Assert.Equal(TestProfiles.Balanced, f.Service.CurrentProfile());

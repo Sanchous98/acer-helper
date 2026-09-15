@@ -26,10 +26,19 @@ public sealed partial class LaptopService
     /// pass can read the hardware profile ONCE and derive the key without a second EC round-trip.</summary>
     public string CurrentModeKey(PerformanceProfile? cur)
     {
-        if (cur == null) return "default";
+        // The derivation itself now lives in Domain/ModeKey.cs; this keeps the method's exact former shape,
+        // including the early return that does NOT take the lock — the null case reads nothing, and the original
+        // deliberately answered it without acquiring _state.
+        //
+        // The SLOT is read here, under the lock, and passed by value. That is not a style choice: it is the
+        // remembered mode of the LIVE power source, so reading it inside the domain type would either put the
+        // lock there or drop it, and hoisting a guarded read out of its lock is the hazard recorded in
+        // docs/open-decisions.md §3. The lock is now held across the whole derivation rather than only the Turbo
+        // branch — a superset, and free: `cur` is already materialised and ModeKey.For is pure, so the hold is
+        // two field reads.
+        if (cur == null) return ModeKey.None.Value;
         lock (_state)
-            if (Settings.TurboToggles && cur.Kind == ProfileKind.Turbo && Slot.BaseId.Length > 0) return Slot.BaseId;
-        return cur.Id;
+            return ModeKey.For(cur, Settings.TurboToggles, Slot).Value;
     }
 
     public PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
@@ -37,19 +46,20 @@ public sealed partial class LaptopService
     public IReadOnlyList<PerformanceProfile> SelectableProfiles() =>
         device.PowerProfiles?.Selectable() ?? [];
 
-    public bool ApplyProfile(PerformanceProfile p)
+    public (bool ok, string? error) ApplyProfile(PerformanceProfile p)
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return false;
+        if (pp == null) return (false, null);
         lock (_state)
         {
-            if (!pp.Set(p)) { LastError = pp.LastError; return false; }
+            var r = Attempt(() => pp.Set(p), () => pp.LastError);
+            if (!r.ok) return r;
             // Remember this as the base for the current source; a direct profile pick clears the Turbo flag.
             Slot.BaseId = p.Id;
             Slot.Turbo = false;
             Save();
+            return r;
         }
-        return true;
     }
 
     /// <summary>True if the hardware is currently in the Turbo profile.</summary>
@@ -75,25 +85,28 @@ public sealed partial class LaptopService
     /// off = return to the remembered base. The base id is preserved; only the Turbo flag flips.
     /// Returns the profile that actually landed (null on failure) so the caller doesn't have to read it back
     /// out of the hardware to know what it just applied — see AppController's lighting hand-off.</summary>
-    public PerformanceProfile? SetTurbo(bool on)
+    public (PerformanceProfile? applied, string? error) SetTurbo(bool on)
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return null;
+        if (pp == null) return (null, null);
         lock (_state)
         {
             if (on)
             {
                 var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
-                if (turbo == null) return null;
+                if (turbo == null) return (null, null);
                 var cur = pp.Current();
                 if (cur != null && cur.Kind != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
-                if (!pp.Set(turbo)) { LastError = pp.LastError; return null; }
+                var r = Attempt(() => pp.Set(turbo), () => pp.LastError);
+                if (!r.ok) return (null, r.error);
                 Slot.Turbo = true;
                 Save();
-                return turbo;
+                return (turbo, null);
             }
             var baseP = BaseProfile();
-            return baseP != null && ApplyProfile(baseP) ? baseP : null;   // clears Turbo flag + persists base
+            if (baseP == null) return (null, null);
+            var applied = ApplyProfile(baseP);   // clears Turbo flag + persists base
+            return applied.ok ? (baseP, null) : (null, applied.error);
         }
     }
 
@@ -117,11 +130,11 @@ public sealed partial class LaptopService
     /// <summary>Set the profile a power source should use, and apply it right away when that source is the live
     /// one. Stored exactly the way a manual pick stores it (<see cref="ApplyProfile"/>), so the two can't
     /// disagree: base id + a Turbo flag, since Turbo is a switch over a base rather than a mode of its own
-    /// while "Turbo toggles" is on. Returns false only if the immediate apply failed.</summary>
-    public bool SetSourceProfile(bool onAc, PerformanceProfile p)
+    /// while "Turbo toggles" is on. Reports a failure only if the immediate apply failed.</summary>
+    public (bool ok, string? error) SetSourceProfile(bool onAc, PerformanceProfile p)
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return false;
+        if (pp == null) return (false, null);
         lock (_state)
         {
             var slot = onAc ? Settings.OnAc : Settings.OnBattery;
@@ -139,7 +152,7 @@ public sealed partial class LaptopService
             // Reference equality against the live slot: exact, and it also covers the "source still unknown"
             // case (Slot then reads as the AC slot), so setting the AC profile before any battery reading
             // applies immediately rather than silently waiting for a source change.
-            return !ReferenceEquals(Slot, slot) || ApplyStoredMode();
+            return !ReferenceEquals(Slot, slot) ? (true, (string?)null) : ApplyStoredMode();
         }
     }
 
@@ -179,17 +192,22 @@ public sealed partial class LaptopService
         Save();
     }
 
-    /// <summary>Apply the live source's remembered mode. Returns false only when a hardware write failed —
-    /// "nothing to do" (already in that mode, nothing remembered) is success.</summary>
-    private bool ApplyStoredMode()
+    /// <summary>Apply the live source's remembered mode. Reports a failure only when a hardware write failed —
+    /// "nothing to do" (already in that mode, nothing remembered) is success.
+    ///
+    /// It carries a channel because ONE of its two callers reads it: <see cref="SetSourceProfile"/>'s result is
+    /// surfaced by the power-source row in Options, so an error reaching it today through the shared field must
+    /// keep reaching it. The other caller (<see cref="SyncPowerSource"/>, from the refresh loop) discards it,
+    /// exactly as it did before.</summary>
+    private (bool ok, string? error) ApplyStoredMode()
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return false;
+        if (pp == null) return (false, null);
         var slot = Slot;
-        if (string.IsNullOrEmpty(slot.BaseId)) return true;
+        if (string.IsNullOrEmpty(slot.BaseId)) return (true, null);
 
         var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
-        if (baseP == null) return true;
+        if (baseP == null) return (true, null);
 
         var current = pp.Current();
         var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
@@ -204,16 +222,12 @@ public sealed partial class LaptopService
         // active profile, so we don't need to re-drive it while Turbo is engaged.
         if (wantTurbo)
         {
-            if (current?.Kind == ProfileKind.Turbo) return true;   // already in Turbo -> nothing to do
+            if (current?.Kind == ProfileKind.Turbo) return (true, null);   // already in Turbo -> nothing to do
             if (current?.Id != baseP.Id) pp.Set(baseP);            // establish the base we sit over (skip if on it)
-            if (pp.Set(turbo!)) return true;
-            LastError = pp.LastError;
-            return false;
+            return Attempt(() => pp.Set(turbo!), () => pp.LastError);
         }
-        if (current?.Id == baseP.Id) return true;                  // already in the remembered base profile
-        if (pp.Set(baseP)) return true;
-        LastError = pp.LastError;
-        return false;
+        if (current?.Id == baseP.Id) return (true, null);          // already in the remembered base profile
+        return Attempt(() => pp.Set(baseP), () => pp.LastError);
     }
 
     /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
@@ -226,10 +240,10 @@ public sealed partial class LaptopService
         bool turboToggles;
         lock (_state) turboToggles = Settings.TurboToggles;
         if (turboToggles)
-            return SetTurbo(!IsTurboOn());   // returns what landed — no read-back needed
+            return SetTurbo(!IsTurboOn()).applied;   // returns what landed — no read-back needed
 
         var target = NextSelectable(pp, pp.Current());
-        return target != null && ApplyProfile(target) ? target : null;
+        return target != null && ApplyProfile(target).ok ? target : null;
     }
 
     private static PerformanceProfile? NextSelectable(IPowerProfiles pp, PerformanceProfile? current)

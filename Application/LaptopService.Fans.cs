@@ -27,7 +27,9 @@ public sealed partial class LaptopService
             ok = fc.SetCustomSpeeds(cpu, gpu);
         }
         else ok = fc.SetMode(mode);
-        if (!ok) LastError = fc.LastError;
+        // No error channel here on purpose: every caller of ApplyFan is void (SetFan, SetFanCurve, ApplyCustom,
+        // ApplyModeFan), so there has never been a reader for this failure — and giving it one now would start
+        // showing the user a message the app has never shown.
         return ok;
     }
 
@@ -65,16 +67,19 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>The fan preset for the current mode, or defaults if none is saved yet (not stored).</summary>
+    /// <summary>The fan preset for the current mode, or defaults if none is saved yet (not stored). A SNAPSHOT:
+    /// the caller cannot reach the stored instance through it, so a view-model that keeps the value cannot
+    /// rewrite the user's settings behind <c>_state</c>'s back.</summary>
     public FanPreset CurrentFan()
     {
         lock (_state)
-            return Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) ? f : new FanPreset();
+            return Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) ? f.Snapshot() : new FanPreset();
     }
 
     /// <summary>Apply the current mode's saved fan preset on a mode change. Auto/Max are pushed immediately;
     /// Custom is left to <see cref="ApplyCustom"/> (the refresh loop) so per-fan curves track temperature.
-    /// Returns the preset so the UI reflects it, or null if this mode has none (fans left untouched).</summary>
+    /// Returns the preset so the UI reflects it, or null if this mode has none (fans left untouched) — a
+    /// SNAPSHOT, like <see cref="CurrentFan"/>, and for the same reason.</summary>
     public FanPreset? ApplyModeFan()
     {
         lock (_state)
@@ -82,7 +87,7 @@ public sealed partial class LaptopService
             if (!Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f)) return null;
             _fanCurve.Reset();
             if ((FanMode)f.Mode != FanMode.Custom) ApplyFan((FanMode)f.Mode, (byte)f.Cpu, (byte)f.Gpu);
-            return f;
+            return f.Snapshot();
         }
     }
 

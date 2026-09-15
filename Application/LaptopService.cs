@@ -68,7 +68,25 @@ public sealed partial class LaptopService : IDisposable
     /// returning copies, which is a redesign of the lighting path, not a visibility change.</summary>
     internal Settings Settings { get; }
 
-    public string? LastError { get; private set; }
+    /// <summary>Run a hardware write and report BOTH halves of its outcome: whether it succeeded, and — when it
+    /// did not — the port's own reason.
+    ///
+    /// This replaces the "write a shared <c>LastError</c> field, let the caller read it afterwards" idiom, which
+    /// <c>AppController</c> and <c>OptionsAssembler</c> read from six places and NEVER under <c>_state</c>: the
+    /// field was the one value read across threads without a lock, and the failure it produced was not a torn
+    /// read but a WRONG one — a caller picking up the error of a different call (docs/open-decisions.md §2).
+    /// A returned value cannot be someone else's.
+    ///
+    /// The rule that keeps this from being a behaviour change: a channel is given ONLY where a reader exists
+    /// today. The points that are silent now stay silent — <c>ApplyFan</c>, <c>ApplyStoredMode</c> (when reached
+    /// from the refresh loop) and <c>ApplyModeCo</c> have no reader, and wiring one up would start showing the
+    /// user messages the app has never shown, which is a feature, not a refactor.</summary>
+    private static (bool ok, string? error) Attempt(Func<bool> write, Func<string?> reason)
+    {
+        bool ok;
+        try { ok = write(); } catch { ok = false; }   // a port that throws is a failed write, not a crash
+        return (ok, ok ? null : reason());
+    }
 
     // Guards ALL access to the mutable Settings graph (its collections + scalars), the per-source slots,
     // _onAc, the fan-curve engine, and Save() — because these are now touched from TWO threads: the UI thread
@@ -156,16 +174,6 @@ public sealed partial class LaptopService : IDisposable
     {
         if (!map.TryGetValue(key, out var value)) map[key] = value = new T();
         return value;
-    }
-
-    private bool Run<T>(T? svc, Func<T, bool> set, Func<T, string?> err) where T : class
-    {
-        if (svc == null) return false;
-        bool ok;
-        try { ok = set(svc); }
-        catch { ok = false; }
-        if (!ok) LastError = err(svc);
-        return ok;
     }
 
     public void Dispose()

@@ -106,6 +106,22 @@ public sealed class FanPreset
     public bool  GpuUseCurve { get; set; }
     public int[] CpuCurve    { get; set; } = [];
     public int[] GpuCurve    { get; set; } = [];
+
+    /// <summary>A copy that shares NOTHING mutable with the stored instance — the two arrays are duplicated,
+    /// not aliased. This is what a reader gets instead of the stored object, so a caller that keeps or edits
+    /// what it was handed cannot rewrite the user's settings without going through a Set method (and thus
+    /// without the lock that guards the graph). The depth is the point: copying the fields but keeping the
+    /// arrays would leave the widest part of the preset still shared.</summary>
+    public FanPreset Snapshot() => new()
+    {
+        Mode = Mode,
+        Cpu = Cpu,
+        Gpu = Gpu,
+        CpuUseCurve = CpuUseCurve,
+        GpuUseCurve = GpuUseCurve,
+        CpuCurve = [.. CpuCurve],
+        GpuCurve = [.. GpuCurve],
+    };
 }
 
 /// <summary>A performance mode's remembered lighting: per-RGB-zone state, keyed by zone name.</summary>
@@ -120,6 +136,11 @@ public sealed class GpuOcPreset
 {
     public int Core { get; set; }
     public int Mem  { get; set; }
+
+    /// <summary>A copy that shares nothing with the stored instance. Both members are values, so there is no
+    /// depth to get wrong here — the method exists so every axis reads the same way at the call site, and so a
+    /// member added later is copied by default rather than aliased by accident.</summary>
+    public GpuOcPreset Snapshot() => new() { Core = Core, Mem = Mem };
 }
 
 /// <summary>A performance mode's remembered CPU Curve-Optimizer offset, in AVFS counts (0 = stock, negative =
@@ -136,6 +157,11 @@ public sealed class CoPreset
     /// separate domains, because a hybrid part's clusters are separate rails sitting at different voltages, and one
     /// number for both is pinned by whichever gives out first. A missing key means stock (0) for that domain.</summary>
     public Dictionary<string, int> Domains { get; set; } = new();
+
+    /// <summary>A copy that shares nothing mutable with the stored instance: <see cref="Domains"/> is a new
+    /// dictionary holding the same entries. A caller that keeps the offset for a rail and edits it must not be
+    /// editing what the next mode switch will read back.</summary>
+    public CoPreset Snapshot() => new() { AllCore = AllCore, Domains = new(Domains) };
 }
 
 /// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.</summary>

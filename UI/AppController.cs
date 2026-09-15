@@ -186,7 +186,11 @@ internal sealed class AppController
                                     // switch. Safe: _lightingCoord is created before BuildUi and outlives rebuilds.
                                     v => { if (followKey != null) _svc.SetDeviceFlag(followKey, v);
                                            _lightingCoord.OnFollowsProfileFlipped(); },
-                                    d.KeyboardBrightness, _svc.SetKeyboardBrightness)
+                                    // The backlight slider verifies its write by read-back (VerifiedHwValue) and
+                                    // snaps itself back when the write does not take, so it needs only the
+                                    // success flag — the reason has no reader here and is deliberately dropped,
+                                    // rather than starting to show a message the app never showed.
+                                    d.KeyboardBrightness, lvl => _svc.SetKeyboardBrightness(lvl).ok)
             : null;
         // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
         // layer now, which must not reference a UI toolkit.
@@ -363,17 +367,19 @@ internal sealed class AppController
     // changes the profile — pick, tray, hotkey, Turbo switch — goes through here.
     private void ApplyProfile(PerformanceProfile p)
     {
-        if (_svc.ApplyProfile(p)) _lightingCoord.OnProfileApplied(p);
-        else Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(_svc.LastError));
+        var r = _svc.ApplyProfile(p);
+        if (r.ok) _lightingCoord.OnProfileApplied(p);
+        else Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(r.error));
         Refresh();
     }
 
-    // Turbo used as a switch (the "Turbo toggles" mode). SetTurbo returns the profile that landed (Turbo, or the
+    // Turbo used as a switch (the "Turbo toggles" mode). SetTurbo reports the profile that landed (Turbo, or the
     // remembered base when switching off), so the lighting follows it without a read-back.
     private void SetTurbo(bool on)
     {
-        if (_svc.SetTurbo(on) is { } applied) _lightingCoord.OnProfileApplied(applied);
-        else Notify(Loc.T("Turbo failed") + Err(_svc.LastError));
+        var r = _svc.SetTurbo(on);
+        if (r.applied is { } applied) _lightingCoord.OnProfileApplied(applied);
+        else Notify(Loc.T("Turbo failed") + Err(r.error));
         Refresh();
     }
 
@@ -396,14 +402,16 @@ internal sealed class AppController
     // Failure is surfaced so a rejected write (e.g. dGPU powered off) doesn't fail silently.
     private void SetGpuOc(int core, int mem)
     {
-        if (!_svc.SetGpuOc(core, mem)) Notify(Loc.T("GPU overclock failed") + Err(_svc.LastError));
+        var r = _svc.SetGpuOc(core, mem);
+        if (!r.ok) Notify(Loc.T("GPU overclock failed") + Err(r.error));
     }
 
     // CPU power-mode overlay, applied + persisted per performance mode by the service. Like SetGpuOc: no
     // Refresh() (nothing shared depends on it); failure surfaced.
     private void SetCpuPower(string id)
     {
-        if (!_svc.SetCpuPower(id)) Notify(Loc.T("Power mode failed") + Err(_svc.LastError));
+        var r = _svc.SetCpuPower(id);
+        if (!r.ok) Notify(Loc.T("Power mode failed") + Err(r.error));
     }
 
     // CPU undervolt (all-core Curve Optimizer), applied + persisted per performance mode by the service. Unlike
@@ -414,9 +422,10 @@ internal sealed class AppController
     {
         _ = Task.Run(() =>
         {
-            var ok = _svc.SetCoValues(counts);
-            var err = _svc.LastError;
-            if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("CPU undervolt failed") + Err(err)));
+            var r = _svc.SetCoValues(counts);
+            // The reason travels WITH the result, so there is nothing to capture before the post: reading a
+            // shared field after handing the work off was a race on the error itself.
+            if (!r.ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("CPU undervolt failed") + Err(r.error)));
         });
     }
 
