@@ -135,7 +135,7 @@ public sealed class LampArrayBridge : IDisposable
         if (!Enabled || !HostOwnsLighting) return;
         lock (_apply)
         {
-            if (_frame is { } f) Paint(f, force: true);
+            if (_frame is { } f) Paint(_layout, _written, f, force: true);
         }
     }
 
@@ -173,7 +173,7 @@ public sealed class LampArrayBridge : IDisposable
             lock (_apply)
             {
                 _frame = frame.Colors;
-                Paint(frame.Colors, force: false);
+                Paint(_layout, _written, frame.Colors, force: false);
             }
 
             // Rate limit (see MinIntervalMs). Sleeping HERE — after the write, before the next wait — is what
@@ -195,9 +195,15 @@ public sealed class LampArrayBridge : IDisposable
 
     // Apply one frame to the hardware. Caller holds _apply. Walks the layout zone by zone, because the
     // interesting optimisation is per zone: N equal sub-zone colours collapse into ONE all-zones report.
-    private void Paint(LampColor[] colors, bool force)
+    //
+    // Static with its two fields taken as parameters (was an instance method reading _layout/_written) so a test
+    // can drive it with a hand-built layout, a dedupe mirror and a frame — no transport, no worker thread, no
+    // timing, nothing that needs hardware. Visibility and shape ONLY: the guard, the read order and every effect
+    // are unchanged, and both callers pass the two fields from the same place — inside the same _apply lock —
+    // that this method used to read them. Same precedent as RyzenCurveOptimizer.Encode/CoreArg/GpuMargin.
+    internal static void Paint(LampArrayLayout? layout, LampColor[]? written, LampColor[] colors, bool force)
     {
-        if (_layout is not { } layout || _written is not { } written) return;
+        if (layout is null || written is null) return;
 
         for (var zi = 0; zi < layout.Zones.Count; zi++)
         {
@@ -254,7 +260,10 @@ public sealed class LampArrayBridge : IDisposable
     // decide a zone shows colour swatches (HasColor && !HasSpeed; on Acer that is STATIC). A host frame is by
     // definition a static colour per lamp, so an animated effect would fight it. Null = this zone can't take
     // an arbitrary colour at all (then it simply isn't painted).
-    private static RgbModeInfo? StaticEffect(RgbZone zone)
+    //
+    // Widened private -> internal, visibility only, so the selection rule (including the fallback) can be pinned
+    // without a transport — the same precedent as the members above.
+    internal static RgbModeInfo? StaticEffect(RgbZone zone)
         => zone.Effects.FirstOrDefault(e => e is { HasColor: true, HasSpeed: false })
            ?? zone.Effects.FirstOrDefault(e => e.HasColor);
 
