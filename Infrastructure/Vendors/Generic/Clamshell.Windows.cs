@@ -43,7 +43,7 @@ public sealed partial class Clamshell
             // stay-awake (would break the "never leave lid=stay-awake" invariant) -> Sleep. Clear so the
             // next take-over re-captures fresh.
             _originalLidAction = null;
-            SetAcLidAction(o != LID_DO_NOTHING ? o : LID_SLEEP);
+            SetAcLidAction(RestoreAction(o));
         }
         else
         {
@@ -53,16 +53,35 @@ public sealed partial class Clamshell
             // undock already restored — writing Sleep here (the old behavior) silently clobbered the user's
             // setting. The one thing worth fixing is a crash leftover: a previous session that died with our
             // DO_NOTHING still in place -> repair it to Sleep so the lid isn't stuck staying awake.
-            if (GetAcLidAction() == LID_DO_NOTHING) SetAcLidAction(LID_SLEEP);
+            if (IsCrashLeftover(GetAcLidAction())) SetAcLidAction(LID_SLEEP);
         }
     }
+
+    /// <summary>The action to write back when giving up the take-over: exactly what was captured, EXCEPT a
+    /// captured stay-awake, which is mapped to Sleep. That exception is the class's whole safety invariant —
+    /// a capture of <see cref="LID_DO_NOTHING"/> means this session (or a dead one) had already left the lid
+    /// not-doing-anything, and writing it back would make the disable a no-op and pin the lid open forever.
+    /// Pure, and extracted for exactly that reason: the decision's only other caller is a real
+    /// <c>PowerWriteACValueIndex</c> + <c>PowerSetActiveScheme</c> on the owner's machine.</summary>
+    internal static uint RestoreAction(uint captured) => captured != LID_DO_NOTHING ? captured : LID_SLEEP;
+
+    /// <summary>True when the action currently in the power scheme is our own stay-awake — i.e. a previous
+    /// session died before it could restore, and the lid is stuck. Nothing captured this session means we
+    /// must not touch the user's real setting (Hibernate / Shut down / …) on the way out; this is the single
+    /// case where writing is still the right thing. Pure, for the same reason as <see cref="RestoreAction"/>.
+    /// The nullable input is the read itself: a scheme we cannot read (or no active scheme) is not a leftover.
+    /// </summary>
+    internal static bool IsCrashLeftover(uint? current) => current == LID_DO_NOTHING;
 
     // ---- lid-close power setting (powrprof) ----
 
     private static Guid SUB_BUTTONS = new("4f971e89-eebd-4455-a8de-9e59040e7347");
     private static Guid LID_ACTION  = new("5ca83367-6e45-459f-a27b-476b1d01c936");
-    private const uint LID_DO_NOTHING = 0;
-    private const uint LID_SLEEP      = 1;
+    // The powrprof lid-close action values (the AC value of SUB_BUTTONS\LID_ACTION): 2 and 3 are Hibernate
+    // and Shut down, which is why the two helpers above preserve them rather than normalizing to Sleep.
+    // internal, visibility only, so the rules that read them can be pinned without a power-policy write.
+    internal const uint LID_DO_NOTHING = 0;
+    internal const uint LID_SLEEP      = 1;
 
     [DllImport("powrprof.dll")] private static extern uint PowerGetActiveScheme(IntPtr userRootPowerKey, out IntPtr activePolicyGuid);
     [DllImport("powrprof.dll")] private static extern uint PowerReadACValueIndex(IntPtr rootPowerKey, ref Guid scheme, ref Guid subGroup, ref Guid setting, out uint value);
