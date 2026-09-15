@@ -33,9 +33,6 @@ public sealed class LampArrayBridge : IDisposable
     // gradient one unit per frame would otherwise generate a write per frame per zone forever.
     private const int ColorEpsilon = 5;
 
-    // How long the worker keeps re-trying after the transport fails (driver unloaded, device removed): it just
-    // stops. Re-enabling is a user action (or an app restart) — silently reconnecting in a loop would hide a
-    // real problem and keep poking a device that isn't there.
     private readonly IRgbDevice _rgb;
     private readonly ILampArrayTransport _transport;
     private readonly Func<RgbZone, bool>? _include;
@@ -148,6 +145,10 @@ public sealed class LampArrayBridge : IDisposable
             // Blocking, last-one-wins: returns the NEWEST frame, or false once the transport is torn down.
             if (!_transport.WaitFrame(out var frame))
             {
+                // The channel failed on its own (driver unloaded, device removed) or a Disable tore it down.
+                // Either way the worker just stops — it does NOT re-try. Re-enabling is a user action (or an app
+                // restart), because silently reconnecting in a loop would hide a real problem and keep poking a
+                // device that isn't there. And a failure we did not ask for is the only one worth reporting.
                 if (!_stopping) LastError = _transport.LastError;
                 break;
             }
