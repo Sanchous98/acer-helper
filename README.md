@@ -63,7 +63,8 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
 - **`Infrastructure/Vendors/Acer/`** (`AcerHelper.Infrastructure.Vendors.Acer`) — Acer feature
   implementations. There is **no
   separate platform layer**: the OS access is folded into the vendor implementation, split per OS
-  by file name — `AcerGaming.Windows.cs` (WMI), and future `*.Linux.cs` (sysfs) sit side by side.
+  by file name — `AcerDevice.Windows.cs` (WMI) and `AcerDevice.Linux.cs` (hidraw + sysfs, with no kernel
+  module required) sit side by side.
   Within Acer, capabilities are **probed at runtime** (RGB device present? EC supported-profile
   mask? nullable WMI getters?) — so most models work without an entry. Profiles (shared enum) and
   fan topology (dual) are not per-model. The only un-probeable per-model bits — friendly name and
@@ -176,6 +177,8 @@ then `appimagetool AcerHelper.AppDir AcerHelper-x86_64.AppImage`.
 
 ## Roadmap
 
-- Linux hardware backend — Acer via Linuwu-Sense sysfs, evdev hotkeys, X/Wayland gamma, logind clamshell
+- Linux hardware backend — Acer probe-first: hidraw for RGB and the EC power envelope, `platform_profile`
+  for the firmware profile set, Linuwu-Sense optional for the node-backed controls; evdev hotkeys, X/Wayland
+  gamma, logind clamshell
 - Additional vendors behind the same Domain ports
 - Per-key RGB; fan curves

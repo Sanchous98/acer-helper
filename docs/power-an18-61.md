@@ -195,8 +195,9 @@ packets are identical on every OS — only the transport hooks differ (`OpenTran
   Linux enumeration **never lists** (the same reason `EneHidController` has a Linux partial). One hidraw node
   covers *all* of a device's collections, so matching the parent hid device's `HID_ID`
   (`bus:vendor:product`) is enough; the report id in byte 0 selects the vendor collection's report. Reaching
-  `/dev/hidrawN` without root relies on the desktop's **uaccess ACL** (present for built-in HID) or a udev rule —
-  the same prerequisite the RGB controller documents.
+  `/dev/hidrawN` without root needs an **explicit** grant: systemd's `70-uaccess.rules` tags hidraw only for a few
+  hwdb-classified classes (AV production controllers, lights, hardware wallets, 3D mice) and a blanket rule was
+  declined upstream (systemd#38991), so the bundled `60-acer-helper.rules` tags both Acer HID interfaces instead.
 - **Linux is untested on hardware.** The codec is verified on Windows. A missing or unwritable node degrades to
   `Available = false` and the profile path keeps its previous behaviour — so a wrong guess here means "no EC
   envelope control", **never** a bad write.

@@ -22,8 +22,9 @@ public sealed partial class AcerDevice : GenericDevice
         InitVendor();
     }
 
-    /// <summary>Per-OS: create the Acer transports and wire the proprietary ports (WMI on Windows, Linuwu
-    /// sysfs on Linux). See AcerDevice.Windows.cs / AcerDevice.Linux.cs.</summary>
+    /// <summary>Per-OS: create the Acer transports and wire the proprietary ports (WMI on Windows; hidraw for
+    /// RGB and the EC envelope, platform_profile for the profile set, and Linuwu-Sense where present on Linux).
+    /// See AcerDevice.Windows.cs / AcerDevice.Linux.cs.</summary>
     partial void InitVendor();
 
     // USB-charging levels (ids = battery-threshold percentages, "0" = off). OS-agnostic — the same choices

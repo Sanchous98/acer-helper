@@ -8,8 +8,12 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // necessarily USB — on the Nitro AN18-61 (and other recent models) it sits on HID-over-I2C, which
 // HidSharp's Linux enumeration never lists. hidraw covers every HID bus: we find our node by the parent
 // hid device's HID_ID (bus:vendor:product) in sysfs and push feature reports with HIDIOCSFEATURE.
-// Reaching /dev/hidrawN without root relies on the desktop's uaccess ACL (present for built-in HID) or a
-// udev rule.
+// Reaching /dev/hidrawN without root needs an EXPLICIT grant, and this controller gets none by default:
+// systemd's own 70-uaccess.rules tags hidraw only for a few hwdb-classified device classes (AV production
+// controllers, AV lights, hardware wallets, 3D mice), and a blanket rule was declined upstream (systemd#38991)
+// for session-isolation reasons. The bundled 60-acer-helper.rules tags both Acer HID interfaces; without it the
+// open below fails EACCES and this controller reports itself absent — RGB silently disappears with no message
+// naming the cause.
 internal sealed partial class EneHidController
 {
     private FileStream? _dev;

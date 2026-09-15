@@ -2,7 +2,7 @@ namespace AcerHelper.Domain;
 
 // A small OpenRGB-style RGB framework. A device's lighting is assembled from bricks:
 //   RgbZone        — a controllable region (its effect list + apply ops), optionally split into sub-zones.
-//   IRgbController — a hardware transport that produces the zones it can drive (ENE HID, Linuwu sysfs, …).
+//   IRgbController — a hardware transport that produces the zones it can drive (ENE HID, a future LampArray, …).
 //   RgbDevice      — an IRgbDevice assembled by concatenating one or more controllers' zones.
 // The UI binds to IRgbDevice.Zones and renders one panel per zone, so it adapts to whatever the active
 // controllers advertise — no keyboard/lightbar assumptions baked into the port.
@@ -69,8 +69,8 @@ public interface IRgbDevice
 }
 
 /// <summary>A hardware RGB transport brick that produces the zones it can drive. One per transport (ENE HID
-/// on Windows, Linuwu sysfs on Linux, a future LampArray, …); a device may aggregate several. IDisposable
-/// for controllers holding a handle (e.g. a HID stream).</summary>
+/// on both Windows and Linux — hidraw there, no kernel module, a future LampArray, …); a device may aggregate
+/// several. IDisposable for controllers holding a handle (e.g. a HID stream).</summary>
 public interface IRgbController : IDisposable
 {
     IReadOnlyList<RgbZone> Zones { get; }

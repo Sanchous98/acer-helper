@@ -8,8 +8,8 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // reason as EneHidController.Linux.cs (this controller sits on HID-over-I2C, which HidSharp's Linux enumeration
 // never lists). One hidraw node covers all of a device's collections, so matching the parent hid device's
 // HID_ID (bus:vendor:product) is enough; the report id in byte 0 selects the vendor collection's report.
-// Reaching /dev/hidrawN without root relies on the desktop's uaccess ACL (present for built-in HID) or a udev
-// rule — the same prerequisite the RGB controller already documents.
+// Reaching /dev/hidrawN without root needs an EXPLICIT grant — an I2C-HID controller gets no uaccess ACL by
+// default. See EneHidController.Linux.cs for why, and packaging/60-acer-helper.rules for the rule that grants it.
 //
 // NOTE: untested on Linux hardware. A missing or unwritable node degrades to Available = false and the profile
 // path keeps its previous behaviour, so a wrong guess means "no EC envelope control", never a bad write.

@@ -165,8 +165,8 @@ internal static partial class Strings
         // ---- device status messages ----
         ["Acer WMI unavailable — run as administrator."]
             = "Acer WMI недоступен — запустите от имени администратора.",
-        ["Linuwu-Sense module not loaded — install/load it for Acer controls."]
-            = "Модуль Linuwu-Sense не загружен — установите/загрузите его для управления функциями Acer.",
+        ["Linuwu-Sense module not loaded — profiles and RGB work without it; the fan, LCD, battery and backlight controls need it."]
+            = "Модуль Linuwu-Sense не загружен — профили и RGB работают и без него; управление вентиляторами, LCD, батареей и подсветкой требует его.",
         ["Linuwu-Sense is loaded but its files aren't accessible — add your user to the module's group (or install the udev rule) and log in again."]
             = "Linuwu-Sense загружен, но его файлы недоступны — добавьте пользователя в группу модуля (или установите правило udev) и войдите снова.",
         ["Dell BIOS controls are locked by a BIOS admin password and were hidden."]

@@ -4,12 +4,18 @@ using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
-// Linux: create the Linuwu-Sense sysfs transport and wire the generic feature holders (DelegatePorts.cs) to
-// the per-feature encoding methods below. All the Acer-on-Linux encoding lives here (node names + trivial
-// formats). If the module isn't loaded we keep the inherited generic ports and say why. Profiles come from
-// platform_profile (the full Acer firmware set) rather than the PPD collapse; sensors stay generic hwmon.
-// RGB reuses the cross-platform EneHidController brick (same ENE device and packets as Windows; here it is
-// reached via raw hidraw — on recent models it's HID-over-I2C, not USB).
+// Linux: probe each Acer channel INDEPENDENTLY and wire the generic feature holders (DelegatePorts.cs) to the
+// per-feature encoding methods below. All the Acer-on-Linux encoding lives here (node names + trivial formats).
+//
+// Three tiers, and only the third needs a kernel module:
+//   1. the two HID interfaces — RGB and the EC performance-envelope channel — over raw hidraw, module-free
+//      (RGB reuses the cross-platform EneHidController brick: same ENE device and packets as Windows; on recent
+//      models it is HID-over-I2C, not USB);
+//   2. the profile set, from platform_profile — a MAINLINE acer-wmi interface, so also module-free;
+//   3. the Linuwu-Sense sysfs nodes (fans, LCD override, battery limiter/calibration, backlight timeout, USB
+//      charging), which are the only thing that goes away when the module isn't loaded.
+// Profiles come from platform_profile (the full Acer firmware set) rather than the PPD collapse; sensors stay
+// generic hwmon.
 public sealed partial class AcerDevice
 {
     private const string LinuwuRoot = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi";
@@ -36,24 +42,41 @@ public sealed partial class AcerDevice
         // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden).
         if (AcerHotkeys.TryCreate() is { } keys) Own(Hotkeys = keys);
 
+        // ---- profiles: independent of Linuwu-Sense, so wired OUTSIDE the module gate below ----
+        // platform_profile is a mainline acer-wmi interface (the legacy ACPI alias, plus per-handler class nodes
+        // on 6.14+), NOT a Linuwu-Sense feature. Probing it behind the gate, as this did until now, meant a
+        // machine with mainline acer-wmi and no module threw the profile port away TOGETHER with the EC channel —
+        // and that is precisely the configuration with no other way to move the power envelope.
+        //
+        // The full Acer BIOS profile set is adopted only when this process can actually switch it (root/udev);
+        // otherwise the generic polkit-authorised PPD port the base ctor wired stays (working beats
+        // richer-but-broken — the same rule DellDevice.Linux follows).
+        var sysfs = new SysfsPowerProfiles();
+        IPowerProfiles? port = sysfs is { Available: true, Writable: true }
+            ? new BatteryGatedProfiles(sysfs, OnAc)
+            : PowerProfiles;
+
+        // The EC usage mode has to move with whichever port we ended up with, or the envelope never changes on an
+        // EC-HID model — including when the port is PPD's collapsed three-choice set. Enqueue-only and
+        // best-effort (see EcSyncedProfiles); a null delegate means this model has no EC channel and the port
+        // behaves exactly as it did before.
+        var envelope = _ec is { } ecDev ? (Func<ProfileKind, bool>)ecDev.Apply : null;
+        PowerProfiles = port is null ? null : new EcSyncedProfiles(port, envelope);
+
+        // Boot sync, EC-only — same reasoning as AcerDevice.Windows.cs: the profile survives a reboot but the EC
+        // usage mode behind it does not, so the machine can report Turbo while running the lowest power row. Push
+        // the mode matching whatever profile the PLATFORM reports — the sysfs node is the hardware truth even when
+        // it is not writable by us — deliberately NOT a profile switch.
+        if (envelope != null && sysfs.Current() is { } cur) envelope(cur.Kind);
+
         var senseDir = FirstExistingDir($"{LinuwuRoot}/predator_sense", $"{LinuwuRoot}/nitro_sense");
         if (senseDir == null)
         {
-            StatusMessage = "Linuwu-Sense module not loaded — install/load it for Acer controls.";
-            return;   // keep the inherited generic ports (+ any RGB wired above)
+            StatusMessage = "Linuwu-Sense module not loaded — profiles and RGB work without it; the fan, LCD, battery and backlight controls need it.";
+            return;   // keep every port wired above (+ the inherited generic ones)
         }
 
-        // The full Acer BIOS profile set — but only when this process can actually switch it (root/udev);
-        // otherwise the generic polkit-authorised PPD port stays (working beats richer-but-broken).
-        var profiles = new SysfsPowerProfiles();
-        if (profiles is { Available: true, Writable: true })
-        {
-            PowerProfiles = new BatteryGatedProfiles(profiles, _ec);
-            // Boot sync, EC-only — same reasoning as AcerDevice.Windows.cs: push the EC usage mode for the
-            // profile the platform already reports, without driving a profile switch.
-            if (_ec != null && profiles.Current() is { } cur) _ec.Apply(cur.Kind);
-        }
-
+        // The full Acer BIOS profile set is probed ABOVE, outside this gate — do not move it back in here.
         _sense = new SysfsInvoker(senseDir);
 
         // The nodes are 0660 root:<module group> — existing but unusable to us means EVERY control would
@@ -79,45 +102,24 @@ public sealed partial class AcerDevice
 
     private bool Usable(string node) => _sense.Has(node) && _sense.CanWrite(node);
 
-    // The EC rejects everything except balanced/low-power while on battery (EOPNOTSUPP straight from the
-    // driver — verified on AN18-61), mirroring the Windows supported-mask behaviour (Turbo drops out when
-    // unplugged). Grey those profiles out rather than letting every click fail.
-    private sealed class BatteryGatedProfiles(SysfsPowerProfiles inner, AcerEcHidController? ec) : IPowerProfiles
+    // AC = any Mains-class power supply reporting online; no Mains node at all -> assume AC (desktops, and any
+    // model whose supply doesn't advertise the class). The policy it feeds — which profiles to grey out on
+    // battery — lives in BatteryGatedProfiles, which is cross-platform and testable; this walk is the part that
+    // needs a Linux box, so it stays here and is injected.
+    private static bool OnAc()
     {
-        private static readonly string[] BatterySafe = ["balanced", "low-power"];
-
-        public string? LastError => inner.LastError;
-        public IReadOnlyList<PerformanceProfile> All => inner.All;
-        public PerformanceProfile? Current() => inner.Current();
-
-        // Two channels, as on Windows (see AcerDevice.Windows.SetProfile): platform_profile is the profile the
-        // platform reports, but on EC-HID models it does not move the power envelope — the EC usage mode does.
-        // Enqueue-only, and a no-op when the interface is absent.
-        public bool Set(PerformanceProfile profile)
+        try
         {
-            ec?.Apply(profile.Kind);
-            return inner.Set(profile);
-        }
-
-        public IReadOnlyList<PerformanceProfile> Selectable()
-            => OnAc() ? inner.Selectable() : inner.Selectable().Where(p => BatterySafe.Contains(p.Id)).ToList();
-
-        // AC = any Mains-class power supply reporting online; no Mains node at all -> assume AC.
-        private static bool OnAc()
-        {
-            try
+            var mainsSeen = false;
+            foreach (var d in Directory.EnumerateDirectories("/sys/class/power_supply"))
             {
-                var mainsSeen = false;
-                foreach (var d in Directory.EnumerateDirectories("/sys/class/power_supply"))
-                {
-                    if (Hwmon.ReadText(Path.Combine(d, "type")) != "Mains") continue;
-                    mainsSeen = true;
-                    if (Hwmon.ReadText(Path.Combine(d, "online")) == "1") return true;
-                }
-                return !mainsSeen;
+                if (Hwmon.ReadText(Path.Combine(d, "type")) != "Mains") continue;
+                mainsSeen = true;
+                if (Hwmon.ReadText(Path.Combine(d, "online")) == "1") return true;
             }
-            catch { return true; }
+            return !mainsSeen;
         }
+        catch { return true; }
     }
 
     // ---- fans ("0,0" = auto, "100,100" = max, "cpu,gpu" = custom) ----

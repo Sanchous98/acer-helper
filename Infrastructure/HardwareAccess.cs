@@ -65,7 +65,7 @@ public static class HardwareAccess
                 $"install -m0644 '{stagedConf}' /etc/tmpfiles.d/acer-helper.conf && " +
                 "udevadm control --reload-rules && " +
                 "udevadm trigger --subsystem-match=power_supply --subsystem-match=leds --subsystem-match=platform-profile " +
-                "--subsystem-match=platform --subsystem-match=input && " +
+                "--subsystem-match=platform --subsystem-match=input --subsystem-match=hidraw && " +
                 "systemd-tmpfiles --create /etc/tmpfiles.d/acer-helper.conf";
 
             var psi = new ProcessStartInfo("pkexec") { UseShellExecute = false };
