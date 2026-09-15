@@ -15,7 +15,7 @@ Abstract:
     Division of labour (see public.h): this driver holds the static report descriptor, answers the host's
     attribute interrogation out of a layout the app pushes down, accumulates the host's lamp writes into whole
     frames, and hands those frames up. It knows nothing about Acer hardware, zones, rate limiting or who owns
-    the backlight — that all lives in the app (Features/LampArrayBridge.cs), so this binary stays small and
+    the backlight — that all lives in the app (Domain/LampArrayBridge.cs), so this binary stays small and
     stable, which matters when every change means re-signing.
 
 --*/

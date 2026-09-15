@@ -7,7 +7,7 @@ Module Name:
 Abstract:
 
     The contract between AcerHelperLampArray.sys and Acer Helper's user-mode side
-    (Vendors/Generic/LampArrayTransport.Windows.cs). CHANGE ONE, CHANGE THE OTHER: the C# transport writes and
+    (Infrastructure/Vendors/Generic/LampArrayTransport.Windows.cs). CHANGE ONE, CHANGE THE OTHER: the C# transport writes and
     reads these structures by hand (BinaryPrimitives over a byte[]), so the field order, the sizes and the
     IOCTL codes below are all load-bearing. The C_ASSERTs at the bottom are the tripwire for the C side; the
     C# side names the same numbers as constants.
@@ -15,7 +15,7 @@ Abstract:
     Design note: the driver deliberately owns as little as possible. It answers the host's *attribute* queries
     (which lamps exist, where they are) out of the layout blob the app pushes down, and it accumulates the
     host's lamp writes into a frame. It knows nothing about zones, Acer hardware, rate limiting or ownership —
-    all of that is C# (Features/LampArrayBridge.cs), which is what keeps this signed binary stable.
+    all of that is C# (Domain/LampArrayBridge.cs), which is what keeps this signed binary stable.
 
 --*/
 
