@@ -14,7 +14,7 @@ namespace AcerHelper.Domain;
 /// produced. A row that has a <paramref name="Read"/> needs no separate delegate (its prime is that same
 /// read); only one with no readback at all needs it, which is why LCD overdrive passes it explicitly. The
 /// point is that these reads, which used to run on the UI thread while the UI was being built, now land on
-/// the row's own serial worker. See docs/refactoring-plan.md, wave 6.</summary>
+/// the row's own serial worker.</summary>
 public sealed record OptionToggle(string Label, bool Supported, bool Initial, Action<bool> OnChange,
                                   Func<bool>? Read = null,
                                   Func<bool>? Confirm = null, Func<Task<bool>>? ConfirmAsync = null,

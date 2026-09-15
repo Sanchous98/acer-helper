@@ -9,7 +9,7 @@ namespace AcerHelper.Tests;
 /// Wave 6, step 1: the option rows no longer read the hardware while the UI is being BUILT. Each row is
 /// constructed with a PLACEHOLDER — the value a FAILED read would have produced — and the real value arrives
 /// from its prime, which runs on the row's own serial worker (<see cref="VerifiedHwValue{T}"/>, the same
-/// machinery the readback after a write already used). See docs/refactoring-plan.md, wave 6.
+/// machinery the readback after a write already used).
 ///
 /// Three gates, in the order they matter:
 /// <list type="number">

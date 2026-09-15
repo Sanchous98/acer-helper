@@ -1,6 +1,6 @@
 # Hardware actor — design, defects and risk
 
-Working document for Wave 5 of `docs/refactoring-plan.md`: replace the scattered synchronisation primitives
+Working document for Wave 5 of `docs/open-decisions.md`: replace the scattered synchronisation primitives
 with a single serialized executor that owns the transports. Written **before** any code, because the change
 rewrites the concurrency model and the project has no behavioural tests.
 
@@ -28,7 +28,7 @@ substitutions a reader needs:
 
 The *analysis* is unaffected — no claim in this document rests on a folder's name, and the one path that
 mattered to a defect (`WmiSession`'s gate) is identified by symbol. Only the addresses moved. Rationale and the
-resulting `Vendors/Generic` naming oddity: `docs/refactoring-plan.md`, "Целевая структура".
+resulting `Vendors/Generic` naming oddity: `04229ff` (the 85-file move) + `dd9f8d9` (the stale references).
 
 ## Scope
 

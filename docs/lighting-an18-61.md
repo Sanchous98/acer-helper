@@ -279,4 +279,4 @@ so it **reduces the odds of a fully corrupt apply rather than guaranteeing a cle
 stays well under the **~120 ms** apply debounce, so a normal apply is still visually instant. `0` disables it.
 
 This gate is **pacing and coalescing, not serialisation**, and must not be merged into the WMI EC gate (see
-`docs/wmi-interop.md` and the constraints in `docs/refactoring-plan.md`).
+`docs/wmi-interop.md` and the constraints in `docs/open-decisions.md`).

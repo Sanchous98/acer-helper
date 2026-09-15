@@ -229,7 +229,7 @@ public class FanCurveEvalCurveTests
     /// there. Reachable only from a hand-edited settings.json: the UI always writes five entries
     /// (FansViewModel.Duties). A latent trap, not a live defect.
     ///
-    /// The production/test mismatch is an OPEN DECISION recorded in docs/refactoring-plan.md, section
+    /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
     /// "Известные особенности (решение ожидается)", item 2. This case is deliberately left live — not
     /// skipped, not deleted — so whoever fixes the index, or instead tightens the :42 guard to fall back
     /// to DefaultCurve, gets an immediate signal here.

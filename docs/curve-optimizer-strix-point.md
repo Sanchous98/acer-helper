@@ -199,7 +199,7 @@ Two behaviours worth knowing:
   continues.
 - If the wait times out, the write is abandoned with *"another tool is holding the PCI access lock"* and **the
   offset silently does not apply**. Users read that as "the undervolt doesn't hold" — recorded as a known defect
-  in `docs/refactoring-plan.md`, not fixed here.
+  in `docs/open-decisions.md`, not fixed here.
 
 ## Exposed range: `-40 … 0`
 

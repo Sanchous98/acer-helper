@@ -30,7 +30,7 @@ internal sealed class WmiSession : IDisposable
     //
     // That last claim — "the ~ms of blocking on the UI-thread poll is negligible" — is what GateStats exists
     // to test rather than assume: both acquisitions below are timed, split pool vs UI thread. See
-    // docs/refactoring-plan.md, waves 5-6.
+    // docs/open-decisions.md §1.
     private static readonly Lock Gate = new();
 
     private readonly IWbemServices _svc;

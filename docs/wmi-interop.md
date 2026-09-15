@@ -100,7 +100,7 @@ Properties of the gate that matter:
 - Held only for **its own transaction** and released in between, so reads and writes **interleave, never overlap**.
   The ~ms of blocking on the UI-thread poll is negligible.
 
-This lock is why the refactoring plan calls the WMI path "already almost an actor": one static re-entrant lock,
-one EC transaction at a time, with an explicit argument about the interleavings. Note also that it is a
+This lock is why `docs/open-decisions.md` (§1) calls the WMI path "already almost an actor": one static
+re-entrant lock, one EC transaction at a time, with an explicit argument about the interleavings. Note also that it is a
 **serialisation**, not a pacing/coalescing queue — the two HID `Gate`s (`EneHidController`,
-`AcerEcHidController`) are the opposite and must not be merged into it (see `docs/refactoring-plan.md`).
+`AcerEcHidController`) are the opposite and must not be merged into it (see `docs/open-decisions.md`).

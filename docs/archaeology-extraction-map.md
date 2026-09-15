@@ -1204,5 +1204,5 @@ Reported, **not fixed**. The extraction step should not carry any of these claim
 5. **`Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Windows.cs:419` — the offset silently does not apply.** After the
    5-second PCI-mutex wait times out, the write is abandoned with *"another tool is holding the PCI access
    lock"* and the setting is never applied; users read this as "the undervolt doesn't hold". Already recorded in
-   `docs/refactoring-plan.md` ("Известные нарушения") — not repeated here as a new finding, but the *comment*
+   `docs/open-decisions.md` ("Известные нарушения") — not repeated here as a new finding, but the *comment*
    at `:419` does not say the offset is dropped, so a reader of the code alone would not know.

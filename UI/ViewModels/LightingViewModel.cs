@@ -176,8 +176,8 @@ public sealed partial class LightViewModel : ObservableObject
         // what the user sees. And the placeholder this wave uses everywhere else, 0, is the one value that must
         // not go in: the keyboard would come up dark on a configured zone, because the prime only re-reads the
         // slider and never re-applies. Deferring this read therefore means deferring the startup apply with it —
-        // a device-visible change that cannot be checked without the machine (docs/refactoring-plan.md, wave 6,
-        // step 2). The price of leaving it: one EC transaction on the UI thread at BuildUi.
+        // a device-visible change that cannot be checked without the machine. The price of leaving it: one EC
+        // transaction on the UI thread at BuildUi.
         _brightness = Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100);   // hardware value wins if readable
         _speed = state.Speed;
         _reverseDirection = state.Direction == 2;

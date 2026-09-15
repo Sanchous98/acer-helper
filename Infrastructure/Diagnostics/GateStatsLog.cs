@@ -11,7 +11,7 @@ namespace AcerHelper.Infrastructure.Diagnostics;
 /// <c>ExitApp</c>, and a final-only write would lose exactly the session worth measuring.
 ///
 /// Every failure is swallowed: a diagnostic that can break the app is worse than no diagnostic. See
-/// docs/refactoring-plan.md, waves 5-6.</summary>
+/// docs/open-decisions.md §1.</summary>
 internal static class GateStatsLog
 {
     private static readonly long IntervalTicks = Stopwatch.Frequency * 60;   // one line a minute

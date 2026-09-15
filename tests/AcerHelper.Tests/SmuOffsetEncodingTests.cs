@@ -65,7 +65,7 @@ public class SmuOffsetEncodingTests
     /// A latent trap, not a live defect — exactly the shape a later widening of the range, or a new
     /// caller passing an unclamped value, would fall into silently.
     ///
-    /// The production/test mismatch is an OPEN DECISION recorded in docs/refactoring-plan.md, section
+    /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
     /// "Известные особенности (решение ожидается)", item 1. This case is deliberately left live — not
     /// skipped, not deleted — so whoever changes <c>Encode</c> gets an immediate signal: if the positive
     /// branch is ever made to pass a value through, the <c>observed</c> column below becomes the value

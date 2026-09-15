@@ -17,7 +17,7 @@ namespace AcerHelper.Infrastructure.Diagnostics;
 /// reference to a UI toolkit, which is what keeps this file portable. On Linux the counters simply stay zero:
 /// there is no <c>WmiSession</c> there.
 ///
-/// See docs/refactoring-plan.md, waves 5-6.</summary>
+/// See docs/open-decisions.md §1.</summary>
 internal static class GateStats
 {
     /// <summary>A hold longer than this is a "stall" — the EC is wedged, not merely busy. A UI-facing wait of

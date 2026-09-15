@@ -240,4 +240,4 @@ Two further details:
 The `_gate` here is a plain `object`, **not** `System.Threading.Lock`: the worker parks on
 `Monitor.Wait`/`Monitor.Pulse`, which `Lock` does not support. This gate is **pacing and coalescing, not
 serialisation** — it must not be merged into the WMI EC gate (see `docs/wmi-interop.md` and the constraints in
-`docs/refactoring-plan.md`).
+`docs/open-decisions.md`).

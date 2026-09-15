@@ -114,7 +114,7 @@ public sealed partial class LaptopService : IDisposable
         // so moving them out of this outer lock cannot leave them applying a stale mode — it only shortens the
         // hold. (Hoisting the *argument* of a hardware write is a different change and not safe in general: it
         // lets a concurrent writer land first and be overwritten by the stale execution. That is why ApplyCustom
-        // and ApplyModeCpuPower's own cp.Set are left alone — see docs/refactoring-plan.md, Wave 5.)
+        // and ApplyModeCpuPower's own cp.Set are left alone — see docs/open-decisions.md §3.)
         //
         // The ordering these four had relative to each other is preserved: they are still sequential on this
         // thread, and "clamshell takeover before the option rows read it" (its own comment below) still holds.

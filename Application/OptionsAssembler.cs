@@ -19,7 +19,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     /// <summary>Builds the toggle rows. <c>Initial</c> here is a PLACEHOLDER, not a reading: it is the value a
     /// failed read would produce (a flag port answers false when the EC won't answer), and the row fills in the
     /// real state via its prime once the UI is built — off the UI thread, on the row's own serial worker. That
-    /// is why no <c>Get()</c> appears in this method. See docs/refactoring-plan.md, wave 6.</summary>
+    /// is why no <c>Get()</c> appears in this method.</summary>
     public IReadOnlyList<OptionToggle> Toggles()
     {
         var d = svc.Device;

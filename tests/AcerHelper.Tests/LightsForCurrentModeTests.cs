@@ -18,8 +18,7 @@ namespace AcerHelper.Tests;
 /// <item>the overload does NOT read the port (asserted with the fake's read counter, which stands in for the EC
 /// round-trip); and</item>
 /// <item>it uses the profile it was HANDED, not the one it could have read. Without this the first half is
-/// satisfied by an overload that ignores its parameter — a false green that a mutation check confirms is real:
-/// see the note in the wave-6 section of docs/refactoring-plan.md.</item>
+/// satisfied by an overload that ignores its parameter — a false green that a mutation check confirms is real.</item>
 /// </list>
 /// </summary>
 public class LightsForCurrentModeTests

@@ -130,8 +130,7 @@ public sealed class OptionsViewModel : SectionViewModel
     /// Mirrors <see cref="Sync"/>. Called by <c>AppController</c> rather than by this constructor, for two
     /// reasons: the ordering guarantee at the top of <c>AppController</c> (persisted device state re-applied
     /// BEFORE any row reads it) stays explicit and greppable, and a test can assert that construction alone
-    /// performs no device read, without racing a read the constructor had just started. See
-    /// docs/refactoring-plan.md, wave 6.</summary>
+    /// performs no device read, without racing a read the constructor had just started.</summary>
     public void Prime() => Visit(static t => t.Prime(), static c => c.Prime());
 
     private void Visit(Action<ToggleRowViewModel> toggle, Action<ChoiceRowViewModel> choice)

@@ -112,7 +112,7 @@ internal sealed partial class AcerEcHidController : IDisposable
             // doc comment wrongly claimed "read by the UI". Deleting the dead field removes the false impression
             // that an EC write failure is surfaced — it is not. Apply() reports "accepted for sending", not "the
             // EC applied it", and its bool is about the queue, not the write. Recorded as an open gap in
-            // docs/refactoring-plan.md rather than papered over with a field nobody reads.
+            // docs/open-decisions.md §5 rather than papered over with a field nobody reads.
             try { WriteFeature(report); }
             catch { /* keep the worker alive */ }
         }
