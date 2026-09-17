@@ -103,11 +103,14 @@ public class OptionsAssemblerFailureTests
     /// escape the <c>OnChange</c> the UI calls, and the user must still be told.
     ///
     /// WHERE the throw is absorbed is worth being precise about, because it is not where it looks: the write
-    /// goes through <c>LaptopService.SetFlag</c> -> <c>Run</c>, which already has
-    /// <c>try { ok = set(svc); } catch { ok = false; }</c> (LaptopService.cs:122-125). So this case exercises
-    /// <c>Run</c>'s catch, and <c>RunSet</c>'s own catch is the second line of defence behind it —
-    /// which <see cref="AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported"/> reaches instead.
-    /// Either way <c>LastError</c> is read after the failure, so the port's message still reaches the user.</summary>
+    /// goes through <c>LaptopService.SetFlag</c> -> <c>Attempt</c>, whose
+    /// <c>try { ok = write(); } catch { ok = false; }</c> (Application/LaptopService.cs:92-97) absorbs it one
+    /// layer BELOW <c>RunSet</c>. So this case exercises <c>Attempt</c>'s catch, and that is provable from the
+    /// message asserted below rather than from the code's shape: the text ends in the port's own reason, and
+    /// <c>RunSet</c>'s catch discards the reason (<c>catch { result = (false, null); }</c>) — a throw it had
+    /// caught would print the bare name. <c>RunSet</c>'s own catch is a second line of defence that no throwing
+    /// PORT reaches today: every one of its callers hands it a service method that wraps its port in
+    /// <c>Attempt</c>.</summary>
     [Fact]
     public void AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow()
     {
@@ -122,11 +125,20 @@ public class OptionsAssemblerFailureTests
         Assert.Equal("LCD overdrive failed: transport gone", Assert.Single(h.RunPosted()));
     }
 
-    /// <summary>PINNED BEHAVIOUR: the throw that reaches <c>RunSet</c>'s OWN catch. Only a profile write can
-    /// get there — <c>ApplyProfile</c> calls the port directly (LaptopService.Profiles.cs:46) with no
-    /// <c>Run</c> in between — so this is the one arrangement in which <c>RunSet</c>'s
-    /// <c>catch { ok = false; }</c> is the thing standing between a broken port and an exception thrown out of
-    /// an Options row. The service's <c>LastError</c> was never assigned on this path, so the message is bare.</summary>
+    /// <summary>PINNED BEHAVIOUR: a throwing PROFILE port is reported as a failure and does not escape the row,
+    /// and the message is BARE here because <see cref="FakeThrowingPowerProfiles"/> carries no reason.
+    ///
+    /// WHICH LAYER ABSORBS THIS THROW — measured, and the opposite of what this test's name says. The write goes
+    /// <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>Attempt</c>, whose
+    /// <c>try { ok = write(); } catch { ok = false; }</c> catches it (Application/LaptopService.cs:92-97), NOT
+    /// <c>RunSet</c>'s own catch: every caller of <c>RunSet</c> hands it a service method that wraps its port in
+    /// <c>Attempt</c>, so no throwing PORT is what reaches it. What can still reach it is a throw from OUTSIDE a
+    /// wrapped call — a profile port's read (unwrapped in <c>ApplyStoredMode</c>) or the row's own index
+    /// arithmetic — i.e. a second line of defence with a narrower door than this test's name suggests. The
+    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason; a
+    /// <c>RunSet</c>-caught throw could not print that. The assertion below pins the OUTCOME the row owes the
+    /// user (reported, not escaped), and it is unchanged — the name is what was wrong, and it is left alone
+    /// because this wave's brief allows comment-only edits in this file.</summary>
     [Fact]
     public void AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported()
     {

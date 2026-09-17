@@ -114,7 +114,7 @@ public sealed partial class LaptopService
         // OffsetCounts also makes an OVERVOLT unrepresentable, which the port's interface declares but nothing
         // enforced: see Domain/Values.cs. The guard stays — with no port there is no range to clamp against, and
         // that behaviour is pinned by LaptopServiceCoTests.
-        if (co != null) allCore = OffsetCounts.Clamp(allCore, co.Range).Counts;
+        if (co != null) allCore = new CoAxis(co.Domains, co.Range).ClampAllCore(allCore);
         lock (_state)
         {
             var c = StoredCo();
@@ -133,18 +133,17 @@ public sealed partial class LaptopService
     {
         var co = device.CurveOptimizer;
         if (co == null) return [];
-        // The read happens under _state because CurrentCo() hands back a LIVE preset: the Dictionary read below
-        // races SetCoDomains' STRUCTURAL write of that same dictionary, and a read concurrent with an insert can
-        // throw or spin on a resize rather than merely read stale. Values, not the reference, cross the boundary.
-        // co.Domains is an immutable descriptor list built in the port's constructor, so no I/O is held here.
+        // The read happens under _state, but NOT for the reason this comment used to give. It said CurrentCo()
+        // hands back a LIVE preset, which is what the copy-out protected against; CurrentCo() hands back a
+        // SNAPSHOT now (see CurrentCo above), so there is nothing left for the lock to keep still — the array
+        // below is built from a copy nothing else can reach. It is kept because this is a read of the guarded
+        // Settings graph reached from the UI thread and from the refresh pass, and because dropping a lock is a
+        // change in lock scope rather than the move of a rule this method is part of. It is NOT held across a
+        // hardware call: the mode key read inside CurrentCo is an EC transaction that call sites hold _state for
+        // (docs/open-decisions.md §3), co.Domains is an immutable descriptor list built in the port's
+        // constructor, and the index alignment and the key lookup are the domain's (Domain/CoAxis.cs).
         lock (_state)
-        {
-            var c = CurrentCo();
-            if (co.Domains.Count == 0) return [c.AllCore];
-            var counts = new int[co.Domains.Count];
-            for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
-            return counts;
-        }
+            return new CoAxis(co.Domains, co.Range).Rows(CurrentCo());
     }
 
     /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
@@ -153,7 +152,10 @@ public sealed partial class LaptopService
     {
         var co = device.CurveOptimizer;
         if (co == null || counts.Count == 0) return (false, null);
-        return co.Domains.Count > 0 ? SetCoDomains(counts) : SetCo(counts[0]);
+        // Which of the two writes this CPU takes is the domain's rule (Domain/CoAxis.cs, UsesRails), asked here
+        // rather than restated: the same fork decides what a mode change sends below, and two sites deciding it
+        // separately is how they come to disagree.
+        return new CoAxis(co.Domains, co.Range).UsesRails ? SetCoDomains(counts) : SetCo(counts[0]);
     }
 
     /// <summary>Set the per-domain Curve-Optimizer offsets (index-aligned with the port's domains) for the CURRENT mode,
@@ -163,17 +165,16 @@ public sealed partial class LaptopService
         var co = device.CurveOptimizer;
         if (co == null || co.Domains.Count != counts.Count) return (false, null);
 
-        // Per DOMAIN, not per port: the domains are different rails with different bounds (the iGPU carries its own),
-        // so clamping them all against the port-wide range would silently widen or narrow one of them. The upper
-        // bound is 0 either way — an overvolt is not representable (Domain/Values.cs).
-        var clamped = new int[counts.Count];
-        for (var i = 0; i < counts.Count; i++)
-            clamped[i] = OffsetCounts.Clamp(counts[i], co.Domains[i].Range ?? co.Range).Counts;
+        // Per RAIL, not per port: the domains are different rails with different bounds (the iGPU carries its
+        // own), so clamping them all against the port-wide range would silently widen or narrow one of them. The
+        // upper bound is 0 either way — an overvolt is not representable (Domain/Values.cs).
+        var axis = new CoAxis(co.Domains, co.Range);
+        var clamped = axis.ClampEach(counts);
 
         lock (_state)
         {
             var c = StoredCo();
-            for (var i = 0; i < clamped.Length; i++) c.Domains[co.Domains[i].Key] = clamped[i];
+            axis.File(c, clamped);
             Save();
         }
         return Attempt(() => co.SetDomains(clamped), () => co.LastError);
@@ -188,38 +189,34 @@ public sealed partial class LaptopService
     public CoPreset ApplyModeCo()
     {
         var co = device.CurveOptimizer;
+        var axis = co == null ? null : new CoAxis(co.Domains, co.Range);
         CoPreset c;
-        int[]? counts = null;
-        int allCore;
+        int[]? write;
         lock (_state)
         {
-            // Never configured on this install -> never talk to the SMU at all. An empty store means the user has
-            // not opted into undervolting, and sending the mailbox message anyway would be traffic nobody asked for
-            // on an opcode this CPU does not confirm. The first SetCo creates an entry, after which the
-            // "unconfigured mode = stock, actively re-applied" contract below takes over unchanged — so switching
-            // to a mode with no preset still clears the previous mode's undervolt.
-            if (Settings.CoPresets.Count == 0) return new CoPreset();
             c = (Settings.CoPresets.TryGetValue(CurrentModeKey(), out var s) ? s : new CoPreset()).Snapshot();
-            // c is now a SNAPSHOT, not a live reference, so the values the SMU call needs cannot change under it
-            // even though the transaction below runs outside _state — it can block for seconds on the machine-wide
-            // PCI lock, and holding _state across it would stall the background pass. The snapshot also removes the
+            // c is a SNAPSHOT, not a live reference, so the values the SMU call needs cannot change under it even
+            // though the transaction below runs outside _state — it can block for seconds on the machine-wide PCI
+            // lock, and holding _state across it would stall the background pass. The snapshot also removes the
             // race the copy-out used to exist for: the dictionary read here races SetCoDomains' structural write
             // of that same dictionary, exactly as in CurrentCoDomains above.
-            allCore = c.AllCore;
-            if (co != null && co.Domains.Count > 0)
-            {
-                counts = new int[co.Domains.Count];
-                for (var i = 0; i < counts.Length; i++) c.Domains.TryGetValue(co.Domains[i].Key, out counts[i]);
-            }
+            //
+            // What reaches the SMU is the domain's answer (Domain/CoAxis.cs, Reapply), which is also where the
+            // never-configured guard lives. On this axis that guard means DO NOT WRITE AT ALL, not "write stock":
+            // an empty store says the user never opted into undervolting, so the mailbox message would be traffic
+            // nobody asked for on an opcode this CPU does not confirm. The distinction is the whole point — an
+            // empty store and a mode with no entry are the same word in the graph and mean the opposite here,
+            // because a mode that merely lacks an entry IS stock, and stock is actively re-applied.
+            write = axis?.Reapply(c, Settings.CoPresets.Count == 0);
         }
-        if (co == null) return c;
+        if (co == null || write == null) return c;
         // Per-domain wins where the CPU has separate rails: one number for both clusters is pinned by whichever gives
         // out first, so the per-domain values are the real setting and AllCore is only the single-domain fallback.
-        if (counts != null)
+        if (axis!.UsesRails)
         {
-            co.SetDomains(counts);   // silent on purpose: no caller of ApplyModeCo reads a failure
+            co.SetDomains(write);   // silent on purpose: no caller of ApplyModeCo reads a failure
         }
-        else co.Set(allCore);
+        else co.Set(write[0]);
         return c;
     }
 }

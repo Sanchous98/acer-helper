@@ -127,11 +127,16 @@ public sealed class FakeDisplayTint(int levels = 5) : IDisplayTint
 }
 
 /// <summary>
-/// Hand-written <see cref="IPowerProfiles"/> whose <see cref="Set"/> ALWAYS THROWS. It exists for one path:
-/// <see cref="FakePowerProfiles"/> can refuse a write but cannot blow up, and a throwing write reaches
-/// <c>OptionsAssembler.RunSet</c>'s own <c>catch</c> only from here — the flag and choice ports never get that
-/// far, because <c>LaptopService.Run</c> catches their throw one layer below RunSet (LaptopService.cs:119-127),
-/// while a profile write travels from <c>ApplyProfile</c> straight to the port (LaptopService.Profiles.cs:46).
+/// Hand-written <see cref="IPowerProfiles"/> whose <see cref="Set"/> ALWAYS THROWS. <see cref="FakePowerProfiles"/>
+/// can refuse a write but cannot blow up, and the profile rows are the ones whose setter is not a bare
+/// <c>SetFlag</c>/<c>SetChoice</c> call — so this is the fake that proves a throwing write on that shape is
+/// still reported instead of escaping the row.
+///
+/// WHAT IT DOES NOT DO, corrected by measurement: it does not reach <c>OptionsAssembler.RunSet</c>'s own
+/// <c>catch</c>. <c>Attempt</c> absorbs the throw one layer below (Application/LaptopService.cs:92-97), reached
+/// through <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>Attempt(() =&gt; pp.Set(…))</c>, and the same is
+/// true of the flag and choice ports. The reason is visible in the message rather than in the trace:
+/// <c>RunSet</c>'s catch discards the reason, and a message that carries one therefore did not come from it.
 ///
 /// Everything else is the canonical five-profile device, and <see cref="Current"/> reports nothing so a write
 /// is never short-circuited as "already in that profile" before it can throw.
