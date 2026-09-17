@@ -246,15 +246,25 @@ public class OptionsPrimeTests
     /// file is about the app-level rows and about rows built directly, so the section carries nothing.</summary>
     private static OptionsViewModel Shell(IAutostart auto, IClamshell clam)
     {
-        var vm = OptionsViewModel.TryCreate(new FakeDevice { Autostart = auto, Clamshell = clam }, Section(), Eventually.Sync);
+        var vm = OptionsViewModel.TryCreate(new FakeDevice { Autostart = auto, Clamshell = clam },
+                                            Section(auto, clam), Eventually.Sync);
         Assert.NotNull(vm);
         return vm;
     }
 
-    private static OptionsSection Section() => new(
+    /// <summary>The two shell rows' write delegates point at the fake the row reads from — the same shape
+    /// <c>AppController.BuildUi</c> wires (<c>b =&gt; _svc.SetClamshell(b)</c>, <c>b =&gt; _svc.SetAutostart(b)</c>).
+    /// With a no-op in their place the fakes' <c>SetCalls</c> lists were a destination nothing could reach, so a
+    /// click on either row could not have been observed by any assertion — finding (2)'s hazard, here in the
+    /// harness rather than in an assertion. The Turbo-toggles and language delegates stay no-ops because this
+    /// Shell has no service or AppController behind them to point at; nothing in this file clicks those rows.
+    ///
+    /// Hardening, not a repair: no assertion in this file reads those two lists today, so no expected value
+    /// changes and no test's outcome changes with this wiring.</summary>
+    private static OptionsSection Section(IAutostart auto, IClamshell clam) => new(
         HwToggles: [], HwChoices: [], ProfileChoices: [],
         TurboToggles: false, SetTurboToggles: _ => { },
-        SetClamshell: _ => { }, SetAutostart: _ => { },
+        SetClamshell: b => clam.SetEnabled(b), SetAutostart: b => auto.SetEnabled(b),
         Language: AppLanguage.System, SetLanguage: _ => { });
 
     private static ToggleRowViewModel AutostartRow(OptionsViewModel vm, FakeAutostart auto)
