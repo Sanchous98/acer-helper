@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 using Avalonia.Media;
 using Avalonia.Threading;

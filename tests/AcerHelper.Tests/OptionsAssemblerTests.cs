@@ -21,7 +21,7 @@ namespace AcerHelper.Tests;
 /// declared, and each test declares the setting its row reads (<c>FakeDevice.Declare</c>, which is what a
 /// backend's <c>InitVendor</c> does with its own key) — through the harness's <c>declare</c> argument, because
 /// the declaration has to be in place before the fixture builds the service: the settings model copies the
-/// declared set at construction (Domain/Settings.cs). <c>LampArray</c> is never built — the fixture passes no
+/// declared set at construction (Infrastructure/Composition/Settings.cs). <c>LampArray</c> is never built — the fixture passes no
 /// transport — so the "Windows Dynamic Lighting" row does not exist in these tests, and it is the one row whose
 /// failure path is NOT covered here.
 ///
@@ -326,7 +326,7 @@ public class OptionsAssemblerReadbackTests
 
 /// <summary>
 /// Which rows exist. A setting's PRESENCE is now the declaration itself — the backend adds one for each knob its
-/// probe found (Domain/Settings.cs) — so a row that appears without a declaration would promise the user a
+/// probe found (Infrastructure/Composition/Settings.cs) — so a row that appears without a declaration would promise the user a
 /// control that cannot work, and one that fails to appear hides a setting the machine does have.
 ///
 /// The three battery rows are the exception and stay so: they exist exactly when the battery OBJECT has the

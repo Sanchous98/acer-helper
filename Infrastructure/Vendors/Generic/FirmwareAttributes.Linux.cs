@@ -56,7 +56,7 @@ public sealed class FirmwareAttributes
 
     // ---- port factories ----
     // A BIOS attribute wired as a bool/choice in one line (the current_value read/write pair). Vendor
-    // defaults are the usual firmware-attribute enum literals. Each is DECLARED (Domain/Settings.cs) under the
+    // defaults are the usual firmware-attribute enum literals. Each is DECLARED (Domain/DeclaredSetting.cs) under the
     // attribute's own name — the name the firmware and this backend already know it by.
 
     public FlagSetting Flag(string attribute, string on = "Enabled", string off = "Disabled")

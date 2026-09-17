@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 
 namespace AcerHelper.Tests.Fakes;
 

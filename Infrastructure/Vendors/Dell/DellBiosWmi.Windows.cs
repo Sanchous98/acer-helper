@@ -73,7 +73,7 @@ internal sealed class DellBiosWmi
 
     // ---- port factories ----
     // A BIOS enumeration attribute wired as a bool/choice in one line (Get/Set pair). Defaults are the usual
-    // Dell "Enabled"/"Disabled" enum literals. Each is DECLARED (Domain/Settings.cs) under the attribute's own
+    // Dell "Enabled"/"Disabled" enum literals. Each is DECLARED (Domain/DeclaredSetting.cs) under the attribute's own
     // name — the name the firmware and this backend already know it by.
 
     public FlagSetting Flag(string attribute, string on = "Enabled", string off = "Disabled")

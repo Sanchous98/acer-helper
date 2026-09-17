@@ -9,7 +9,7 @@ namespace AcerHelper.Tests;
 /// The declared-settings contract, and the two halves of it (docs/domain-refactoring-plan.md §5, waves 5 + 9).
 ///
 /// WHAT IT IS. A backend declares which settings this machine has, each with its own opaque key and its own
-/// shape — a flag or a pick-one-of-N choice (Domain/Settings.cs). Applying one either works or THROWS
+/// shape — a flag or a pick-one-of-N choice (Domain/DeclaredSetting.cs). Applying one either works or THROWS
 /// <see cref="SettingNotAppliedException"/>, and the exception carries information rather than a sentence: the
 /// message the user reads is composed by the UI from the row's own label, which is why the domain can hold no
 /// setting names at all. What the value MEANS once applied is the row's business

@@ -22,7 +22,7 @@ public partial class App : Avalonia.Application
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             // composition root: detect device, wire settings, build the application service. The device's declared
-            // settings travel with it, because the settings MODEL holds that set and switches it (Domain/Settings.cs)
+            // settings travel with it, because the settings MODEL holds that set and switches it (Infrastructure/Composition/Settings.cs)
             // and IDevice carries no member for it — this is the hand-off.
             var (device, declaredSettings) = DeviceFactory.Create();
             var service = new LaptopService(device, new JsonSettingsStore(), declaredSettings,

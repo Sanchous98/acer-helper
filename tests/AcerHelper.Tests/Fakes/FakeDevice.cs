@@ -21,7 +21,7 @@ namespace AcerHelper.Tests.Fakes;
 ///
 /// THE DECLARED SETTINGS ARE THE SAME KIND OF THING, one step further out: <see cref="Declare"/> is this fake's
 /// probe — what a real backend's <c>InitVendor</c> does with its own key — and the list it fills goes to the
-/// settings MODEL, which holds it and switches it (Domain/Settings.cs), exactly as composition hands a real
+/// settings MODEL, which holds it and switches it (Infrastructure/Composition/Settings.cs), exactly as composition hands a real
 /// device's list over (<c>DeviceFactory</c> -> <c>LaptopService</c> -> the model's constructor). <see cref="IDevice"/>
 /// has no member for it. An empty device is the canonical "this machine has nothing" device.
 ///

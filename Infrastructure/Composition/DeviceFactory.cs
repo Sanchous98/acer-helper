@@ -17,7 +17,7 @@ public static class DeviceFactory
     /// <summary>The machine, and the settings its backend declared while probing it.
     ///
     /// The two travel together because the declared set does not belong to the device any more: the settings
-    /// MODEL holds it and switches it (Domain/Settings.cs), and <see cref="IDevice"/> carries no member for it,
+    /// MODEL holds it and switches it (Infrastructure/Composition/Settings.cs), and <see cref="IDevice"/> carries no member for it,
     /// so this factory is the one place that can hand the backend's own list to the service that builds the model
     /// with it — the concrete device is the only thing that has it.
     ///

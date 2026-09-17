@@ -44,7 +44,7 @@ public enum ReassertOwner
 /// reboot / resume / driver reload, and who re-asserts it.
 ///
 /// WHY THIS EXISTS. Every fact in this table is already true and already written down — but in five blocks of
-/// prose comments spread across <c>Domain/Settings.cs</c> and <c>LaptopService.Tuning.cs</c>, plus a fourth
+/// prose comments spread across <c>Infrastructure/Composition/Settings.cs</c> and <c>LaptopService.Tuning.cs</c>, plus a fourth
 /// copy of the volatility list in <c>Ports.cs</c>. Prose cannot be cross-checked against the code it describes,
 /// and the consequence is on record: adding a sixth axis means remembering four separate places (the preset
 /// bag, the accessors, the schedule, and the UI section), with no compiler and no test to catch a forgotten one.

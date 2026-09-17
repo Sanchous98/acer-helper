@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 
 namespace AcerHelper.Tests;
 

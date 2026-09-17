@@ -57,7 +57,7 @@ public sealed partial class LaptopService : IDisposable
         // this class reads Settings, so loading it here rather than there is observably the same order.
         //
         // ...and the settings this machine declares are handed to the model that holds and switches them
-        // (Domain/Settings.cs) THROUGH ITS CONSTRUCTOR: the store builds the model with this set, so the set is
+        // (Infrastructure/Composition/Settings.cs) THROUGH ITS CONSTRUCTOR: the store builds the model with this set, so the set is
         // fixed before the model exists rather than installed into it afterwards. They arrive as a constructor
         // argument rather than off the device because they no longer live on IDevice: the backend's probe finds
         // them, and the composition root is what carries them here (see DeviceFactory.Create).

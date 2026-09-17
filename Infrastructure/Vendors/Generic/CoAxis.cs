@@ -1,4 +1,7 @@
-namespace AcerHelper.Domain;
+using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
+
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// The Curve-Optimizer axis's write rules, holding no state of its own: they take the rails a CPU exposes and

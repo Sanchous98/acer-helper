@@ -9,7 +9,7 @@ namespace AcerHelper.Infrastructure.Composition;
 /// that reads the settings this machine offers, so <see cref="AppController"/> doesn't; the produced
 /// models are plain data handed to the view-models, which stay free of the service.
 ///
-/// THE HARDWARE ROWS COME FROM THE SETTINGS THE SETTINGS MODEL HOLDS (Domain/Settings.cs), not from a port slot
+/// THE HARDWARE ROWS COME FROM THE SETTINGS THE SETTINGS MODEL HOLDS (Infrastructure/Composition/Settings.cs), not from a port slot
 /// and a hard-coded name per row. The model holds the set its machine's backend declared, and each declaration
 /// carries its own shape (a flag or a choice) and its own opaque key; this file supplies the one thing a
 /// declaration deliberately does not — the row's label, which is the UI's business (<see cref="LabelFor"/>). So a
@@ -158,7 +158,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     /// the WMI layer serializes across controls, so this just runs the set inline and posts any error to the UI.
     /// The row's own readback is what corrects the switch when a write silently doesn't take.
     ///
-    /// A DECLARED setting refuses by THROWING (Domain/Settings.cs), and this is where that becomes a sentence:
+    /// A DECLARED setting refuses by THROWING (Domain/DeclaredSetting.cs), and this is where that becomes a sentence:
     /// the exception carries what happened — which setting, and the transport's own words — while the label is
     /// the UI's, so the message names the row the user is looking at. Composing it from a second, English name
     /// per setting is what made five rows report a control the interface never showed them
@@ -191,7 +191,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
 
     /// <summary>The UI's own name for a setting the backend declares, by the backend's own key. This is the ONLY
     /// place that turns a setting into words, and it sits here because naming and localization belong to the UI:
-    /// a declaration carries no display name (Domain/Settings.cs). A key with no entry reads as the key itself,
+    /// a declaration carries no display name (Domain/DeclaredSetting.cs). A key with no entry reads as the key itself,
     /// so a backend that declares a setting this build has no name for still gets a row and a message instead of
     /// silence.
     ///

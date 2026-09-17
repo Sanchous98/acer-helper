@@ -15,8 +15,12 @@ namespace AcerHelper.Tests;
 ///
 /// WHAT IT DOES NOT CLAIM. It does not claim the UI never reaches Infrastructure — it does, by design
 /// (<c>AppController</c> imports <c>AcerHelper.Infrastructure.Diagnostics</c> for the gate stats). It does not
-/// claim <c>Domain</c> is dependency-free: <c>Domain/Settings.cs</c> imports <c>Localization</c> for
-/// <c>AppLanguage</c>, which is listed as an explicit exception rather than quietly tolerated. And it is a rule
+/// claim <c>Domain</c> is dependency-free of the shared kernel below it: <c>Localization</c> is ALLOWED by the
+/// rule below (it sits below Domain as the shared kernel), and that permission is now unexercised rather than
+/// relied on — no file under <c>Domain/</c> imports it since the settings container moved to Infrastructure,
+/// which is what the type that stored <c>AppLanguage</c> was the reason for. The permission stays because
+/// narrowing it would be a rule CHANGE made in the commit that happened to empty it, and a rule that is tighter
+/// than the design is the next author's problem rather than this one's. And it is a rule
 /// about SOURCE LAYOUT, not about behaviour: nothing here proves a type is where it belongs conceptually, only
 /// that the folder, the namespace and the edges between them agree.
 ///
@@ -116,11 +120,18 @@ public class ArchitectureMapTests
             + string.Join("\n  ", offenders));
     }
 
-    /// <summary>Domain points DOWN at nothing. Localization is the single exception and it is named here rather
-    /// than tolerated silently: <c>Domain/Settings.cs</c> stores <c>AppLanguage</c>, so the string tables sit
-    /// below Domain in the dependency order as a shared kernel. Everything else — Infrastructure, Application,
-    /// UI — is forbidden, because a Domain type that reaches one of them stops being the neutral model the
-    /// backends are written against.</summary>
+    /// <summary>Domain points DOWN at nothing. Localization is the single permitted exception, and the
+    /// permission is now unexercised: the type that made it necessary — the settings container, which stored
+    /// <c>AppLanguage</c> — is Infrastructure's, so no file under <c>Domain/</c> imports anything at all today.
+    /// The permission is deliberately NOT narrowed here: emptying it was a consequence of that move, not a
+    /// decision about the rule, and a rule tightened in passing is a rule nobody reviewed. Everything else —
+    /// Infrastructure, Application, UI — is forbidden, because a Domain type that reaches one of them stops
+    /// being the neutral model the backends are written against.
+    ///
+    /// MUTATION-VERIFIED, so neither half is vacuous: <c>using AcerHelper.Infrastructure.Composition;</c> added
+    /// to any file under <c>Domain/</c> reddens it (the container is nameable from Domain again, which is what
+    /// "points up" means), and the Localization permission is what an <c>AppLanguage</c> reference would need if
+    /// one were ever put back.</summary>
     [Fact]
     public void DomainPointsAtNothingButItselfAndLocalization()
     {
@@ -147,11 +158,20 @@ public class ArchitectureMapTests
     /// It names <c>IDynamicLighting</c> and <c>IDynamicLightingFactory</c>
     /// (<c>Application/DynamicLighting.cs</c>) instead, and composition supplies the implementation.
     ///
-    /// Today Application imports Domain and Localization and nothing else. Localization is allowed for the same
-    /// reason <see cref="DomainPointsAtNothingButItselfAndLocalization"/> allows it — it is the shared kernel
-    /// below Domain — and a settings store arrives as the <c>ISettingsStore</c> port rather than as the class
-    /// that implements it. The UI may still reach Infrastructure (it does, by design; see the file's own
-    /// docstring); this rule fences Application, which has no such need.
+    /// WHAT IT FORCED, and this is the part worth reading before moving anything else. When the service layer
+    /// and the persisted container moved to Infrastructure, this rule is what decided the SHAPE of that move:
+    /// the re-apply operation could not stay whole, because its result is built out of the container's types
+    /// and Application may not name them, so only the PLAN stayed (<c>Application/ReapplyPlan.cs</c>, stated in
+    /// Domain vocabulary) and the executor went with the service. Application is now three files, and the rule
+    /// is the reason — not an accident of the move.
+    ///
+    /// Today Application imports Domain and nothing else: Localization is still permitted for the same reason
+    /// <see cref="DomainPointsAtNothingButItselfAndLocalization"/> permits it, but the <c>AppLanguage</c> the
+    /// settings model stored went with the container, so nothing here uses it any more. Localization is
+    /// deliberately NOT removed from the list below for that reason: it was allowed before for a real design
+    /// reason, and dropping it here would be a rule change smuggled into a move. The UI may still reach
+    /// Infrastructure (it does, by design; see the file's own docstring); this rule fences Application, which
+    /// has no such need.
     ///
     /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Lighting;</c> added to
     /// <c>Application/DynamicLighting.cs</c> reddens this test and no other in the file.</summary>

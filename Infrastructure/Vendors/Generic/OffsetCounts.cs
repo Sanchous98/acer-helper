@@ -1,4 +1,6 @@
-namespace AcerHelper.Domain;
+using AcerHelper.Domain;
+
+namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>A Curve-Optimizer offset in AVFS "counts" — negative = less voltage at every frequency, 0 = stock.
 ///

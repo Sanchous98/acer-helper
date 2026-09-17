@@ -32,7 +32,7 @@ public partial class GenericDevice : IDevice
     public IClamshell?          Clamshell          { get; protected set; }
 
     /// <summary>The settings this machine declares — this backend's own list, and the source of the set the
-    /// settings MODEL holds (Domain/Settings.cs). A LIST rather than a slot per capability, because a declaration
+    /// settings MODEL holds (Infrastructure/Composition/Settings.cs). A LIST rather than a slot per capability, because a declaration
     /// carries its own shape and its own key: each vendor's <c>InitVendor</c> adds the entries its own probe
     /// found, in the order the rows should read, and a setting it did not find is simply not declared.
     ///

@@ -12,7 +12,7 @@ namespace AcerHelper.Tests.Fakes;
 ///
 /// THE DECLARATIONS ARE MADE BEFORE THE SERVICE EXISTS, through <paramref name="declare"/> — the fake backend's
 /// probe, run against the bare device. That order is the contract now: the settings model is CONSTRUCTED with the
-/// set of options this machine declares and copies it (Domain/Settings.cs), so a declaration that lands after the
+/// set of options this machine declares and copies it (Infrastructure/Composition/Settings.cs), so a declaration that lands after the
 /// service was built cannot reach the model, exactly as a vendor backend that declared after <c>InitVendor</c>
 /// could not. A test that declares too late fails loudly rather than silently — the row it is about is simply
 /// absent (<c>AssemblerRows.Toggle</c> finds rows by <c>Single</c>).

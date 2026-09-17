@@ -1,4 +1,6 @@
-namespace AcerHelper.Domain;
+using AcerHelper.Domain;
+
+namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>The identity a per-mode preset is filed under — the value behind the string
 /// <c>LaptopService.CurrentModeKey()</c> returns.

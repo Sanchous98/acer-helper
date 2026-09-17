@@ -13,7 +13,7 @@ public sealed partial class LaptopService
     // ---- declared settings (each throws on refusal; the UI catches and composes the message) ----
 
     /// <summary>The settings this machine's backend declared, as the settings MODEL holds them
-    /// (Domain/Settings.cs) — this is what the UI builds its hardware rows from, and the only source of them now
+    /// (Infrastructure/Composition/Settings.cs) — this is what the UI builds its hardware rows from, and the only source of them now
     /// that <see cref="IDevice"/> carries no member for the set.
     ///
     /// Read WITHOUT the graph lock, and that is not an oversight: the lock guards the graph's mutability, and this

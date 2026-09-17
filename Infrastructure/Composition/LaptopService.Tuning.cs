@@ -1,5 +1,6 @@
 using System.Threading;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 
 namespace AcerHelper.Infrastructure.Composition;
