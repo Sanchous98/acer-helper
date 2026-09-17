@@ -371,6 +371,22 @@ Also violating the spirit of the same invariant, without the plan saying so:
 
 ### D16 — A hardware read on the UI thread can block on G1 behind the background poll
 
+**Corrected 2026-09-17: most of the list below is a record of the state before wave 6, not a to-do list.** The
+four option-row bullets stopped being UI-thread reads in `b51c38d` ("defer option-row reads off the UI
+thread", wave 6 step 1): `Toggles()`/`Choices()` now build with placeholders, and the rows are primed after
+`BuildUi` returns, on each row's own serial worker (`OptionsViewModel.Prime()`). `CurrentCpuPower` left the
+path the same way in `cc145c9` (step 3) — it is primed from `BackgroundPass`, not read here. The battery
+bullet is stale a second time over: wave 4b (`9c17ae5`) deleted the four battery ports, so `limit.Get()` and
+`cal.Get()` no longer exist — `BatteryLimit()`/`BatteryCalibration()` carry the `Read` ops of the
+`Battery.ChargeLimit` and `Battery.Calibration` domain records, filled in off the UI thread by
+`BatteryViewModel.Prime()`. What remains of the hazard is narrower but not gone, and the argument the section
+carries — priority, not serialization — is unaffected; it is what wave 6 was aimed at.
+`PowerSourceProfiles()` still reads `svc.SourceProfile(onAc)` under G2 at build time, and `CurrentFan`,
+`CurrentGpuOc` and `CurrentCoDomains` are still read synchronously in `BuildUi`. Those three are hardware reads
+too, not `Settings` reads: each takes `_state` and calls `CurrentModeKey()`, which asks the `PowerProfiles`
+port for the live profile — so the UI thread still blocks on G1 from `BuildUi`, through fewer sites than the
+list below names.
+
 `BuildUi()` (`AppController`'s `BuildUi`) runs on the UI thread and calls, synchronously:
 
 - `OptionsAssembler.Toggles()` → `lcd.Get()`, `kbd.Get()`, `fn.Get()`

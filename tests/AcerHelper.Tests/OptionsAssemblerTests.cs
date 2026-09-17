@@ -47,7 +47,7 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>PINNED BEHAVIOUR: a refused write with NO error text still reports — the suffix is
-    /// conditional (<c>e != null ? $": {e}" : ""</c>, OptionsAssembler.cs:148), so the user gets
+    /// conditional (<c>e != null ? $": {e}" : ""</c>, <c>OptionsAssembler.RunSet</c>), so the user gets
     /// "LCD overdrive failed" and not "…failed: " with a dangling colon. Both halves are pinned by the exact
     /// equality: dropping the suffix would let a silent EC look like a success, while making it unconditional
     /// is what a naive tidy-up produces.</summary>
@@ -80,9 +80,9 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>...and a STALE <c>LastError</c> left over from an earlier failure must not resurrect the
-    /// message: the branch is on the set's result, not on the error text. <c>LaptopService</c>'s LastError is
-    /// a property of the SERVICE, not of the write (LaptopService.cs:56), so it can be non-null while the
-    /// current write is perfectly fine.</summary>
+    /// message: the branch is on the set's result, not on the error text. The port's <c>LastError</c> is
+    /// a property of the PORT, not of the write (Domain/Ports.cs's <c>IFlagPort.LastError</c>), so it can be
+    /// non-null while the current write is perfectly fine.</summary>
     [Fact]
     public void ASuccessfulSet_AfterAFailure_DoesNotNotifyAgain()
     {
@@ -103,7 +103,7 @@ public class OptionsAssemblerFailureTests
     ///
     /// WHERE the throw is absorbed is worth being precise about, because it is not where it looks: the write
     /// goes through <c>LaptopService.SetFlag</c> -> <c>Attempt</c>, whose
-    /// <c>try { ok = write(); } catch { ok = false; }</c> (Application/LaptopService.cs:92-97) absorbs it one
+    /// <c>try { ok = write(); } catch { ok = false; }</c> (<c>LaptopService.Attempt</c>) absorbs it one
     /// layer BELOW <c>RunSet</c>. So this case exercises <c>Attempt</c>'s catch, and that is provable from the
     /// message asserted below rather than from the code's shape: the text ends in the port's own reason, and
     /// <c>RunSet</c>'s catch discards the reason (<c>catch { result = (false, null); }</c>) — a throw it had
@@ -129,7 +129,7 @@ public class OptionsAssemblerFailureTests
     ///
     /// WHICH LAYER ABSORBS THIS THROW: the write goes <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> ->
     /// <c>Attempt</c>, whose <c>try { ok = write(); } catch { ok = false; }</c> catches it
-    /// (Application/LaptopService.cs:92-97), NOT <c>RunSet</c>'s own catch — every caller of <c>RunSet</c> hands
+    /// (<c>LaptopService.Attempt</c>), NOT <c>RunSet</c>'s own catch — every caller of <c>RunSet</c> hands
     /// it a service method that wraps its port in <c>Attempt</c>, so no throwing PORT is what reaches it
     /// (docs/open-decisions.md, «Известные особенности» 4, where the opposite claim was withdrawn). What can
     /// still reach <c>RunSet</c>'s catch is a throw from OUTSIDE a wrapped call — a profile port's read
@@ -187,7 +187,7 @@ public class OptionsAssemblerFailureTests
 /// The readback wiring: which rows carry a <c>Read</c> delegate, and what that delegate answers. The row's
 /// readback is what corrects a switch (or a dropdown) after a write the firmware accepted but did not apply,
 /// so a <c>Read</c> that answers from a copy taken at build time would leave the UI lying about the hardware
-/// — the exact bug the readback exists to remove (Options.cs:8-11).
+/// — the exact bug the readback exists to remove (<c>OptionToggle.Read</c>).
 ///
 /// WAVE 6 MOVED WHERE THE FIRST READ HAPPENS: these delegates are now also what the row's PRIME calls, and the
 /// build itself reads nothing — <c>Initial</c>/<c>InitialIndex</c> are placeholders. The assertions below
@@ -223,7 +223,7 @@ public class OptionsAssemblerReadbackTests
 
     /// <summary>LCD overdrive deliberately has NO readback: its write is <c>SetGamingProfile</c>, which
     /// returns a status byte, so the row self-confirms and skips the second EC transaction the user would hear
-    /// as a second "click" (OptionsAssembler.cs:23-27). Pinned because "add Read everywhere" looks like a
+    /// as a second "click" (<c>OptionsAssembler.Toggles</c>). Pinned because "add Read everywhere" looks like a
     /// tidy-up and is not — it would be an audible regression on every toggle.</summary>
     [Fact]
     public void TheLcdRowHasNoReadback_BecauseItsWriteSelfConfirms()
@@ -245,8 +245,8 @@ public class OptionsAssemblerReadbackTests
     }
 
     /// <summary>A dropdown's <c>Read</c> answers with the INDEX of what the port reports now, not the id
-    /// (Options.cs:16-20). The unknown-id and null cases are PINNED: <c>IndexOf</c> returns 0 both for "no
-    /// such option" and for the first option (OptionsAssembler.cs:162-168), so a port reporting something
+    /// (<c>OptionChoice.Read</c>). The unknown-id and null cases are PINNED: <c>IndexOf</c> returns 0 both for "no
+    /// such option" and for the first option (<c>OptionsAssembler.IndexOf</c>), so a port reporting something
     /// this build does not offer reads as the first entry — the row then shows a setting the hardware is not
     /// in, and a subsequent pick would start from a lie.</summary>
     [Theory]
@@ -277,7 +277,7 @@ public class OptionsAssemblerReadbackTests
     /// <summary>The power-source rows read back from the SERVICE's remembered slot, not from the port's live
     /// profile: the row means "the profile this source uses", which is stored intent — the port only knows
     /// what is on right now and cannot answer for the other source at all
-    /// (OptionsAssembler.cs:103-106).</summary>
+    /// (<c>OptionsAssembler.PowerSourceProfiles</c>).</summary>
     [Fact]
     public void APowerSourceRowsReadback_AnswersFromTheRememberedSlot()
     {
@@ -351,7 +351,7 @@ public class OptionsAssemblerPresenceTests
     }
 
     /// <summary>The blue-light row is suppressed when the tint port has no levels to offer — the presence
-    /// test is <c>tint.Levels &gt; 0</c> and nothing else (OptionsAssembler.cs:75) — and when it IS offered
+    /// test is <c>tint.Levels &gt; 0</c> and nothing else (<c>OptionsAssembler.Choices</c>) — and when it IS offered
     /// it lists exactly as many entries as the port has: the fixed "Off".."Long-use" names truncated to what
     /// this display can do, so no dropdown offers the user a level the hardware does not have.</summary>
     [Theory]
@@ -391,8 +391,9 @@ public class OptionsAssemblerPresenceTests
     }
 
     /// <summary>A device with no profile port, or one that advertises no profiles, has no per-source rows:
-    /// the pair only means something when there is a profile to pick (OptionsAssembler.cs:98). The two halves
-    /// are different devices — the first has no <c>PowerProfiles</c> at all, the second has one that lists
+    /// the pair only means something when there is a profile to pick
+    /// (<c>OptionsAssembler.PowerSourceProfiles</c>). The two halves are different devices — the first has no
+    /// <c>PowerProfiles</c> at all, the second has one that lists
     /// nothing — and both must give an empty list rather than two rows over an empty dropdown.</summary>
     [Theory]
     [InlineData(true)]      // no power-profiles port at all
@@ -441,7 +442,7 @@ public class OptionsAssemblerConfirmTests
 
         Assert.NotNull(row);
         Assert.Same(confirm, row!.ConfirmAsync);
-        Assert.Null(row.Confirm);        // the async form only: OptionToggle allows one of the two (Options.cs:4-11)
+        Assert.Null(row.Confirm);        // the async form only: OptionToggle allows one of the two (Confirm/ConfirmAsync)
     }
 
     /// <summary>A device without the calibration port has no row at all — there is nothing to confirm.</summary>
@@ -563,7 +564,7 @@ internal static class AssemblerRows
 
     /// <summary>The English keys of every row whose write funnels through <c>RunSet</c>: the whole of
     /// <c>Toggles()</c>, both battery rows, and the two pick-one-of-N rows in <c>Choices()</c>. The blue-light
-    /// row is absent on purpose — it does not go through <c>RunSet</c> at all (OptionsAssembler.cs:81) — and
+    /// row is absent on purpose — it does not go through <c>RunSet</c> at all (<c>OptionsAssembler.Choices</c>) — and
     /// so is the LampArray row, which needs a transport this fixture does not build.</summary>
     public static readonly string[] RunSetRowKeys =
     [
