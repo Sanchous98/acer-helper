@@ -128,19 +128,23 @@ public class OptionsAssemblerFailureTests
     /// <summary>PINNED BEHAVIOUR: a throwing PROFILE port is reported as a failure and does not escape the row,
     /// and the message is BARE here because <see cref="FakeThrowingPowerProfiles"/> carries no reason.
     ///
-    /// WHICH LAYER ABSORBS THIS THROW — measured, and the opposite of what this test's name says. The write goes
-    /// <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>Attempt</c>, whose
-    /// <c>try { ok = write(); } catch { ok = false; }</c> catches it (Application/LaptopService.cs:92-97), NOT
-    /// <c>RunSet</c>'s own catch: every caller of <c>RunSet</c> hands it a service method that wraps its port in
-    /// <c>Attempt</c>, so no throwing PORT is what reaches it. What can still reach it is a throw from OUTSIDE a
-    /// wrapped call — a profile port's read (unwrapped in <c>ApplyStoredMode</c>) or the row's own index
-    /// arithmetic — i.e. a second line of defence with a narrower door than this test's name suggests. The
-    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason; a
-    /// <c>RunSet</c>-caught throw could not print that. The assertion below pins the OUTCOME the row owes the
-    /// user (reported, not escaped), and it is unchanged — the name is what was wrong, and it is left alone
-    /// because this wave's brief allows comment-only edits in this file.</summary>
+    /// WHICH LAYER ABSORBS THIS THROW: the write goes <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> ->
+    /// <c>Attempt</c>, whose <c>try { ok = write(); } catch { ok = false; }</c> catches it
+    /// (Application/LaptopService.cs:92-97), NOT <c>RunSet</c>'s own catch — every caller of <c>RunSet</c> hands
+    /// it a service method that wraps its port in <c>Attempt</c>, so no throwing PORT is what reaches it
+    /// (docs/open-decisions.md, «Известные особенности» 4, where the opposite claim was withdrawn). What can
+    /// still reach <c>RunSet</c>'s catch is a throw from OUTSIDE a wrapped call — a profile port's read
+    /// (unwrapped in <c>ApplyStoredMode</c>) or the row's own index arithmetic — a second line of defence with a
+    /// narrower door than the old name suggested.
+    ///
+    /// THE NAME THEREFORE CLAIMS NO ABSORBER, and it must not: THIS test cannot tell <c>Attempt</c> from
+    /// <c>RunSet</c>. Its fake carries no reason, so the message is bare whichever layer caught the throw. The
+    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason — a
+    /// <c>RunSet</c>-caught throw could not print that. What THIS test pins is the OUTCOME the row owes the user:
+    /// reported exactly once, and not escaped. Renamed from
+    /// <c>AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported</c>, which asserted the wrong absorber.</summary>
     [Fact]
-    public void AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported()
+    public void AThrowingProfileSet_DoesNotEscapeThePowerSourceRow_AndIsStillReported()
     {
         var h = new OptionsAssemblerHarness(LaptopServiceFixture.WithProfiles(current: TestProfiles.Quiet));
         var pp = new FakeThrowingPowerProfiles();
@@ -148,7 +152,7 @@ public class OptionsAssemblerFailureTests
 
         var row = AssemblerRows.Choice(h, "Profile on AC power:");
 
-        Assert.Null(Record.Exception(() => row.OnChange(1)));      // caught by RunSet itself, not by the caller
+        Assert.Null(Record.Exception(() => row.OnChange(1)));      // the throw must not leave the row
         Assert.Single(pp.SetCalls);                        // the write was attempted once, then threw
         Assert.Equal("Power-source profile failed", Assert.Single(h.RunPosted()));
     }
