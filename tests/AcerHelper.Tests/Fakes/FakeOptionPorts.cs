@@ -9,16 +9,20 @@ namespace AcerHelper.Tests.Fakes;
 /// (for the flag port) a READ that throws, which the ports survive by different paths (see
 /// <see cref="FakeThrowingPowerProfiles"/>).
 ///
-/// <see cref="FakeFlagPort"/> implements every on/off feature port at once, and <see cref="FakeChoicePort"/>
-/// every pick-one-of-N port, because in Domain/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
+/// <see cref="FakeFlagPort"/> implements every on/off port interface at once, and <see cref="FakeChoicePort"/>
+/// every pick-one-of-N one, because in Domain/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
 /// <see cref="IChoicePort"/> and nothing more — so one fake is dropped into whichever slot the row under test
 /// reads, and a test says which row it means by its label rather than by its port type.
+///
+/// The BATTERY is the exception: its properties are ops on a domain object rather than ports
+/// (Domain/Battery.cs), so those two fakes are handed over as an op pair instead of being assigned to a slot —
+/// see <see cref="FakeFlagPort.AsBatteryToggle"/> and <see cref="FakeChoicePort.AsBatteryChoice"/>, which hand
+/// over the SAME state, read count and refused-write behaviour the port interface exposes.
 ///
 /// Reads are COUNTED: the Options rows hand the user a <c>Read</c> delegate the view-model calls after every
 /// write, so "did the row ask the hardware again?" is an assertion, not an implementation detail.
 /// </summary>
-public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock,
-                                   IBatteryChargeLimit, IBatteryCalibration
+public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock
 {
     /// <summary>What <see cref="Get"/> reports. Mutate it to act like the hardware changed under the app.</summary>
     public bool State { get; set; }
@@ -62,6 +66,13 @@ public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock,
         State = on;
         return true;
     }
+
+    /// <summary>This fake as an on/off property of the battery object. The state, the read count and the
+    /// refused/throwing write are the same ones the port interface exposes — the property is only a different
+    /// way of being handed over. The reason is reported the way the port shape reported it: absent when the
+    /// write took, <see cref="LastError"/> when it did not (the service's <c>Attempt</c> does exactly that).</summary>
+    public BatteryToggle AsBatteryToggle()
+        => new(Get, on => { var ok = Set(on); return (ok, ok ? null : LastError); });
 }
 
 /// <summary>
@@ -69,7 +80,7 @@ public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock,
 /// no Options assertion depends on the option LABELS — only on which id the row maps to which dropdown INDEX
 /// (OptionsAssembler's <c>IndexOf</c>), which is the value the view-model puts back into the combo box.
 /// </summary>
-public sealed class FakeChoicePort : IUsbCharging, IKeyboardBacklightTimeout, IBatteryChargeMode
+public sealed class FakeChoicePort : IUsbCharging, IKeyboardBacklightTimeout
 {
     public FakeChoicePort(params string[] ids)
         => Options = [.. ids.Select(id => new ChoiceOption(id, id))];
@@ -105,6 +116,11 @@ public sealed class FakeChoicePort : IUsbCharging, IKeyboardBacklightTimeout, IB
         CurrentId = id;
         return true;
     }
+
+    /// <summary>This fake as the battery's charge-mode property (see
+    /// <see cref="FakeFlagPort.AsBatteryToggle"/> for why a property is handed over as ops).</summary>
+    public BatteryChoice AsBatteryChoice()
+        => new(Options, Get, id => { var ok = Set(id); return (ok, ok ? null : LastError); });
 }
 
 /// <summary>Hand-written <see cref="IDisplayTint"/>: discrete blue-light levels and a recorded

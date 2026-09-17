@@ -51,14 +51,16 @@ public sealed partial class DellDevice
         // writability by idempotently re-applying the CURRENT mode (no behavioural change) and offer the
         // control only if that write actually takes. Either way drop the generic 80% end-threshold toggle:
         // Dell charge control is the named-mode selector (and the threshold is honoured only in Custom mode).
+        // The drop is a REMOVAL on the battery object, and it stays inside this gate: a Dell with no parseable
+        // charge_types has no charge mode to put in its place, so it keeps the generic limiter the base wired.
         _bat = new SysfsInvoker(Bat);
         var modes = ParseChargeTypes(_bat.Read("charge_types"));
         if (modes.Count > 0)
         {
-            BatteryChargeLimit = null;
+            Battery.ChargeLimit = null;
             var cur = GetChargeMode();
             if (_bat.CanWrite("charge_types") && cur != null && SetChargeMode(cur) is (true, _))
-                BatteryChargeMode = new ChoicePort(modes, GetChargeMode, SetChargeMode);
+                Battery.ChargeMode = new(modes, GetChargeMode, SetChargeMode);
             else
                 locked = true;
         }

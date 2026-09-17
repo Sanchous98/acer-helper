@@ -56,6 +56,12 @@ public sealed class SysfsInvoker(string baseDir)
     public FlagPort Flag(string node, string on = "1", string off = "0")
         => new(() => Read(node) == on, v => { var ok = Write(node, v ? on : off, out var e); return (ok, e); });
 
+    /// <summary>The same node as <see cref="Flag"/>, as the property the battery object takes: the battery's
+    /// toggles carry their reason out of the write instead of stashing it in a port for a later read
+    /// (Domain/Battery.cs), so they take the ops rather than a holder.</summary>
+    public BatteryToggle BatteryToggle(string node, string on = "1", string off = "0")
+        => new(() => Read(node) == on, v => { var ok = Write(node, v ? on : off, out var e); return (ok, e); });
+
     /// <summary>A pick-one node whose stored value is the option id verbatim (read/write pass through).</summary>
     public ChoicePort Choice(string node, IReadOnlyList<ChoiceOption> options)
         => new(options, () => Read(node), id => { var ok = Write(node, id, out var e); return (ok, e); });

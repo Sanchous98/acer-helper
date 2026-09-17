@@ -51,7 +51,7 @@ public sealed partial class DellDevice
         if (bios.Get("ThermalManagement") != null)
             PowerProfiles = new ProfilesPort(Thermal, () => Thermal, CurrentThermal, SetThermal);
         if (bios.Get("PrimaryBattChargeCfg") != null)
-            BatteryChargeMode = _bios.Choice("PrimaryBattChargeCfg", ChargeModes);
+            Battery.ChargeMode = _bios.BatteryChoice("PrimaryBattChargeCfg", ChargeModes);
         if (bios.Get("FnLock") != null)
             FnLock = _bios.Flag("FnLock");
         if (bios.Get("UsbPowerShare") != null)

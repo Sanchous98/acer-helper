@@ -51,9 +51,16 @@ public sealed record CoSection(
     IReadOnlyList<int> Initial,
     Action<int[]> SetCo);
 
-/// <summary>Battery section: whether telemetry exists, plus the pre-built option rows the device supports.</summary>
+/// <summary>Battery section: the battery object — which declares for itself whether there is telemetry and
+/// which charging controls exist — plus the pre-built option rows for those controls. The object is carried
+/// rather than a <c>bool</c> copied out of it, so "the readings are shown exactly when this machine reports a
+/// battery" is stated once, here, where a test can reach it (Battery.Telemetry).</summary>
 public sealed record BatterySection(
-    bool HasInfo, OptionToggle? Limit, OptionToggle? Calibration, OptionChoice? ChargeMode);
+    Battery Battery, OptionToggle? Limit, OptionToggle? Calibration, OptionChoice? ChargeMode)
+{
+    /// <summary>Whether the live readings (charge %, state, health, cycles) are shown at all.</summary>
+    public bool HasInfo => Battery.Telemetry != null;
+}
 
 /// <summary>Options drawer: the generic hardware toggles/choices plus the app-level rows (Turbo-key
 /// behaviour, clamshell, autostart, language). The enabled STATE of clamshell/autostart is read straight off

@@ -96,6 +96,17 @@ public sealed partial class LaptopService : IDisposable
         return (ok, ok ? null : reason());
     }
 
+    /// <summary>The same rule for a write whose op hands back both halves itself — the battery's properties,
+    /// which take their reason from the call rather than from a field read after it (Domain/Battery.cs). There
+    /// is nothing to fetch on failure, so the reason is absent: only a throw can reach the catch below, and a
+    /// throw carries none — the same (false, null) the port shape produces when its LastError was never set.
+    /// Kept here beside its sibling so "a throwing write is a failed write, not a crash" is stated once per
+    /// shape rather than in each caller.</summary>
+    private static (bool ok, string? error) Attempt(Func<(bool ok, string? error)> write)
+    {
+        try { return write(); } catch { return (false, null); }
+    }
+
     // Guards ALL access to the mutable Settings graph (its collections + scalars), the per-source slots,
     // _onAc, the fan-curve engine, and Save() — because these are now touched from TWO threads: the UI thread
     // (user actions: slider/profile/toggle) AND the background refresh pass (AppController offloads the 3s poll

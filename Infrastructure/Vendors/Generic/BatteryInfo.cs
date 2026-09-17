@@ -7,8 +7,12 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// count once at construction, and assembling the live snapshot — lives here; the OS data sources
 /// (Windows WMI + power status, Linux /sys/class/power_supply) are the partial methods in the
 /// matching BatteryInfo.*.cs file.
+///
+/// It is no longer a port: the battery object holds this instance's <see cref="Read"/> as its telemetry op
+/// (Domain/Battery.cs), because "how this machine reads the battery" and "what else this battery can do" are
+/// one subject and the object is where that is stated.
 /// </summary>
-public sealed partial class BatteryInfo : IBatteryInfo
+public sealed partial class BatteryInfo
 {
     private readonly int _health;   // full / design * 100, -1 if unknown
     private readonly int _cycles;   // -1 if unsupported

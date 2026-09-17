@@ -217,7 +217,7 @@ internal sealed class AppController
             // is a hardware read: fan/GPU presets come from the Settings graph.
             new CpuSection(d.CpuPower?.Modes ?? [], null, SetCpuPower),
             new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
-            new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
+            new BatterySection(d.Battery, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.TurboToggles, SetTurboToggles,
                 b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),

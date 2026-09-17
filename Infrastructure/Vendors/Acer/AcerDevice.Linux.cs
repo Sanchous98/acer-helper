@@ -91,11 +91,13 @@ public sealed partial class AcerDevice
 
         // Plain on/off sysfs knobs collapse to the shared flag factory (node = the id string; on/off = "1"/"0",
         // the factory defaults). USB stays bespoke — its read normalises the raw node value to an option id.
+        // The battery's two knobs take the same node as an op pair instead of a flag port, because the battery
+        // object's properties carry their reason out of the write (Domain/Battery.cs).
         if (Usable("fan_speed"))
             FanControl = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         if (Usable("lcd_override"))        LcdOverdrive       = _sense.Flag("lcd_override");
-        if (Usable("battery_limiter"))     BatteryChargeLimit = _sense.Flag("battery_limiter");
-        if (Usable("battery_calibration")) BatteryCalibration = _sense.Flag("battery_calibration");
+        if (Usable("battery_limiter"))     Battery.ChargeLimit = _sense.BatteryToggle("battery_limiter");
+        if (Usable("battery_calibration")) Battery.Calibration = _sense.BatteryToggle("battery_calibration");
         if (Usable("backlight_timeout"))   KeyboardBacklight  = _sense.Flag("backlight_timeout");
         if (Usable("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
     }

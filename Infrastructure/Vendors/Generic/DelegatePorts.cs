@@ -10,22 +10,24 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // BIOS-attribute WMI on Windows). Writes return (ok, error) so the holder can surface LastError; reads
 // return the value directly (errors degrade to a default).
 
-/// <summary>A boolean toggle. The identical-shaped bool ports (charge limit, calibration, LCD overdrive,
-/// keyboard-backlight timeout, Fn lock — all <see cref="IFlagPort"/>) are this one class, instantiated with
-/// different ops.</summary>
+/// <summary>A boolean toggle. The identical-shaped bool ports (LCD overdrive, keyboard-backlight timeout,
+/// Fn lock — all <see cref="IFlagPort"/>) are this one class, instantiated with different ops. The battery's
+/// charge limit and calibration are the same pair of delegates but not the same class: they are members of the
+/// battery object, which takes the ops directly (Domain/Battery.cs).</summary>
 public sealed class FlagPort(Func<bool> read, Func<bool, (bool ok, string? error)> write)
-    : IBatteryChargeLimit, IBatteryCalibration, ILcdOverdrive, IKeyboardBacklight, IFnLock
+    : ILcdOverdrive, IKeyboardBacklight, IFnLock
 {
     public string? LastError { get; private set; }
     public bool Get() => read();
     public bool Set(bool on) { var (ok, e) = write(on); LastError = e; return ok; }
 }
 
-/// <summary>A pick-one-of-N labeled choice. The identical-shaped choice ports (USB charging, battery charge
-/// mode, backlight-timeout duration — all <see cref="IChoicePort"/>) are this one class; ids are the
-/// vendor's stable keys.</summary>
+/// <summary>A pick-one-of-N labeled choice. The identical-shaped choice ports (USB charging,
+/// backlight-timeout duration — all <see cref="IChoicePort"/>) are this one class; ids are the
+/// vendor's stable keys. The battery's charge mode is the same pair of delegates but not this class, for the
+/// same reason as the flag above.</summary>
 public sealed class ChoicePort(IReadOnlyList<ChoiceOption> options, Func<string?> read, Func<string, (bool ok, string? error)> write)
-    : IUsbCharging, IBatteryChargeMode, IKeyboardBacklightTimeout
+    : IUsbCharging, IKeyboardBacklightTimeout
 {
     public string? LastError { get; private set; }
     public IReadOnlyList<ChoiceOption> Options => options;

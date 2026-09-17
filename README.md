@@ -49,9 +49,13 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
 - **`Domain/`** (`AcerHelper.Domain`) — the vendor- and OS-agnostic core: model
   (`PerformanceProfile`, `FanMode`, `SensorSnapshot`, `HotkeyAction`, …) and one fine-grained
   *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `ILcdOverdrive`,
-  `IBatteryChargeLimit`, `IUsbCharging`, `IKeyboardBacklight`, `ILighting`, `IHotkeys`,
+  `IUsbCharging`, `IKeyboardBacklight`, `ILighting`, `IHotkeys`,
   `IDisplayTint`, `IAutostart`, `IClamshell`). The aggregate `IDevice` exposes each port as
   **nullable** — `null` means the feature is absent, so the UI shows exactly what the hardware has.
+  The battery is the one capability that is an OBJECT rather than a port (`Battery`): it declares
+  its own properties one by one, so a firmware with no charge limiter is a battery whose
+  `ChargeLimit` is null instead of a missing port beside three others. See
+  `docs/domain-refactoring-plan.md` §3.1.
   Also the pieces that are logic rather than I/O: `FanCurveEngine`, `LampArrayBridge`, the
   compile-time version constant.
 - **`Application/`** (`AcerHelper.Application`) — the use cases, and nothing else: `LaptopService`

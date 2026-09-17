@@ -80,4 +80,10 @@ internal sealed class DellBiosWmi
 
     public ChoicePort Choice(string attribute, IReadOnlyList<ChoiceOption> options)
         => new(options, () => Get(attribute), id => Set(attribute, id));
+
+    /// <summary>The same attribute as <see cref="Choice"/>, as the property the battery object takes: the
+    /// battery's charge mode carries its reason out of the write instead of stashing it in a port for a later
+    /// read (Domain/Battery.cs). This is the one Dell attribute that is a property of the battery.</summary>
+    public BatteryChoice BatteryChoice(string attribute, IReadOnlyList<ChoiceOption> options)
+        => new(options, () => Get(attribute), id => Set(attribute, id));
 }

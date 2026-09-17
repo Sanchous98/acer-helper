@@ -6,21 +6,20 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// <summary>Generic Linux battery charge limit via the standard power_supply node
 /// <c>charge_control_end_threshold</c> — supported by many laptops through the kernel (Dell, Lenovo, ASUS,
 /// …), independent of any vendor tool. On = cap at 80% (battery-health), Off = 100%. Reading works as the
-/// user; writing needs root or a udev rule (surfaced via LastError, not thrown).</summary>
-public sealed class SysfsChargeLimit : IBatteryChargeLimit
+/// user; writing needs root or a udev rule (surfaced as the write's own error, not thrown).
+///
+/// This is a factory rather than a port: the probe's whole result IS the property, and the node it found is
+/// captured by the ops it returns, so there is no instance left to hold one (Domain/Battery.cs).
+/// </summary>
+public static class SysfsChargeLimit
 {
     private const int LimitPercent = 80;
 
-    private readonly string _node;
-    private SysfsChargeLimit(string node) => _node = node;
-
-    public string? LastError { get; private set; }
-
-    /// <summary>Present only if the kernel exposes the end-threshold node for a battery AND it is writable
-    /// by the current user. Like the hwmon fan PWM, the node is usually root-owned, so without a udev rule
-    /// this returns null and the UI omits the toggle (rather than offering one that fails with
+    /// <summary>The property, or null when the kernel exposes no end-threshold node for a battery OR it is not
+    /// writable by the current user. Like the hwmon fan PWM, the node is usually root-owned, so without a udev
+    /// rule this is absent and the UI omits the toggle (rather than offering one that fails with
     /// "access denied" on every write).</summary>
-    public static SysfsChargeLimit? TryCreate()
+    public static BatteryToggle? TryCreate()
     {
         try
         {
@@ -28,7 +27,7 @@ public sealed class SysfsChargeLimit : IBatteryChargeLimit
             {
                 if (!Path.GetFileName(d).StartsWith("BAT", StringComparison.Ordinal)) continue;
                 string node = Path.Combine(d, "charge_control_end_threshold");
-                if (File.Exists(node) && CanWrite(node)) return new SysfsChargeLimit(node);
+                if (File.Exists(node) && CanWrite(node)) return new BatteryToggle(() => Get(node), on => Set(node, on));
             }
         }
         catch { /* none */ }
@@ -42,15 +41,15 @@ public sealed class SysfsChargeLimit : IBatteryChargeLimit
         catch { return false; }
     }
 
-    public bool Get()
+    private static bool Get(string node)
     {
-        try { return int.TryParse(File.ReadAllText(_node).Trim(), out int v) && v is > 0 and < 100; }
+        try { return int.TryParse(File.ReadAllText(node).Trim(), out int v) && v is > 0 and < 100; }
         catch { return false; }
     }
 
-    public bool Set(bool on)
+    private static (bool ok, string? error) Set(string node, bool on)
     {
-        try { File.WriteAllText(_node, (on ? LimitPercent : 100).ToString()); LastError = null; return true; }
-        catch (Exception ex) { LastError = ex.Message; return false; }
+        try { File.WriteAllText(node, (on ? LimitPercent : 100).ToString()); return (true, null); }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 }

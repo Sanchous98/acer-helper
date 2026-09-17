@@ -7,8 +7,7 @@ namespace AcerHelper.Tests;
 
 /// <summary>
 /// <see cref="OptionsAssembler"/> — the one place that knows the device's option ports and funnels every
-/// setter through <c>RunSet</c> so a failed hardware write reaches the user instead of dying silently
-/// (OptionsAssembler.cs:140-149).
+/// setter through <c>RunSet</c> so a failed hardware write reaches the user instead of dying silently.
 ///
 /// WHY THESE TESTS CAN EXIST AT ALL: <c>RunSet</c> is <c>private</c> (InternalsVisibleTo grants access to
 /// <c>internal</c> only), so nothing here calls it. Its only observable effect used to be a
@@ -296,9 +295,13 @@ public class OptionsAssemblerReadbackTests
 }
 
 /// <summary>
-/// Which rows exist. A null port is the capability model's "this machine cannot do that"
-/// (Domain/Ports.cs:265-269), so a row that appears without its port promises the user a control that
-/// cannot work — and one that fails to appear hides a feature the machine does have.
+/// Which rows exist. A null port is the capability model's "this machine cannot do that", so a row that
+/// appears without its port promises the user a control that cannot work — and one that fails to appear hides
+/// a feature the machine does have.
+///
+/// The three battery rows no longer arrive through a port: they exist exactly when the battery OBJECT has the
+/// property (Domain/Battery.cs), which is the same rule stated one level down. This file's variant of it
+/// covers them one at a time; <c>BatteryTests</c> covers the whole present/absent combination.
 /// </summary>
 public class OptionsAssemblerPresenceTests
 {
@@ -419,8 +422,8 @@ public class OptionsAssemblerPresenceTests
 
 /// <summary>
 /// The one row gated behind a confirmation, and the delegate it is gated with. A single click on calibration
-/// starts a multi-hour charge/discharge cycle, so the row must not be able to run one from the click alone
-/// (OptionsAssembler.cs:128-134) — and no OTHER row may ask, because an extra dialog is invisible until it
+/// starts a multi-hour charge/discharge cycle, so the row must not be able to run one from the click alone —
+/// and no OTHER row may ask, because an extra dialog is invisible until it
 /// appears in front of a user who did not expect one.
 /// </summary>
 public class OptionsAssemblerConfirmTests
@@ -432,7 +435,7 @@ public class OptionsAssemblerConfirmTests
     {
         Func<Task<bool>> confirm = () => Task.FromResult(false);
         var h = new OptionsAssemblerHarness(confirmCalibration: confirm);
-        h.F.Device.BatteryCalibration = new FakeFlagPort();
+        h.F.Device.Battery.Calibration = new FakeFlagPort().AsBatteryToggle();
 
         var row = h.Assembler.BatteryCalibration();
 
@@ -549,10 +552,10 @@ internal static class AssemblerRows
             case "LCD overdrive":                 h.F.Device.LcdOverdrive = flag; break;
             case "Keyboard backlight timeout":    h.F.Device.KeyboardBacklight = flag; break;
             case "Fn lock":                       h.F.Device.FnLock = flag; break;
-            case "Charge limit (~80%)":           h.F.Device.BatteryChargeLimit = flag; break;
-            case "Calibration (full cycle)":      h.F.Device.BatteryCalibration = flag; break;
+            case "Charge limit (~80%)":           h.F.Device.Battery.ChargeLimit = flag.AsBatteryToggle(); break;
+            case "Calibration (full cycle)":      h.F.Device.Battery.Calibration = flag.AsBatteryToggle(); break;
             case "USB charging when off:":        h.F.Device.UsbCharging = choice; break;
-            case "Charge mode":                   h.F.Device.BatteryChargeMode = choice; break;
+            case "Charge mode":                   h.F.Device.Battery.ChargeMode = choice.AsBatteryChoice(); break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(locKey), locKey, "no port slot is mapped to this row");
         }

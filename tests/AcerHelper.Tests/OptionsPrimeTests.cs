@@ -52,13 +52,13 @@ public class OptionsPrimeTests
         var timeout = new FakeChoicePort("5", "30", "60");
         var mode = new FakeChoicePort("adaptive", "express");
         h.F.Device.LcdOverdrive = lcd;
-        h.F.Device.BatteryChargeLimit = limit;
-        h.F.Device.BatteryCalibration = cal;
+        h.F.Device.Battery.ChargeLimit = limit.AsBatteryToggle();
+        h.F.Device.Battery.Calibration = cal.AsBatteryToggle();
         h.F.Device.FnLock = fn;
         h.F.Device.KeyboardBacklight = kbd;
         h.F.Device.UsbCharging = usb;
         h.F.Device.KeyboardBacklightTimeout = timeout;
-        h.F.Device.BatteryChargeMode = mode;
+        h.F.Device.Battery.ChargeMode = mode.AsBatteryChoice();
 
         var toggles = AssemblerRows.Toggles(h).ToList();
         var choices = AssemblerRows.Choices(h).ToList();

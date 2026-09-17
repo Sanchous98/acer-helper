@@ -4,6 +4,10 @@ namespace AcerHelper.Domain;
 // Feature ports: one fine-grained interface per laptop capability. Infrastructure implements
 // them; the Application/UI depend only on these. A feature a device lacks is represented by a
 // null port on IDevice (see below), so the UI shows exactly the features that exist.
+//
+// One capability has moved off that scheme: the battery is a domain OBJECT (Domain/Battery.cs)
+// that declares its own properties one by one, because the battery's controls are not four
+// independent machine capabilities but parts of one. IDevice exposes it as a single slot.
 
 /// <summary>Switchable performance/platform profiles.</summary>
 public interface IPowerProfiles
@@ -34,7 +38,9 @@ public interface ISensors
 
 /// <summary>Shared shape of a boolean hardware toggle (on/off) with an error channel. The concrete on/off
 /// feature ports derive from this so they share one definition and one implementation (see FlagPort); the
-/// distinct interface types stay so IDevice can expose each capability as its own nullable port.</summary>
+/// distinct interface types stay so IDevice can expose each capability as its own nullable port. The battery's
+/// two toggles are NOT among them: they are members of the battery object (Domain/Battery.cs), where presence
+/// per property is what the object itself declares.</summary>
 public interface IFlagPort
 {
     string? LastError { get; }
@@ -57,25 +63,12 @@ public interface IChoicePort
 /// <summary>LCD overdrive (response-time boost).</summary>
 public interface ILcdOverdrive : IFlagPort { }
 
-/// <summary>Live battery telemetry (charge %, state, health, cycles). Read-only.</summary>
-public interface IBatteryInfo
-{
-    BatteryInfoSnapshot Read();
-}
-
-/// <summary>~80% battery charge limit (battery-health mode).</summary>
-public interface IBatteryChargeLimit : IFlagPort { }
-
-/// <summary>Battery calibration (full charge/discharge cycle).</summary>
-public interface IBatteryCalibration : IFlagPort { }
-
-/// <summary>Vendor battery charging strategy — a named mode, not a bare threshold (e.g. Dell:
-/// Adaptive / Express charge / Primarily AC / Standard / Custom). The mode set (<see cref="IChoicePort.Options"/>)
-/// is what the firmware actually advertises on this machine.</summary>
-public interface IBatteryChargeMode : IChoicePort { }
-
 /// <summary>USB charging while the laptop is powered off. The options are vendor-defined labelled choices
-/// (Acer: Off/10%/20%/30% battery threshold; Dell PowerShare: Off/On).</summary>
+/// (Acer: Off/10%/20%/30% battery threshold; Dell PowerShare: Off/On). A battery-shaped name and, on Acer,
+/// battery-threshold ids — but NOT a property of the battery, so it stays a port of its own: the row it
+/// drives ("USB charging when off:") belongs to the Options drawer, and folding it into the battery object
+/// would move it into the Battery section, which is a change to what the user sees (see the wave 4b notes in
+/// docs/domain-refactoring-plan.md).</summary>
 public interface IUsbCharging : IChoicePort { }
 
 /// <summary>Keyboard backlight auto-off timeout (on/off).</summary>
@@ -266,6 +259,11 @@ public interface IClamshell : IDisposable
 /// The connected laptop. Each feature is a nullable port: <c>null</c> means the device does not
 /// support that feature (so the UI hides its section). This <i>is</i> the capability model —
 /// the set of non-null ports describes exactly what this vendor × OS combination can do.
+///
+/// The battery is the exception, and the first capability to change shape: <see cref="Battery"/> is always
+/// there and declares its OWN properties one by one (Domain/Battery.cs), because "this laptop has no charge
+/// limiter" is a fact about the battery rather than about the machine. A machine with no battery at all is
+/// simply one whose battery object has nothing on it.
 /// </summary>
 public interface IDevice : IDisposable
 {
@@ -276,10 +274,7 @@ public interface IDevice : IDisposable
     IFanControl?         FanControl         { get; }
     ISensors?            Sensors            { get; }
     ILcdOverdrive?       LcdOverdrive       { get; }
-    IBatteryInfo?        BatteryInfo        { get; }
-    IBatteryChargeLimit? BatteryChargeLimit { get; }
-    IBatteryCalibration? BatteryCalibration { get; }
-    IBatteryChargeMode?  BatteryChargeMode  { get; }
+    Battery              Battery            { get; }
     IUsbCharging?        UsbCharging        { get; }
     IKeyboardBacklight?  KeyboardBacklight  { get; }
     IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; }

@@ -53,9 +53,14 @@ public sealed partial class AcerDevice
         LcdOverdrive  = new FlagPort(GetLcd, SetLcd);
 
         Own(_battery = new WmiInvoker("BatteryControl"));
+        // The firmware's own capability MASK decides which of the two properties this battery has: ReadStatus
+        // reports uFunctionList, a bitmask of the modes the machine supports. Until wave 4b each bit gated a
+        // nullable port of its own, which expressed the same presence — what changes is that it is now stated
+        // as a property of the battery, so a battery that lacks one is visible as such rather than as a null
+        // slot beside three others.
         var bm = _battery.Available ? BatteryWmi.ReadStatus(_battery, out _) : null;
-        if (bm?.HealthAvail == true) BatteryChargeLimit = new FlagPort(GetChargeLimit, SetChargeLimit);
-        if (bm?.CalibAvail  == true) BatteryCalibration = new FlagPort(GetCalibration, SetCalibration);
+        if (bm?.HealthAvail == true) Battery.ChargeLimit = new(GetChargeLimit, SetChargeLimit);
+        if (bm?.CalibAvail  == true) Battery.Calibration = new(GetCalibration, SetCalibration);
 
         Own(_apge = new WmiInvoker("APGeAction"));
         if (_apge.Available && UsbDecode(UiGet(_apge, UsbQuery)) >= 0)

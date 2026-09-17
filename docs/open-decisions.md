@@ -528,6 +528,10 @@ nothing here and is a thermal and stability risk, so it is not offered». Обе
   «чего нет» объявляет сам объект (батарея без лимитера), а не отсутствие порта.
   Разбор — `docs/domain-refactoring-plan.md` §3.1. Признано хорошим ровно то, что
   здесь и было ценно — узость; отменяется способ её получить.
+  **Первый объект landed в волне 4b** (`Domain/Battery.cs`): четыре батарейных порта
+  (`IBatteryInfo`, `IBatteryChargeLimit`, `IBatteryCalibration`, `IBatteryChargeMode`)
+  заменены одним `Battery` с nullable-свойствами, `IDevice` усох с 22 портов до 19,
+  сами интерфейсы удалены. Остальные порты пока по старой схеме.
 - WMI через source-generated COM interop вместо `System.Management` (тот не
   AOT-совместим).
 - `Loc` на встроенных таблицах вместо `.resx` (спутниковые сборки ломают Native

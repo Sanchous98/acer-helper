@@ -36,7 +36,8 @@ namespace AcerHelper.Tests;
 /// recorded for <c>BackgroundPass</c>'s binding to the reconciler in <c>HardwareReconcilerTests</c>.)
 ///
 /// What these gates cannot show, and nothing here claims they do: that the port really returns what the row now
-/// shows on a live machine (no test constructs <c>AcerDevice</c>/<c>DellDevice</c> — wave 4b's finding), and
+/// shows on a live machine (no test constructs <c>AcerDevice</c>/<c>DellDevice</c> — the finding that got wave
+/// 4b's own check reworded, `docs/domain-refactoring-plan.md` §5), and
 /// that the placeholder is never visible at real startup timings.
 /// </summary>
 public class BatteryPrimeTests
@@ -252,9 +253,9 @@ public class BatteryPrimeTests
         var limit = new FakeFlagPort { State = limiterOn };
         var cal = new FakeFlagPort { State = calibrating };
         var mode = new FakeChoicePort("adaptive", "express") { CurrentId = chargeModeId };
-        h.F.Device.BatteryChargeLimit = limit;
-        h.F.Device.BatteryCalibration = cal;
-        h.F.Device.BatteryChargeMode = mode;
+        h.F.Device.Battery.ChargeLimit = limit.AsBatteryToggle();
+        h.F.Device.Battery.Calibration = cal.AsBatteryToggle();
+        h.F.Device.Battery.ChargeMode = mode.AsBatteryChoice();
         return (h, limit, cal, mode);
     }
 
@@ -271,7 +272,7 @@ public class BatteryPrimeTests
     /// </summary>
     private static BatteryViewModel Section(OptionsAssemblerHarness h)
     {
-        var bat = new BatterySection(HasInfo: true,
+        var bat = new BatterySection(h.F.Device.Battery,
                                      h.Assembler.BatteryLimit(), h.Assembler.BatteryCalibration(),
                                      h.Assembler.BatteryChargeMode());
         return new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode, Eventually.Sync);

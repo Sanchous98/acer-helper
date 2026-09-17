@@ -4,8 +4,8 @@ namespace AcerHelper.Tests.Fakes;
 
 /// <summary>
 /// Hand-written <see cref="IDevice"/>. EVERY port is a settable auto-property defaulting to
-/// <c>null</c> = "this device does not have that feature" (Domain/Ports.cs:270-297), so a test
-/// declares exactly the hardware its scenario needs and nothing else:
+/// <c>null</c> = "this device does not have that feature", so a test declares exactly the hardware its
+/// scenario needs and nothing else:
 ///
 ///     var f = new LaptopServiceFixture();
 ///     f.Device.PowerProfiles = new FakePowerProfiles(profiles);
@@ -14,6 +14,12 @@ namespace AcerHelper.Tests.Fakes;
 /// Ports are read lazily by <c>LaptopService</c> on each call, so assigning them after the service is
 /// constructed is correct. <see cref="Dispose"/> is a no-op that records the call: nothing here owns a
 /// handle, and no test may touch real hardware.
+///
+/// <see cref="Battery"/> is the one slot that is NOT nullable, because it is no longer a port: it is the
+/// domain object that declares its own properties one by one (Domain/Battery.cs), and a machine with no
+/// battery is simply one whose object has nothing on it. A test therefore arranges the battery through that
+/// object — <c>f.Device.Battery.ChargeLimit = new FakeFlagPort().AsBatteryToggle()</c> — and an empty
+/// <see cref="Battery"/> is the canonical "no battery anything" device.
 /// </summary>
 public sealed class FakeDevice : IDevice
 {
@@ -24,10 +30,7 @@ public sealed class FakeDevice : IDevice
     public IFanControl? FanControl { get; set; }
     public ISensors? Sensors { get; set; }
     public ILcdOverdrive? LcdOverdrive { get; set; }
-    public IBatteryInfo? BatteryInfo { get; set; }
-    public IBatteryChargeLimit? BatteryChargeLimit { get; set; }
-    public IBatteryCalibration? BatteryCalibration { get; set; }
-    public IBatteryChargeMode? BatteryChargeMode { get; set; }
+    public Battery Battery { get; set; } = new();
     public IUsbCharging? UsbCharging { get; set; }
     public IKeyboardBacklight? KeyboardBacklight { get; set; }
     public IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; set; }

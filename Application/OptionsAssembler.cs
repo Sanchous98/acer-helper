@@ -115,31 +115,33 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             Read: () => IndexOfProfile(profiles, svc.SourceProfile(onAc)));
     }
 
-    // Battery controls live in the Battery section (not generic Options).
+    // Battery controls live in the Battery section (not generic Options). They read the battery OBJECT, whose
+    // properties are ops rather than ports: a row exists exactly when the property does, which is the same
+    // fact the old nullable port carried — now declared by the battery itself (Domain/Battery.cs).
 
     /// <summary>Vendor battery charging strategy (e.g. Dell Adaptive/Express/Custom) as a dropdown.</summary>
     public OptionChoice? BatteryChargeMode()
     {
-        if (svc.Device.BatteryChargeMode is not { } mode) return null;
+        if (svc.Device.Battery.ChargeMode is not { } mode) return null;
         var modes = mode.Options;
         var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
         return new OptionChoice(Loc.T("Charge mode"), true, names, 0,
-            i => RunSet(() => svc.SetChoice(mode, modes[i].Id), "Charge mode"),
-            Read: () => IndexOf(modes, mode.Get()));
+            i => RunSet(() => svc.SetBatteryChoice(mode, modes[i].Id), "Charge mode"),
+            Read: () => IndexOf(modes, mode.Read()));
     }
 
     public OptionToggle? BatteryLimit()
-        => svc.Device.BatteryChargeLimit is { } limit
+        => svc.Device.Battery.ChargeLimit is { } limit
             ? new OptionToggle(Loc.T("Charge limit (~80%)"), true, false,
-                v => RunSet(() => svc.SetFlag(limit, v), "Battery limit"), Read: limit.Get)
+                v => RunSet(() => svc.SetBatteryToggle(limit, v), "Battery limit"), Read: limit.Read)
             : null;
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
     public OptionToggle? BatteryCalibration()
-        => svc.Device.BatteryCalibration is { } cal
+        => svc.Device.Battery.Calibration is { } cal
             ? new OptionToggle(Loc.T("Calibration (full cycle)"), true, false,
-                v => RunSet(() => svc.SetFlag(cal, v), "Battery calibration"),
-                Read: cal.Get, ConfirmAsync: confirmCalibration)
+                v => RunSet(() => svc.SetBatteryToggle(cal, v), "Battery calibration"),
+                Read: cal.Read, ConfirmAsync: confirmCalibration)
             : null;
 
     // Apply one hardware set and report failure. Called on the row's serial worker thread (see HwSerial):

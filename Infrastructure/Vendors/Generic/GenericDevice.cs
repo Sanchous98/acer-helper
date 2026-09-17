@@ -20,10 +20,7 @@ public partial class GenericDevice : IDevice
     public IFanControl?         FanControl         { get; protected set; }
     public ISensors?            Sensors            { get; protected set; }
     public ILcdOverdrive?       LcdOverdrive       { get; protected set; }
-    public IBatteryInfo?        BatteryInfo        { get; protected set; }
-    public IBatteryChargeLimit? BatteryChargeLimit { get; protected set; }
-    public IBatteryCalibration? BatteryCalibration { get; protected set; }
-    public IBatteryChargeMode?  BatteryChargeMode  { get; protected set; }
+    public Battery              Battery            { get; } = new();
     public IUsbCharging?        UsbCharging        { get; protected set; }
     public IKeyboardBacklight?  KeyboardBacklight  { get; protected set; }
     public IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; protected set; }
@@ -47,7 +44,10 @@ public partial class GenericDevice : IDevice
     public GenericDevice(string? status = null)
     {
         StatusMessage = status;
-        BatteryInfo = GenericBattery.TryCreate();   // cross-platform (null on a desktop / no battery)
+        // Cross-platform telemetry, and the ONLY property the base can offer: whether it exists at all is the
+        // OS's answer (null on a desktop / no battery), and the machine's charging controls — none of which the
+        // generic OS surface can promise — are added by a vendor's InitVendor one property at a time.
+        if (GenericBattery.TryCreate() is { } info) Battery.Telemetry = info.Read;
         Autostart = new Autostart();                // cross-platform (.desktop on Linux, scheduled task on Windows)
         InitPlatform();
     }

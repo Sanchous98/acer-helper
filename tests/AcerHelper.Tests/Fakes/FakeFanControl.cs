@@ -47,7 +47,11 @@ public sealed class FakeSensors : ISensors
     }
 }
 
-public sealed class FakeBatteryInfo : IBatteryInfo
+/// <summary>Hand-written battery telemetry: no EC, no ACPI, just the snapshot the test hands in — with its
+/// reads counted, so "the battery card read the hardware" is an assertion rather than an implementation
+/// detail. This used to be a port (<c>FakeBatteryInfo</c>); telemetry is the battery object's own op now
+/// (Domain/Battery.cs), so a test wires it with <c>Battery.Telemetry = telemetry.Read</c>.</summary>
+public sealed class FakeBatteryTelemetry
 {
     public BatteryInfoSnapshot Snapshot { get; set; } = new();
     public int ReadCount { get; private set; }

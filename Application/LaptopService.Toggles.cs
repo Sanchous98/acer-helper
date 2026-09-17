@@ -8,7 +8,7 @@ public sealed partial class LaptopService
 {
     public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();
 
-    public BatteryInfoSnapshot ReadBatteryInfo() => device.BatteryInfo?.Read() ?? new BatteryInfoSnapshot();
+    public BatteryInfoSnapshot ReadBatteryInfo() => device.Battery.Read();
 
     // ---- hardware toggles (each returns the write's outcome AND its reason) ----
 
@@ -20,6 +20,16 @@ public sealed partial class LaptopService
 
     public (bool ok, string? error) SetChoice(IChoicePort? port, string id)
         => port == null ? (false, null) : Attempt(() => port.Set(id), () => port.LastError);
+
+    // The battery's properties are not ports: they are ops that answer both halves of their outcome
+    // themselves (Domain/Battery.cs), so there is no LastError to fetch afterwards and the shape of the
+    // wrapper differs — see the tuple overload of Attempt. The rows above keep the port shape, which still
+    // carries its own error channel.
+    public (bool ok, string? error) SetBatteryToggle(BatteryToggle toggle, bool on)
+        => Attempt(() => toggle.Write(on));
+
+    public (bool ok, string? error) SetBatteryChoice(BatteryChoice choice, string id)
+        => Attempt(() => choice.Write(id));
 
     public (bool ok, string? error) SetKeyboardBrightness(int level)
         => device.KeyboardBrightness is { } kb ? Attempt(() => kb.Set(level), () => kb.LastError) : (false, null);
