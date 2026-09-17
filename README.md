@@ -44,26 +44,31 @@ reboot while the EC mode behind it does not. Full protocol, the measured mode→
 
 ## Architecture
 
-One project, organised by layer; **namespaces match the directories** (`AcerHelper` + path):
+One project, organised by layer; **namespaces match the directories** (`AcerHelper` + path).
+The dependency arrow is **Infrastructure → Application → Domain**: Infrastructure depends on
+and *uses* Application, Application depends on Domain, and neither the reverse nor a skip is
+allowed. Infrastructure implements what Application declares. `ArchitectureMapTests` asserts it.
 
 - **`Domain/`** (`AcerHelper.Domain`) — the vendor- and OS-agnostic core: model
   (`PerformanceProfile`, `FanMode`, `SensorSnapshot`, `HotkeyAction`, …) and one fine-grained
-  *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `ILighting`, `IHotkeys`,
+  *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `IRgbDevice`, `IHotkeys`,
   `IDisplayTint`, `IAutostart`, `IClamshell`). The aggregate `IDevice` exposes each port as
   **nullable** — `null` means the feature is absent, so the UI shows exactly what the hardware has.
   Two capabilities state their own shape instead of occupying a port: the battery is an OBJECT
   (`Battery`) declaring its properties one by one, so a firmware with no charge limiter is a battery
   whose `ChargeLimit` is null instead of a missing port beside three others; and the settings a
-  backend owns are **declared** (`SettingDeclaration`) under the backend's own opaque key, so the
-  domain knows no hardware-specific setting name — the settings model is constructed with the set of
-  them and switches only within it, refusing anything this machine does not declare. See
+  backend owns are **declared** (`SettingDeclaration`, in `Domain/DeclaredSetting.cs`) under the
+  backend's own opaque key, so the domain knows no hardware-specific setting name — the settings
+  CONTAINER (Infrastructure's) is constructed with the set of them and switches only within it,
+  refusing anything this machine does not declare. See
   `docs/domain-refactoring-plan.md` §3.1 and §5 (waves 5 + 9).
   Also the pieces that are logic rather than I/O: `Fan` (one fan's duty curve and the duty applied to it)
   with `FanCurveEngine` (the pair of fans and the deadband over them), and the
   compile-time version constant.
-- **`Application/`** (`AcerHelper.Application`) — the use cases, and nothing else: `LaptopService`
-  (split across `LaptopService.*.cs` partials, one per feature family) and `OptionsAssembler`.
-  This is the only layer the UI talks to.
+- **`Application/`** (`AcerHelper.Application`) — the use cases, and the contracts Infrastructure
+  implements: `ReapplyPlan` (which axes a boot, a mode switch and a wake re-apply, in what order, on
+  what thread), `IDynamicLighting`/`IDynamicLightingFactory` (the virtual-lighting surface the bridge
+  implements), and `AppArgs`. It names no Infrastructure type — see the arrow above.
 - **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
   `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.
@@ -88,12 +93,18 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
   power-mode overlay / Linux ACPI `platform_profile`), blue-light gamma, autostart, clamshell,
   battery, keyboard brightness, hwmon sensors + a small WMI helper, again split by
   `*.Windows.cs` / `*.Linux.cs`. It is a *vendor* only in the sense that its "vendor" is the OS —
-  which is why it lives beside `Acer/` rather than in a layer of its own.
+  which is why it lives beside `Acer/` rather than in a layer of its own. The one part that is
+  *not* vendor-agnostic lives here too, next to the transport that made it concrete: `CoAxis`
+  (the Curve Optimizer's four write rules) and `OffsetCounts` (its AVFS counts), because a rail
+  clamped in AVFS counts models one vendor's silicon rather than the task.
 - **`Infrastructure/Vendors/Dell/`** (`AcerHelper.Infrastructure.Vendors.Dell`) — the second vendor
   backend, the one that proves the split is real rather than Acer-shaped.
-- **`Infrastructure/Composition/`** (`AcerHelper.Infrastructure.Composition`) —
-  `DeviceFactory.Windows.cs` / `DeviceFactory.Linux.cs`
-  detect the device and assemble an `IDevice`; `CompositeDevice`, `JsonSettingsStore`. When no
+- **`Infrastructure/Composition/`** (`AcerHelper.Infrastructure.Composition`) — the machine's
+  service and the shape its settings are kept in: `LaptopService` (split across `LaptopService.*.cs`
+  partials, one per feature family), `OptionsAssembler` (the hardware rows), `HardwareReconciler`
+  (executes `Application`'s re-apply plan against the ports), `Settings` and the persisted presets
+  (`FanPreset`, `GpuOcPreset`, `CoPreset`, `LightSettings`, …) with `ModeKey` and `ISettingsStore`,
+  and `JsonSettingsStore`. `DeviceFactory` detects the device and assembles an `IDevice`. When no
   vendor backend matches (a non-Acer laptop, or no elevation), it falls back to a **generic
   device** offering those OS-standard basics — so the app is useful on any laptop. (Validated on a
   Dell Latitude 5540 on Linux: shows the firmware's cool/quiet/balanced/performance profiles.)

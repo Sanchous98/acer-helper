@@ -9,7 +9,8 @@ Everything below is a read of the tree at v0.32.0. Line numbers are as of that r
 **Line numbers here are not maintained (noted 2026-09-14).** They were written against the revision current when
 each passage was written and have already drifted; treat the symbol names as the anchor and re-locate by name.
 The tree has also been reorganised since: `LaptopService` is now six `LaptopService*.cs` partial files, and
-`OptionsAssembler` has moved from `UI/` to the repo root (`namespace AcerHelper.Application`).
+`OptionsAssembler` has moved from `UI/` to the repo root (later `Infrastructure/Composition/`, see below;
+the namespace in between was `AcerHelper.Application`).
 
 **Paths were also reorganised (2026-09-15), and this document predates that.** Every path quoted below was
 written against the old layout; `namespace` now equals the folder path verbatim, and 85 files moved. The
@@ -25,6 +26,16 @@ substitutions a reader needs:
 | `Program.cs` at the root | `Bootstrap/Program.cs` |
 | `Os/…` | `Infrastructure/Vendors/Generic/…` (the folder no longer exists) |
 | `AcerHelper.Features`, `AcerHelper.Vendors.*`, `AcerHelper.Os`, `AcerHelper.Composition`, `AcerHelper.Diagnostics` | `AcerHelper.Domain`, `AcerHelper.Infrastructure.Vendors.*`, `AcerHelper.Infrastructure.*` |
+
+**And the service layer left `Application/` (2026-09-18).** The substitution table's row for
+`LaptopService*.cs` / `OptionsAssembler.cs` now reads `Infrastructure/Composition/…`, not `Application/…`:
+the owner ruled that a "service" over the hardware and the persisted settings graph is Infrastructure, and
+the re-apply operation was split with it — `Application/ReapplyPlan.cs` holds the plan (`ReapplyTrigger`,
+`Schedule`, `RunsOffTheCallersThread`, `Reflects`) and `Infrastructure/Composition/HardwareReconciler.cs`
+executes it. `Settings.cs` and the presets followed to `Infrastructure/Composition/`, `CoAxis`/`OffsetCounts`
+to `Infrastructure/Vendors/Generic/`, and the declared-setting CONTRACT stayed in `Domain/DeclaredSetting.cs`.
+Every `LaptopService*` symbol named below is unchanged; only its folder is. See
+`docs/domain-layering-map.md` §2.
 
 **And the LampArray layer left `Domain/` too (2026-09-17).** `Domain/LampArrayBridge.cs` and
 `Domain/LampArray.cs` are now `Infrastructure/Lighting/LampArrayBridge.cs` and
