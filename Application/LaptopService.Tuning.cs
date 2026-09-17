@@ -20,6 +20,16 @@ public sealed partial class LaptopService
             return Settings.GpuOcPresets.TryGetValue(CurrentModeKey(), out var g) ? g.Snapshot() : new GpuOcPreset();
     }
 
+    /// <summary>As <see cref="CurrentGpuOc()"/> but reusing an already-read current profile — the same pair, and
+    /// for the same reason, as <see cref="CurrentModeKey(PerformanceProfile?)"/>. The key derivation and the
+    /// preset lookup stay together under <c>_state</c>, exactly as in the parameterless form; the only thing
+    /// removed is the <c>PowerProfiles</c> read that caller was paying for a profile it already had.</summary>
+    public GpuOcPreset CurrentGpuOc(PerformanceProfile? cur)
+    {
+        lock (_state)
+            return Settings.GpuOcPresets.TryGetValue(CurrentModeKey(cur), out var g) ? g.Snapshot() : new GpuOcPreset();
+    }
+
     /// <summary>Set the GPU core+memory clock offsets (MHz) for the CURRENT mode, persist, and apply now.</summary>
     public (bool ok, string? error) SetGpuOc(int core, int mem)
     {
@@ -103,6 +113,16 @@ public sealed partial class LaptopService
             return Settings.CoPresets.TryGetValue(CurrentModeKey(), out var c) ? c.Snapshot() : new CoPreset();
     }
 
+    /// <summary>As <see cref="CurrentCo()"/> but reusing an already-read current profile — the same pair, and for
+    /// the same reason, as <see cref="CurrentModeKey(PerformanceProfile?)"/>. It exists because
+    /// <see cref="CurrentCoDomains(PerformanceProfile?)"/> renders its rows from this preset, and that caller is
+    /// handed the profile: going through the parameterless form would read the port for a key it already holds.</summary>
+    public CoPreset CurrentCo(PerformanceProfile? cur)
+    {
+        lock (_state)
+            return Settings.CoPresets.TryGetValue(CurrentModeKey(cur), out var c) ? c.Snapshot() : new CoPreset();
+    }
+
     /// <summary>Set the all-core Curve-Optimizer offset (AVFS counts, negative = undervolt) for the CURRENT mode,
     /// persist, and apply now. Call this OFF the UI thread: the SMU transaction waits on a machine-wide PCI lock
     /// that other tuning tools also take, so it can block for seconds.</summary>
@@ -139,11 +159,25 @@ public sealed partial class LaptopService
         // below is built from a copy nothing else can reach. It is kept because this is a read of the guarded
         // Settings graph reached from the UI thread and from the refresh pass, and because dropping a lock is a
         // change in lock scope rather than the move of a rule this method is part of. It is NOT held across a
-        // hardware call: the mode key read inside CurrentCo is an EC transaction that call sites hold _state for
-        // (docs/open-decisions.md §3), co.Domains is an immutable descriptor list built in the port's
-        // constructor, and the index alignment and the key lookup are the domain's (Domain/CoAxis.cs).
+        // hardware call of its own: the one EC transaction reachable from here is the mode-key read inside the
+        // parameterless CurrentCo(), which call sites hold _state for by decision (docs/open-decisions.md §3) —
+        // co.Domains is an immutable descriptor list built in the port's constructor, and the index alignment and
+        // the key lookup are the domain's (Domain/CoAxis.cs).
         lock (_state)
             return new CoAxis(co.Domains, co.Range).Rows(CurrentCo());
+    }
+
+    /// <summary>As <see cref="CurrentCoDomains()"/> but reusing an already-read current profile. The lock, the
+    /// rows and the port guard are the parameterless form's, unchanged — the only difference is the key inside
+    /// <see cref="CurrentCo(PerformanceProfile?)"/>: this form reads NO port at all, so a caller holding the
+    /// profile (the UI build path does, see <c>AppController.BuildUi</c>) stops paying an EC round-trip for the
+    /// rows it renders.</summary>
+    public int[] CurrentCoDomains(PerformanceProfile? cur)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null) return [];
+        lock (_state)
+            return new CoAxis(co.Domains, co.Range).Rows(CurrentCo(cur));
     }
 
     /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one

@@ -387,6 +387,43 @@ too, not `Settings` reads: each takes `_state` and calls `CurrentModeKey()`, whi
 port for the live profile — so the UI thread still blocks on G1 from `BuildUi`, through fewer sites than the
 list below names.
 
+**Corrected a second time 2026-09-17: the three preset reads are gone from `BuildUi`, and the item is still not
+retired.** `CurrentFan`, `CurrentGpuOc` and `CurrentCoDomains` gained an overload taking an already-read profile
+— the pair `CurrentModeKey(PerformanceProfile?)` already had, and the remedy `docs/open-decisions.md` §3 names
+for exactly this site — and `BuildUi` now passes the `cur` its caller read once. (`CurrentCo` gained the same
+overload because `CurrentCoDomains` renders its rows from it: four methods, three call sites.) `BuildUi`
+therefore reads no live profile through the `PowerProfiles` port any more — it still touches the port's `All`
+list, which is a cached table built at construction, not a transaction — and the closing sentence above is
+superseded: the UI thread no longer blocks on G1 from `BuildUi` through those three.
+
+Read that as a narrowing, not a retirement. What survives, measured against the tree:
+
+- the build path still performs **one** profile read on the UI thread — the deliberate hoist in the
+  `AppController` constructor and in `RebuildForLanguage`, which exists so that `BuildUi` can be handed a
+  profile at all. Its comment enumerates what keys off that one read; the enumeration now includes these three.
+  So "the build path performs no hardware read" remains false, at one read per build instead of four.
+- `BuildUi` still acquires G2 (`PowerSourceProfiles()` → `LaptopService.SourceProfile`), and the background
+  pass holds G2 across EC writes (`ApplyCustom`, `ApplyModeCpuPower` — D17 below), so a build can still wait
+  behind the poll. Removing a read removes a G1 transaction; it does not remove the exposure.
+- two callers hold no profile and still read, each for a different reason: `LaptopService.ApplyModeGpuOc`
+  (through the parameterless `CurrentGpuOc`, under G2 — a §3 site) and `HardwareReconciler.Reapply`'s
+  Curve-Optimizer reflect (through the parameterless `CurrentCoDomains`, on the pool thread). Whether they
+  should take a profile too is an open decision — `docs/domain-refactoring-plan.md` §7.
+- the same shape exists one layer earlier, at startup, and the bullets below do not say so: the constructor
+  runs `LaptopService.ApplyStartupState` → `HardwareReconciler.Reapply(Startup)` on the UI thread, and the
+  Fans, GpuOc and CpuPower axes are all driven inline there (only `Co` is deferred), each deriving its key
+  through the parameterless `CurrentModeKey()`. This is why the hazard is not a `BuildUi`-only property, and
+  the Fans one is a §3 site for the same reason.
+
+**What is withdrawn** is the conclusion that this item can be read as done — including the opening sentence
+above, that "most of the list below is a record of the state before wave 6, not a to-do list". That sentence is
+true of the LIST; it is not a statement about the UI thread, and this is the second time the difference has had
+to be written down. The record of what was believed at each wave is kept, here and below.
+
+The new shape is pinned by `tests/AcerHelper.Tests/PresetReadsWithProfileTests.cs`, whose fake port counts its
+`Current()` reads: zero on the fixed path, value-identical to the reading path for the same profile, the handed
+profile is the one used, and the two callers without a profile still read.
+
 `BuildUi()` (`AppController`'s `BuildUi`) runs on the UI thread and calls, synchronously:
 
 - `OptionsAssembler.Toggles()` → `lcd.Get()`, `kbd.Get()`, `fn.Get()`
@@ -394,6 +431,7 @@ list below names.
 - `OptionsAssembler.BatteryLimit()` / `BatteryCalibration()` → `limit.Get()`, `cal.Get()`
 - `OptionsAssembler.PowerSourceProfiles()` → `svc.SourceProfile(onAc)` under G2
 - `LaptopService.CurrentFan` / `CurrentGpuOc` / `CurrentCpuPower` / `CurrentCoDomains` → G2
+  *(superseded — see the second correction above: none of those four is read in `BuildUi` today)*
 
 Every one of those `Get()` calls is a WMI transaction and therefore takes **G1** (`WmiSession.Windows.cs:83`).
 `BuildUi` is called at startup (from the `AppController` constructor) and on **every live language switch** (`RebuildForLanguage`).
@@ -731,6 +769,12 @@ block behind the background poll. But the fix is a *priority* and a *timeout*, w
 displacing any primitive: give the poll lower priority at the `WmiSession.Gate` call sites, or move the
 poll's reads behind a single `TryQueryFirst(timeoutMs)`. The actor's two-lane queue (4.4.3) is one way to
 express that; it is not the only way, and it is the most expensive.
+
+*(Re-checked 2026-09-17 against D16's second correction, and left standing as written. The correction removed
+three reads from `BuildUi`; it did not empty the UI thread's hardware path. One profile read per build remains
+there by design, `ApplyStartupState`'s inline axes still read there at startup, and `BuildUi` still waits on G2
+while the poll holds it across an EC write. Priority is still the requirement — which is the objection's point,
+not an argument that the remaining reads are acceptable.)*
 
 **4. Centralising all transports creates a new coupling.** Today the SMU mailbox (5 s cross-process budget),
 the ENE HID pacing (10 ms), the VHF frame pump (blocking) and the ACPI poll (~ms) are four independent

@@ -71,7 +71,8 @@ internal sealed class AppController
 
         // Read the current hardware profile ONCE, and before the UI is built, so everything that keys off the
         // current mode derives it from this one read instead of each doing its own EC round-trip: BuildUi's
-        // lighting lookup, the two seeds below and the follow-lighting hand-off. Hoisting it above BuildUi is safe
+        // lighting lookup and its per-mode fan/GPU/Curve-Optimizer values, the two seeds below and
+        // the follow-lighting hand-off. Hoisting it above BuildUi is safe
         // because BuildUi only READS the device — the state changes live in ApplyStartupState above, which has
         // already run — and it keeps the read outside the gate-stats window below, whose subject is the time
         // BuildUi itself spends blocked on hardware.
@@ -173,7 +174,8 @@ internal sealed class AppController
     // flyout window and the tray. Returns them for the caller to store — kept side-effect-free (no field writes
     // beyond what the closures capture) so it can run both at startup and on a live language rebuild.
     // <paramref name="cur"/> is the current hardware profile, already read by the caller: the lighting view-model
-    // keys its per-mode state off it, and passing it in means that lookup costs no second EC round-trip.
+    // and the per-mode fan/GPU/Curve-Optimizer values all key off it, and passing it in means none of those
+    // lookups costs a second EC round-trip.
     private (MainViewModel, FlyoutCoordinator, TrayController, LightingViewModel?) BuildUi(PerformanceProfile? cur)
     {
         var d = _svc.Device;
@@ -202,21 +204,29 @@ internal sealed class AppController
         // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
         // layer now, which must not reference a UI toolkit.
         var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a));
-        var fan0 = _svc.CurrentFan();   // current mode's fan preset (defaults if none saved)
+        // The three per-mode preset builds below are keyed by the CURRENT mode, and the key is derived from the
+        // live profile — a PowerProfiles read, i.e. a WMI transaction on Windows. `cur` is that profile, read
+        // once by the caller (the constructor and RebuildForLanguage hoist it), so all three pass it in: BuildUi
+        // performs no profile read of its own. Through the parameterless forms these were three EC round-trips
+        // taken on the UI thread while the UI was being built (the hazard recorded as D16 in
+        // docs/hardware-actor-design.md); the values were always Settings' — only the key needed the hardware.
+        var fan0 = _svc.CurrentFan(cur);   // current mode's fan preset (defaults if none saved)
         var vm = new MainViewModel(d, new UiActions(
             new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
-            new GpuSection(_svc.CurrentGpuOc(), SetGpuOc),
+            new GpuSection(_svc.CurrentGpuOc(cur), SetGpuOc),
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
             // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
             // maps an unknown id to Balanced. The real value arrives from the first background pass (see the
             // prime in BackgroundPass / `_cpuPrimed`). The three BATTERY rows below are deferred in the same way
             // (their ports are read to fill them), and so are the Options drawer's rows; both sets are primed off
             // the UI thread right after BuildUi returns — OptionsPage by OptionsViewModel.Prime(), the battery
-            // rows by BatteryViewModel.Prime(). Nothing else in this record list is deferred because nothing else
-            // is a hardware read: fan/GPU presets come from the Settings graph.
+            // rows by BatteryViewModel.Prime(). Nothing else in this record list is deferred, but not because
+            // nothing else needed the hardware: the fan/GPU/Curve-Optimizer values come from the Settings graph
+            // while their KEY came from the port, and they take `cur` for it above. A row is deferred when its
+            // value is readable only from a port; these three are keyed by one.
             new CpuSection(d.CpuPower?.Modes ?? [], null, SetCpuPower),
-            new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
+            new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(cur), SetCo),
             new BatterySection(d.Battery, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.TurboToggles, SetTurboToggles,

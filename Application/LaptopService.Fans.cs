@@ -76,6 +76,19 @@ public sealed partial class LaptopService
             return Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) ? f.Snapshot() : new FanPreset();
     }
 
+    /// <summary>As <see cref="CurrentFan()"/> but reusing an already-read current profile, so a caller that has
+    /// just read it pays no second EC round-trip for the key. Same pair, and for the same reason, as
+    /// <see cref="CurrentModeKey(PerformanceProfile?)"/> and <see cref="LightsForCurrentMode(PerformanceProfile?)"/>.
+    ///
+    /// The lock keeps its exact former scope: the key is derived from the caller's profile and the preset is
+    /// looked up under one <c>_state</c> hold, which is the pairing docs/open-decisions.md §3 protects. What is
+    /// gone is only the port read — the parameterless form still reads it under the lock, deliberately.</summary>
+    public FanPreset CurrentFan(PerformanceProfile? cur)
+    {
+        lock (_state)
+            return Settings.FanPresets.TryGetValue(CurrentModeKey(cur), out var f) ? f.Snapshot() : new FanPreset();
+    }
+
     /// <summary>Apply the current mode's saved fan preset on a mode change. Auto/Max are pushed immediately;
     /// Custom is left to <see cref="ApplyCustom"/> (the refresh loop) so per-fan curves track temperature.
     /// Returns the preset so the UI reflects it, or null if this mode has none (fans left untouched) — a
