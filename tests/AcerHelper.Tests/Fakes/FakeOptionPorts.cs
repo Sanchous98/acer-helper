@@ -5,8 +5,9 @@ namespace AcerHelper.Tests.Fakes;
 /// <summary>
 /// Hand-written ports for <c>OptionsAssembler</c>: each is the real port's two-way shape (a write that can
 /// fail, a read the test controls) plus the failure modes a fake needs to let a test CHOOSE — a refused write
-/// (<see cref="FakeFlagPort.SetResult"/>/<see cref="FakeChoicePort.SetResult"/>) and, separately, a write that
-/// THROWS, which the ports survive by different paths (see <see cref="FakeThrowingPowerProfiles"/>).
+/// (<see cref="FakeFlagPort.SetResult"/>/<see cref="FakeChoicePort.SetResult"/>), a write that THROWS, and
+/// (for the flag port) a READ that throws, which the ports survive by different paths (see
+/// <see cref="FakeThrowingPowerProfiles"/>).
 ///
 /// <see cref="FakeFlagPort"/> implements every on/off feature port at once, and <see cref="FakeChoicePort"/>
 /// every pick-one-of-N port, because in Domain/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
@@ -31,6 +32,12 @@ public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock,
     /// must survive it either way.</summary>
     public bool ThrowOnSet { get; set; }
 
+    /// <summary>When true, <see cref="Get"/> counts the attempt and throws instead of answering — the EC
+    /// refusing the read rather than reporting a value. Distinct from <see cref="State"/>=false, which is a
+    /// real answer ("off") that a row must SHOW; a throw must leave the row on its placeholder, because the
+    /// port never said anything.</summary>
+    public bool ThrowOnGet { get; set; }
+
     public string? LastError { get; set; }
 
     /// <summary>Number of <see cref="Get"/> calls. The row reads once when it is built (its
@@ -43,6 +50,7 @@ public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock,
     public bool Get()
     {
         GetCount++;
+        if (ThrowOnGet) throw new InvalidOperationException("FakeFlagPort: the read blew up");
         return State;
     }
 

@@ -89,6 +89,11 @@ internal sealed class AppController
         // the clamshell row takes its state from the device object the takeover just touched, and must see the
         // applied value, which is why that row has no deferred read at all.
         _vm.OptionsPage?.Prime();
+        // ...and the battery section's three charging rows, which are built the same way and for the same reason:
+        // their values come from the charge-limit, calibration and charge-mode ports (wave 4a). Called from here —
+        // and not from the view-model's constructor — for the ordering guarantee above, and so that a test can
+        // assert that construction alone reads no port.
+        _vm.Battery?.Prime();
         // ...and the lighting section with them: the plain-backlight slider is built with a placeholder too. The
         // RGB panels' brightness is NOT deferred (its construction value is what the startup re-apply sends to the
         // device), so nothing re-reads them here — a read that is not an event must not touch state, which is what
@@ -205,9 +210,11 @@ internal sealed class AppController
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
             // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
             // maps an unknown id to Balanced. The real value arrives from the first background pass (see the
-            // prime in BackgroundPass / `_cpuPrimed`). Nothing else in this record list is deferred because
-            // nothing else is a hardware read: fan/GPU presets come from the Settings graph, and the option
-            // rows under Battery/Options are primed by OptionsViewModel.Prime() right after this returns.
+            // prime in BackgroundPass / `_cpuPrimed`). The three BATTERY rows below are deferred in the same way
+            // (their ports are read to fill them), and so are the Options drawer's rows; both sets are primed off
+            // the UI thread right after BuildUi returns — OptionsPage by OptionsViewModel.Prime(), the battery
+            // rows by BatteryViewModel.Prime(). Nothing else in this record list is deferred because nothing else
+            // is a hardware read: fan/GPU presets come from the Settings graph.
             new CpuSection(d.CpuPower?.Modes ?? [], null, SetCpuPower),
             new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(), SetCo),
             new BatterySection(d.BatteryInfo != null, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
@@ -249,6 +256,7 @@ internal sealed class AppController
         (_vm, _windows, _tray, _lighting) = BuildUi(cur);
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
+        _vm.Battery?.Prime();                     // ...and so do the battery section's three charging rows
         _lighting?.Prime();                       // ...and so does the backlight slider
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";

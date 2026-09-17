@@ -70,6 +70,12 @@ public sealed partial class MainViewModel : ObservableObject
     public LightingViewModel? LightingPage => _lighting;
     public TuningViewModel?   TuningPage   => _tuning;
 
+    /// <summary>The battery section's view-model. Not a drawer page like the three above — it is one of
+    /// <see cref="Sections"/> — but exposed for the same reason they are: its three charging rows are built with
+    /// placeholders and are settled by <c>AppController</c> once the UI exists (see
+    /// <see cref="BatteryViewModel.Prime"/>).</summary>
+    public BatteryViewModel? Battery => _battery;
+
     public bool IsOptionsPage  => ReferenceEquals(DrawerContent, _options);
     public bool IsLightingPage => ReferenceEquals(DrawerContent, _lighting);
     public bool IsTuningPage   => ReferenceEquals(DrawerContent, _tuning);
