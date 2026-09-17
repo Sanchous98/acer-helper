@@ -117,25 +117,27 @@ public class OptionsAssemblerFailureTests
     /// is the behaviour that keeps one bad port from taking its switch down with it — the exception must not
     /// escape the <c>OnChange</c> the UI calls, and the user must still be told.
     ///
-    /// WHERE the throw is absorbed is worth being precise about, because it is not where it looks: the write
-    /// goes through <c>LaptopService.ApplySetting</c> -> <c>SettingDeclaration.Apply</c> ->
-    /// <c>FlagSetting.Write</c>, whose <c>try { ok = Port.Set(...) } catch { ok = false; }</c> absorbs it and
-    /// then reads the port's own <c>LastError</c>. So what reaches <c>RunSet</c> is a
-    /// <c>SettingNotAppliedException</c> that already carries the reason, and that is provable from the message
-    /// asserted below: it ends in the port's own words, so the reason crossed the layer that caught the throw.
-    /// A declaration that let the throw through would report the bare name instead, because a
-    /// <c>RunSet</c> catch of anything but that exception has no reason to print.</summary>
+    /// WHERE the throw is absorbed, and WHAT IT MAY CARRY. The write goes through
+    /// <c>LaptopService.ApplySetting</c> -> <c>SettingDeclaration.Apply</c> -> <c>FlagSetting.Write</c>, whose
+    /// catch absorbs it. That layer deliberately reports NO reason, and the message asserted below is bare
+    /// because of it: the port's <c>LastError</c> is assigned by a call that runs to COMPLETION, so a throw
+    /// leaves whatever an earlier call put there, and reading it would pin another call's words on this failure
+    /// (Domain/DeclaredSetting.cs). The port below carries exactly such a leftover — an earlier refusal's
+    /// "transport gone" — and the assertion is that it does NOT appear. That is also why the reason genuinely
+    /// crossing the layer is pinned where it is real: a write that returns false (the test above, "...: EC
+    /// refused the write"). A declaration that let the throw through would report a bare name too, from
+    /// <c>RunSet</c>'s own catch.</summary>
     [Fact]
     public void AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow()
     {
-        var lcd = new FakeFlagPort { ThrowOnSet = true, LastError = "transport gone" };
+        var lcd = new FakeFlagPort { ThrowOnSet = true, LastError = "transport gone" };   // an earlier call's words
         var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false));
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
 
         Assert.Null(Record.Exception(() => row.OnChange(true)));   // the throw must not leave the row
         Assert.Equal([true], lcd.SetCalls);               // the write was attempted, and only once
-        Assert.Equal("LCD overdrive failed: transport gone", Assert.Single(h.RunPosted()));
+        Assert.Equal("LCD overdrive failed", Assert.Single(h.RunPosted()));   // reported, with no invented cause
     }
 
     /// <summary>PINNED BEHAVIOUR: a throwing PROFILE port is reported as a failure and does not escape the row,

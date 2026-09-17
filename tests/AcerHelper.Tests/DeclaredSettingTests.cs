@@ -63,23 +63,58 @@ public class DeclaredSettingTests
         Assert.Equal([true, false], port.SetCalls);
     }
 
-    /// <summary>A transport whose write THROWS is a refusal, not a crash, and the reason still crosses: the
-    /// declaration catches it and reads the port's <c>LastError</c>. This is the rule
-    /// <c>LaptopService.Attempt</c> stated for the tuple channel, restated on the side of the exception so the
-    /// same writes are reported with the same words. The assembler-side twin of this test asserts the message
-    /// the user ends up reading.</summary>
+    /// <summary>A transport whose write THROWS is a refusal, not a crash — and it carries NO reason, because the
+    /// only one available belongs to another call. This is the rule <c>LaptopService.Attempt</c> stated for the
+    /// tuple channel, restated on the side of the exception: a throw is a failed write, and the failure it
+    /// reports is its own. The assembler-side twin of this test asserts the message the user ends up reading.
+    ///
+    /// THE ARRANGEMENT IS THE TEST, and both halves of it are asserted. The SAME port is first REFUSED — which is
+    /// what leaves a refusal's words on it, and the exception reports them, so the field really is in play — and
+    /// then made to THROW, which is a call that never assigns it. Under the old
+    /// <c>catch { ok = false; }</c> the declaration read the field after the throw and the second refusal came
+    /// back wearing the first one's words ("Access Denied"); now the reason is absent.
+    ///
+    /// MUTATION that reddens it: put the field read back on the throw path (replace the early
+    /// <c>return (false, null)</c> with <c>catch { ok = false; }</c>) — this test alone, since every other test
+    /// here reaches the field through a write that RETURNED.</summary>
     [Fact]
-    public void ATransportThatThrows_IsARefusal_NotACrash()
+    public void AThrowingTransport_IsARefusal_ThatCarriesNoReasonOfItsOwn()
     {
-        var setting = new FlagSetting
-        {
-            Key = "lcd_override",
-            Port = new FakeFlagPort { ThrowOnSet = true, LastError = "transport gone" },
-        };
+        var port = new FakeFlagPort { SetResult = false, LastError = "Access Denied" };
+        var setting = new FlagSetting { Key = "lcd_override", Port = port };
 
-        var ex = Assert.Throws<SettingNotAppliedException>(() => setting.Apply("1"));
+        var refused = Assert.Throws<SettingNotAppliedException>(() => setting.Apply("1"));
+        Assert.Equal("Access Denied", refused.Reason);   // the refusal reports the port's words...
 
-        Assert.Equal("transport gone", ex.Reason);
+        port.ThrowOnSet = true;                          // ...and now the transport dies instead
+        var threw = Assert.Throws<SettingNotAppliedException>(() => setting.Apply("1"));
+
+        Assert.Equal("lcd_override", threw.Key);
+        Assert.Null(threw.Reason);                       // NOT the previous call's "Access Denied"
+        Assert.Equal([true, true], port.SetCalls);       // Control: both writes were attempted
+    }
+
+    /// <summary>The same two facts for the other shape: <see cref="ChoiceSetting.Write"/> absorbs a throw the
+    /// way <see cref="FlagSetting.Write"/> does, and it too reports no reason of its own. Pinned separately
+    /// because the two overrides are separate code, and a fix applied to one of them is invisible here.
+    ///
+    /// MUTATION that reddens it: restore <c>catch { ok = false; }</c> in <c>ChoiceSetting.Write</c> (the field
+    /// read after a throw) — this test alone, since nothing else in the suite throws from a choice port.</summary>
+    [Fact]
+    public void AThrowingChoiceTransport_CarriesNoReasonOfItsOwnEither()
+    {
+        var port = new FakeChoicePort("5s", "30s") { SetResult = false, LastError = "Access Denied" };
+        var setting = new ChoiceSetting { Key = "stop_timeout", Port = port };
+
+        Assert.Equal("Access Denied",
+                     Assert.Throws<SettingNotAppliedException>(() => setting.Apply("30s")).Reason);
+
+        port.ThrowOnSet = true;
+        var threw = Assert.Throws<SettingNotAppliedException>(() => setting.Apply("30s"));
+
+        Assert.Equal("stop_timeout", threw.Key);
+        Assert.Null(threw.Reason);
+        Assert.Equal(["30s", "30s"], port.SetCalls);   // Control: both writes were attempted
     }
 
     /// <summary>A choice maps the id the hardware reports to the dropdown INDEX the row needs — and answers 0

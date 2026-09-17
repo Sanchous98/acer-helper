@@ -63,14 +63,25 @@ public sealed record FlagSetting : SettingDeclaration
     /// <summary>The stored form of a flag, for callers that hold a bool.</summary>
     public static string Value(bool on) => on ? "1" : "0";
 
-    /// <summary>A port that THROWS is a failed write, not a crash, and its reason still has to reach the user:
-    /// every transport in the tree that throws reports its cause through <see cref="IFlagPort.LastError"/>, and
-    /// that is what a rejected write shows. This is the rule <c>LaptopService.Attempt</c> stated for the tuple
-    /// channel, kept on this side of the exception so the same writes are reported the same way.</summary>
+    /// <summary>A port that THROWS is a failed write, not a crash — and it reports NO reason, deliberately.
+    /// <see cref="IFlagPort.LastError"/> is a field the PORT owns, written by a call that runs to completion, so
+    /// a write that THREW never assigned it: reading it here would hand the user whatever an EARLIER call left
+    /// behind, which is the failure mode docs/open-decisions.md §2 exists to remove ("a reader picking up
+    /// ANOTHER call's error"). Measured on the tree rather than assumed: the one production <see cref="IFlagPort"/>
+    /// (<c>Infrastructure/Vendors/Generic/DelegatePorts.cs</c>) sets <c>LastError</c> only after its write
+    /// delegate returns, and every delegate the backends hand it (Acer's <c>GmSet</c>/<c>UiSet</c>, Dell's
+    /// WmiSession calls, the Linux sysfs and firmware-attributes writers) catches its own failures and returns
+    /// them as a pair — so nothing in the tree establishes the old claim that a throwing transport reports its
+    /// cause through <c>LastError</c>, and a throw can only leave a stale value there. Absent is also how the
+    /// other shape reports the same event (<c>LaptopService.Attempt</c> over a tuple, and
+    /// <c>OptionsAssembler.RunSet</c>'s catch): a throwing transport reads the same way wherever it is caught,
+    /// and the UI shows "&lt;row label&gt; failed" with no invented cause rather than a real failure wearing
+    /// somebody else's words.</summary>
     protected override (bool ok, string? error) Write(string value)
     {
         bool ok;
-        try { ok = Port.Set(value == "1"); } catch { ok = false; }
+        try { ok = Port.Set(value == "1"); }
+        catch { return (false, null); }   // a throw assigns nothing: LastError still belongs to an earlier call
         return (ok, ok ? null : Port.LastError);
     }
 }
@@ -100,11 +111,14 @@ public sealed record ChoiceSetting : SettingDeclaration
         return 0;
     }
 
-    /// <summary>A port that THROWS is a failed write, not a crash — see <see cref="FlagSetting.Write"/>.</summary>
+    /// <summary>A port that THROWS is a failed write, not a crash, and it reports no reason for the same reason
+    /// <see cref="FlagSetting.Write"/> does not: a throw leaves the port's own <c>LastError</c> holding an
+    /// earlier call's words.</summary>
     protected override (bool ok, string? error) Write(string value)
     {
         bool ok;
-        try { ok = Port.Set(value); } catch { ok = false; }
+        try { ok = Port.Set(value); }
+        catch { return (false, null); }
         return (ok, ok ? null : Port.LastError);
     }
 }
@@ -127,7 +141,8 @@ public sealed class SettingNotAppliedException(string key, string? reason)
     public string Key { get; } = key;
 
     /// <summary>The transport's own words when it refused the write, or the model's when it refused an option it
-    /// does not declare; null when the transport gave none (<see cref="FlagSetting.Write"/> reads
-    /// <c>IFlagPort.LastError</c>, which a port may never have set).</summary>
+    /// does not declare; null when the transport gave none — it never set <c>IFlagPort.LastError</c> on this
+    /// call, or the write THREW, and then no reason belonging to this call exists to report
+    /// (<see cref="FlagSetting.Write"/>).</summary>
     public string? Reason { get; } = reason;
 }

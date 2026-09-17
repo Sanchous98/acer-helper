@@ -95,6 +95,11 @@ public sealed class FakeChoicePort : IChoicePort
     /// returns false — the EC-refused case.</summary>
     public bool SetResult { get; set; } = true;
 
+    /// <summary>When true, <see cref="Set"/> throws instead of returning — the same failure path
+    /// <see cref="FakeFlagPort.ThrowOnSet"/> models, on the choice shape (a declared choice declares its own
+    /// refusal through <c>ChoiceSetting.Write</c>, so both halves of that class need a port that can blow up).</summary>
+    public bool ThrowOnSet { get; set; }
+
     public string? LastError { get; set; }
 
     /// <summary>Number of <see cref="Get"/> calls (the row reads once when it is built).</summary>
@@ -112,6 +117,7 @@ public sealed class FakeChoicePort : IChoicePort
     public bool Set(string id)
     {
         SetCalls.Add(id);
+        if (ThrowOnSet) throw new InvalidOperationException("FakeChoicePort: the write blew up");
         if (!SetResult) return false;
         CurrentId = id;
         return true;
