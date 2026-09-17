@@ -1385,6 +1385,60 @@ BlGetOff)`) — **ноль красных**: ни один тест не стр�
    Закреплено тестом, который требует, чтобы эти два сайта **продолжали** читать
    (`PresetReadsWithProfileTests.TheCallersThatHoldNoProfile_StillRead`) — иначе «путь сборки
    перестал читать» неотличимо от «чтения переехали».
+10. **Девять форм утверждений, которые не могут упасть** (аудит целостности тестов, 2026-09-17;
+    восемь файлов тестов). Аудит нашёл их и **не тронул намеренно**: починка каждой означает
+    удаление или переписывание утверждения, а это суждение о том, что тест должен был
+    закрепить, — решение владельца, а не уборка. **Ни одна из них не является ложным
+    зелёным**: в каждом тесте рядом стоит родственное утверждение, которое работу делает.
+    Формы:
+
+    - `ModeAxisTableTests.cs`, `EveryAxisHasABagThePresetGraphCanSee` — **тавтология**: обе
+      стороны `Assert.Equal` построены из одного и того же `Enum.GetValues<ModeAxis>()` и
+      разойтись не могут ни при какой мутации `Domain`/`Application`. Смысл несут строки под
+      ней (`ModeAxisTable.All.Count` и `.Distinct().Count()` против той же длины).
+    - `ModeAxisTableTests.cs`, `StartupDrivesExactlyTheAxesTheTableCallsVolatile`, две строки —
+      **коллекция, в которую нечего записать**: `Assert.DoesNotContain(ModeAxis.Lights, driven)`
+      смотрит на `HashSet`, наполняемый четырьмя портами (ветки `Lights` нет ни у одного), а
+      `Schedule(Startup)` — это `All.Where(IsVolatile)`, где `Lights` не волотильна; замерено
+      аудитом: снятие фильтра `Owner` в реконсилере эту строку **не краснит**. И
+      `Assert.NotEmpty(driven)` («...и утверждение выше не вакуумно») гарантирован
+      `Eventually.Until` выше, наполняющим ту же коллекцию: **страж невакуумности сам вакуумен**.
+    - `SmuOffsetEncodingTests.cs`, `Encode_IsInjectiveAcrossTheWholeOfferedRange` — значение,
+      **следующее из цикла выше**: 51 успешный `seen.Add` даёт 51 элемент, и это уже проверено
+      строкой выше. Замерено: мутация, делающая `Encode` коллизирующим, краснит строку **выше**,
+      не эту. У соседнего теста такой строки нет.
+    - `ReconcileScheduleTests.cs`, `StartupDoesNotTouchTheFans` и `HardwareReconcilerTests.cs`,
+      `AStartupDrivesTheGpuOffsetsThenTheCpuOverlayThenTheCurveOptimizer` —
+      `Assert.NotNull(settings.FanPresets["balanced"])` — **`NotNull` на значении, которое тест
+      сам записал двумя кадрами раньше**: прод между записью и утверждением только читает граф
+      пресетов, а на отсутствующем ключе индексатор бросил бы `KeyNotFoundException`, а не
+      покраснил утверждение.
+    - `LampArrayLifecycleTests.cs`, `ReassertDoesNothingWhenDisabled` — **переопределённый
+      страж: ни одна одиночная мутация его не краснит.** `Disable()` обнуляет `Enabled`,
+      `_layout`, `_written` и `_frame`; короткое замыкание `!Enabled` в `Reassert` и проверка
+      `layout is null` в `Paint` независимо предотвращают запись, поэтому краснят только две
+      согласованные мутации. Докстрока теста это и признаёт («слабее теста выше по построению…
+      закрепляет контракт, а не одну из половин стража»); настоящий страж — соседний
+      `ReassertDoesNothingWhenNoHostOwnsTheSurface`.
+    - `LaptopServiceModeTests.cs` и `ModeKeyTests.cs`,
+      `Assert.DoesNotContain(f.Pp!.All, p => p.Id == "ghost")` — **утверждение о собственной
+      фикстуре**: `FakePowerProfiles.All` заполняется один раз в конструкторе, прод его только
+      читает. Форма читается как посылка — законная документирующая привычка, но буквально
+      неопровержима.
+    - `RgbDeviceTests.cs`, `AControllerThatOverridesNothingSupportsNoneOfTheOptionalCapabilities` —
+      `Assert.Empty(device.Zones)` — **коллекция, в которую нечего записать**: единственный
+      источник — заглушка самого теста (`BareController.Zones => []`). Содержание теста — три
+      строки под ней.
+    - `RgbDeviceTests.cs`, `TheApplyHooksReceiveEveryArgumentInOrder` —
+      `Assert.True(zone.ApplyEffect(...))` / `Assert.True(zone.ApplySubZone(...))` —
+      **истинность задана лямбдами самого теста** (литерал `true`), а `RgbZone` — чистый
+      проброс. Слабая форма; содержательны утверждения аргументов под ней.
+
+    **Вопрос владельцу:** удалять, переписывать или оставлять каждую. Из кода это не выводится —
+    и «это тавтология, убрать», и «это документирующая посылка, оставить» одинаково защитимы, и
+    цена обоих мала. Четыре пробела покрытия из того же аудита закрыты тестами
+    (`OptionsRowClickTests`, `FlippingTheFollowSwitch_HandsTheZoneBackAndForth_AndPersistsTheChoice`,
+    `ASuccessfulSet_AfterAFailure_DoesNotNotifyAgain`, `WithNoBatteryPorts_ThereAreNoRows_AndPrimingIsANoOp`).
 
 ---
 
