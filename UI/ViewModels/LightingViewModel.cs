@@ -125,7 +125,9 @@ public sealed partial class LightingViewModel : ObservableObject
     /// slider is built at 0 and takes its real level here (see <see cref="BacklightViewModel"/>). The RGB panels
     /// are deliberately NOT re-read — their construction value is already a reading and is what the startup
     /// re-apply sends, and re-reading them here is what <see cref="AdoptFromInput"/> exists to do on an event
-    /// instead. Call at startup and after a language rebuild, never on a schedule: see docs/state-and-events.md.</summary>
+    /// instead. Call at startup and after a language rebuild, never on a schedule: see docs/state-and-events.md.
+    /// Opening the drawer runs the same read through <see cref="Reapply"/> — a moment of doubt is an event, not
+    /// a schedule, and the rule above is about running it on a timer.</summary>
     public void Prime() => Backlight?.SyncFromHardware();
 
     /// <summary>An out-of-band input arrived (a special key): read the hardware and <b>adopt</b> what it says as
@@ -151,11 +153,19 @@ public sealed partial class LightingViewModel : ObservableObject
     /// more than its colour epsilon. Nothing is lost by yielding: the stored value is what
     /// <c>LightingCoordinator.OnHostOwnerChanged</c> paints the moment the host lets go. The host's own frame is
     /// deliberately NOT re-asserted here — opening a drawer clobbers nothing, and the callers that do need a
-    /// re-assertion are the ones <c>Paint</c> already serves.</summary>
+    /// re-assertion are the ones <c>Paint</c> already serves.
+    ///
+    /// The plain backlight is the one control here settled by a READ, and the only device it exists on is one
+    /// with no RGB panels at all: it has no stored value to push (its slider is a deferred placeholder whose
+    /// write is verified by read-back), so the drawer can do for it exactly what <see cref="Prime"/> does at
+    /// startup — and it must, because the level can change with no event the app ever sees (another tool, a BIOS
+    /// hotkey raising no raw input, an Fn press while the drawer was shut) and would otherwise sit at its
+    /// startup value for the whole session.</summary>
     public void Reapply()
     {
         if (_host is { HostOwnsLighting: true }) return;
         foreach (var panel in Panels) panel.Reapply();
+        Backlight?.SyncFromHardware();
     }
 
     /// <summary>Rebind every panel to a different mode's per-zone state and re-apply it (called when the
@@ -483,10 +493,11 @@ public sealed partial class BacklightViewModel : ObservableObject
         // WAVE 6: a PLACEHOLDER, not a reading — 0 is what a failed read gives (LightingViewModel.cs, the same
         // rule as the option rows). Unlike an RGB zone's brightness, this one is safe to defer: a backlight's
         // construction writes nothing to the device (the latch below is a field write, and no apply fires until
-        // the user moves the slider), so the placeholder cannot leak outward. The prime is SyncFromHardware —
-        // called once at startup and again on a language rebuild (LightingViewModel.Prime), and wired to the
-        // Fn-key path through LightingViewModel.AdoptFromInput. Opening the Lighting drawer no longer settles it:
-        // that path re-applies the RGB panels and reads nothing (LightingViewModel.Reapply).
+        // the user moves the slider), so the placeholder cannot leak outward. Its reads are all EVENTS or
+        // startup: the prime is SyncFromHardware, called once at startup and again on a language rebuild
+        // (LightingViewModel.Prime), wired to the Fn-key path through LightingViewModel.AdoptFromInput, and run
+        // when the Lighting drawer opens (LightingViewModel.Reapply) — the three moments the level can be known
+        // to have moved with no event of ours to say so.
         _level = 0;
         _hw.Latch((int)_level);
         UpdateName();
