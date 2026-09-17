@@ -46,19 +46,20 @@ public class FanCurveEvalCurveTests
     // back to DefaultCurve fails instead of coincidentally passing.
     private static readonly int[] Ramp = [10, 20, 30, 40, 50];
 
-    // The stored curve is declared non-nullable (FanPreset.CpuCurve), but Fan itself tolerates null (and a
+    // The curve is declared non-nullable (FanSettings.Curve), but Fan itself tolerates null (and a
     // too-short array), so the tests hand it one through `duties!` rather than pretending it cannot happen —
     // a deserialised or hand-edited settings file can produce exactly this.
     //
-    // The commit is what a caller does after a successful write, and the curve is stored the way
+    // The commit is what a caller does after a successful write, and the curve reaches the fan the way
     // LaptopService.SetFanCurve stores it: verbatim, with no length validation, which is what keeps the
     // over-long cases below reachable. `fallback` is the model's `LastApplied`: a negative one means nothing
     // was ever committed, so nothing is committed here either — Fan's own sentinel for that state is -1.
+    // The fixed duty is 0 because the curve is on: Fan reads it only when the curve is off.
     private static int Eval(int[]? duties, int temp, int fallback = -1)
     {
-        var fan = new Fan(gpu: false);
+        var fan = new Fan(new FanSettings(true, duties!, 0));
         if (fallback >= 0) fan.Commit(fallback);
-        return fan.Duty(new FanPreset { CpuUseCurve = true, CpuCurve = duties! }, temp);
+        return fan.Duty(temp);
     }
 
     // ---- the anchors themselves: a curve must reproduce its own points exactly ----
@@ -242,10 +243,11 @@ public class FanCurveEvalCurveTests
     /// (FansViewModel.Duties). A latent trap, not a live defect.
     ///
     /// STILL REACHABLE from the public surface, which is why this pin survived <c>EvalCurve</c> becoming
-    /// private: <see cref="FanPreset.CpuCurve"/> is a public settable array with no length validation, and
-    /// <c>LaptopService.SetFanCurve</c> stores whatever it is handed, so a six-entry curve is a preset's
-    /// ordinary contents rather than a private call. The case below is unreachable only from the UI's own
-    /// editor, never from the model.
+    /// private: <see cref="FanPreset.CpuCurve"/> is a public settable array with no length validation,
+    /// <c>LaptopService.SetFanCurve</c> stores whatever it is handed, and the mapping from the stored halves
+    /// to the two fans (LaptopService.Fans.FanSettingsOf) passes the array through unchanged — so a six-entry
+    /// curve is a preset's ordinary contents rather than a private call. The case below is unreachable only
+    /// from the UI's own editor, never from the model.
     ///
     /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
     /// "Известные особенности (решение ожидается)", item 2. This case is deliberately left live — not

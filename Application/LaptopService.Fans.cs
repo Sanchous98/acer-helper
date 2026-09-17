@@ -12,7 +12,8 @@ public sealed partial class LaptopService
     // the interpolation and that fan's last applied duty) plus the paired deadband that decides whether a write
     // happens at all. Custom mode drives the fans through it on the sensor loop; Reset() on any out-of-band
     // change so the deadband can't swallow the first write. Touched by UI-thread SetFan/SetFanCurve and the
-    // background ApplyCustom -> guarded by _state.
+    // background ApplyCustom -> guarded by _state. The model is told a fan's data and never which fan it is:
+    // the mapping from the stored preset's two halves to the two fans is FanSettingsOf below.
     private readonly FanCurveEngine _fanCurve = new();
 
     public bool ApplyFan(FanMode mode, byte cpu, byte gpu)
@@ -38,6 +39,20 @@ public sealed partial class LaptopService
     /// <summary>The stored preset for the current mode, created on first write (user is configuring it).
     /// Caller holds _state.</summary>
     private FanPreset StoredFan() => GetOrAdd(Settings.FanPresets, CurrentModeKey());
+
+    /// <summary>The two fans' own settings, read out of their halves of the stored preset. THIS IS WHERE A
+    /// FAN'S IDENTITY IS DECIDED: the schema keeps both fans in one object and its halves are named Cpu and
+    /// Gpu, so "this one is the GPU fan" is a fact this layer establishes and the domain models are never told
+    /// — Domain/Fan.cs has no CPU/GPU flag to set. It is also the ONLY place the frozen field layout is read,
+    /// so a reader of the other half cannot be mistaken for this one, and it is the seam that lets the stored
+    /// container move to Infrastructure without touching Domain.
+    ///
+    /// The curve array is passed through verbatim: SetFanCurve stores whatever the UI hands it, with no length
+    /// validation, and Fan is the thing that tolerates a null, short or over-long one. Caller holds _state or
+    /// passes a snapshot it owns.</summary>
+    private static (FanSettings cpu, FanSettings gpu) FanSettingsOf(FanPreset f)
+        => (new FanSettings(f.CpuUseCurve, f.CpuCurve, f.Cpu),
+            new FanSettings(f.GpuUseCurve, f.GpuCurve, f.Gpu));
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
     /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
@@ -117,7 +132,7 @@ public sealed partial class LaptopService
                 !Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) || (FanMode)f.Mode != FanMode.Custom)
             { _fanCurve.Reset(); return; }
 
-            if (_fanCurve.Step(f, s) is not { } duty) return;                       // within deadband
+            if (_fanCurve.Step(FanSettingsOf(f), s) is not { } duty) return;        // within deadband
             if (ApplyFan(FanMode.Custom, (byte)duty.cpu, (byte)duty.gpu))
                 _fanCurve.Commit(duty.cpu, duty.gpu);                               // advance state only on success
         }

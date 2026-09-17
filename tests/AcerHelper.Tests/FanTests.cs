@@ -4,16 +4,23 @@ using AcerHelper.Tests.Fakes;
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// The fan curve as the MODEL it now belongs to (<see cref="Fan"/>), driven DIRECTLY — one fan at a time, a
-/// preset and a temperature in, the duty% that fan should be at out, plus the memory of what was applied to
-/// it. Before the curve moved there was nothing to ask one fan about: the interpolation was a static helper and
-/// the duty memory was two loose ints on the controller, so the only reachable question was the pair's.
+/// The fan curve as the MODEL it now belongs to (<see cref="Fan"/>), driven DIRECTLY — one fan at a time, the
+/// data that fan was given and a temperature in, the duty% it should be at out, plus the memory of what was
+/// applied to it. Before the curve moved there was nothing to ask one fan about: the interpolation was a static
+/// helper and the duty memory was two loose ints on the controller, so the only reachable question was the
+/// pair's.
 ///
 /// WHY DIRECT DRIVING IS THE POINT AND NOT A SHORTCUT (the shape <c>CoAxisTests.cs</c> argued for the Co axis):
 /// the existing suite pins this path through the SERVICE, and every one of those assertions still passes if the
 /// curve is written out at the site instead of asked of this type. The cross-checks at the end tie each answer
 /// back to the pair the port actually received, so the model cannot quietly stop being the one the production
 /// path uses.
+///
+/// WHICH FAN IS WHICH is no longer the model's business — <see cref="Fan"/> has no CPU/GPU flag and takes no
+/// half-of-a-preset selector — so <c>FansOf</c> below restates the mapping the application performs
+/// (LaptopService.Fans.FanSettingsOf) in one place, which is what lets these tests build a fan at all. That
+/// restatement is not what pins production's mapping: the cross-checks at the end compare against the literal
+/// pair the port received, so swapping the halves in the service reddens them rather than this file.
 ///
 /// WHAT IS NOT CHECKED HERE. Whether a write happens at all: the deadband is decided for the PAIR of fans, and
 /// its boundary and pairing are pinned as today's behaviour in <c>FanCurveEngineStepTests.cs</c> — this file
@@ -29,12 +36,23 @@ public class FanTests
     private static readonly int[] Ramp    = [10, 20, 30, 40, 50];
     private static readonly int[] GpuRamp = [90, 80, 70, 60, 50];
 
-    private static Fan CpuFan() => new(gpu: false);
-    private static Fan GpuFan() => new(gpu: true);
+    /// <summary>One stored preset split into the two fans' settings, the way the application layer does it
+    /// (LaptopService.Fans.FanSettingsOf). The pairing of halves to fans is the CALLER's decision now; the
+    /// model is handed one fan's own data and nothing about its position.</summary>
+    private static (FanSettings cpu, FanSettings gpu) FansOf(FanPreset p)
+        => (new FanSettings(p.CpuUseCurve, p.CpuCurve, p.Cpu),
+            new FanSettings(p.GpuUseCurve, p.GpuCurve, p.Gpu));
 
-    // ---- rule: a fan reads ITS OWN half of the preset, curve or fixed speed ----
+    private static Fan CpuFan(FanPreset p) => new(FansOf(p).cpu);
+    private static Fan GpuFan(FanPreset p) => new(FansOf(p).gpu);
 
-    /// <summary>The two fans of one preset are two different curves, and each answers from its own: this is the
+    /// <summary>A fan built only to watch its memory: the rules below never ask it for a duty, so its data is
+    /// arbitrary.</summary>
+    private static Fan AFan() => new(new FanSettings(false, [], 0));
+
+    // ---- rule: a fan answers from the data it was handed, curve or fixed speed ----
+
+    /// <summary>The two fans of one preset are two different curves, and each is handed its own: this is the
     /// per-fan half of the curve that the frozen schema keeps in one object.</summary>
     [Fact]
     public void WithItsCurveOn_AFanFollowsItsOwnCurve_AndNotTheOtherFans()
@@ -45,14 +63,14 @@ public class FanTests
             GpuUseCurve = true, GpuCurve = GpuRamp,
         };
 
-        Assert.Equal(20, CpuFan().Duty(preset, 60));   // 10 + 10*10/10
-        Assert.Equal(80, GpuFan().Duty(preset, 60));   // 90 + (80-90)*10/10
-        Assert.Equal(15, CpuFan().Duty(preset, 55));
-        Assert.Equal(75, GpuFan().Duty(preset, 65));   // 80 + (70-80)*5/10 — the falling side of its curve
+        Assert.Equal(20, CpuFan(preset).Duty(60));   // 10 + 10*10/10
+        Assert.Equal(80, GpuFan(preset).Duty(60));   // 90 + (80-90)*10/10
+        Assert.Equal(15, CpuFan(preset).Duty(55));
+        Assert.Equal(75, GpuFan(preset).Duty(65));   // 80 + (70-80)*5/10 — the falling side of its curve
     }
 
-    /// <summary>With its curve off a fan holds its own fixed speed, clamped into the duty range — the CPU's
-    /// number is not the GPU's, which is the half of this rule the pair could not state.</summary>
+    /// <summary>With its curve off a fan holds its own fixed speed, clamped into the duty range — even though
+    /// its own curve is handed over alongside it, which is the half of this rule the pair could not state.</summary>
     [Theory]
     [InlineData(-1, 0)]
     [InlineData(0, 0)]
@@ -63,8 +81,8 @@ public class FanTests
     {
         var preset = new FanPreset { Cpu = fixedDuty, Gpu = 25, CpuCurve = Ramp, GpuCurve = GpuRamp };
 
-        Assert.Equal(expected, CpuFan().Duty(preset, 70));
-        Assert.Equal(25, GpuFan().Duty(preset, 70));
+        Assert.Equal(expected, CpuFan(preset).Duty(70));
+        Assert.Equal(25, GpuFan(preset).Duty(70));
     }
 
     // ---- rule: the duty memory is the fan's, and an unreadable temperature holds THAT fan's last duty ----
@@ -80,13 +98,13 @@ public class FanTests
             CpuUseCurve = true, CpuCurve = Ramp,
             GpuUseCurve = true, GpuCurve = GpuRamp,
         };
-        var cpu = CpuFan();
-        var gpu = GpuFan();
+        var cpu = CpuFan(preset);
+        var gpu = GpuFan(preset);
         cpu.Commit(88);
 
-        Assert.Equal(88, cpu.Duty(preset, -1));       // not the curve's first duty, 10
-        Assert.Equal(88, cpu.Duty(preset, -100));     // any negative reading is the same unknown
-        Assert.Equal(90, gpu.Duty(preset, -1));       // this fan has committed nothing: its own idle duty
+        Assert.Equal(88, cpu.Duty(-1));       // not the curve's first duty, 10
+        Assert.Equal(88, cpu.Duty(-100));     // any negative reading is the same unknown
+        Assert.Equal(90, gpu.Duty(-1));       // this fan has committed nothing: its own idle duty
     }
 
     /// <summary>The memory is per fan, and both operations touch one fan at a time — which is what a <see
@@ -94,8 +112,8 @@ public class FanTests
     [Fact]
     public void TheMemoryIsPerFan_CommitAndResetTouchOneFanAtATime()
     {
-        var cpu = CpuFan();
-        var gpu = GpuFan();
+        var cpu = AFan();
+        var gpu = AFan();
 
         Assert.Equal(-1, cpu.LastApplied);
         Assert.Equal(-1, gpu.LastApplied);
@@ -110,6 +128,21 @@ public class FanTests
 
         Assert.Equal(-1, cpu.LastApplied);
         Assert.Equal(70, gpu.LastApplied);   // the other fan's memory is untouched
+    }
+
+    /// <summary>The memory survives being handed fresh data, which is what every step of the sensor loop does:
+    /// re-reading a fan's settings must not make the deadband forget what the hardware is actually at.
+    /// Configure is internal, and this is the only place the rule is stated.</summary>
+    [Fact]
+    public void HandingAFanFreshData_KeepsItsMemory()
+    {
+        var fan = CpuFan(new FanPreset { CpuUseCurve = true, CpuCurve = Ramp });
+        fan.Commit(42);
+
+        fan.Configure(new FanSettings(true, [60, 60, 60, 60, 60], 0));
+
+        Assert.Equal(42, fan.LastApplied);
+        Assert.Equal(42, fan.Duty(-1));      // the fresh curve's first duty is 60; the committed duty still wins
     }
 
     // ---- rule: what is per fan is the memory; the WRITE DECISION stays the pair's ----
@@ -127,11 +160,11 @@ public class FanTests
         var engine = new FanCurveEngine();
         engine.Commit(15, 40);
 
-        Assert.Equal((15, 46), engine.Step(preset, new SensorSnapshot { CpuTempC = 55, GpuTempC = 50 }));
+        Assert.Equal((15, 46), engine.Step(FansOf(preset), new SensorSnapshot { CpuTempC = 55, GpuTempC = 50 }));
 
         engine.Commit(15, 46);   // what the caller commits after the write succeeded
 
-        Assert.Null(engine.Step(preset, new SensorSnapshot { CpuTempC = 55, GpuTempC = 50 }));
+        Assert.Null(engine.Step(FansOf(preset), new SensorSnapshot { CpuTempC = 55, GpuTempC = 50 }));
     }
 
     // ---- cross-checks: the answer the model states is the one the port receives ----
@@ -158,7 +191,9 @@ public class FanTests
     /// <summary>THE CROSS-CHECK the whole file rests on. The service's stored preset is handed to the model, and
     /// its two answers must be the pair the port actually received. Without this the model could be a parallel
     /// statement of the curve that production ignores — the failure mode this wave exists to avoid, and the one
-    /// a direct-only test cannot see.</summary>
+    /// a direct-only test cannot see. It is also what pins the service's mapping of stored halves to fans: the
+    /// literal pair below is the CPU's curve value against the GPU's fixed speed, so swapping the two halves
+    /// in the service fails here.</summary>
     [Fact]
     public void TheDutiesTheModelStatesAreTheOnesThePortReceives()
     {
@@ -169,7 +204,7 @@ public class FanTests
         Assert.Equal([FanMode.Custom], fan.ModeCalls);          // Custom behaviour first, speeds second
         Assert.Single(fan.SpeedCalls);
         Assert.Equal(((byte)15, (byte)40), fan.SpeedCalls[0]);  // the answer is not vacuous
-        Assert.Equal(((byte)CpuFan().Duty(stored, 55), (byte)GpuFan().Duty(stored, 50)), fan.SpeedCalls[0]);
+        Assert.Equal(((byte)CpuFan(stored).Duty(55), (byte)GpuFan(stored).Duty(50)), fan.SpeedCalls[0]);
     }
 
     /// <summary>...and the same for the deadband, whose verdict is the one thing the model deliberately does
@@ -188,7 +223,7 @@ public class FanTests
 
         var engine = new FanCurveEngine();
         engine.Commit(15, 40);           // what the first pass left the fans at
-        Assert.Null(engine.Step(stored, Hot));
+        Assert.Null(engine.Step(FansOf(stored), Hot));
     }
 
     /// <summary>The other half of the same contract, through the service: the memory advances only on a write

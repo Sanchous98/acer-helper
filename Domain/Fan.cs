@@ -1,19 +1,38 @@
 namespace AcerHelper.Domain;
 
 /// <summary>
-/// One fan of this machine as the app drives it in Custom mode: the duty curve it follows, the interpolation
-/// that turns a temperature into a duty%, and the last duty the app actually applied to it. The curve and its
-/// memory belong to the fan they are about, so they live here rather than in the controller that walks them.
+/// One fan's own data, as its caller read it: the curve this fan follows when its curve is on, and the fixed
+/// duty% it holds when the curve is off.
 ///
-/// IT IS A VIEW OVER <see cref="FanPreset"/>, AND THAT IS THE FROZEN SCHEMA TALKING. The preset holds BOTH
-/// fans' settings in one object keyed per performance mode, and that shape is a compatibility surface: a
-/// committed fixture (tests/AcerHelper.Tests/Fixtures/settings-0.33.0.json, guarded by JsonSettingsStoreTests)
-/// makes renaming any part of it a decision rather than an edit. So a fan does not own its stored curve — it
-/// reads its own half of the preset, chosen once at construction, because the CPU and the GPU are the only two
-/// halves the schema has. Everything else about the curve IS the model's: the anchors, the default ramp, the
-/// interpolation, and the duty memory.
+/// WHICH FAN THIS DESCRIBES IS DELIBERATELY NOT REPRESENTED. A machine has two fans and only the caller knows
+/// which one is the CPU and which the GPU — that is a fact about a particular machine's layout, not about what
+/// a fan does — so nothing here names a position, a label or an index. The persisted container holds BOTH fans
+/// in one object (and that shape is a compatibility surface), so the mapping from its two halves to two of
+/// these lives with the layer that reads presets: Application/LaptopService.Fans.cs. That is also what keeps
+/// Domain from naming the stored schema at all.
+/// </summary>
+/// <param name="UseCurve">Drive this fan from <paramref name="Curve"/> rather than from
+/// <paramref name="FixedDuty"/> — the per-fan half of the preset's <c>*UseCurve</c> flag.</param>
+/// <param name="Curve">One duty% per <see cref="Fan.Anchors"/> entry. A null or short array is tolerated and
+/// falls back to <see cref="Fan.DefaultCurve"/> (see the curve evaluation in <see cref="Fan"/>), because a
+/// deserialised or hand-edited settings file can hand one over, and nothing between there and here validates
+/// it.</param>
+/// <param name="FixedDuty">The stored fixed speed. Read only when <paramref name="UseCurve"/> is off, and
+/// clamped into the duty range when it is.</param>
+public readonly record struct FanSettings(bool UseCurve, int[] Curve, int FixedDuty);
+
+/// <summary>
+/// One fan as the app drives it in Custom mode: the data it was given — the curve it follows, whether it uses
+/// that curve or its fixed duty, its fixed duty, and the last duty the app actually applied to it. The curve
+/// and its memory belong to the fan they are about, so they live here rather than in the controller that walks
+/// them.
 ///
-/// WHAT IT DOES NOT DECIDE: whether a duty is written at all. The controller's deadband is decided for the PAIR
+/// WHAT IT DOES NOT KNOW. Which fan it is: there is no CPU/GPU flag, no half-of-a-preset selector and no
+/// constructor argument that picks one, because a fan is a fan — it answers for its own speed and nothing
+/// above it changes that. The caller decides the identity (Application/LaptopService.Fans.cs maps the preset's
+/// two halves onto two of these), and the fan it hands over is told only its own data.
+///
+/// WHAT IT DOES NOT DECIDE. Whether a duty is written at all. The controller's deadband is decided for the PAIR
 /// of fans at once and returns both duties when it is left (see <see cref="FanCurveEngine"/>), because the port
 /// writes a pair. A fan answers what its duty is and remembers what was applied to it; the decision to write
 /// belongs to the pair.
@@ -25,11 +44,24 @@ public sealed class Fan
     public static readonly int[] Anchors      = [50, 60, 70, 80, 90];
     public static readonly int[] DefaultCurve = [30, 45, 60, 80, 100];
 
-    private readonly bool _gpu;     // which half of the preset this fan reads
+    private FanSettings _settings;  // the data the caller read for THIS fan, replaced whenever it re-reads
     private int _last = -1;         // last duty% applied to THIS fan (-1 = none yet)
 
-    /// <param name="gpu"><c>true</c> for the GPU fan, <c>false</c> for the CPU one — the preset's two halves.</param>
-    public Fan(bool gpu) => _gpu = gpu;
+    /// <summary>A fan holding the data its caller read for it. Nothing else is passed, and nothing about which
+    /// fan this is can be: <see cref="FanSettings"/> is the whole of what a fan needs to answer for its
+    /// speed.</summary>
+    public Fan(FanSettings settings) => _settings = settings;
+
+    /// <summary>Replace this fan's data with what the caller has just read for it. Called on every step, because
+    /// the caller reads the preset live: a mode switch or an edit takes effect on the next step exactly as it
+    /// did when the data arrived as a parameter.
+    ///
+    /// The duty MEMORY is deliberately not touched. It records what the hardware was last told, which the data
+    /// says nothing about; clearing it here would make every step look like a first step, and the deadband —
+    /// whose entire job is to suppress a write when nothing moved — would never suppress one. <see cref="Reset"/>
+    /// is the one operation that clears it, and the caller calls it exactly when the fans' out-of-band state
+    /// changes.</summary>
+    internal void Configure(FanSettings settings) => _settings = settings;
 
     /// <summary>The last duty% the caller committed to this fan, or -1 when nothing has been committed yet.
     /// Read by <see cref="FanCurveEngine"/>, whose deadband is decided on both fans at once and therefore needs
@@ -48,27 +80,20 @@ public sealed class Fan
     /// <summary>The duty% this fan should be at for the live temperature: its own curve's value when its curve
     /// is on, else its own fixed speed clamped into the duty range. An unreadable temperature (-1, and anything
     /// below) holds the last committed duty when there is one, so one bad sample cannot move a fan.</summary>
-    public int Duty(FanPreset preset, int tempC)
-    {
-        var (useCurve, curve, fixedDuty) = Stored(preset);
-        return useCurve ? EvalCurve(curve, tempC, _last) : Math.Clamp(fixedDuty, 0, 100);
-    }
-
-    /// <summary>This fan's half of the persisted preset — the ONE place the frozen field layout is read, so a
-    /// reader of the other half cannot be mistaken for this one.</summary>
-    private (bool UseCurve, int[] Curve, int FixedDuty) Stored(FanPreset p)
-        => _gpu ? (p.GpuUseCurve, p.GpuCurve, p.Gpu) : (p.CpuUseCurve, p.CpuCurve, p.Cpu);
+    public int Duty(int tempC)
+        => _settings.UseCurve ? EvalCurve(_settings.Curve, tempC, _last)
+                              : Math.Clamp(_settings.FixedDuty, 0, 100);
 
     /// <summary>Interpolate a duty% for <paramref name="temp"/> from the per-anchor curve (linear between
     /// anchors, flat beyond the ends). Unknown temperature (-1) holds the last value (or the idle duty).</summary>
-    internal static int EvalCurve(int[] duties, int temp, int fallback)
+    private static int EvalCurve(int[] duties, int temp, int fallback)
     {
         var a = Anchors;
         if (duties == null || duties.Length < a.Length) duties = DefaultCurve;
         if (temp < 0)      return fallback >= 0 ? fallback : Math.Clamp(duties[0], 0, 100);
         if (temp <= a[0])  return Math.Clamp(duties[0], 0, 100);
         if (temp >= a[^1]) return Math.Clamp(duties[^1], 0, 100);
-        for (int i = 1; i < a.Length; i++)
+        for (var i = 1; i < a.Length; i++)
             if (temp <= a[i])
             {
                 int d0 = duties[i - 1], d1 = duties[i];

@@ -14,13 +14,15 @@ namespace AcerHelper.Tests;
 public class FanCurveEngineStepTests
 {
     // Fixed-speed fans, so the expected duty is exactly the number the test supplies and the deadband is
-    // the only thing under test. Temps are irrelevant for these presets and are left unset (-1).
-    private static FanPreset Fixed(int cpu, int gpu) => new() { Cpu = cpu, Gpu = gpu };
+    // the only thing under test. Temps are irrelevant for these fans and are left unset (-1). Each fan is
+    // handed its own settings — curve off, its fixed duty — because that is all a fan is given now.
+    private static (FanSettings cpu, FanSettings gpu) Fixed(int cpu, int gpu) =>
+        (new FanSettings(false, [], cpu), new FanSettings(false, [], gpu));
 
     private static SensorSnapshot NoTemps { get; } = new();
 
-    private static FanPreset Curved(int[] cpuCurve, int gpu) =>
-        new() { CpuUseCurve = true, CpuCurve = cpuCurve, Gpu = gpu };
+    private static (FanSettings cpu, FanSettings gpu) Curved(int[] cpuCurve, int gpu) =>
+        (new FanSettings(true, cpuCurve, 0), new FanSettings(false, [], gpu));
 
     // ---- no committed state: the first Step after construction or Reset must always apply ----
 
@@ -224,14 +226,11 @@ public class FanCurveEngineStepTests
     public void GpuCurveIsEvaluatedIndependentlyOfTheCpuCurve()
     {
         var engine = new FanCurveEngine();
-        var preset = new FanPreset
-        {
-            CpuUseCurve = true, CpuCurve = [10, 20, 30, 40, 50],
-            GpuUseCurve = true, GpuCurve = [90, 80, 70, 60, 50],
-        };
+        var fans = (cpu: new FanSettings(true, [10, 20, 30, 40, 50], 0),
+                    gpu: new FanSettings(true, [90, 80, 70, 60, 50], 0));
 
         // CPU at 60 °C -> 20; GPU at 60 °C -> 80. The two curves must not share state.
-        var result = engine.Step(preset, new SensorSnapshot { CpuTempC = 60, GpuTempC = 60 });
+        var result = engine.Step(fans, new SensorSnapshot { CpuTempC = 60, GpuTempC = 60 });
         Assert.Equal((20, 80), result);
     }
 
@@ -241,9 +240,10 @@ public class FanCurveEngineStepTests
     public void OutOfRangeCurvePoints_StillProduceAByteSafeDuty()
     {
         var engine = new FanCurveEngine();
-        var preset = new FanPreset { CpuUseCurve = true, CpuCurve = [150, -20, 60, 80, 200], Gpu = 0 };
+        var fans = (cpu: new FanSettings(true, [150, -20, 60, 80, 200], 0),
+                    gpu: new FanSettings(false, [], 0));
 
-        var result = engine.Step(preset, new SensorSnapshot { CpuTempC = 50, GpuTempC = 50 });
+        var result = engine.Step(fans, new SensorSnapshot { CpuTempC = 50, GpuTempC = 50 });
 
         Assert.Equal((100, 0), result);   // clamp(150) = 100
     }
