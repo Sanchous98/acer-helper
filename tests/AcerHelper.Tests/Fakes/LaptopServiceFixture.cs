@@ -7,6 +7,10 @@ namespace AcerHelper.Tests.Fakes;
 /// A <see cref="LaptopService"/> wired to the hand-written fakes, with no port assigned until a test asks
 /// for one. Ports are read lazily on every call, so a test may assign <c>Device.&lt;Port&gt;</c> after
 /// construction. <c>LampArray</c> is never built: the fixture passes no transport, so nothing P/Invokes.
+///
+/// The fake backend's declared settings are handed to the service exactly as composition hands a real device's
+/// (<c>DeviceFactory.Create</c> -> this constructor -> <c>Settings.Install</c>), and by REFERENCE, which is what
+/// lets a test call <see cref="FakeDevice.Declare"/> after this line and still have the model see it.
 /// </summary>
 public sealed class LaptopServiceFixture
 {
@@ -20,7 +24,7 @@ public sealed class LaptopServiceFixture
     public LaptopServiceFixture(Settings? settings = null)
     {
         Store = new FakeSettingsStore(settings);
-        Service = new LaptopService(Device, Store);
+        Service = new LaptopService(Device, Store, Device.DeclaredSettings);
     }
 
     /// <summary>Attach a <see cref="FakePowerProfiles"/> and return it, for arranging and asserting.</summary>

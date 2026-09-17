@@ -14,6 +14,11 @@ namespace AcerHelper.Tests;
 /// setting names at all. What the value MEANS once applied is the row's business
 /// (<c>OptionsAssemblerTests</c>), and what survives a restart is the settings bag.
 ///
+/// WHERE THE SET LIVES. The declarations are NOT on <c>IDevice</c>: the settings model holds the set it was
+/// handed (<c>Settings.DeclaredSettings</c>/<c>Install</c>) and carries the logic of switching one, so these
+/// tests arrange them through the fixture's fake backend — whose list the fixture hands over exactly as
+/// composition hands a real device's — and read them back off the service.
+///
 /// WHY THESE CAN EXIST. <c>LaptopService</c>, its settings store and a declared setting are all reachable
 /// without hardware: the setting's transport is a fake, and the row's failure path was already made observable
 /// by the injected <c>post</c> delegate (OptionsAssemblerTests says why). Nothing here needs a real knob.
@@ -161,6 +166,60 @@ public class DeclaredSettingTests
 
         Assert.True(probe.SetCalled);        // non-vacuity: the probe really was written through
         Assert.False(probe.HeldDuringSet);   // the lock never spanned that write
+    }
+
+    // ---------------------------------------------------------------- the model half: it holds the set, and switches it
+
+    /// <summary>The set of declared options belongs to the MODEL and is supplied from outside: it holds what it
+    /// was handed and invents nothing, because what a machine HAS is what its backend's probe found and there is
+    /// no other source for it now that <c>IDevice</c> carries no member. Pinned because the failure would be
+    /// silent and would read as "this machine has no settings": a model that ignored the hand-off leaves every
+    /// row unbuildable and every apply unreachable.</summary>
+    [Fact]
+    public void TheModelHoldsTheSetItWasHanded_AndInventsNoneOfItsOwn()
+    {
+        var declared = new FlagSetting { Key = "lcd_override", Port = new FakeFlagPort() };
+        var settings = new Settings();
+
+        Assert.Empty(settings.DeclaredSettings);       // nothing is declared until something declares it
+
+        settings.Install([declared]);
+
+        Assert.Equal([declared], settings.DeclaredSettings);
+    }
+
+    /// <summary>The hand-off itself: the set a backend declared reaches the model through the service's
+    /// constructor, which is the only route there is now. Pinned because a service that skipped the install would
+    /// still build, still save, and offer no hardware row at all — the failure would look like a machine with no
+    /// settings rather than like a missing line. It also pins that the list is held BY REFERENCE: the fake backend
+    /// declares after the service exists, and a copying install would make that declaration invisible.</summary>
+    [Fact]
+    public void TheDeclaredSetReachesTheModel_ThroughTheServicesConstructor()
+    {
+        var f = new LaptopServiceFixture();
+        var declared = f.Device.Declare("lcd_override", new FakeFlagPort(), readbackVerifiesWrite: false);
+
+        Assert.Equal([declared], f.Service.DeclaredSettings);
+    }
+
+    /// <summary>The switching logic, taken on the model directly: an apply goes through the option's OWN contract
+    /// (so the write, and any refusal, are the option's — this layer adds no second channel), and remembering
+    /// lands the value in the bag under the option's own key. The two are separate calls because the graph lock
+    /// must not span the write; the row-level path that places the lock is pinned by
+    /// <see cref="AnAppliedSetting_IsRecordedUnderItsOwnKey_AndSaved"/> and
+    /// <see cref="TheHardwareWrite_HappensOutsideTheStateLock"/>.</summary>
+    [Fact]
+    public void TheModelSwitchesThroughTheOptionsOwnContract_AndRemembersUnderItsOwnKey()
+    {
+        var port = new FakeFlagPort();
+        var declared = new FlagSetting { Key = "lcd_override", Port = port };
+        var settings = new Settings();
+
+        settings.Apply(declared, FlagSetting.Value(true));
+        settings.Remember(declared, FlagSetting.Value(true));
+
+        Assert.Equal([true], port.SetCalls);                            // the option's own contract did the write
+        Assert.Equal("1", settings.DeviceSettings["lcd_override"]);     // ...and the value is under its own key
     }
 
     // ---------------------------------------------------------------- both halves through a row

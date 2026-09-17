@@ -12,21 +12,33 @@ public sealed partial class LaptopService
 
     // ---- declared settings (each throws on refusal; the UI catches and composes the message) ----
 
-    /// <summary>Apply one of the settings this machine declares (Domain/Settings.cs), then record the value
-    /// under the setting's own key.
+    /// <summary>The settings this machine's backend declared, as the settings MODEL holds them
+    /// (Domain/Settings.cs) — this is what the UI builds its hardware rows from, and the only source of them now
+    /// that <see cref="IDevice"/> carries no member for the set.
+    ///
+    /// Read WITHOUT the graph lock, and that is not an oversight: the lock guards the graph's mutability, and this
+    /// list is installed once in the constructor — before the UI or the refresh pass exists — and is not appended
+    /// to afterwards. (A test's fake backend declares after that constructor, which is why the model holds the list
+    /// by reference; see <c>Settings.Install</c>.)</summary>
+    public IReadOnlyList<SettingDeclaration> DeclaredSettings => Settings.DeclaredSettings;
+
+    /// <summary>Apply one of the settings this machine declares, then record the value under the setting's own
+    /// key. Both halves of the switch belong to the model — <c>Settings.Apply</c> hands the value to the option's
+    /// own contract (a refusal is a <see cref="SettingNotAppliedException"/>) and <c>Settings.Remember</c> records
+    /// what took; what stays here is what the model cannot own: the graph lock and the save.
     ///
     /// THE ORDER IS THE POINT. The hardware write runs OUTSIDE <c>_state</c>, because a setting is an EC/WMI
     /// write and the lock must never span one (docs/domain-refactoring-plan.md §4). Only the recording takes it,
-    /// which is also what makes "released on throw" free: a refused write throws out of
-    /// <see cref="SettingDeclaration.Apply"/> before the lock is ever taken, and nothing is recorded.
+    /// which is also what makes "released on throw" free: a refused write throws out of the model's Apply before
+    /// the lock is ever taken, and nothing is recorded.
     ///
     /// The refusal is an EXCEPTION rather than a returned pair because the reason it carries is information
     /// about what happened, not a sentence: this layer knows the setting only by its opaque key and has no name
     /// to put in a message (docs/domain-refactoring-plan.md §5, wave 9). The UI owns the label.</summary>
     public void ApplySetting(SettingDeclaration setting, string value)
     {
-        setting.Apply(value);
-        lock (_state) { Settings.DeviceSettings[setting.Key] = value; }
+        Settings.Apply(setting, value);
+        lock (_state) { Settings.Remember(setting, value); }
         Save();
     }
 

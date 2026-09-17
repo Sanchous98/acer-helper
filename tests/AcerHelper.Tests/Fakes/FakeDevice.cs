@@ -16,12 +16,16 @@ namespace AcerHelper.Tests.Fakes;
 /// constructed is correct. <see cref="Dispose"/> is a no-op that records the call: nothing here owns a
 /// handle, and no test may touch real hardware.
 ///
-/// <see cref="Battery"/> and <see cref="DeclaredSettings"/> are the two slots that are NOT a nullable port,
-/// because neither is a port any more: the battery is the domain object that declares its own properties one
-/// by one (Domain/Battery.cs), and a setting is DECLARED under the backend's own key (Domain/Settings.cs). A
-/// test therefore arranges them through those objects — <c>Battery.ChargeLimit = new
-/// FakeFlagPort().AsBatteryToggle()</c>, <see cref="Declare"/> — and an empty device is the canonical "this
-/// machine has nothing" device.
+/// <see cref="Battery"/> is the one slot that is NOT a nullable port, because it is not a port any more: the
+/// battery is the domain object that declares its own properties one by one (Domain/Battery.cs), so a test
+/// arranges it through that object — <c>Battery.ChargeLimit = new FakeFlagPort().AsBatteryToggle()</c>.
+///
+/// THE DECLARED SETTINGS ARE THE SAME KIND OF THING, one step further out: <see cref="Declare"/> is this fake's
+/// probe — what a real backend's <c>InitVendor</c> does with its own key — and the list it fills goes to the
+/// settings MODEL, which holds it and switches it (Domain/Settings.cs), exactly as composition hands a real
+/// device's list over (<c>DeviceFactory</c> -> <c>LaptopService</c>, see <see cref="LaptopServiceFixture"/>).
+/// <see cref="IDevice"/> has no member for it. An empty device is the canonical "this machine has nothing"
+/// device.
 /// </summary>
 public sealed class FakeDevice : IDevice
 {
@@ -43,7 +47,10 @@ public sealed class FakeDevice : IDevice
     public IAutostart? Autostart { get; set; }
     public IClamshell? Clamshell { get; set; }
 
-    /// <summary>The settings this fake machine declares, in the order its backend would add them.</summary>
+    /// <summary>The settings this fake machine declares, in the order its backend would add them. This is the
+    /// fake BACKEND's own list rather than an <see cref="IDevice"/> member — the settings model holds the set, and
+    /// the fixture hands this very list to it (see <see cref="LaptopServiceFixture"/>), so a test may either
+    /// declare before the service exists or, as every test here does, after it.</summary>
     public IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
 
     private readonly List<SettingDeclaration> _declaredSettings = [];

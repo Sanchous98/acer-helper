@@ -38,7 +38,8 @@ public sealed partial class LaptopService : IDisposable
     private readonly ISettingsStore store;
     private readonly ILampArrayTransport? lampArray;
 
-    public LaptopService(IDevice device, ISettingsStore store, ILampArrayTransport? lampArray = null)
+    public LaptopService(IDevice device, ISettingsStore store, IReadOnlyList<SettingDeclaration> declaredSettings,
+                         ILampArrayTransport? lampArray = null)
     {
         this.device = device;
         this.store = store;
@@ -48,6 +49,11 @@ public sealed partial class LaptopService : IDisposable
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
         // this class reads Settings, so loading it here rather than there is observably the same order.
         Settings = store.Load();
+        // ...and the settings this machine declares are handed to the model that holds and switches them
+        // (Domain/Settings.cs). They arrive as a constructor argument rather than off the device because they no
+        // longer live on IDevice: the backend's probe finds them, and the composition root is what carries them
+        // here (see DeviceFactory.Create).
+        Settings.Install(declaredSettings);
     }
 
     /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this

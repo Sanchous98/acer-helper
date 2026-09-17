@@ -31,15 +31,22 @@ public partial class GenericDevice : IDevice
     public IAutostart?          Autostart          { get; protected set; }
     public IClamshell?          Clamshell          { get; protected set; }
 
-    /// <summary>The settings this machine declares. A LIST rather than a slot per capability, because a
-    /// declaration carries its own shape and its own key: each vendor's <c>InitVendor</c> adds the entries its
-    /// own probe found, in the order the rows should read, and a setting it did not find is simply not
-    /// declared.</summary>
+    /// <summary>The settings this machine declares — this backend's own list, and the source of the set the
+    /// settings MODEL holds (Domain/Settings.cs). A LIST rather than a slot per capability, because a declaration
+    /// carries its own shape and its own key: each vendor's <c>InitVendor</c> adds the entries its own probe
+    /// found, in the order the rows should read, and a setting it did not find is simply not declared.
+    ///
+    /// It is deliberately NOT a member of <see cref="IDevice"/>: the model holds the set and switches it, so the
+    /// composition root carries this list there — <c>DeviceFactory</c> hands it alongside the device, and
+    /// <c>LaptopService</c>'s constructor installs it into the loaded settings. This property is what that
+    /// hand-off reads.</summary>
     public IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
 
     private readonly List<SettingDeclaration> _declaredSettings = [];
 
-    /// <summary>Register one setting this machine's probe found, under the backend's own key for it.</summary>
+    /// <summary>Register one setting this machine's probe found, under the backend's own key for it. The list is
+    /// finished before the app service is built (probing happens in the device's construction), so nothing
+    /// appends to it once the settings model holds it.</summary>
     protected void Declare(SettingDeclaration setting) => _declaredSettings.Add(setting);
 
     private readonly List<IDisposable> _owned = [];

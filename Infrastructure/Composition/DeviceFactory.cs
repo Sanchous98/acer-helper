@@ -13,7 +13,16 @@ namespace AcerHelper.Infrastructure.Composition;
 /// </summary>
 public static class DeviceFactory
 {
-    public static IDevice Create()
+    /// <summary>The machine, and the settings its backend declared while probing it.
+    ///
+    /// The two travel together because the declared set does not belong to the device any more: the settings
+    /// MODEL holds it and switches it (Domain/Settings.cs), and <see cref="IDevice"/> carries no member for it,
+    /// so this factory is the one place that can hand the backend's own list to the service that installs it —
+    /// the concrete device is the only thing that has it.
+    ///
+    /// The list is complete by the time it is read: a backend declares during its own construction
+    /// (<c>InitVendor</c>), and <see cref="GenericDevice.FinalizeComposition"/> only adjusts ports.</summary>
+    public static (IDevice Device, IReadOnlyList<SettingDeclaration> DeclaredSettings) Create()
     {
         var (manufacturer, product) = MachineInfo.Read();
 
@@ -26,7 +35,7 @@ public static class DeviceFactory
         // performance profiles are a vendor WMI/EC port or the generic Windows overlay — let the device make
         // the composition decisions that depend on it (e.g. the overlay-CPU-power axis; see GenericDevice).
         device.FinalizeComposition();
-        return device;
+        return (device, device.DeclaredSettings);
     }
 
     /// <summary>The OS's transport for publishing this laptop's zones as a virtual HID LampArray (Windows

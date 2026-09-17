@@ -2,8 +2,14 @@ using AcerHelper.Localization;
 
 namespace AcerHelper.Domain;
 
-/// <summary>User preferences. Persisted by an <see cref="ISettingsStore"/> (Infrastructure).
-/// Values are vendor-neutral so they survive a hardware/vendor change.</summary>
+/// <summary>User preferences, and the set of settings THIS machine declares plus the logic of switching them.
+///
+/// The two halves are different in kind, and holding both in one type is a recorded state rather than a
+/// claim that they belong together: the persisted half is the shape of settings.json — written by an
+/// <see cref="ISettingsStore"/> (Infrastructure), vendor-neutral so it survives a hardware/vendor change —
+/// while <see cref="DeclaredSettings"/> is runtime state the backend supplies and that must never reach the
+/// file. Splitting them into two types (the persisted container moving to Infrastructure, this declarative
+/// half staying in Domain) is a separate, larger move: docs/domain-layering-map.md, move 4.</summary>
 public sealed class Settings
 {
     // UI language. Default follows the OS UI culture (see Loc); serialized as the enum's numeric value by the
@@ -66,6 +72,56 @@ public sealed class Settings
     // key + its meaning live in the backend (Infrastructure/Vendors/*); access via LaptopService.GetDeviceFlag /
     // SetDeviceFlag, and via LaptopService.ApplySetting for a declared setting.
     public Dictionary<string, string> DeviceSettings { get; set; } = new();
+
+    // ---- the options this machine declares (this type's runtime half) ----------------------------------------
+    //
+    // A backend declares which settings THIS machine has, each under its own opaque key; this type HOLDS that set
+    // and carries the logic of switching it — applying one goes through the option's own contract, and a refusal
+    // comes out of that call as an exception. The FORM of a declaration and what applying one is are stated once,
+    // with the contract types at the bottom of this file; nothing here interprets a key or invents a declaration.
+    //
+    // THE SET IS SUPPLIED FROM OUTSIDE (Install). What a machine has is what its probe found, so this type builds
+    // nothing itself; the backend fills the list while it is constructed and the composition path hands it over.
+    //
+    // NOT PERSISTED, and the accessor below is `internal` rather than public because of it: the guard
+    // EveryDeclaredPropertyStillReachesTheDisk (tests) holds every PUBLIC property of this type to reaching
+    // settings.json, and a declaration must not reach it — it says what the MACHINE has, not what the user chose.
+    // A public property would either put a list of live transports in the user's file or force that guard to grow
+    // an exemption, and noticing exactly that is what the guard is for.
+
+    private IReadOnlyList<SettingDeclaration> _declaredSettings = [];
+
+    /// <summary>The settings this machine's backend declared, in the order their rows should read. Empty on a
+    /// machine that declares none.</summary>
+    internal IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
+
+    /// <summary>Hand over the set of options this machine declares. Called once, from the composition path
+    /// (<c>LaptopService</c>'s constructor), with the list the backend filled while probing.
+    ///
+    /// The list is held BY REFERENCE rather than copied, and the difference is deliberate: the shipped backends
+    /// have finished declaring before the app service exists, so there is nothing a copy would protect, while a
+    /// test's fake backend declares AFTER the service exists — the same live list is how a test says which row it
+    /// means, and copying would silently make a later declaration invisible to the model.</summary>
+    internal void Install(IReadOnlyList<SettingDeclaration> options) => _declaredSettings = options;
+
+    /// <summary>Switch one declared option: hand the value to the option's own contract, which is where the write
+    /// happens and where a refusal comes from — a <see cref="SettingNotAppliedException"/> carrying the key and
+    /// the transport's own reason.
+    ///
+    /// THE CALLER MUST NOT HOLD THE GRAPH LOCK ACROSS THIS CALL. It is an EC/WMI write and the lock must never
+    /// span one (docs/domain-refactoring-plan.md §4), so the recording that follows a write that took is a
+    /// separate call — <see cref="Remember"/> — which the caller makes under the lock instead. This type keeps no
+    /// lock of its own: a lock in Domain/ is the same thing §4 forbids.</summary>
+    internal void Apply(SettingDeclaration option, string value) => option.Apply(value);
+
+    /// <summary>Remember a value the hardware took, under the option's OWN key — the bag is keyed by the
+    /// backend's name for the setting, which is the only name either layer has for it, and a choice's value is an
+    /// option id rather than a bool, which the bag carries as a string.
+    ///
+    /// That a REFUSED switch records nothing is the ORDER, not a check: a throw out of <see cref="Apply"/> leaves
+    /// this call unreached (pinned by <c>DeclaredSettingTests.ARefusedSetting_RecordsNothing_AndSavesNothing</c>).
+    /// The caller holds the graph lock: <see cref="DeviceSettings"/> is a shared collection.</summary>
+    internal void Remember(SettingDeclaration option, string value) => DeviceSettings[option.Key] = value;
 }
 
 // ---- the declared-settings contract ------------------------------------------------------------------------
@@ -74,6 +130,9 @@ public sealed class Settings
 // A backend declares which settings THIS machine has, each under its own opaque key, and this file declares the
 // two halves of what that means: the FORM of a declaration (a flag or a choice, and for a choice its legal
 // values) and what APPLYING one is (a write, whose refusal is an exception rather than a returned message).
+// Switching one is <see cref="Settings.Apply"/> plus <see cref="Settings.Remember"/>: the apply goes through the
+// declaration below, the remembering is the write into the bag above, and the two are separate calls only because
+// the graph lock must not span the write.
 //
 // Nothing here interprets a key or names a setting. The row's label, its localization and the sentence the user
 // reads on a failure all belong to the UI, which is the only layer that knows what to call a `lcd_override`.

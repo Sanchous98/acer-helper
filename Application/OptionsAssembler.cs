@@ -6,14 +6,15 @@ namespace AcerHelper.Application;
 /// <summary>Builds the generic <see cref="OptionToggle"/>/<see cref="OptionChoice"/> models from whatever
 /// hardware the device exposes, wrapping each setter so failures are reported via <paramref name="notify"/>
 /// (off the UI thread, then handed to <paramref name="post"/> to get back onto it). This is the one place
-/// that reads the device for the settings it offers, so <see cref="AppController"/> doesn't; the produced
+/// that reads the settings this machine offers, so <see cref="AppController"/> doesn't; the produced
 /// models are plain data handed to the view-models, which stay free of the service.
 ///
-/// THE HARDWARE ROWS COME FROM THE SETTINGS THE DEVICE DECLARES (Domain/Settings.cs), not from a port slot and
-/// a hard-coded name per row. A declaration carries its own shape (a flag or a choice) and its own opaque key;
-/// this file supplies the one thing a declaration deliberately does not — the row's label, which is the UI's
-/// business (<see cref="LabelFor"/>). So a backend that declares nothing offers nothing, and one that declares
-/// a setting this build has no name for still gets a row rather than silence.
+/// THE HARDWARE ROWS COME FROM THE SETTINGS THE SETTINGS MODEL HOLDS (Domain/Settings.cs), not from a port slot
+/// and a hard-coded name per row. The model holds the set its machine's backend declared, and each declaration
+/// carries its own shape (a flag or a choice) and its own opaque key; this file supplies the one thing a
+/// declaration deliberately does not — the row's label, which is the UI's business (<see cref="LabelFor"/>). So a
+/// backend that declares nothing offers nothing, and one that declares a setting this build has no name for still
+/// gets a row rather than silence.
 ///
 /// <paramref name="post"/> is a parameter rather than a direct <c>Dispatcher.UIThread.Post</c> call so this
 /// file — the last one that would have kept the Application layer Avalonia-bound — needs no toolkit at all.
@@ -33,7 +34,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public IReadOnlyList<OptionToggle> Toggles()
     {
         var list = new List<OptionToggle>();
-        foreach (var setting in svc.Device.DeclaredSettings)
+        foreach (var setting in svc.DeclaredSettings)
         {
             if (setting is not FlagSetting flag) continue;
             var label = Loc.T(LabelFor(setting.Key));
@@ -67,7 +68,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public IReadOnlyList<OptionChoice> Choices()
     {
         var list = new List<OptionChoice>();
-        foreach (var setting in svc.Device.DeclaredSettings)
+        foreach (var setting in svc.DeclaredSettings)
         {
             if (setting is not ChoiceSetting choice) continue;
             var label = Loc.T(LabelFor(setting.Key));

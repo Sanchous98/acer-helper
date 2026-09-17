@@ -21,8 +21,11 @@ public partial class App : Avalonia.Application
             // tray app: closing windows must not quit the process
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            // composition root: detect device, wire settings, build the application service
-            var service = new LaptopService(DeviceFactory.Create(), new JsonSettingsStore(),
+            // composition root: detect device, wire settings, build the application service. The device's declared
+            // settings travel with it, because the settings MODEL holds that set and switches it (Domain/Settings.cs)
+            // and IDevice carries no member for it — this is the hand-off.
+            var (device, declaredSettings) = DeviceFactory.Create();
+            var service = new LaptopService(device, new JsonSettingsStore(), declaredSettings,
                                             DeviceFactory.CreateLampArrayTransport());
             // Activate the persisted UI language before any window/view-model is built (they read their
             // strings via Loc at construction). Default is "System" -> follow the OS UI culture. Read through

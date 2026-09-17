@@ -8,8 +8,10 @@ namespace AcerHelper.Domain;
 // Two capabilities have moved off that scheme, both by declaring their own shape instead of
 // occupying a nullable slot: the battery is a domain OBJECT (Domain/Battery.cs) that declares its
 // properties one by one, and the settings a backend owns are DECLARED
-// (IDevice.DeclaredSettings, Domain/Settings.cs) under the backend's own keys. In both cases "this
-// machine does not have that" is the absence of a property/declaration rather than a null port.
+// (Settings.DeclaredSettings, Domain/Settings.cs) under the backend's own keys. The declared set is
+// held by the settings MODEL, not by IDevice: the backend's probe finds the settings, and the
+// composition path hands the set over. In both cases "this machine does not have that" is the
+// absence of a property/declaration rather than a null port.
 
 /// <summary>Switchable performance/platform profiles.</summary>
 public interface IPowerProfiles
@@ -45,9 +47,10 @@ public interface ISensors
 /// them: LCD overdrive, the keyboard-backlight timeout flag and Fn lock are flags, the USB-charging and
 /// keyboard-backlight-timeout-duration settings are <see cref="IChoicePort"/>s. None of them has an interface
 /// type of its own any more — a setting is declared as a <see cref="FlagSetting"/>/<see cref="ChoiceSetting"/>
-/// on <see cref="IDevice.DeclaredSettings"/>, so the SHAPE is what a caller switches on and the capability's
-/// name is the backend's opaque key. The battery's two toggles are not among them either: they are members of
-/// the battery object (Domain/Battery.cs), where presence per property is what the object itself declares.</summary>
+/// on the settings model (<c>Settings.DeclaredSettings</c>, Domain/Settings.cs), so the SHAPE is what a caller
+/// switches on and the capability's name is the backend's opaque key. The battery's two toggles are not among
+/// them either: they are members of the battery object (Domain/Battery.cs), where presence per property is what
+/// the object itself declares.</summary>
 public interface IFlagPort
 {
     string? LastError { get; }
@@ -71,10 +74,11 @@ public interface IChoicePort
 // IUsbCharging and IFnLock — one per setting of the four the declared-settings contract was introduced for (the
 // keyboard backlight is two settings on two different machines), each occupying its own nullable slot on
 // IDevice. They are gone: a setting is now DECLARED by the backend that owns its key
-// (IDevice.DeclaredSettings), so "this machine has an LCD-overdrive setting" is the presence of a declaration
-// rather than the presence of a dedicated type. The one thing they carried that a declaration does not is the
-// port's LastError, and the declaration reads it (<see cref="IFlagPort.LastError"/>). IUsbCharging left this
-// list for the same reason wave 4b left the battery ports behind: nothing implements or exposes it any more.
+// (Settings.DeclaredSettings, Domain/Settings.cs), so "this machine has an LCD-overdrive setting" is the presence
+// of a declaration rather than the presence of a dedicated type. The one thing they carried that a declaration
+// does not is the port's LastError, and the declaration reads it (<see cref="IFlagPort.LastError"/>). IUsbCharging
+// left this list for the same reason wave 4b left the battery ports behind: nothing implements or exposes it any
+// more.
 
 /// <summary>Plain (non-RGB) keyboard-backlight brightness in discrete hardware levels, 0 = off
 /// (e.g. Dell: 0..2 = Off/Dim/Bright). RGB keyboards expose brightness via <see cref="IRgbDevice"/> instead.</summary>
@@ -257,9 +261,12 @@ public interface IClamshell : IDisposable
 /// The battery is the exception, and the first capability to change shape: <see cref="Battery"/> is always
 /// there and declares its OWN properties one by one (Domain/Battery.cs), because "this laptop has no charge
 /// limiter" is a fact about the battery rather than about the machine. A machine with no battery at all is
-/// simply one whose battery object has nothing on it. <see cref="DeclaredSettings"/> follows it for the
-/// settings a vendor owns: none of them occupies a slot, and which ones this machine has is what the list
-/// contains.
+/// simply one whose battery object has nothing on it.
+///
+/// The settings a backend declares are NOT a member here, and their absence is the point rather than an
+/// omission: the set belongs to the settings MODEL, which holds it and switches it (Domain/Settings.cs), and
+/// the backend's own list is handed over at composition (DeviceFactory → <c>LaptopService</c>'s constructor).
+/// A device that declares nothing therefore offers nothing, and no port slot has to be interpreted to say so.
 /// </summary>
 public interface IDevice : IDisposable
 {
@@ -280,11 +287,4 @@ public interface IDevice : IDisposable
     IDriverSetup?        DriverSetup        { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
-
-    /// <summary>The settings this machine's backend declares — one entry per setting its probe actually found,
-    /// which is how "this machine does not have that" is stated for them (the same rule the battery object
-    /// follows per property). Each carries its own shape and its own opaque key, so nothing above has to know
-    /// which laptop has an LCD-overdrive knob or what this vendor calls it. Empty on a machine that declares
-    /// none.</summary>
-    IReadOnlyList<SettingDeclaration> DeclaredSettings { get; }
 }
