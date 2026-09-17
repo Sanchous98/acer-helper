@@ -242,12 +242,32 @@ Application, а политики и волатильность (`EmptyAxisPolicy
 
 **Шаг 2. `AppArgs` → Application.** Решено владельцем, три файла, ничего не задет.
 
+> **Сделано 2026-09-17.** `Application/AppArgs.cs`, namespace `AcerHelper.Application`; `using`
+> заменён с `AcerHelper.Domain` на `AcerHelper.Application` в двух файлах автозапуска
+> (`Autostart.Windows.cs`, `Autostart.Linux.cs`). `UI/App.axaml.cs` не правился — нужный `using`
+> у него уже был, как и записано в §1 выше. Перенос, а не смена: все 923 существующих
+> утверждения остались зелёными без правок.
+
 **Шаг 3. Разрез расписания.** `ReapplyTrigger` → Application, `ModeAxisTable.Schedule` →
 Application (одним типом или как член переехавшего). `ModeAxisTable` остаётся в домене с
 `All`/`Policy`/`PolicyWhenNoModeWasEverConfigured`/`IsVolatile`/`Owner`. Правки: 1
 продакшн-файл (`HardwareReconciler`) и 3 тестовых. **Глоссарий** держит имя
 `ModeAxisTable` — имя остаётся, поэтому набор тестов зелёный; строка в `context-map.md`
 требует правки только в колонке слоя.
+
+> **Сделано 2026-09-17.** `ReapplyTrigger` переехал в `Application/HardwareReconciler.cs`, а
+> `Schedule` стал `HardwareReconciler.Schedule(ReapplyTrigger)` (`internal static`) там же. Из двух
+> вариантов имени, названных выше, выбран второй: таблица осталась одна и потеряла член, второй
+> тип не заводился, потому что единственный исполнитель расписания и есть `HardwareReconciler`.
+> Списки по-прежнему **собираются** из `All` и `IsVolatile`: расписание читает таблицу, а не
+> повторяет её. Перенос, а не смена — те же триггеры дают те же оси в том же порядке, и все 923
+> утверждения остались зелёными; в тестах правились только `using` и цель вызова.
+>
+> **Поправка к написанному выше: `context-map.md` не потребовал правок.** Строка `ModeAxisTable`
+> в его §1 перечисляет «политику пресета нет, волатильность, кто переприменяет» и слой `Domain`,
+> то есть после разреза описывает ровно то, что осталось. `ReapplyTrigger` по решению §3 «Слова
+> без типа» намеренно без типа в первой колонке, поэтому колонки слоя у него нет и устареть
+> нечему. `GlossaryTests` зелёный без правок.
 
 **Шаг 4. Формы хранения в инфраструктуру.** `Settings`, `ISettingsStore`, `LightSettings`,
 `LightPreset`, `GpuOcPreset`, `CoPreset`, `ProfileMemory` → `Infrastructure/Composition/`.
@@ -407,6 +427,9 @@ UI-специфичные имена (`Confirm`, `Prime`, `Read`) живут н�
 | **Инфраструктура** | 32 | 21 |
 | **Спорные** | 3 (`IDevice`, `OptionToggle`, `OptionChoice`) | 0 до ответа владельца |
 | **Всего** | **69** | **24 из 69** |
+
+Таблица считает то, что было **до** работ по §2. Шаг 2 сделан 2026-09-17 (`AppArgs` →
+`Application/`), поэтому «переносимо сейчас» — **23**, а не 24.
 
 Заблокировано: 10 портов гейтом `IDevice`, `FanPreset` — моделью `Fan`. Всё остальное —
 перенос файла с namespace и `using`-ами; ни одно персистентное имя при этом не меняется,

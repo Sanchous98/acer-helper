@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using AcerHelper.Domain;
+using AcerHelper.Application;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 
