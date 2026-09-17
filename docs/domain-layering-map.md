@@ -240,6 +240,49 @@ Application, а политики и волатильность (`EmptyAxisPolicy
 инфраструктуру, и решение «узкий контракт вместо прямого типа» лучше принять на этом шаге,
 а не после.
 
+> **Сделано 2026-09-17. Одиннадцать типов переехали в новую папку `Infrastructure/Lighting/`** (namespace
+> `AcerHelper.Infrastructure.Lighting`): `IRgbController` и `RgbDevice` — вырезаны из `Domain/Rgb.cs`, который
+> остался на месте и держит `RgbZone` и `IRgbDevice`; восемь типов `Domain/LampArray.cs`; `LampArrayBridge`.
+> Из двух адресов, названных выше, выбран второй (новая папка), а не `Vendors/Generic`: папка называет
+> предмет — подсветку, — тогда как `Vendors/Generic` называет бэкенд-заглушку.
+>
+> **Счёт за `Application` оплачен узким контрактом, то есть вариантом (а), а не признанием
+> `Application → Infrastructure`.** `Application/DynamicLighting.cs` объявляет два контракта: `IDynamicLighting`
+> — ровно та часть моста, которую зовут `LaptopService` и UI (`Enabled`, `LastError`, `Enable`, `Disable`,
+> `HostOwnsLighting`, `OwnerChanged`, `Reassert`, плюс `IDisposable`, потому что `LaptopService.Dispose` снимает
+> поверхность), — и `IDynamicLightingFactory` (`Create(rgb, include)`). `LampArrayBridge` реализует первый,
+> `Infrastructure/Composition/LampArrayBridgeFactory.cs` — второй, и его отдаёт
+> `DeviceFactory.CreateDynamicLightingFactory()`, заменивший `CreateLampArrayTransport()`. Ни `LaptopService`,
+> ни `OptionsAssembler`, ни `UI/LightingCoordinator` не называют теперь ни `ILampArrayTransport`, ни
+> `LampArrayBridge`; **ни один файл `Application/` не получил `using` на инфраструктуру**, и это проверено не
+> глазами: `ArchitectureMapTests.ApplicationPointsAtDomainNotInfrastructure` — новое правило в том же файле,
+> мутация «`using AcerHelper.Infrastructure.Lighting;` в `Application/DynamicLighting.cs`» краснит его и
+> только его.
+>
+> **Почему фабрика, а не готовый объект.** Мост собирается из состояния сервиса: `include`
+> (`ZoneAvailableToHost`) читает граф настроек через `GetDeviceFlag`, а `LaptopService.LampArray` строит мост
+> лениво, после `Settings.Install`. Готовый объект пришлось бы собирать в корне композиции, где сервиса ещё
+> нет, — поэтому Application просит «дай мне поверхность для этих зон», а не получает её. Второй контракт и
+> есть цена этого решения; она названа здесь, а не спрятана.
+>
+> **Что осталось как было, и это проверено, а не обещано.** Поведение: транспорт создаётся в тот же момент
+> (`LampArrayHost.Create()` по-прежнему зовётся в композиции, а не лениво), мост собирается тем же условием
+> («есть транспорт» и «есть зоны»), фильтр зон — тот же самый делегат сервиса, световая дверь и 53 примитива не
+> тронуты. Тесты: 923 утверждения зелёные до и после; правки в существующих тестах — только `using` (7 файлов)
+> и два доккомментария, которые стали неправдой (`RgbDeviceTests` называл себя «доменной половиной»
+> фреймворка, `LaptopServiceFixture` — что фикстура не подаёт транспорт). Добавлены четыре утверждения:
+> правило `ApplicationPointsAtDomainNotInfrastructure` и три теста `DynamicLightingSeamTests`, закрывающие то,
+> что переезд создал заново — путь «фабрика → сервис → мост», который до переезда не был покрыт ничем и после
+> него тоже не был бы. **923 → 927, три прогона подряд по 927/0.** Четыре мутации, и каждая названа:
+> `using` на инфраструктуру в `Application/` краснит новое правило; фабрика, отвечающая `null`, краснит два
+> теста шва и НЕ краснит третий — тот как раз про «фабрики не было вовсе» и различить эти два случая не может
+> по построению; выброшенный `include` краснит только тест про зоны; «отсутствующая поверхность сообщает об
+> успехе» краснит третий тест.
+>
+> **`context-map.md` не потребовал правок:** ни один из одиннадцати типов в его таблице не назван (там есть
+> только `RgbZone`, который остался доменным), поэтому ни одна строка колонки слоя не устарела. Поправлены
+> только ссылки на путь: `README.md` (две) и `docs/lamparray.md` (одна).
+
 **Шаг 2. `AppArgs` → Application.** Решено владельцем, три файла, ничего не задет.
 
 > **Сделано 2026-09-17.** `Application/AppArgs.cs`, namespace `AcerHelper.Application`; `using`
@@ -430,7 +473,9 @@ UI-специфичные имена (`Confirm`, `Prime`, `Read`) живут н�
 
 Таблица считает то, что было **до** работ по §2. Шаги 2 и 3 сделаны 2026-09-17 (`AppArgs`,
 `ReapplyTrigger` и член `Schedule` → `Application/`), поэтому «переносимо сейчас» — **21**,
-а не 24.
+а не 24; после шага 1 (те же сутки, 11 типов из 32 уехали в `Infrastructure/Lighting/`) —
+**10**. Домен при этом не изменил состав: `RgbZone` и `IRgbDevice` остались, уехали
+транспортные типы того же файла.
 
 Заблокировано: 10 портов гейтом `IDevice`, `FanPreset` — моделью `Fan`. Всё остальное —
 перенос файла с namespace и `using`-ами; ни одно персистентное имя при этом не меняется,
