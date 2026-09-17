@@ -396,6 +396,42 @@ public class LaptopServiceModeKeyTests
         Assert.Equal(id, f.Service.CurrentModeKey());
     }
 
+    /// <summary>The other half of "a non-Turbo profile keys by its own id": it keeps its own id even with the
+    /// Turbo switch ON and a base remembered, so the sharing branch belongs to a Turbo current profile ALONE.
+    /// That conjunction — the switch AND the kind — is the whole rule (<c>LaptopService.Profiles.cs</c>
+    /// <see cref="LaptopService.ModeKeyFor"/>), and this is the case that moves if the kind clause is dropped:
+    /// the presets of the mode the machine is actually in would then be read from, and written to, the
+    /// remembered base's slot instead.
+    ///
+    /// The state is one the slot and the hardware can genuinely disagree about, because they are written by
+    /// different things: the slot records what the APP last did, the current profile reports what the
+    /// HARDWARE last did — a profile changed outside the app, or a failed <c>Attempt</c> in
+    /// <c>ApplyStoredMode</c>, leaves the remembered base naming a mode the machine is not in.
+    ///
+    /// <c>expected</c> is written out as a LITERAL rather than read back from the fixture, and the last
+    /// assertion states the point mechanically: the key is NOT the remembered base.</summary>
+    [Theory]
+    [InlineData("quiet", "performance", "quiet")]
+    [InlineData("balanced", "performance", "balanced")]
+    [InlineData("performance", "quiet", "performance")]
+    [InlineData("eco", "balanced", "eco")]
+    public void ANonTurboProfile_WithTheTurboSwitchOn_StillKeysByItsOwnId(string currentId, string baseId,
+                                                                         string expected)
+    {
+        var f = LaptopServiceFixture.WithProfiles(
+            settings: new Settings
+                      {
+                          TurboToggles = true,
+                          OnAc = new ProfileMemory { BaseId = baseId, Turbo = false },
+                      },
+            current: TestProfiles.ById(currentId));
+
+        var key = f.Service.CurrentModeKey();
+
+        Assert.Equal(expected, key);
+        Assert.NotEqual(baseId, key);          // the remembered base was not shared
+    }
+
     /// <summary>Turbo used as a plain selectable profile is a mode of its own: the flag is off, so the
     /// key is the Turbo id even though a base is remembered.</summary>
     [Fact]
@@ -496,8 +532,19 @@ public class LaptopServiceModeKeyTests
         Assert.Equal("turbo", f.Service.CurrentModeKey());                  // not "quiet"
     }
 
-    /// <summary>The overload exists so a refresh pass can read the hardware profile once. It must agree
-    /// with the no-argument form for whatever the port currently reports.</summary>
+    /// <summary>The overload exists so a refresh pass can read the hardware profile once. It must agree with
+    /// the no-argument form for whatever the port currently reports — and THAT AGREEMENT is all this test
+    /// pins: both sides go through the one rule (<c>LaptopService.Profiles.cs</c>
+    /// <see cref="LaptopService.ModeKeyFor"/>), so a change to it moves both answers together and every row
+    /// below stays green.
+    ///
+    /// The rows are therefore NOT the rule's coverage, however much the table looks like a key table. The rule
+    /// itself is pinned by the tests in this class that expect a LITERAL key —
+    /// <see cref="ANonTurboProfile_WithTheTurboSwitchOn_StillKeysByItsOwnId"/>,
+    /// <see cref="Turbo_WithTurboTogglesOn_KeysByTheRememberedBase"/>,
+    /// <see cref="Turbo_WithTurboTogglesOff_KeysByTheTurboId"/>,
+    /// <see cref="Turbo_WithNoRememberedBase_KeysByTheTurboId"/> — and, for the cross-product of the rule's
+    /// four inputs, directly by <c>ModeKeyTests</c>. This one is kept for the delegation alone.</summary>
     [Theory]
     [InlineData("quiet", false, "")]
     [InlineData("balanced", true, "performance")]
