@@ -54,8 +54,9 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
   Two capabilities state their own shape instead of occupying a port: the battery is an OBJECT
   (`Battery`) declaring its properties one by one, so a firmware with no charge limiter is a battery
   whose `ChargeLimit` is null instead of a missing port beside three others; and the settings a
-  backend owns are **declared** (`SettingDeclaration` on `IDevice.DeclaredSettings`) under the
-  backend's own opaque key, so the domain knows no hardware-specific setting name. See
+  backend owns are **declared** (`SettingDeclaration`) under the backend's own opaque key, so the
+  domain knows no hardware-specific setting name — the settings model is constructed with the set of
+  them and switches only within it, refusing anything this machine does not declare. See
   `docs/domain-refactoring-plan.md` §3.1 and §5 (waves 5 + 9).
   Also the pieces that are logic rather than I/O: `Fan` (one fan's duty curve and the duty applied to it)
   with `FanCurveEngine` (the pair of fans and the deadband over them), and the

@@ -600,8 +600,9 @@ nothing here and is a thermal and stability risk, so it is not offered». Обе
   заменены одним `Battery` с nullable-свойствами, `IDevice` усох с 22 портов до 19,
   сами интерфейсы удалены. **Волны 5+9 удалили ещё пять** (`ILcdOverdrive`,
   `IKeyboardBacklight`, `IKeyboardBacklightTimeout`, `IUsbCharging`, `IFnLock`) вместе с их
-  слотами: настройку теперь объявляет сам бэкенд (`IDevice.DeclaredSettings`,
-  `Domain/Settings.cs`), `IDevice` усох до 15, а `IFlagPort`/`IChoicePort` остались — это
+  слотами: настройку теперь объявляет сам бэкенд (`Domain/Settings.cs` — волна 5+9 положила набор на
+  `IDevice.DeclaredSettings`, откуда он уехал в модель и с 2026-09-18 подаётся её конструктором),
+  `IDevice` усох до 15, а `IFlagPort`/`IChoicePort` остались — это
   форма транспорта, которую объявление несёт. Остальные порты пока по старой схеме.
 - WMI через source-generated COM interop вместо `System.Management` (тот не
   AOT-совместим).
