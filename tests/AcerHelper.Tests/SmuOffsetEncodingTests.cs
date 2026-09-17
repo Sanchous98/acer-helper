@@ -43,7 +43,7 @@ public class SmuOffsetEncodingTests
 
     /// <summary>OBSERVED CURRENT behaviour — an open question, NOT a spec and NOT intended behaviour.
     ///
-    /// What the code does right now (RyzenCurveOptimizer.Windows.cs:388):
+    /// What the code does right now (<c>RyzenCurveOptimizer.Encode</c>):
     ///
     ///     =&gt; (counts &gt;= 0 ? 0u : 0x100000u - (uint)(-counts)) &amp; 0xFFFFFu;
     ///
@@ -55,13 +55,13 @@ public class SmuOffsetEncodingTests
     /// Two readings are defensible and the code does not disambiguate them:
     ///   * deliberate hardening — the app supports undervolt only and every caller clamps to
     ///     [MinCounts, 0], so flattening a positive request to "no offset" is the safe answer; or
-    ///   * an unfinished branch — the sibling <c>GpuMargin</c> (:399-400) genuinely returns 5 for 5
+    ///   * an unfinished branch — the sibling <c>GpuMargin</c> genuinely returns 5 for 5
     ///     (see the passing GpuMargin_PositiveOffsets_AreTheValueItself), and the comment above
     ///     <c>Encode</c> justifies ONLY the zero case ("0 is sent as a plain 0, NOT as 0x100000") while
     ///     saying nothing about non-zero positives. That counter-evidence is why this is still open.
     ///
-    /// Unreachable on today's call paths: <c>Set</c> (:256), <c>SetDomains</c> (:319, :323),
-    /// <c>Range</c> (:174), CoViewModel.cs:115 and the clamp in `LaptopService.Tuning.cs` `SetCo` all clamp to [MinCounts, 0].
+    /// Unreachable on today's call paths: <c>Set</c>, <c>SetDomains</c>, <c>Range</c>, <c>CoViewModel</c>'s
+    /// constructor clamp and the clamp in <c>LaptopService.SetCo</c> all clamp to [MinCounts, 0].
     /// A latent trap, not a live defect — exactly the shape a later widening of the range, or a new
     /// caller passing an unclamped value, would fall into silently.
     ///

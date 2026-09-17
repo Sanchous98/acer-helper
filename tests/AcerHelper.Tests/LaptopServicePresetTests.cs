@@ -104,7 +104,7 @@ public class LaptopServicePresetReadTests
 
     // ---- the readers: a Current* accessor on a mode with no preset creates NOTHING ----
 
-    /// <summary>The returned preset is the type's own default (Settings.cs:99-101: Auto, 70/70), and the
+    /// <summary>The returned preset is the type's own default (<c>FanPreset</c>: Auto, 70/70), and the
     /// graph is untouched — no entry, no Save.</summary>
     [Fact]
     public void CurrentFan_OnAnUnconfiguredMode_CreatesNoPreset()
@@ -426,7 +426,7 @@ public class LaptopServiceApplyModeGraphTests
 
     /// <summary>A mode the user never configured has no fan preset at all, and the fans are deliberately
     /// left alone rather than forced to a default — the hardware mode cannot be read back to seed one
-    /// (Settings.cs:23-26). So the port must not be touched either.</summary>
+    /// (<c>Settings.FanPresets</c>). So the port must not be touched either.</summary>
     [Fact]
     public void ApplyModeFan_OnAnUnconfiguredMode_ReturnsNull_AndLeavesTheFansAlone()
     {
@@ -522,7 +522,7 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(-15, stored.AllCore);                       // ...and so is the scalar beside it
     }
 
-    /// <summary>GPU offsets follow the OPPOSITE contract to fans (Settings.cs:42-47): an unconfigured mode
+    /// <summary>GPU offsets follow the OPPOSITE contract to fans (<c>Settings.GpuOcPresets</c>): an unconfigured mode
     /// is definitely stock, because the driver zeroes the offsets on every boot — so switching to it MUST
     /// clear whatever the previous mode applied. Hence the port still gets a (0, 0) write, while the graph
     /// still gains nothing.</summary>
@@ -571,7 +571,7 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(0, f.Store.SaveCount);
     }
 
-    /// <summary>CPU power follows the FAN contract, not the GPU one (Settings.cs:57-61): an unconfigured
+    /// <summary>CPU power follows the FAN contract, not the GPU one (<c>Settings.CpuPowerModes</c>): an unconfigured
     /// mode is left untouched, because forcing an OS power mode on a profile the user never configured would
     /// be a change nobody asked for. So the port is not written — only read, to report reality.</summary>
     [Fact]

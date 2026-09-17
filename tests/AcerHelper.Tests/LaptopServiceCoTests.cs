@@ -28,7 +28,8 @@ public class LaptopServiceCoClampTests
     // ---- SetCo: the ALL-CORE path, clamped against the port's range BEFORE it is persisted ----
 
     /// <summary>Out of range is stored CLAMPED, not raw: the port clamps what it sends to the SMU anyway
-    /// (Domain/Ports.cs:196-199), so a raw value on disk would make the app report an undervolt the
+    /// (<c>ICurveOptimizer.Set</c>, which clamps to the port's own <c>ICurveOptimizer.Range</c>), so a raw
+    /// value on disk would make the app report an undervolt the
     /// hardware never got (`LaptopService.Tuning.cs` `SetCo` — the port-range clamp before persisting).</summary>
     [Theory]
     [InlineData(-100, -30)]      // below the port's Min
@@ -206,7 +207,7 @@ public class LaptopServiceCoDomainClampTests
     }
 
     /// <summary>The all-core value is NOT touched by the per-domain path — it is a separate field with a
-    /// separate meaning (the single-domain fallback, Settings.cs:130-133), and mixing the two would apply
+    /// separate meaning (the single-domain fallback, <c>CoPreset.AllCore</c>), and mixing the two would apply
     /// one rail's number to the whole package on a CPU that later loses domain control.</summary>
     [Fact]
     public void SetCoDomains_LeavesTheAllCoreValueAlone()
@@ -286,7 +287,7 @@ public class LaptopServiceCoKeyingTests
         Assert.Equal(new[] { -20, -10 }, co.SetDomainsCalls[1]); // the SMU is told the reordered values too
     }
 
-    /// <summary>Relabelling a domain (Label is display-only, Domain/Ports.cs:205-208) must keep its value:
+    /// <summary>Relabelling a domain (<c>VoltageDomain.Label</c> is display-only) must keep its value:
     /// the key is what the preset is filed under.</summary>
     [Fact]
     public void PerDomainValues_SurviveARelabelledDomain()
@@ -317,7 +318,7 @@ public class LaptopServiceCoKeyingTests
     }
 
     /// <summary>A domain the preset has no entry for is stock for THAT rail only — never the all-core value,
-    /// and never a neighbour's (Settings.cs:137-138).</summary>
+    /// and never a neighbour's (<c>CoPreset.Domains</c> — a missing key means stock for that domain).</summary>
     [Fact]
     public void AMissingDomainKey_ReadsAsStock_NotAsTheAllCoreValue()
     {
@@ -405,7 +406,7 @@ public class LaptopServiceCoCountTests
     /// store is no longer empty, which permanently disarms the never-configured guard in
     /// <c>ApplyModeCo</c> (`LaptopService.Tuning.cs` `ApplyModeCo`), so every later mode switch, startup and resume now talks to
     /// the SMU on an install whose user never configured an undervolt. Pinned as shipped; unreachable from the
-    /// shipped UI, which only ever calls <c>SetCoValues</c> (UI/AppController.cs:372) and that refuses an
+    /// shipped UI, which only ever calls <c>SetCoValues</c> (<c>AppController.SetCo</c>) and that refuses an
     /// empty array (`LaptopService.Tuning.cs` `SetCoValues` — the empty-count refusal).</summary>
     [Fact]
     public void SetCoDomains_WithADomainlessCpuAndNoCounts_IsAccepted_AndDisarmsTheNeverConfiguredGuard()
@@ -486,7 +487,7 @@ public class LaptopServiceCoCountTests
 
 /// <summary>
 /// <see cref="LaptopService.CurrentCoDomains"/> — the read the UI renders its rows from. It must answer in
-/// the port's own shape (Domain/Ports.cs:183-190) without ever creating a preset, and it must not confuse
+/// the port's own shape (<c>ICurveOptimizer.Domains</c>) without ever creating a preset, and it must not confuse
 /// "no Curve-Optimizer port at all" (nothing to show) with "a CPU that takes one offset" (one row).
 /// </summary>
 public class LaptopServiceCurrentCoDomainsTests
@@ -566,7 +567,7 @@ public class LaptopServiceCurrentCoDomainsTests
 ///     message on their CPU; and
 /// (b) once anything IS configured, a mode with no preset is definitely stock and MUST be actively cleared,
 ///     because the offset is SMU-resident and a stale one carried into a profile the user never configured
-///     is how an unexplained instability happens (Settings.cs:49-55).
+///     is how an unexplained instability happens (<c>Settings.CoPresets</c>).
 /// </summary>
 public class LaptopServiceApplyModeCoTests
 {

@@ -7,7 +7,7 @@ namespace AcerHelper.Tests;
 /// The EC byte ↔ performance-profile table: which byte the EC accepts, which name/kind/accent the UI shows
 /// for it, and which profile each bit of the EC's supported-mask selects.
 ///
-/// A wrong entry here is not a crash, it is the WRONG PROFILE: <c>AcerDevice.Windows.cs:92</c> shifts
+/// A wrong entry here is not a crash, it is the WRONG PROFILE: <c>AcerDevice.SetProfile</c> shifts
 /// <see cref="AcerProfiles.ToByte"/>'s result straight into the <c>SetGamingMiscSetting</c> call, so a
 /// mismatched byte silently sets a different power/thermal envelope than the user clicked. The table is pure
 /// static data with no hardware path, so all of it is reachable from a test.

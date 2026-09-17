@@ -84,7 +84,7 @@ public class OptionsPrimeTests
 
     /// <summary>The placeholder is not invented: it is what the row shows TODAY when a read fails — a flag
     /// port answers false, and <c>IndexOf</c> answers 0 for "no such option" as well as for the first one
-    /// (OptionsAssembler.cs:162-168). So the deferral introduces no new kind of lie; it only moves the honest
+    /// (<c>ChoiceSetting.IndexOf</c>). So the deferral introduces no new kind of lie; it only moves the honest
     /// answer a few milliseconds later.</summary>
     [Fact]
     public void EveryPlaceholder_IsTheAnswerAFailedReadWouldHaveGiven()
@@ -104,7 +104,7 @@ public class OptionsPrimeTests
     /// <summary>
     /// The app-level rows, which <c>OptionsAssembler</c> does not build. Only the autostart row can defer
     /// anything: <c>Autostart.IsEnabled()</c> shells out to schtasks.exe, while <c>Clamshell.Enabled</c> is a
-    /// field the port already holds (Clamshell.cs:24) — so the clamshell row builds from it inline, and a test
+    /// field the port already holds (<c>Clamshell.Enabled</c>) — so the clamshell row builds from it inline, and a test
     /// says so instead of a comment claiming it.
     /// </summary>
     [Fact]

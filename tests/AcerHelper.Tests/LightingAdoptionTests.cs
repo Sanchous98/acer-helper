@@ -52,7 +52,7 @@ namespace AcerHelper.Tests;
 /// <c>AnAdoption_NeverClaimsTheZoneAsConfigured</c>.</item>
 /// </list>
 ///
-/// THE GAP, NAMED. The plan's literal mutation — restore the poller at <c>AppController.cs:617</c> — is NOT
+/// THE GAP, NAMED. The plan's literal mutation — restore the poller in <c>AppController.UiPass</c> — is NOT
 /// reachable by this suite: <c>AppController</c> needs a live desktop lifetime and a refresh loop, which is the
 /// limit <c>ReconcileScheduleTests</c> and <c>CpuPrimeTests</c> already record. So what is unproven here is that
 /// the PASS no longer polls; what is proven is that the two paths that pass fed (<c>Prime</c> and <c>Reapply</c>)
