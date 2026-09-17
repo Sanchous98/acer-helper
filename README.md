@@ -56,7 +56,8 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
   its own properties one by one, so a firmware with no charge limiter is a battery whose
   `ChargeLimit` is null instead of a missing port beside three others. See
   `docs/domain-refactoring-plan.md` §3.1.
-  Also the pieces that are logic rather than I/O: `FanCurveEngine`, `LampArrayBridge`, the
+  Also the pieces that are logic rather than I/O: `Fan` (one fan's duty curve and the duty applied to it)
+  with `FanCurveEngine` (the pair of fans and the deadband over them), `LampArrayBridge`, the
   compile-time version constant.
 - **`Application/`** (`AcerHelper.Application`) — the use cases, and nothing else: `LaptopService`
   (split across `LaptopService.*.cs` partials, one per feature family) and `OptionsAssembler`.

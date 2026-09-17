@@ -8,9 +8,11 @@ public sealed partial class LaptopService
 {
     // ---- fans ----
 
-    // The emulated fan-curve controller (anchors, default ramp, hysteresis/deadband). Custom mode drives the
-    // fans through it on the sensor loop; Reset() on any out-of-band change so the deadband can't swallow the
-    // first write. Touched by UI-thread SetFan/SetFanCurve and the background ApplyCustom -> guarded by _state.
+    // The emulated fan-curve controller: one model per fan (Domain/Fan.cs owns the anchors, the default ramp,
+    // the interpolation and that fan's last applied duty) plus the paired deadband that decides whether a write
+    // happens at all. Custom mode drives the fans through it on the sensor loop; Reset() on any out-of-band
+    // change so the deadband can't swallow the first write. Touched by UI-thread SetFan/SetFanCurve and the
+    // background ApplyCustom -> guarded by _state.
     private readonly FanCurveEngine _fanCurve = new();
 
     public bool ApplyFan(FanMode mode, byte cpu, byte gpu)

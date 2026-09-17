@@ -92,8 +92,9 @@ public sealed class ProfileMemory
 /// <summary>A performance mode's remembered fan selection: mode (1=Auto/2=Max/3=Custom) + custom speeds.
 /// When <see cref="Curve"/> is on, the app ignores the fixed speeds and instead drives Custom speeds from a
 /// duty% curve at fixed temperature anchors (Acer has no native fan curves — this emulates them via the
-/// sensor loop; anchors live in LaptopService). <see cref="CpuCurve"/>/<see cref="GpuCurve"/> hold one duty%
-/// per anchor; empty = use the built-in default ramp.</summary>
+/// sensor loop; the anchors and the default ramp live in <see cref="Fan"/>). <see cref="CpuCurve"/>/<see cref="GpuCurve"/> hold one duty%
+/// per anchor; empty = use the built-in default ramp. The preset is the STORED shape and holds BOTH fans;
+/// <see cref="Fan"/> is the model that reads one half of it.</summary>
 public sealed class FanPreset
 {
     public int Mode { get; set; } = 1;

@@ -14,10 +14,10 @@ namespace AcerHelper.UI.ViewModels;
 /// persists per performance mode.</summary>
 public sealed partial class FansViewModel : SectionViewModel
 {
-    // Anchors + default ramp come from the one owner (the emulated-curve engine), so the graph and the
-    // controller that drives the fans can't drift apart.
-    private static readonly int[] Anchors      = FanCurveEngine.Anchors;
-    private static readonly int[] DefaultCurve = FanCurveEngine.DefaultCurve;
+    // Anchors + default ramp come from the one owner (the fan model), so the graph and the curve that drives
+    // the fans can't drift apart.
+    private static readonly int[] Anchors      = Fan.Anchors;
+    private static readonly int[] DefaultCurve = Fan.DefaultCurve;
 
     private readonly Action<FanMode, byte, byte> _setFan;
     private readonly Action<bool, bool, int[]> _setFanCurve;                 // (gpu, use, points)

@@ -3,8 +3,8 @@ using AcerHelper.Domain;
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// Pins the fan curve's declared SHAPE. <see cref="FanCurveEngine.Anchors"/> and
-/// <see cref="FanCurveEngine.DefaultCurve"/> are the single source of truth the UI graph also reads, so a
+/// Pins the fan curve's declared SHAPE. <see cref="Fan.Anchors"/> and
+/// <see cref="Fan.DefaultCurve"/> are the single source of truth the UI graph also reads, so a
 /// drift between the documented spec and the array is exactly the kind of change that produces wrong fan
 /// speeds with no error anywhere. These assertions are the spec, not a restatement of the code.
 /// </summary>
@@ -12,28 +12,28 @@ public class FanCurveSpecTests
 {
     [Fact]
     public void Anchors_AreTheDocumentedFivePointScale() =>
-        Assert.Equal(new[] { 50, 60, 70, 80, 90 }, FanCurveEngine.Anchors);
+        Assert.Equal(new[] { 50, 60, 70, 80, 90 }, Fan.Anchors);
 
     [Fact]
     public void DefaultCurve_IsTheDocumentedRamp() =>
-        Assert.Equal(new[] { 30, 45, 60, 80, 100 }, FanCurveEngine.DefaultCurve);
+        Assert.Equal(new[] { 30, 45, 60, 80, 100 }, Fan.DefaultCurve);
 
     [Fact]
     public void DefaultCurve_HasOneDutyPerAnchor_AndIsMonotonic()
     {
-        Assert.Equal(FanCurveEngine.Anchors.Length, FanCurveEngine.DefaultCurve.Length);
-        for (var i = 1; i < FanCurveEngine.DefaultCurve.Length; i++)
-            Assert.True(FanCurveEngine.DefaultCurve[i] > FanCurveEngine.DefaultCurve[i - 1],
+        Assert.Equal(Fan.Anchors.Length, Fan.DefaultCurve.Length);
+        for (var i = 1; i < Fan.DefaultCurve.Length; i++)
+            Assert.True(Fan.DefaultCurve[i] > Fan.DefaultCurve[i - 1],
                 $"default ramp must rise strictly: index {i}");
     }
 
     [Fact]
     public void DefaultCurve_StaysInsideTheDutyRange() =>
-        Assert.All(FanCurveEngine.DefaultCurve, d => Assert.InRange(d, 0, 100));
+        Assert.All(Fan.DefaultCurve, d => Assert.InRange(d, 0, 100));
 }
 
 /// <summary>
-/// <see cref="FanCurveEngine.EvalCurve"/> — the pure interpolation behind every Custom-mode fan write.
+/// <see cref="Fan.EvalCurve"/> — the pure interpolation behind every Custom-mode fan write.
 /// Silent-failure territory: a wrong value here is a plausible-looking duty% written to the EC, with no
 /// exception and no log line. Everything below is derived from the source, not from the prose doc.
 /// </summary>
@@ -47,7 +47,7 @@ public class FanCurveEvalCurveTests
     // too-short array), so the tests reach that branch through `null!` rather than pretending it cannot
     // happen — a deserialised or hand-edited settings file can produce exactly this.
     private static int Eval(int[]? duties, int temp, int fallback = -1) =>
-        FanCurveEngine.EvalCurve(duties!, temp, fallback);
+        Fan.EvalCurve(duties!, temp, fallback);
 
     // ---- the anchors themselves: a curve must reproduce its own points exactly ----
 
@@ -211,15 +211,15 @@ public class FanCurveEvalCurveTests
 
     /// <summary>OBSERVED CURRENT behaviour — an open question, NOT a spec and NOT intended behaviour.
     ///
-    /// What the code does right now (FanCurveEngine.cs:45):
+    /// What the code does right now (the flat-top branch of <see cref="Fan.EvalCurve"/>):
     ///
     ///     if (temp &gt;= a[^1]) return Math.Clamp(duties[^1], 0, 100);
     ///
     /// Every other anchor-indexed read in <c>EvalCurve</c> uses an ANCHOR's index: <c>duties[0]</c> for
-    /// the cold clamp (:43/:44), <c>duties[i - 1]</c>/<c>duties[i]</c> in the loop. The "at or above the
-    /// last anchor" branch instead reads <c>duties[^1]</c> — the last element of the ARRAY. The guard at
-    /// :42 rejects only <c>Length &lt; 5</c>, so a curve longer than the five anchors takes the flat top
-    /// of the fan curve from an entry that belongs to no anchor:
+    /// the cold clamp (twice), <c>duties[i - 1]</c>/<c>duties[i]</c> in the loop. The "at or above the
+    /// last anchor" branch instead reads <c>duties[^1]</c> — the last element of the ARRAY. The guard
+    /// <c>duties.Length &lt; Anchors.Length</c> rejects only a SHORT curve, so a curve longer than the five
+    /// anchors takes the flat top of the fan curve from an entry that belongs to no anchor:
     ///
     ///   input:   duties = [10,20,30,40,50,999],  temp = 90 °C (exactly the last anchor)
     ///   current: 100 — clamp(duties[5] = 999)
@@ -231,8 +231,8 @@ public class FanCurveEvalCurveTests
     ///
     /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
     /// "Известные особенности (решение ожидается)", item 2. This case is deliberately left live — not
-    /// skipped, not deleted — so whoever fixes the index, or instead tightens the :42 guard to fall back
-    /// to DefaultCurve, gets an immediate signal here.
+    /// skipped, not deleted — so whoever fixes the index, or instead tightens the guard to fall back
+    /// to <see cref="Fan.DefaultCurve"/>, gets an immediate signal here.
     /// </summary>
     [Fact]
     public void CurveLongerThanTheAnchors_AboveTheLastAnchor_CurrentlyUsesTheLastArrayEntry_OpenQuestion()
