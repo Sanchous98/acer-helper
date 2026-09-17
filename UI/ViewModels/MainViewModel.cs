@@ -146,7 +146,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenLighting()
     {
-        _lighting?.Sync();   // re-read live keyboard brightness (Fn keys change it out-of-band) before showing
+        _lighting?.Reapply();   // doubt moment: push our value at the device, do NOT ask the wire what it holds
         OpenDrawer(Loc.T("Lighting"), _lighting);
     }
 
@@ -171,14 +171,16 @@ public sealed partial class MainViewModel : ObservableObject
     public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);
 
     /// <summary>True while the Lighting drawer is the one actually on screen. Cheap check the input-driven
-    /// brightness sync gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>
+    /// brightness adoption gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>
     public bool IsLightingVisible => IsDrawerOpen && ReferenceEquals(DrawerContent, _lighting);
 
-    /// <summary>While the Lighting drawer is showing, re-read live keyboard brightness so the slider tracks
-    /// Fn-key changes. The read itself runs off the UI thread (see LightViewModel.SyncFromHardware).</summary>
-    public void SyncLightingIfVisible()
+    /// <summary>An out-of-band input event (a special key) while the Lighting drawer is showing: ADOPT the
+    /// brightness the hardware now holds as the new intent. The read runs off the UI thread and is the only path
+    /// on which a read changes state — see docs/state-and-events.md and
+    /// <see cref="LightingViewModel.AdoptFromInput"/>.</summary>
+    public void AdoptLightingIfVisible()
     {
-        if (IsLightingVisible) _lighting?.Sync();
+        if (IsLightingVisible) _lighting?.AdoptFromInput();
     }
 
     private void OpenDrawer(string title, object? content)

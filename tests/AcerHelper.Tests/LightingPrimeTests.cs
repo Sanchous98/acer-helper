@@ -10,8 +10,8 @@ namespace AcerHelper.Tests;
 /// and the whole point of these gates is that the difference is a decision rather than an oversight.
 ///
 /// DEFERRED: the plain (non-RGB) backlight's level. Its constructor writes nothing to the device, so a
-/// placeholder is provably invisible, and <c>SyncFromHardware</c> — already wired to the drawer opening and to
-/// Fn-key changes — is its prime.
+/// placeholder is provably invisible, and <c>SyncFromHardware</c> — wired to Fn-key changes and called once at
+/// startup and once per language rebuild — is its prime.
 ///
 /// NOT DEFERRED: an RGB zone's brightness. That value is also what the startup re-apply SENDS to the device,
 /// so a placeholder would change what the hardware is told. The plan prescribed 0 there; 0 is the one value
@@ -67,7 +67,7 @@ public class LightingPrimeTests
         var panel = Panel(state, written, readBrightness: () => 0);
 
         Assert.Equal(0, panel.Brightness);
-        Assert.Equal([0], written);           // the guard in SyncBrightness does NOT run on the construction path
+        Assert.Equal([0], written);           // the guard in AdoptBrightness does NOT run on the construction path
     }
 
     /// <summary>Nothing is re-applied while the user has never set this zone: a fresh install must not override

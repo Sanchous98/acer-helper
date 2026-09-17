@@ -34,6 +34,7 @@ public sealed partial class LightingViewModel : ObservableObject
     // aliased into LaptopService.Settings and now enumerated by a background Save(), so the structural insert
     // must be serialized with it (see LaptopService.EnsureLightZone).
     private readonly Func<Dictionary<string, LightSettings>, string, LightSettings> _ensureZone;
+    private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
     private Dictionary<string, LightSettings> _lights;   // current performance mode's per-zone state (swapped by Reload)
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
@@ -46,16 +47,26 @@ public sealed partial class LightingViewModel : ObservableObject
 
     /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
     /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
-    /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.</summary>
+    /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.
+    ///
+    /// <paramref name="post"/> is the UI-thread marshaller each panel (and the backlight) is built with; it
+    /// defaults to <c>Dispatcher.UIThread.Post</c> and exists so a test can drive the whole section with a
+    /// synchronous poster — the same seam, and the same measured reason, as
+    /// <c>OptionsViewModel.TryCreate(device, o, post)</c>: the real dispatcher is thread-affine in a bare xUnit
+    /// process, so a headless test cannot pump it (see <c>Eventually</c>). Without the seam the wave's rule could
+    /// not be tested where the app actually calls it: a read that is not an event must leave state alone, and a
+    /// "nothing changed" assertion against a post that never runs proves nothing.</summary>
     public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights,
                              Func<Dictionary<string, LightSettings>, string, LightSettings> ensureZone, Action save,
                              bool followsProfile, Action<bool> saveFollowsProfile,
-                             IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null)
+                             IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null,
+                             Action<Action>? post = null)
     {
         _lights = lights;
         _ensureZone = ensureZone;
         _save = save;
         _saveFollowsProfile = saveFollowsProfile;
+        _post = post;
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
@@ -69,18 +80,19 @@ public sealed partial class LightingViewModel : ObservableObject
         // A non-RGB keyboard backlight: brightness is the ONLY control (an RGB keyboard's brightness is
         // per-zone, so it's shown only when there are no zones).
         if (Panels.Count == 0 && backlight != null && applyBacklight != null)
-            Backlight = new BacklightViewModel(backlight, applyBacklight);
+            Backlight = new BacklightViewModel(backlight, applyBacklight, post);
     }
 
     // Build a panel for one zone, bound to the current mode's per-zone state (created on first sight). Seeds
-    // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness also drives Sync.
+    // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness is what the
+    // event path re-reads it with (AdoptFromInput -> LightViewModel.AdoptFromHardware).
     private void BuildPanel(RgbZone zone)
     {
         var state = _ensureZone(_lights, zone.Name);   // create-if-missing under the service lock (see _ensureZone)
         Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
-            state, _save, zone.ReadBrightness));
+            state, _save, zone.ReadBrightness, _post));
     }
 
     // Flip the switch live: turning it OFF builds the follow-capable panels (each applies the mode's stored
@@ -97,13 +109,32 @@ public sealed partial class LightingViewModel : ObservableObject
         _saveFollowsProfile(value);
     }
 
-    /// <summary>Re-read live brightness (each RGB zone's, and the plain backlight's) and reflect it in the
-    /// slider (no re-apply/save). Call when the lighting panel is shown so it stays in sync with Fn-key
-    /// changes.</summary>
-    public void Sync()
+    /// <summary>Settle the deferred placeholders after a (re)build. Only the plain backlight needs this: its
+    /// slider is built at 0 and takes its real level here (see <see cref="BacklightViewModel"/>). The RGB panels
+    /// are deliberately NOT re-read — their construction value is already a reading and is what the startup
+    /// re-apply sends, and re-reading them here is what <see cref="AdoptFromInput"/> exists to do on an event
+    /// instead. Call at startup and after a language rebuild, never on a schedule: see docs/state-and-events.md.</summary>
+    public void Prime() => Backlight?.SyncFromHardware();
+
+    /// <summary>An out-of-band input arrived (a special key): read the hardware and <b>adopt</b> what it says as
+    /// the new intent. This is the ONE path on which a read changes state, and it is an event, not a schedule —
+    /// the read only delivers the event's value. A read taken on a timer carries whatever the wire last held,
+    /// which is how switching profiles used to lose the brightness of the mode being switched to.</summary>
+    public void AdoptFromInput()
     {
-        foreach (var panel in Panels) panel.SyncFromHardware();
+        foreach (var panel in Panels) panel.AdoptFromHardware();
         Backlight?.SyncFromHardware();
+    }
+
+    /// <summary>The doubt moment (the drawer opening, a mode change, a resume): push OUR stored value at the
+    /// device rather than asking the device what it holds. Re-applying is idempotent and cannot be wrong; reading
+    /// can, because the write we just sent may not have landed yet. The plain backlight is not in here: it exists
+    /// only on a device with no RGB zones, it has no stored value to push, and it is settled by <see cref="Prime"/>
+    /// at startup and re-read by <see cref="AdoptFromInput"/> on an event — so opening the drawer leaves its
+    /// slider exactly as it is.</summary>
+    public void Reapply()
+    {
+        foreach (var panel in Panels) panel.Reapply();
     }
 
     /// <summary>Rebind every panel to a different mode's per-zone state and re-apply it (called when the
@@ -128,6 +159,7 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action<RgbModeInfo, AccentColor, byte, byte, byte> _applyAll;   // (effect, colour, brightness, speed, direction)
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly Func<int?>? _readBrightness;
+    private readonly Action<Action> _post;   // UI-thread marshaller for an adopted read (see the ctor)
     private LightSettings _state;   // swapped by Rebind when the performance mode changes
     private readonly Action _save;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -155,15 +187,21 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private double _brightness;
     [ObservableProperty] private double _speed;
 
+    /// <param name="post">The UI-thread marshaller the out-of-band read posts its adopted value through;
+    /// defaults to <c>Dispatcher.UIThread.Post</c>. Injectable for the same reason the option rows' poster is
+    /// (see <c>Eventually</c>): the real dispatcher is thread-affine and a bare xUnit process creates it from
+    /// whichever thread first touches it, so a headless test cannot pump it. Same seam, same reason.</param>
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
                           Action<RgbModeInfo, AccentColor, byte, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
-                          LightSettings state, Action save, Func<int?>? readBrightness = null)
+                          LightSettings state, Action save, Func<int?>? readBrightness = null,
+                          Action<Action>? post = null)
     {
         Title = title;
         _effects = effects;
         _applyAll = applyAll;
         _applyZone = applyZone;
         _readBrightness = readBrightness;
+        _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _state = state;
         _save = save;
         EffectNames = effects.Select(e => Loc.T(e.Name)).ToList();
@@ -204,9 +242,13 @@ public sealed partial class LightViewModel : ObservableObject
         if (state.Configured) ApplyNow();
     }
 
-    /// <summary>Re-read this zone's live brightness (if readable) and reflect it in the slider without an
-    /// apply/save. Called when the lighting panel is shown, to catch out-of-band Fn-key changes.</summary>
-    public void SyncFromHardware()
+    /// <summary>Read this zone's live brightness and ADOPT it as the new intent — slider and storage. Called
+    /// only on an out-of-band input event (a special key), because that is the only way a brightness the app did
+    /// not author can appear: the Fn key is an author of intent exactly like the slider is, it just delivers its
+    /// value through a read instead of through the UI. Never call this on a schedule — a read taken while our own
+    /// write is still in flight carries the PREVIOUS value, and adopting it persists the wire's lag as the user's
+    /// choice. See docs/state-and-events.md and <see cref="Reapply"/>.</summary>
+    public void AdoptFromHardware()
     {
         var read = _readBrightness;
         if (read == null) return;
@@ -225,7 +267,7 @@ public sealed partial class LightViewModel : ObservableObject
             {
                 int? b;
                 try { b = read.Invoke(); } catch { b = null; }
-                if (b is { } v) Dispatcher.UIThread.Post(() => SyncBrightness(v));
+                if (b is { } v) _post(() => AdoptBrightness(v));
                 lock (_readGate)
                 {
                     if (!_readPending) { _reading = false; return; }
@@ -234,6 +276,13 @@ public sealed partial class LightViewModel : ObservableObject
             }
         });
     }
+
+    /// <summary>The doubt moment at this panel's level: push OUR state at the device and read nothing. Called
+    /// when the panel opens (see <see cref="LightingViewModel.Reapply"/>). Reading here is what loses the value:
+    /// the write we sent may not have landed, so the register still holds the PREVIOUS profile's brightness (or
+    /// the zero the profile flash leaves behind) and believing it undoes the switch. Re-applying is idempotent —
+    /// the device is last-write-wins, and an already-correct value is visually silent.</summary>
+    public void Reapply() => ApplyNow();
 
     /// <summary>Point this panel at another mode's persisted state, reflect it in the UI, and re-apply it to
     /// the device. Called when the performance mode changes. Unlike startup, this ALWAYS applies: the app is
@@ -269,15 +318,23 @@ public sealed partial class LightViewModel : ObservableObject
         ApplyNow();
     }
 
-    /// <summary>Reflect a hardware-reported brightness in the slider without triggering an apply/save
-    /// (used to sync to Fn-key changes). The <c>_loading</c> guard makes OnBrightnessChanged a no-op.</summary>
-    private void SyncBrightness(int value)
+    /// <summary>ADOPT a hardware-reported brightness: move the slider and make it the STORED intent. Reached only
+    /// from <see cref="AdoptFromHardware"/>, i.e. only from an out-of-band input event — the one path on which a
+    /// read is an author of intent (docs/state-and-events.md). Storing is the half that used to be missing: the
+    /// slider followed an Fn-key change while <c>_state</c> kept the old value, so the app and the hardware
+    /// disagreed until the user happened to touch the slider again.
+    ///
+    /// <c>_loading</c> keeps this out of <c>Schedule()</c>, and only Brightness is written: <c>Configured</c> and
+    /// the rest of the slider are deliberately left alone, so a key that moves a zone the user never configured
+    /// (a fresh install) cannot make the app start driving that zone — that snapshot is <c>SaveState()</c>'s job
+    /// on the user-edit path.</summary>
+    private void AdoptBrightness(int value)
     {
         value = Math.Clamp(value, 0, 100);
         // A user edit is in flight (the debounce is pending): the hardware read raced ahead of the apply and
         // carries a stale value — accepting it would yank the slider back mid-drag, and (worse) the pending
         // debounce tick would then apply and PERSIST the stale value over the user's choice. The user wins;
-        // the periodic sync re-reads after the apply has landed.
+        // the next input event re-reads after this apply has landed.
         if (_debounce.IsEnabled) return;
         // A read-back of 0 while the app is driving a non-zero brightness is spurious: the OPMODE profile-flash
         // (follows-profile mode) zeroes the EC's keyboard-brightness register even though the keyboard is lit by
@@ -289,6 +346,8 @@ public sealed partial class LightViewModel : ObservableObject
         _loading = true;
         Brightness = value;
         _loading = false;
+        _state.Brightness = value;   // the read is the new intent, so persist it — nothing else in _state moves
+        _save();
     }
 
     partial void OnSelectedEffectIndexChanged(int value) { UpdateColorMode(); Schedule(); }
@@ -404,8 +463,9 @@ public sealed partial class BacklightViewModel : ObservableObject
         // rule as the option rows). Unlike an RGB zone's brightness, this one is safe to defer: a backlight's
         // construction writes nothing to the device (the latch below is a field write, and no apply fires until
         // the user moves the slider), so the placeholder cannot leak outward. The prime is SyncFromHardware —
-        // already wired to the drawer opening and to Fn-key changes, and called once at startup from
-        // LightingViewModel.Sync.
+        // called once at startup and again on a language rebuild (LightingViewModel.Prime), and wired to the
+        // Fn-key path through LightingViewModel.AdoptFromInput. Opening the Lighting drawer no longer settles it:
+        // that path re-applies the RGB panels and reads nothing (LightingViewModel.Reapply).
         _level = 0;
         _hw.Latch((int)_level);
         UpdateName();

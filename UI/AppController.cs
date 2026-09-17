@@ -91,8 +91,9 @@ internal sealed class AppController
         _vm.OptionsPage?.Prime();
         // ...and the lighting section with them: the plain-backlight slider is built with a placeholder too. The
         // RGB panels' brightness is NOT deferred (its construction value is what the startup re-apply sends to the
-        // device), but Sync re-reads it off the UI thread all the same, so this is where its slider is settled.
-        _lighting?.Sync();
+        // device), so nothing re-reads them here — a read that is not an event must not touch state, which is what
+        // Prime exists to keep separate from AdoptFromInput (docs/state-and-events.md).
+        _lighting?.Prime();
         _lastModeKey = _svc.CurrentModeKey(cur0);   // VMs already seeded with this mode's presets; don't re-trigger
         _lastProfileId = cur0?.Id ?? "";
         _cpuPrimed = false;                         // the fresh CPU-power row holds a placeholder — prime it
@@ -105,9 +106,10 @@ internal sealed class AppController
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
         ApplyHardwareAccessBanner();
 
-        // Real-time keyboard-brightness sync: the Fn brightness key raises raw input, so instead of polling we
-        // re-read on that input, while the Lighting panel is visible. The read is off-thread and self-
-        // coalescing, so no debounce is needed and the slider tracks each press immediately.
+        // Out-of-band keyboard-brightness input: the Fn brightness key raises raw input, so brightness the app did
+        // not author is adopted from there instead of from the refresh pass — the pass read the same register
+        // while our own write was still in flight, took the wire's lag as the user's choice, and saved it (see
+        // docs/state-and-events.md). The read is off-thread and self-coalescing, so no debounce is needed.
         if (d.Hotkeys != null)
         {
             d.Hotkeys.Pressed += OnHotkey;
@@ -247,7 +249,7 @@ internal sealed class AppController
         (_vm, _windows, _tray, _lighting) = BuildUi(cur);
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
-        _lighting?.Sync();                        // ...and so does the backlight slider
+        _lighting?.Prime();                       // ...and so does the backlight slider
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";
         _cpuPrimed = false;                       // ...and the rebuilt CPU-power row holds a placeholder again
@@ -348,14 +350,17 @@ internal sealed class AppController
         catch { /* no handler / blocked -> ignore */ }
     }
 
-    // Any special-key input -> re-read keyboard brightness immediately (no debounce), but only while the
-    // Lighting panel is visible so normal typing does ZERO work here. The read is off-thread and coalesces
-    // back-to-back requests, so rapid presses track without piling up or blocking input.
+    // Any special-key input -> ADOPT the keyboard brightness the hardware now holds (no debounce), but only while
+    // the Lighting panel is visible so normal typing does ZERO work here. This is the one path where a read is an
+    // author of intent — the Fn key is a user like the slider is, it just delivers its value through a read
+    // (docs/state-and-events.md). The read is off-thread and coalesces back-to-back requests, so rapid presses
+    // track without piling up or blocking input.
     // Marshaled to the UI thread like OnHotkey: on Linux the event fires on the evdev reader thread, and
-    // IsLightingVisible/Sync touch UI-bound state (incl. enumerating the Panels collection the UI mutates).
+    // IsLightingVisible/AdoptLightingIfVisible touch UI-bound state (incl. enumerating the Panels collection the
+    // UI mutates).
     private void OnInputActivity() => Dispatcher.UIThread.Post(() =>
     {
-        if (_vm.IsLightingVisible) _vm.SyncLightingIfVisible();
+        if (_vm.IsLightingVisible) _vm.AdoptLightingIfVisible();
     });
 
     // ---- actions ----
@@ -614,7 +619,9 @@ internal sealed class AppController
             _lightingCoord.OnStateChanged(t.ProfileChanged, t.Current?.Id, t.Flash, t.Lights!);
 
         _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Battery, t.Status);
-        _vm.SyncLightingIfVisible();   // keep the keyboard-brightness slider live (its read is already off-thread)
+        // No lighting sync on the UI pass: a read taken here carries whatever the wire last held, so the pass
+        // used to ADOPT the previous profile's brightness (and persist it) while our own write was still in
+        // flight. The Fn-key read on OnInputActivity is the event path; everything else re-applies instead.
         _tray.Update(t.Current, t.Selectable);
     }
 
