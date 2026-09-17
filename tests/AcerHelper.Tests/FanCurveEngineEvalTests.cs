@@ -33,7 +33,10 @@ public class FanCurveSpecTests
 }
 
 /// <summary>
-/// <see cref="Fan.EvalCurve"/> — the pure interpolation behind every Custom-mode fan write.
+/// <see cref="Fan.Duty"/> — the curve evaluation behind every Custom-mode fan write. The interpolation itself
+/// is private to <see cref="Fan"/>, so these cases drive it the only way production does: a preset whose CPU
+/// half holds the curve, plus this fan's own committed memory. The arithmetic pinned below is unchanged by
+/// that re-pointing; only the door in.
 /// Silent-failure territory: a wrong value here is a plausible-looking duty% written to the EC, with no
 /// exception and no log line. Everything below is derived from the source, not from the prose doc.
 /// </summary>
@@ -43,11 +46,20 @@ public class FanCurveEvalCurveTests
     // back to DefaultCurve fails instead of coincidentally passing.
     private static readonly int[] Ramp = [10, 20, 30, 40, 50];
 
-    // The parameter is declared non-nullable by the engine, but its body explicitly tolerates null (and a
-    // too-short array), so the tests reach that branch through `null!` rather than pretending it cannot
-    // happen — a deserialised or hand-edited settings file can produce exactly this.
-    private static int Eval(int[]? duties, int temp, int fallback = -1) =>
-        Fan.EvalCurve(duties!, temp, fallback);
+    // The stored curve is declared non-nullable (FanPreset.CpuCurve), but Fan itself tolerates null (and a
+    // too-short array), so the tests hand it one through `duties!` rather than pretending it cannot happen —
+    // a deserialised or hand-edited settings file can produce exactly this.
+    //
+    // The commit is what a caller does after a successful write, and the curve is stored the way
+    // LaptopService.SetFanCurve stores it: verbatim, with no length validation, which is what keeps the
+    // over-long cases below reachable. `fallback` is the model's `LastApplied`: a negative one means nothing
+    // was ever committed, so nothing is committed here either — Fan's own sentinel for that state is -1.
+    private static int Eval(int[]? duties, int temp, int fallback = -1)
+    {
+        var fan = new Fan(gpu: false);
+        if (fallback >= 0) fan.Commit(fallback);
+        return fan.Duty(new FanPreset { CpuUseCurve = true, CpuCurve = duties! }, temp);
+    }
 
     // ---- the anchors themselves: a curve must reproduce its own points exactly ----
 
@@ -211,11 +223,11 @@ public class FanCurveEvalCurveTests
 
     /// <summary>OBSERVED CURRENT behaviour — an open question, NOT a spec and NOT intended behaviour.
     ///
-    /// What the code does right now (the flat-top branch of <see cref="Fan.EvalCurve"/>):
+    /// What the code does right now (the flat-top branch of <see cref="Fan.Duty"/>'s curve evaluation):
     ///
     ///     if (temp &gt;= a[^1]) return Math.Clamp(duties[^1], 0, 100);
     ///
-    /// Every other anchor-indexed read in <c>EvalCurve</c> uses an ANCHOR's index: <c>duties[0]</c> for
+    /// Every other anchor-indexed read in that evaluation uses an ANCHOR's index: <c>duties[0]</c> for
     /// the cold clamp (twice), <c>duties[i - 1]</c>/<c>duties[i]</c> in the loop. The "at or above the
     /// last anchor" branch instead reads <c>duties[^1]</c> — the last element of the ARRAY. The guard
     /// <c>duties.Length &lt; Anchors.Length</c> rejects only a SHORT curve, so a curve longer than the five
@@ -228,6 +240,12 @@ public class FanCurveEvalCurveTests
     /// Invisible for a well-formed five-long curve, because the array index and the anchor index coincide
     /// there. Reachable only from a hand-edited settings.json: the UI always writes five entries
     /// (FansViewModel.Duties). A latent trap, not a live defect.
+    ///
+    /// STILL REACHABLE from the public surface, which is why this pin survived <c>EvalCurve</c> becoming
+    /// private: <see cref="FanPreset.CpuCurve"/> is a public settable array with no length validation, and
+    /// <c>LaptopService.SetFanCurve</c> stores whatever it is handed, so a six-entry curve is a preset's
+    /// ordinary contents rather than a private call. The case below is unreachable only from the UI's own
+    /// editor, never from the model.
     ///
     /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
     /// "Известные особенности (решение ожидается)", item 2. This case is deliberately left live — not
