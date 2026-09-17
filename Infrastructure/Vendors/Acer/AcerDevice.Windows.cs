@@ -50,7 +50,18 @@ public sealed partial class AcerDevice
         if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(cur.Kind);
         Sensors       = new SensorsPort(ReadSensors);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        LcdOverdrive  = new FlagPort(GetLcd, SetLcd);
+        // The three settings this backend owns, DECLARED rather than parked in a slot of their own. Their keys
+        // are the names the Acer backend already knows them by — the Linuwu-Sense node names the Linux half of
+        // this backend binds the same three knobs through — so both OSes declare the same key for the same
+        // setting and a settings.json written on one reads on the other. Windows talks WMI and has no node of
+        // that name; the key is the backend's name for the setting, not a path.
+        //
+        // LCD overdrive is the one setting with no readback: its write (SetGamingProfile) returns a status byte,
+        // so a row already knows whether it took, and reading the setting back would be a second EC transaction
+        // the user hears as a second "click". What that costs is one read at startup — the row's prime — and
+        // none per write.
+        Declare(new FlagSetting { Key = "lcd_override", ReadbackVerifiesWrite = false,
+                                  Port = new FlagPort(GetLcd, SetLcd) });
 
         Own(_battery = new WmiInvoker("BatteryControl"));
         // The firmware's own capability MASK decides which of the two properties this battery has: ReadStatus
@@ -64,9 +75,10 @@ public sealed partial class AcerDevice
 
         Own(_apge = new WmiInvoker("APGeAction"));
         if (_apge.Available && UsbDecode(UiGet(_apge, UsbQuery)) >= 0)
-            UsbCharging = new ChoicePort(UsbLevels, GetUsb, SetUsb);
+            Declare(new ChoiceSetting { Key = "usb_charging", Port = new ChoicePort(UsbLevels, GetUsb, SetUsb) });
         var bl = _apge.Available ? UiGet(_apge, BlQuery) : ulong.MaxValue;
-        if (bl is BlGetOn or BlGetOff) KeyboardBacklight = new FlagPort(GetBacklight, SetBacklight);
+        if (bl is BlGetOn or BlGetOff)
+            Declare(new FlagSetting { Key = "backlight_timeout", Port = new FlagPort(GetBacklight, SetBacklight) });
 
         WireRgb(ReadKbBrightness);
 

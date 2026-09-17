@@ -16,10 +16,11 @@ namespace AcerHelper.Tests;
 /// captures what <c>RunSet</c> handed to <c>post</c>, then RUNS it: the message is built inside the posted
 /// action, on the UI thread, so until it is run the user has been told nothing.
 ///
-/// NO REAL HARDWARE: the fixture builds <see cref="LaptopService"/> over <see cref="FakeDevice"/> with no
-/// ports, and each test assigns the port its row reads (ports are read lazily). <c>LampArray</c> is never
-/// built — the fixture passes no transport — so the "Windows Dynamic Lighting" row does not exist in these
-/// tests, and it is the one row whose failure path is NOT covered here.
+/// NO REAL HARDWARE: the fixture builds <see cref="LaptopService"/> over <see cref="FakeDevice"/> with nothing
+/// declared, and each test declares the setting its row reads (<c>FakeDevice.Declare</c>, which is what a
+/// backend's <c>InitVendor</c> does with its own key). <c>LampArray</c> is never built — the fixture passes no
+/// transport — so the "Windows Dynamic Lighting" row does not exist in these tests, and it is the one row whose
+/// failure path is NOT covered here.
 ///
 /// LOCALIZATION: labels and the failure message are looked up with <c>Loc.T</c>. Rows are found by
 /// <c>Loc.T(englishKey)</c> so the lookups survive a translation table; the MESSAGES are asserted in English
@@ -31,13 +32,14 @@ namespace AcerHelper.Tests;
 public class OptionsAssemblerFailureTests
 {
     /// <summary>A refused write with an error text must produce exactly ONE notification, and it must name
-    /// the control AND carry the port's own words — "something failed" is not actionable, and the port's
+    /// the control AND carry the transport's own words — "something failed" is not actionable, and the port's
     /// <c>LastError</c> is the only explanation the user will ever get.</summary>
     [Fact]
     public void AFailedSet_PostsOneNotification_WithTheControlNameAndThePortsError()
     {
         var h = new OptionsAssemblerHarness();
-        h.F.Device.LcdOverdrive = new FakeFlagPort { SetResult = false, LastError = "EC refused the write" };
+        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = "EC refused the write" },
+                           readbackVerifiesWrite: false);
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -47,15 +49,15 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>PINNED BEHAVIOUR: a refused write with NO error text still reports — the suffix is
-    /// conditional (<c>e != null ? $": {e}" : ""</c>, <c>OptionsAssembler.RunSet</c>), so the user gets
-    /// "LCD overdrive failed" and not "…failed: " with a dangling colon. Both halves are pinned by the exact
-    /// equality: dropping the suffix would let a silent EC look like a success, while making it unconditional
-    /// is what a naive tidy-up produces.</summary>
+    /// conditional (<c>OptionsAssembler.Fail</c>), so the user gets "LCD overdrive failed" and not "…failed: "
+    /// with a dangling colon. Both halves are pinned by the exact equality: dropping the suffix would let a
+    /// silent EC look like a success, while making it unconditional is what a naive tidy-up produces.</summary>
     [Fact]
     public void AFailedSet_WithNoErrorText_SaysOnlyThatItFailed()
     {
         var h = new OptionsAssemblerHarness();
-        h.F.Device.LcdOverdrive = new FakeFlagPort { SetResult = false, LastError = null };
+        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = null },
+                           readbackVerifiesWrite: false);
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -63,14 +65,14 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>A write that lands must not notify at all. Pinned because the failure branch is one `if`
-    /// away from firing on every write — a successful set returns <c>(true, null)</c>, so there is no reason to
+    /// away from firing on every write — a successful set returns without throwing, so there is no reason to
     /// carry and nothing to read back afterwards.</summary>
     [Fact]
     public void ASuccessfulSet_PostsNothing_AndNotifiesNothing()
     {
         var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { SetResult = true };
-        h.F.Device.LcdOverdrive = lcd;
+        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -80,42 +82,41 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>...and a STALE <c>LastError</c> left over from an earlier failure must not resurrect the
-    /// message: the branch is on the set's result, not on the error text. The port's <c>LastError</c> is
+    /// message: the branch is on the write's outcome, not on the error text. The port's <c>LastError</c> is
     /// a property of the PORT, not of the write (Domain/Ports.cs's <c>IFlagPort.LastError</c>), so it can be
     /// non-null while the current write is perfectly fine.</summary>
     [Fact]
     public void ASuccessfulSet_AfterAFailure_DoesNotNotifyAgain()
     {
         var h = new OptionsAssemblerHarness();
-        h.F.Device.FnLock = new FakeFlagPort { SetResult = false, LastError = "old news" };
+        h.F.Device.Declare(Keys.FnLock, new FakeFlagPort { SetResult = false, LastError = "old news" });
         AssemblerRows.Toggle(h, "Fn lock").OnChange(true);
         Assert.Single(h.RunPosted());
 
-        h.F.Device.LcdOverdrive = new FakeFlagPort();           // succeeds
+        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort());       // succeeds
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
         Assert.Single(h.Posted);                                // still only the one from the Fn-lock failure
     }
 
-    /// <summary>PINNED BEHAVIOUR: a port whose <c>Set</c> THROWS is a failed write, not a crashed row. This is
-    /// the behaviour that keeps one bad port from taking its switch down with it — the exception must not
+    /// <summary>PINNED BEHAVIOUR: a transport whose <c>Set</c> THROWS is a failed write, not a crashed row. This
+    /// is the behaviour that keeps one bad port from taking its switch down with it — the exception must not
     /// escape the <c>OnChange</c> the UI calls, and the user must still be told.
     ///
     /// WHERE the throw is absorbed is worth being precise about, because it is not where it looks: the write
-    /// goes through <c>LaptopService.SetFlag</c> -> <c>Attempt</c>, whose
-    /// <c>try { ok = write(); } catch { ok = false; }</c> (<c>LaptopService.Attempt</c>) absorbs it one
-    /// layer BELOW <c>RunSet</c>. So this case exercises <c>Attempt</c>'s catch, and that is provable from the
-    /// message asserted below rather than from the code's shape: the text ends in the port's own reason, and
-    /// <c>RunSet</c>'s catch discards the reason (<c>catch { result = (false, null); }</c>) — a throw it had
-    /// caught would print the bare name. <c>RunSet</c>'s own catch is a second line of defence that no throwing
-    /// PORT reaches today: every one of its callers hands it a service method that wraps its port in
-    /// <c>Attempt</c>.</summary>
+    /// goes through <c>LaptopService.ApplySetting</c> -> <c>SettingDeclaration.Apply</c> ->
+    /// <c>FlagSetting.Write</c>, whose <c>try { ok = Port.Set(...) } catch { ok = false; }</c> absorbs it and
+    /// then reads the port's own <c>LastError</c>. So what reaches <c>RunSet</c> is a
+    /// <c>SettingNotAppliedException</c> that already carries the reason, and that is provable from the message
+    /// asserted below: it ends in the port's own words, so the reason crossed the layer that caught the throw.
+    /// A declaration that let the throw through would report the bare name instead, because a
+    /// <c>RunSet</c> catch of anything but that exception has no reason to print.</summary>
     [Fact]
     public void AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow()
     {
         var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { ThrowOnSet = true, LastError = "transport gone" };
-        h.F.Device.LcdOverdrive = lcd;
+        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
 
@@ -129,19 +130,18 @@ public class OptionsAssemblerFailureTests
     ///
     /// WHICH LAYER ABSORBS THIS THROW: the write goes <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> ->
     /// <c>Attempt</c>, whose <c>try { ok = write(); } catch { ok = false; }</c> catches it
-    /// (<c>LaptopService.Attempt</c>), NOT <c>RunSet</c>'s own catch — every caller of <c>RunSet</c> hands
-    /// it a service method that wraps its port in <c>Attempt</c>, so no throwing PORT is what reaches it
+    /// (<c>LaptopService.Attempt</c>), NOT <c>RunSet</c>'s own catch — the power-source row is one of the rows
+    /// that is not a declared setting, so it still hands back a pair and <c>RunSet</c> sees no exception at all
     /// (docs/open-decisions.md, «Известные особенности» 4, where the opposite claim was withdrawn). What can
-    /// still reach <c>RunSet</c>'s catch is a throw from OUTSIDE a wrapped call — a profile port's read
-    /// (unwrapped in <c>ApplyStoredMode</c>) or the row's own index arithmetic — a second line of defence with a
-    /// narrower door than the old name suggested.
+    /// still reach <c>RunSet</c>'s own catch on that overload is a throw from OUTSIDE a wrapped call — a profile
+    /// port's read (unwrapped in <c>ApplyStoredMode</c>) or the row's own index arithmetic.
     ///
     /// THE NAME THEREFORE CLAIMS NO ABSORBER, and it must not: THIS test cannot tell <c>Attempt</c> from
     /// <c>RunSet</c>. Its fake carries no reason, so the message is bare whichever layer caught the throw. The
-    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason — a
-    /// <c>RunSet</c>-caught throw could not print that. What THIS test pins is the OUTCOME the row owes the user:
-    /// reported exactly once, and not escaped. Renamed from
-    /// <c>AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported</c>, which asserted the wrong absorber.</summary>
+    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason.
+    /// What THIS test pins is the OUTCOME the row owes the user: reported exactly once, and not escaped.
+    /// Renamed from <c>AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported</c>, which asserted the wrong
+    /// absorber.</summary>
     [Fact]
     public void AThrowingProfileSet_DoesNotEscapeThePowerSourceRow_AndIsStillReported()
     {
@@ -153,33 +153,35 @@ public class OptionsAssemblerFailureTests
 
         Assert.Null(Record.Exception(() => row.OnChange(1)));      // the throw must not leave the row
         Assert.Single(pp.SetCalls);                        // the write was attempted once, then threw
-        Assert.Equal("Power-source profile failed", Assert.Single(h.RunPosted()));
+        Assert.Equal("Profile on AC power: failed", Assert.Single(h.RunPosted()));
     }
 
-    /// <summary>Every row that funnels through <c>RunSet</c> must name ITSELF in the message — an error that
-    /// does not say which control failed is the bug this file guards, and a copy-paste that leaves the wrong
-    /// name in one row's <c>what</c> is invisible until it fires.
+    /// <summary>Every row that reports a failure must name ITSELF — an error that does not say which control
+    /// failed is the bug this file guards, and a copy-paste that leaves the wrong name in one row is invisible
+    /// until it fires.
     ///
-    /// NOTE the two rows whose message names something the UI never shows: the row labelled "Keyboard
-    /// backlight timeout" fails as "Backlight timeout", and the row labelled "Charge limit (~80%)" fails as
-    /// "Battery limit". Pinned as shipped — the internal name is what reaches the user, and it is not the row
-    /// label.</summary>
+    /// THE NAME IS THE ROW'S OWN LABEL, and that is the whole of this theory now: the message used to be
+    /// composed from a second, English name per setting, which disagreed with the label on five of these rows
+    /// ("Keyboard backlight timeout" failed as "Backlight timeout", "Charge limit (~80%)" as "Battery limit", and
+    /// so on) — so the user was told about a control the interface never showed them
+    /// (docs/open-decisions.md, «Известные особенности» 5). Those five texts changed here by design, and each
+    /// expected value below is now the label.</summary>
     [Theory]
-    [InlineData("LCD overdrive", "LCD overdrive")]                    // Toggles()
-    [InlineData("Keyboard backlight timeout", "Backlight timeout")]
-    [InlineData("Fn lock", "Fn lock")]
-    [InlineData("USB charging when off:", "USB charging")]            // Choices()
-    [InlineData("Charge mode", "Charge mode")]                        // BatteryChargeMode()
-    [InlineData("Charge limit (~80%)", "Battery limit")]              // BatteryLimit()
-    [InlineData("Calibration (full cycle)", "Battery calibration")]   // BatteryCalibration()
-    public void AFailedSet_TellsTheUserWhichControlFailed(string locKey, string reportedName)
+    [InlineData("LCD overdrive")]                                     // a declared flag
+    [InlineData("Keyboard backlight timeout")]                        // a declared flag (Acer)
+    [InlineData("Fn lock")]                                           // a declared flag (Dell)
+    [InlineData("USB charging when off:")]                            // a declared choice
+    [InlineData("Charge mode")]                                       // the battery object
+    [InlineData("Charge limit (~80%)")]                               // the battery object
+    [InlineData("Calibration (full cycle)")]                          // the battery object
+    public void AFailedSet_TellsTheUserWhichControlFailed(string locKey)
     {
         var h = AssemblerRows.AllRefusing();
 
         AssemblerRows.Change(h, locKey);
 
         Assert.Single(h.Posted);
-        Assert.Equal($"{reportedName} failed", Assert.Single(h.RunPosted()));
+        Assert.Equal($"{Loc.T(locKey)} failed", Assert.Single(h.RunPosted()));
     }
 }
 
@@ -203,7 +205,7 @@ public class OptionsAssemblerReadbackTests
     {
         var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = true };
-        h.F.Device.FnLock = fn;
+        h.F.Device.Declare(Keys.FnLock, fn);
 
         var row = AssemblerRows.Toggle(h, "Fn lock");
         Assert.False(row.Initial);           // placeholder: what a FAILED read would have shown
@@ -221,16 +223,18 @@ public class OptionsAssemblerReadbackTests
         Assert.Equal(3, fn.GetCount);        // ...and again: the delegate reads, it does not remember
     }
 
-    /// <summary>LCD overdrive deliberately has NO readback: its write is <c>SetGamingProfile</c>, which
-    /// returns a status byte, so the row self-confirms and skips the second EC transaction the user would hear
-    /// as a second "click" (<c>OptionsAssembler.Toggles</c>). Pinned because "add Read everywhere" looks like a
-    /// tidy-up and is not — it would be an audible regression on every toggle.</summary>
+    /// <summary>LCD overdrive deliberately has NO readback, and the declaration says so rather than this file:
+    /// its write (<c>SetGamingProfile</c> on Windows, the <c>lcd_override</c> node on Linux) reports whether it
+    /// took, so the row self-confirms and skips the second hardware transaction the user would hear as a second
+    /// "click" (<see cref="SettingDeclaration.ReadbackVerifiesWrite"/>). Pinned because "add Read everywhere"
+    /// looks like a tidy-up and is not — it would be an audible regression on every toggle. The row still needs
+    /// a way to show its value, and a row with no Read gets it from an explicit <c>Prime</c>.</summary>
     [Fact]
     public void TheLcdRowHasNoReadback_BecauseItsWriteSelfConfirms()
     {
         var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { State = true };
-        h.F.Device.LcdOverdrive = lcd;
+        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
         Assert.Null(row.Read);
@@ -244,11 +248,28 @@ public class OptionsAssemblerReadbackTests
         Assert.Equal(1, lcd.GetCount);       // one transaction — and only because a prime was asked for
     }
 
+    /// <summary>The other polarity of <see cref="SettingDeclaration.ReadbackVerifiesWrite"/>, and the one every
+    /// other setting uses: a declaration that does NOT self-confirm hands the row the same read as both its
+    /// readback and its prime (the view-model resolves <c>Prime ?? Read</c>), so no declaration needs to supply
+    /// two delegates. Together with the LCD test above this pins the fork the declaration carries — a mutation
+    /// that ignores the flag, in either direction, reddens one of the two.</summary>
+    [Fact]
+    public void ADeclarationThatDoesNotSelfConfirm_CarriesAReadback_AndNoSeparatePrime()
+    {
+        var h = new OptionsAssemblerHarness();
+        h.F.Device.Declare(Keys.FnLock, new FakeFlagPort { State = true });
+
+        var row = AssemblerRows.Toggle(h, "Fn lock");
+
+        Assert.NotNull(row.Read);      // the readback exists...
+        Assert.Null(row.Prime);        // ...and is what the prime falls back on, so there is no second delegate
+    }
+
     /// <summary>A dropdown's <c>Read</c> answers with the INDEX of what the port reports now, not the id
-    /// (<c>OptionChoice.Read</c>). The unknown-id and null cases are PINNED: <c>IndexOf</c> returns 0 both for "no
-    /// such option" and for the first option (<c>OptionsAssembler.IndexOf</c>), so a port reporting something
-    /// this build does not offer reads as the first entry — the row then shows a setting the hardware is not
-    /// in, and a subsequent pick would start from a lie.</summary>
+    /// (<c>OptionChoice.Read</c>). The unknown-id and null cases are PINNED: <c>ChoiceSetting.IndexOf</c> returns
+    /// 0 both for "no such option" and for the first option, so a port reporting something this build does not
+    /// offer reads as the first entry — the row then shows a setting the hardware is not in, and a subsequent
+    /// pick would start from a lie.</summary>
     [Theory]
     [InlineData("off", 0)]
     [InlineData("20", 2)]
@@ -260,7 +281,7 @@ public class OptionsAssemblerReadbackTests
     {
         var h = new OptionsAssemblerHarness();
         var usb = new FakeChoicePort("off", "10", "20", "30") { CurrentId = currentId };
-        h.F.Device.UsbCharging = usb;
+        h.F.Device.Declare(Keys.Usb, usb);
 
         var row = AssemblerRows.Choice(h, "USB charging when off:");
         Assert.Equal(0, row.InitialIndex);   // placeholder — the build does not ask, so it cannot know
@@ -295,17 +316,17 @@ public class OptionsAssemblerReadbackTests
 }
 
 /// <summary>
-/// Which rows exist. A null port is the capability model's "this machine cannot do that", so a row that
-/// appears without its port promises the user a control that cannot work — and one that fails to appear hides
-/// a feature the machine does have.
+/// Which rows exist. A setting's PRESENCE is now the declaration itself — the backend adds one for each knob its
+/// probe found (Domain/Settings.cs) — so a row that appears without a declaration would promise the user a
+/// control that cannot work, and one that fails to appear hides a setting the machine does have.
 ///
-/// The three battery rows no longer arrive through a port: they exist exactly when the battery OBJECT has the
+/// The three battery rows are the exception and stay so: they exist exactly when the battery OBJECT has the
 /// property (Domain/Battery.cs), which is the same rule stated one level down. This file's variant of it
 /// covers them one at a time; <c>BatteryTests</c> covers the whole present/absent combination.
 /// </summary>
 public class OptionsAssemblerPresenceTests
 {
-    /// <summary>The degenerate device: no ports, so nothing at all is offered.</summary>
+    /// <summary>The degenerate device: nothing declared, so nothing at all is offered.</summary>
     [Fact]
     public void WithNoPortsAtAll_NothingIsOffered()
     {
@@ -319,7 +340,9 @@ public class OptionsAssemblerPresenceTests
         Assert.Null(h.Assembler.BatteryCalibration());
     }
 
-    /// <summary>Every row appears on exactly its own port, and none of them on any other.</summary>
+    /// <summary>Every row appears on exactly its own declaration, and none of them on any other. Renamed from
+    /// <c>ARowAppearsExactlyWhenItsPortIsPresent</c>: the thing a row's presence now tests is a declaration, and
+    /// four of these seven rows no longer have a port of their own at all.</summary>
     [Theory]
     [InlineData("LCD overdrive")]
     [InlineData("Keyboard backlight timeout")]      // the on/off row
@@ -328,7 +351,7 @@ public class OptionsAssemblerPresenceTests
     [InlineData("Charge mode")]
     [InlineData("Charge limit (~80%)")]
     [InlineData("Calibration (full cycle)")]
-    public void ARowAppearsExactlyWhenItsPortIsPresent(string locKey)
+    public void ARowAppearsExactlyWhenTheBackendDeclaresIt(string locKey)
     {
         var absent = new OptionsAssemblerHarness();
         Assert.DoesNotContain(Loc.T(locKey), AssemblerRows.Labels(absent));
@@ -338,13 +361,31 @@ public class OptionsAssemblerPresenceTests
         Assert.Contains(Loc.T(locKey), AssemblerRows.Labels(present));
     }
 
-    /// <summary>The dropdown variant of the same device: only the timeout CHOICE row appears when the
-    /// duration port is the one present, and the on/off row of the same name stays away.</summary>
+    /// <summary>A declaration whose key this build has no label for still produces a row, named by the key.
+    /// The alternative — dropping the row — would hide a control the machine has because a UI table is behind
+    /// the backend, and the failure it would produce would be silence (the class of bug the whole channel
+    /// exists to remove). The fallback is the only reason <c>LabelFor</c> has a default arm at all.</summary>
     [Fact]
-    public void TheTimeoutRowsAreIndependent_OneForTheFlagPort_OneForTheChoicePort()
+    public void AnUnknownKey_StillGetsARow_AndFailsUnderTheKeyItself()
     {
         var h = new OptionsAssemblerHarness();
-        h.F.Device.KeyboardBacklightTimeout = new FakeChoicePort("5", "30", "60");
+        h.F.Device.Declare("acer.somethingNew", new FakeFlagPort { SetResult = false });
+
+        var row = AssemblerRows.Toggle(h, "acer.somethingNew");
+        Assert.Equal("acer.somethingNew", row.Label);
+
+        row.OnChange(true);
+
+        Assert.Equal("acer.somethingNew failed", Assert.Single(h.RunPosted()));
+    }
+
+    /// <summary>The dropdown variant of the same device: only the timeout CHOICE row appears when the
+    /// duration declaration is the one present, and the on/off row of the same name stays away.</summary>
+    [Fact]
+    public void TheTimeoutRowsAreIndependent_OneForTheFlagSetting_OneForTheChoiceSetting()
+    {
+        var h = new OptionsAssemblerHarness();
+        h.F.Device.Declare(Keys.Timeout, new FakeChoicePort("5", "30", "60"));
 
         Assert.Contains(Loc.T("Keyboard backlight timeout:"), AssemblerRows.Labels(h));
         Assert.DoesNotContain(Loc.T("Keyboard backlight timeout"), AssemblerRows.Labels(h));
@@ -503,11 +544,12 @@ internal sealed class OptionsAssemblerHarness
 }
 
 /// <summary>
-/// Row lookup and port wiring by LABEL, because the row — not the port — is what the user sees, and one
-/// fake serves several slots (Domain/Ports.cs: every on/off port is exactly <see cref="IFlagPort"/>).
+/// Row lookup and wiring by LABEL, because the row — not the setting — is what the user sees, and one fake
+/// serves several declarations (Domain/Ports.cs: every on/off transport is exactly <see cref="IFlagPort"/>).
 ///
 /// Every helper takes the ENGLISH text that <c>Loc.T</c> looks up, not a translated label: the keys are
-/// stable, the labels are not.
+/// stable, the labels are not. <see cref="Keys"/> holds the other half of that vocabulary — the keys the
+/// backends own, which a declaration must carry for the UI to know what to call it.
 /// </summary>
 internal static class AssemblerRows
 {
@@ -542,42 +584,43 @@ internal static class AssemblerRows
     }
 
     /// <summary>
-    /// Attach a port to whichever slot the row with this key reads. The switch is on the English KEY because
-    /// that is what identifies the row independently of any translation table; the fakes of the other kind are
-    /// ignored, so a caller may pass both without knowing which one the row wants.
+    /// Attach a fake to whichever row this key names, the way the machine's backend declares it. The switch is
+    /// on the English KEY because that is what identifies the row independently of any translation table; the
+    /// fakes of the other kind are ignored, so a caller may pass both without knowing which one the row wants.
+    /// The battery's three properties are not declared settings, so they are still attached to the object.
     /// </summary>
     public static void Wire(OptionsAssemblerHarness h, string locKey, FakeFlagPort flag, FakeChoicePort choice)
     {
         switch (locKey)
         {
-            case "LCD overdrive":                 h.F.Device.LcdOverdrive = flag; break;
-            case "Keyboard backlight timeout":    h.F.Device.KeyboardBacklight = flag; break;
-            case "Fn lock":                       h.F.Device.FnLock = flag; break;
+            case "LCD overdrive":                 h.F.Device.Declare(Keys.Lcd, flag, readbackVerifiesWrite: false); break;
+            case "Keyboard backlight timeout":    h.F.Device.Declare(Keys.BacklightTimeout, flag); break;
+            case "Fn lock":                       h.F.Device.Declare(Keys.FnLock, flag); break;
             case "Charge limit (~80%)":           h.F.Device.Battery.ChargeLimit = flag.AsBatteryToggle(); break;
             case "Calibration (full cycle)":      h.F.Device.Battery.Calibration = flag.AsBatteryToggle(); break;
-            case "USB charging when off:":        h.F.Device.UsbCharging = choice; break;
+            case "USB charging when off:":        h.F.Device.Declare(Keys.Usb, choice); break;
             case "Charge mode":                   h.F.Device.Battery.ChargeMode = choice.AsBatteryChoice(); break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(locKey), locKey, "no port slot is mapped to this row");
+                throw new ArgumentOutOfRangeException(nameof(locKey), locKey, "no setting or property is mapped to this row");
         }
     }
 
-    /// <summary>The English keys of every row whose write funnels through <c>RunSet</c>: the whole of
-    /// <c>Toggles()</c>, both battery rows, and the two pick-one-of-N rows in <c>Choices()</c>. The blue-light
-    /// row is absent on purpose — it does not go through <c>RunSet</c> at all (<c>OptionsAssembler.Choices</c>) — and
-    /// so is the LampArray row, which needs a transport this fixture does not build.</summary>
+    /// <summary>The English keys of every row whose write is reported through <c>OptionsAssembler.RunSet</c>:
+    /// the declared settings that are flags or choices, both battery rows, and the two pick-one-of-N battery
+    /// rows. The blue-light row is absent on purpose — it does not report through <c>RunSet</c> at all
+    /// (<c>OptionsAssembler.Choices</c>) — and so is the LampArray row, which needs a transport this fixture
+    /// does not build.</summary>
     public static readonly string[] RunSetRowKeys =
     [
         "LCD overdrive", "Keyboard backlight timeout", "Fn lock",
         "USB charging when off:", "Charge mode", "Charge limit (~80%)", "Calibration (full cycle)",
     ];
 
-    /// <summary>A device with every option port present and every write REFUSED — the arrangement the
-    /// per-row failure theory needs. One refusing fake serves all five on/off slots and one serves all three
-    /// dropdown slots: the rows are built and invoked one case at a time, so sharing them cannot cross cases.
-    /// No port carries a reason (their <c>LastError</c> stays null), so the message is exactly
-    /// "&lt;name&gt; failed" for every row — and the rows are built and invoked one case at a time, so sharing
-    /// the fakes cannot cross cases.</summary>
+    /// <summary>A device with every row present and every write REFUSED — the arrangement the per-row failure
+    /// theory needs. One refusing fake serves all the on/off settings and one serves all the pick-one settings:
+    /// the rows are built and invoked one case at a time, so sharing them cannot cross cases. No fake carries a
+    /// reason (their <c>LastError</c> stays null), so the message is exactly "&lt;label&gt; failed" for every
+    /// row.</summary>
     public static OptionsAssemblerHarness AllRefusing()
     {
         var h = new OptionsAssemblerHarness();
@@ -589,4 +632,25 @@ internal static class AssemblerRows
 
     /// <summary>Drop the nulls out of an optional row (the battery rows are nullable rather than absent).</summary>
     private static IEnumerable<T> Optional<T>(params T?[] rows) where T : class => rows.OfType<T>();
+}
+
+/// <summary>
+/// The keys the fakes declare their settings under. A key is the BACKEND's own name for a setting and the UI
+/// never invents one, so these are the names the shipped backends use: Acer's three are the Linuwu-Sense node
+/// names its Linux half binds the same knobs through (AcerDevice.Linux.cs), declared by its Windows half too; of
+/// Dell's, two are the BIOS-attribute names dell-wmi-sysman exposes on both OSes and the third is the LED node
+/// the timeout lives on.
+///
+/// THEY ARE NOT CHECKED AGAINST THE BACKENDS, and that is a named gap rather than an oversight: no test
+/// constructs <c>AcerDevice</c>/<c>DellDevice</c> (their probes need WMI and real firmware — see the wave-4b
+/// notes), so a backend that renamed a key would leave the UI showing the key itself instead of a label, and
+/// nothing here would redden. What IS pinned is that such a key still yields a row and a message
+/// (<c>AnUnknownKey_StillGetsARow_AndFailsUnderTheKeyItself</c>) rather than silence.</summary>
+internal static class Keys
+{
+    public const string Lcd              = "lcd_override";        // Acer: the on/off LCD-overdrive node
+    public const string BacklightTimeout = "backlight_timeout";   // Acer: the on/off timeout node
+    public const string Usb              = "usb_charging";        // Acer: battery-threshold choice
+    public const string Timeout          = "stop_timeout";        // Dell: the duration choice
+    public const string FnLock           = "FnLock";              // Dell: a BIOS attribute
 }

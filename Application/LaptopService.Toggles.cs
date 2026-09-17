@@ -10,21 +10,32 @@ public sealed partial class LaptopService
 
     public BatteryInfoSnapshot ReadBatteryInfo() => device.Battery.Read();
 
-    // ---- hardware toggles (each returns the write's outcome AND its reason) ----
+    // ---- declared settings (each throws on refusal; the UI catches and composes the message) ----
 
-    // Every simple on/off or pick-one control routes through one of these two: the port carries its own
-    // error channel, so the caller (OptionsAssembler) passes the device's nullable port + the new value.
-    // SetKeyboardBrightness stays its own method — it's a LevelPort (an int), not a flag/choice.
-    public (bool ok, string? error) SetFlag(IFlagPort? port, bool on)
-        => port == null ? (false, null) : Attempt(() => port.Set(on), () => port.LastError);
+    /// <summary>Apply one of the settings this machine declares (Domain/Settings.cs), then record the value
+    /// under the setting's own key.
+    ///
+    /// THE ORDER IS THE POINT. The hardware write runs OUTSIDE <c>_state</c>, because a setting is an EC/WMI
+    /// write and the lock must never span one (docs/domain-refactoring-plan.md §4). Only the recording takes it,
+    /// which is also what makes "released on throw" free: a refused write throws out of
+    /// <see cref="SettingDeclaration.Apply"/> before the lock is ever taken, and nothing is recorded.
+    ///
+    /// The refusal is an EXCEPTION rather than a returned pair because the reason it carries is information
+    /// about what happened, not a sentence: this layer knows the setting only by its opaque key and has no name
+    /// to put in a message (docs/domain-refactoring-plan.md §5, wave 9). The UI owns the label.</summary>
+    public void ApplySetting(SettingDeclaration setting, string value)
+    {
+        setting.Apply(value);
+        lock (_state) { Settings.DeviceSettings[setting.Key] = value; }
+        Save();
+    }
 
-    public (bool ok, string? error) SetChoice(IChoicePort? port, string id)
-        => port == null ? (false, null) : Attempt(() => port.Set(id), () => port.LastError);
+    // ---- hardware toggles that are NOT declared settings (each returns the write's outcome AND its reason) ----
 
     // The battery's properties are not ports: they are ops that answer both halves of their outcome
     // themselves (Domain/Battery.cs), so there is no LastError to fetch afterwards and the shape of the
-    // wrapper differs — see the tuple overload of Attempt. The rows above keep the port shape, which still
-    // carries its own error channel.
+    // wrapper differs — see the tuple overload of Attempt. Same for the plain-backlight level, a LevelPort (an
+    // int) rather than a flag/choice. The declared settings above take neither road: they throw.
     public (bool ok, string? error) SetBatteryToggle(BatteryToggle toggle, bool on)
         => Attempt(() => toggle.Write(on));
 
@@ -65,7 +76,12 @@ public sealed partial class LaptopService
     public void PersistLighting() => Save();
 
     /// <summary>Read a vendor-specific device flag from the neutral <see cref="Settings.DeviceSettings"/> bag
-    /// (the key is owned by the backend, e.g. Infrastructure/Vendors/Acer). Missing key -> <paramref name="fallback"/>.</summary>
+    /// (the key is owned by the backend, e.g. Infrastructure/Vendors/Acer). Missing key -> <paramref name="fallback"/>.
+    ///
+    /// This pair is for the backend-owned flags that are NOT declared settings — the lightbar's
+    /// "follows performance profile" flag and the one-shot driver prompt. A DECLARED setting's value lands in
+    /// the same bag under its own key (<see cref="ApplySetting"/>), and its own accessors are the declaration's
+    /// read and write: a choice's value is an option id, which this bool-shaped reader could not answer for.</summary>
     public bool GetDeviceFlag(string key, bool fallback)
     {
         lock (_state)

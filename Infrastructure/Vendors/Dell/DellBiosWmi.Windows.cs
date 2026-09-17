@@ -73,13 +73,14 @@ internal sealed class DellBiosWmi
 
     // ---- port factories ----
     // A BIOS enumeration attribute wired as a bool/choice in one line (Get/Set pair). Defaults are the usual
-    // Dell "Enabled"/"Disabled" enum literals.
+    // Dell "Enabled"/"Disabled" enum literals. Each is DECLARED (Domain/Settings.cs) under the attribute's own
+    // name — the name the firmware and this backend already know it by.
 
-    public FlagPort Flag(string attribute, string on = "Enabled", string off = "Disabled")
-        => new(() => Get(attribute) == on, v => Set(attribute, v ? on : off));
+    public FlagSetting Flag(string attribute, string on = "Enabled", string off = "Disabled")
+        => new() { Key = attribute, Port = new FlagPort(() => Get(attribute) == on, v => Set(attribute, v ? on : off)) };
 
-    public ChoicePort Choice(string attribute, IReadOnlyList<ChoiceOption> options)
-        => new(options, () => Get(attribute), id => Set(attribute, id));
+    public ChoiceSetting Choice(string attribute, IReadOnlyList<ChoiceOption> options)
+        => new() { Key = attribute, Port = new ChoicePort(options, () => Get(attribute), id => Set(attribute, id)) };
 
     /// <summary>The same attribute as <see cref="Choice"/>, as the property the battery object takes: the
     /// battery's charge mode carries its reason out of the write instead of stashing it in a port for a later

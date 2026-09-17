@@ -51,18 +51,21 @@ public sealed class SysfsInvoker(string baseDir)
     // InitVendor wires a plain sysfs knob declaratively instead of a Get/Set method pair. Bespoke encodings
     // (bit-packing, bracket-parsed lists, value normalisation) keep their named methods.
 
-    /// <summary>A boolean node (writes <paramref name="on"/>/<paramref name="off"/>, reads true when equal to
-    /// <paramref name="on"/>).</summary>
-    public FlagPort Flag(string node, string on = "1", string off = "0")
-        => new(() => Read(node) == on, v => { var ok = Write(node, v ? on : off, out var e); return (ok, e); });
+    /// <summary>A boolean node DECLARED as this machine's setting, keyed by the node's own name — the name the
+    /// backend already knows it by, so the declaration adds no second spelling of it. Writes
+    /// <paramref name="on"/>/<paramref name="off"/>, reads true when equal to <paramref name="on"/>.</summary>
+    public FlagSetting Flag(string node, string on = "1", string off = "0")
+        => new() { Key = node, Port = new FlagPort(() => Read(node) == on, v => { var ok = Write(node, v ? on : off, out var e); return (ok, e); }) };
 
     /// <summary>The same node as <see cref="Flag"/>, as the property the battery object takes: the battery's
     /// toggles carry their reason out of the write instead of stashing it in a port for a later read
-    /// (Domain/Battery.cs), so they take the ops rather than a holder.</summary>
+    /// (Domain/Battery.cs), so they take the ops rather than a holder. Not a declared setting — the battery
+    /// declares its own properties.</summary>
     public BatteryToggle BatteryToggle(string node, string on = "1", string off = "0")
         => new(() => Read(node) == on, v => { var ok = Write(node, v ? on : off, out var e); return (ok, e); });
 
-    /// <summary>A pick-one node whose stored value is the option id verbatim (read/write pass through).</summary>
-    public ChoicePort Choice(string node, IReadOnlyList<ChoiceOption> options)
-        => new(options, () => Read(node), id => { var ok = Write(node, id, out var e); return (ok, e); });
+    /// <summary>A pick-one node DECLARED as this machine's setting, keyed by the node's own name (see
+    /// <see cref="Flag"/>). Its stored value is the option id verbatim (read/write pass through).</summary>
+    public ChoiceSetting Choice(string node, IReadOnlyList<ChoiceOption> options)
+        => new() { Key = node, Port = new ChoicePort(options, () => Read(node), id => { var ok = Write(node, id, out var e); return (ok, e); }) };
 }

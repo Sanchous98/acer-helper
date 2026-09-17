@@ -89,17 +89,24 @@ public sealed partial class AcerDevice
             return;
         }
 
-        // Plain on/off sysfs knobs collapse to the shared flag factory (node = the id string; on/off = "1"/"0",
-        // the factory defaults). USB stays bespoke — its read normalises the raw node value to an option id.
-        // The battery's two knobs take the same node as an op pair instead of a flag port, because the battery
-        // object's properties carry their reason out of the write (Domain/Battery.cs).
+        // Plain on/off sysfs knobs collapse to the shared flag factory, which DECLARES each one under the node's
+        // own name — the name this backend already knows the setting by (on/off = "1"/"0", the factory
+        // defaults). USB stays bespoke — its read normalises the raw node value to an option id — so it is
+        // declared here with that same node name as its key. The battery's two knobs take the same node as an
+        // op pair instead of a declared setting, because the battery object's properties carry their reason out
+        // of the write (Domain/Battery.cs).
         if (Usable("fan_speed"))
             FanControl = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
-        if (Usable("lcd_override"))        LcdOverdrive       = _sense.Flag("lcd_override");
+        // LCD overdrive is declared with no readback, as it is on the Windows side of this backend: the app has
+        // never read that row back, and here the node write also reports its own failure, so there is nothing a
+        // readback would add. The row still PRIMES from the node, which is one read at startup and none per write.
+        if (Usable("lcd_override"))
+            Declare(_sense.Flag("lcd_override") with { ReadbackVerifiesWrite = false });
         if (Usable("battery_limiter"))     Battery.ChargeLimit = _sense.BatteryToggle("battery_limiter");
         if (Usable("battery_calibration")) Battery.Calibration = _sense.BatteryToggle("battery_calibration");
-        if (Usable("backlight_timeout"))   KeyboardBacklight  = _sense.Flag("backlight_timeout");
-        if (Usable("usb_charging"))        UsbCharging        = new ChoicePort(UsbLevels, GetUsb, SetUsb);
+        if (Usable("backlight_timeout"))   Declare(_sense.Flag("backlight_timeout"));
+        if (Usable("usb_charging"))
+            Declare(new ChoiceSetting { Key = "usb_charging", Port = new ChoicePort(UsbLevels, GetUsb, SetUsb) });
     }
 
     private bool Usable(string node) => _sense.Has(node) && _sense.CanWrite(node);

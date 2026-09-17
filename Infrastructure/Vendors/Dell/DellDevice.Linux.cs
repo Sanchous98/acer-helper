@@ -72,7 +72,7 @@ public sealed partial class DellDevice
         if (_kbd.Has("stop_timeout"))
         {
             if (_kbd.CanWrite("stop_timeout"))
-                KeyboardBacklightTimeout = _kbd.Choice("stop_timeout", KbdTimeouts);
+                Declare(_kbd.Choice("stop_timeout", KbdTimeouts));
             else locked = true;
         }
 
@@ -85,10 +85,10 @@ public sealed partial class DellDevice
             locked = true;
         else if (_fw != null)
         {
-            if (_fw.CanRead("FnLock")) FnLock = _fw.Flag("FnLock");
+            if (_fw.CanRead("FnLock")) Declare(_fw.Flag("FnLock"));
             if (_fw.CanRead("UsbPowerShare"))
-                UsbCharging = _fw.Choice("UsbPowerShare",
-                    [new ChoiceOption("Disabled", "Off"), new ChoiceOption("Enabled", "On")]);
+                Declare(_fw.Choice("UsbPowerShare",
+                    [new ChoiceOption("Disabled", "Off"), new ChoiceOption("Enabled", "On")]));
         }
 
         if (locked)

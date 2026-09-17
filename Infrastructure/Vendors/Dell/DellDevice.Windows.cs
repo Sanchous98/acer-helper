@@ -53,9 +53,9 @@ public sealed partial class DellDevice
         if (bios.Get("PrimaryBattChargeCfg") != null)
             Battery.ChargeMode = _bios.BatteryChoice("PrimaryBattChargeCfg", ChargeModes);
         if (bios.Get("FnLock") != null)
-            FnLock = _bios.Flag("FnLock");
+            Declare(_bios.Flag("FnLock"));
         if (bios.Get("UsbPowerShare") != null)
-            UsbCharging = _bios.Choice("UsbPowerShare", [new("Disabled", "Off"), new("Enabled", "On")]);
+            Declare(_bios.Choice("UsbPowerShare", [new("Disabled", "Off"), new("Enabled", "On")]));
         // Plain keyboard backlight (Disabled/Dim/Bright) as discrete brightness levels — shown in the
         // Lighting window, not Options. (On Linux the same knob is the kernel LED class, wired generically.)
         if (bios.Get("KeyboardIllumination") != null)

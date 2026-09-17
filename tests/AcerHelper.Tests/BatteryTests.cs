@@ -151,9 +151,10 @@ public class BatteryRowPresenceTests
     }
 
     /// <summary>The write path is the one it was: the value reaches the property, and a refused write reports
-    /// through the row under the name the app has always used. The name is deliberately not the row label
-    /// ("Charge limit (~80%)" fails as "Battery limit") — that mismatch is a recorded decision, pinned here
-    /// through the new shape as it is pinned in <c>OptionsAssemblerFailureTests</c> through the old one.
+    /// through the row. THE NAME CHANGED, deliberately, in the same commit that gave the settings channel its
+    /// label: the message is composed from the row the user is looking at, so "Charge limit (~80%)" fails under
+    /// its own label instead of under the internal "Battery limit" the interface never showed
+    /// (docs/open-decisions.md, «Известные особенности» 5 — the mismatch this test used to pin as shipped).
     ///
     /// The reason in the message is what the property's write hands back, not a <c>LastError</c> read
     /// afterwards — the shape change means the text now provably belongs to THIS write
@@ -168,7 +169,7 @@ public class BatteryRowPresenceTests
         AssemblerRows.Toggle(h, "Charge limit (~80%)").OnChange(true);
 
         Assert.Equal([true], limit.SetCalls);        // the write was attempted, and reached the property
-        Assert.Equal("Battery limit failed: EC refused the write", Assert.Single(h.RunPosted()));
+        Assert.Equal("Charge limit (~80%) failed: EC refused the write", Assert.Single(h.RunPosted()));
     }
 
     /// <summary>A write that lands notifies nothing — the failure branch is one <c>if</c> away from firing on

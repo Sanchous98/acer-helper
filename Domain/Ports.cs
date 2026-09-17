@@ -5,9 +5,11 @@ namespace AcerHelper.Domain;
 // them; the Application/UI depend only on these. A feature a device lacks is represented by a
 // null port on IDevice (see below), so the UI shows exactly the features that exist.
 //
-// One capability has moved off that scheme: the battery is a domain OBJECT (Domain/Battery.cs)
-// that declares its own properties one by one, because the battery's controls are not four
-// independent machine capabilities but parts of one. IDevice exposes it as a single slot.
+// Two capabilities have moved off that scheme, both by declaring their own shape instead of
+// occupying a nullable slot: the battery is a domain OBJECT (Domain/Battery.cs) that declares its
+// properties one by one, and the settings a backend owns are DECLARED
+// (IDevice.DeclaredSettings, Domain/Settings.cs) under the backend's own keys. In both cases "this
+// machine does not have that" is the absence of a property/declaration rather than a null port.
 
 /// <summary>Switchable performance/platform profiles.</summary>
 public interface IPowerProfiles
@@ -37,10 +39,15 @@ public interface ISensors
 }
 
 /// <summary>Shared shape of a boolean hardware toggle (on/off) with an error channel. The concrete on/off
-/// feature ports derive from this so they share one definition and one implementation (see FlagPort); the
-/// distinct interface types stay so IDevice can expose each capability as its own nullable port. The battery's
-/// two toggles are NOT among them: they are members of the battery object (Domain/Battery.cs), where presence
-/// per property is what the object itself declares.</summary>
+/// feature ports derive from this so they share one definition and one implementation (see FlagPort).
+///
+/// The settings the declared-settings contract was introduced for are one of two shapes, and this is one of
+/// them: LCD overdrive, the keyboard-backlight timeout flag and Fn lock are flags, the USB-charging and
+/// keyboard-backlight-timeout-duration settings are <see cref="IChoicePort"/>s. None of them has an interface
+/// type of its own any more — a setting is declared as a <see cref="FlagSetting"/>/<see cref="ChoiceSetting"/>
+/// on <see cref="IDevice.DeclaredSettings"/>, so the SHAPE is what a caller switches on and the capability's
+/// name is the backend's opaque key. The battery's two toggles are not among them either: they are members of
+/// the battery object (Domain/Battery.cs), where presence per property is what the object itself declares.</summary>
 public interface IFlagPort
 {
     string? LastError { get; }
@@ -48,9 +55,9 @@ public interface IFlagPort
     bool Set(bool on);
 }
 
-/// <summary>Shared shape of a pick-one-of-N labelled choice with an error channel. The concrete choice
-/// feature ports derive from this (see ChoicePort). Ids are the vendor's stable keys; <see cref="Options"/>
-/// is the display list.</summary>
+/// <summary>Shared shape of a pick-one-of-N labelled choice with an error channel (see ChoicePort). Ids are the
+/// vendor's stable keys; <see cref="Options"/> is the display list — and, for a declared setting, the order a
+/// dropdown shows them in (<see cref="ChoiceSetting.IndexOf"/>).</summary>
 public interface IChoicePort
 {
     string? LastError { get; }
@@ -60,19 +67,14 @@ public interface IChoicePort
     bool Set(string id);
 }
 
-/// <summary>LCD overdrive (response-time boost).</summary>
-public interface ILcdOverdrive : IFlagPort { }
-
-/// <summary>USB charging while the laptop is powered off. The options are vendor-defined labelled choices
-/// (Acer: Off/10%/20%/30% battery threshold; Dell PowerShare: Off/On). A battery-shaped name and, on Acer,
-/// battery-threshold ids — but NOT a property of the battery, so it stays a port of its own: the row it
-/// drives ("USB charging when off:") belongs to the Options drawer, and folding it into the battery object
-/// would move it into the Battery section, which is a change to what the user sees (see the wave 4b notes in
-/// docs/domain-refactoring-plan.md).</summary>
-public interface IUsbCharging : IChoicePort { }
-
-/// <summary>Keyboard backlight auto-off timeout (on/off).</summary>
-public interface IKeyboardBacklight : IFlagPort { }
+// Five more interface types used to stand here — ILcdOverdrive, IKeyboardBacklight, IKeyboardBacklightTimeout,
+// IUsbCharging and IFnLock — one per setting of the four the declared-settings contract was introduced for (the
+// keyboard backlight is two settings on two different machines), each occupying its own nullable slot on
+// IDevice. They are gone: a setting is now DECLARED by the backend that owns its key
+// (IDevice.DeclaredSettings), so "this machine has an LCD-overdrive setting" is the presence of a declaration
+// rather than the presence of a dedicated type. The one thing they carried that a declaration does not is the
+// port's LastError, and the declaration reads it (<see cref="IFlagPort.LastError"/>). IUsbCharging left this
+// list for the same reason wave 4b left the battery ports behind: nothing implements or exposes it any more.
 
 /// <summary>Plain (non-RGB) keyboard-backlight brightness in discrete hardware levels, 0 = off
 /// (e.g. Dell: 0..2 = Off/Dim/Bright). RGB keyboards expose brightness via <see cref="IRgbDevice"/> instead.</summary>
@@ -83,14 +85,6 @@ public interface IKeyboardBrightness
     int Get();
     bool Set(int level);
 }
-
-/// <summary>Keyboard-backlight auto-off delay as a duration choice (5s / 30s / 1m / 5m …), for hardware
-/// where the timeout is a fixed set of durations rather than a plain on/off (e.g. the Dell LED stop_timeout).
-/// Ids are the exact strings the hardware accepts and reports back.</summary>
-public interface IKeyboardBacklightTimeout : IChoicePort { }
-
-/// <summary>Fn-key lock: whether the F-row defaults to its secondary (media/hardware) functions.</summary>
-public interface IFnLock : IFlagPort { }
 
 // RGB lighting is modelled as a zone-based device (IRgbDevice, in Rgb.cs) rather than a fixed
 // keyboard+lightbar port, so the UI adapts to whatever zones the active controllers advertise.
@@ -263,7 +257,9 @@ public interface IClamshell : IDisposable
 /// The battery is the exception, and the first capability to change shape: <see cref="Battery"/> is always
 /// there and declares its OWN properties one by one (Domain/Battery.cs), because "this laptop has no charge
 /// limiter" is a fact about the battery rather than about the machine. A machine with no battery at all is
-/// simply one whose battery object has nothing on it.
+/// simply one whose battery object has nothing on it. <see cref="DeclaredSettings"/> follows it for the
+/// settings a vendor owns: none of them occupies a slot, and which ones this machine has is what the list
+/// contains.
 /// </summary>
 public interface IDevice : IDisposable
 {
@@ -273,13 +269,8 @@ public interface IDevice : IDisposable
     IPowerProfiles?      PowerProfiles      { get; }
     IFanControl?         FanControl         { get; }
     ISensors?            Sensors            { get; }
-    ILcdOverdrive?       LcdOverdrive       { get; }
     Battery              Battery            { get; }
-    IUsbCharging?        UsbCharging        { get; }
-    IKeyboardBacklight?  KeyboardBacklight  { get; }
-    IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; }
     IKeyboardBrightness? KeyboardBrightness { get; }
-    IFnLock?             FnLock             { get; }
     IRgbDevice?          Lighting           { get; }
     IHotkeys?            Hotkeys            { get; }
     IDisplayTint?        DisplayTint        { get; }
@@ -289,4 +280,11 @@ public interface IDevice : IDisposable
     IDriverSetup?        DriverSetup        { get; }
     IAutostart?          Autostart          { get; }
     IClamshell?          Clamshell          { get; }
+
+    /// <summary>The settings this machine's backend declares — one entry per setting its probe actually found,
+    /// which is how "this machine does not have that" is stated for them (the same rule the battery object
+    /// follows per property). Each carries its own shape and its own opaque key, so nothing above has to know
+    /// which laptop has an LCD-overdrive knob or what this vendor calls it. Empty on a machine that declares
+    /// none.</summary>
+    IReadOnlyList<SettingDeclaration> DeclaredSettings { get; }
 }

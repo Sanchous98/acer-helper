@@ -19,13 +19,8 @@ public partial class GenericDevice : IDevice
     public IPowerProfiles?      PowerProfiles      { get; protected set; }
     public IFanControl?         FanControl         { get; protected set; }
     public ISensors?            Sensors            { get; protected set; }
-    public ILcdOverdrive?       LcdOverdrive       { get; protected set; }
     public Battery              Battery            { get; } = new();
-    public IUsbCharging?        UsbCharging        { get; protected set; }
-    public IKeyboardBacklight?  KeyboardBacklight  { get; protected set; }
-    public IKeyboardBacklightTimeout? KeyboardBacklightTimeout { get; protected set; }
     public IKeyboardBrightness? KeyboardBrightness { get; protected set; }
-    public IFnLock?             FnLock             { get; protected set; }
     public IRgbDevice?          Lighting           { get; protected set; }
     public IHotkeys?            Hotkeys            { get; protected set; }
     public IDisplayTint?        DisplayTint        { get; protected set; }
@@ -35,6 +30,17 @@ public partial class GenericDevice : IDevice
     public IDriverSetup?        DriverSetup        { get; protected set; }
     public IAutostart?          Autostart          { get; protected set; }
     public IClamshell?          Clamshell          { get; protected set; }
+
+    /// <summary>The settings this machine declares. A LIST rather than a slot per capability, because a
+    /// declaration carries its own shape and its own key: each vendor's <c>InitVendor</c> adds the entries its
+    /// own probe found, in the order the rows should read, and a setting it did not find is simply not
+    /// declared.</summary>
+    public IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
+
+    private readonly List<SettingDeclaration> _declaredSettings = [];
+
+    /// <summary>Register one setting this machine's probe found, under the backend's own key for it.</summary>
+    protected void Declare(SettingDeclaration setting) => _declaredSettings.Add(setting);
 
     private readonly List<IDisposable> _owned = [];
 

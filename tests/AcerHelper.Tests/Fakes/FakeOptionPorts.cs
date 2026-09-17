@@ -3,26 +3,26 @@ using AcerHelper.Domain;
 namespace AcerHelper.Tests.Fakes;
 
 /// <summary>
-/// Hand-written ports for <c>OptionsAssembler</c>: each is the real port's two-way shape (a write that can
+/// Hand-written transports for <c>OptionsAssembler</c>: each is the real one's two-way shape (a write that can
 /// fail, a read the test controls) plus the failure modes a fake needs to let a test CHOOSE — a refused write
 /// (<see cref="FakeFlagPort.SetResult"/>/<see cref="FakeChoicePort.SetResult"/>), a write that THROWS, and
 /// (for the flag port) a READ that throws, which the ports survive by different paths (see
 /// <see cref="FakeThrowingPowerProfiles"/>).
 ///
-/// <see cref="FakeFlagPort"/> implements every on/off port interface at once, and <see cref="FakeChoicePort"/>
-/// every pick-one-of-N one, because in Domain/Ports.cs each of them is exactly <see cref="IFlagPort"/> /
-/// <see cref="IChoicePort"/> and nothing more — so one fake is dropped into whichever slot the row under test
-/// reads, and a test says which row it means by its label rather than by its port type.
+/// Each fake is one of the two TRANSPORT shapes (Domain/Ports.cs: <see cref="IFlagPort"/>, and
+/// <see cref="IChoicePort"/>) and is DECLARED as a setting through <see cref="FakeDevice.Declare(string,
+/// IFlagPort, bool)"/>, which pairs it with the backend key a real one comes with — so a test says which row it
+/// means by that key (or by the row's label) rather than by a port type that no longer exists.
 ///
 /// The BATTERY is the exception: its properties are ops on a domain object rather than ports
-/// (Domain/Battery.cs), so those two fakes are handed over as an op pair instead of being assigned to a slot —
+/// (Domain/Battery.cs), so those two fakes are handed over as an op pair instead of being declared —
 /// see <see cref="FakeFlagPort.AsBatteryToggle"/> and <see cref="FakeChoicePort.AsBatteryChoice"/>, which hand
 /// over the SAME state, read count and refused-write behaviour the port interface exposes.
 ///
 /// Reads are COUNTED: the Options rows hand the user a <c>Read</c> delegate the view-model calls after every
 /// write, so "did the row ask the hardware again?" is an assertion, not an implementation detail.
 /// </summary>
-public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock
+public sealed class FakeFlagPort : IFlagPort
 {
     /// <summary>What <see cref="Get"/> reports. Mutate it to act like the hardware changed under the app.</summary>
     public bool State { get; set; }
@@ -78,9 +78,9 @@ public sealed class FakeFlagPort : ILcdOverdrive, IKeyboardBacklight, IFnLock
 /// <summary>
 /// Hand-written <see cref="IChoicePort"/> for the dropdown rows. Every id doubles as its display name, because
 /// no Options assertion depends on the option LABELS — only on which id the row maps to which dropdown INDEX
-/// (OptionsAssembler's <c>IndexOf</c>), which is the value the view-model puts back into the combo box.
+/// (<c>ChoiceSetting.IndexOf</c>), which is the value the view-model puts back into the combo box.
 /// </summary>
-public sealed class FakeChoicePort : IUsbCharging, IKeyboardBacklightTimeout
+public sealed class FakeChoicePort : IChoicePort
 {
     public FakeChoicePort(params string[] ids)
         => Options = [.. ids.Select(id => new ChoiceOption(id, id))];

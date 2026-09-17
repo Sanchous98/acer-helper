@@ -56,11 +56,12 @@ public sealed class FirmwareAttributes
 
     // ---- port factories ----
     // A BIOS attribute wired as a bool/choice in one line (the current_value read/write pair). Vendor
-    // defaults are the usual firmware-attribute enum literals.
+    // defaults are the usual firmware-attribute enum literals. Each is DECLARED (Domain/Settings.cs) under the
+    // attribute's own name — the name the firmware and this backend already know it by.
 
-    public FlagPort Flag(string attribute, string on = "Enabled", string off = "Disabled")
-        => new(() => Read(attribute) == on, v => { var ok = Write(attribute, v ? on : off, out var e); return (ok, e); });
+    public FlagSetting Flag(string attribute, string on = "Enabled", string off = "Disabled")
+        => new() { Key = attribute, Port = new FlagPort(() => Read(attribute) == on, v => { var ok = Write(attribute, v ? on : off, out var e); return (ok, e); }) };
 
-    public ChoicePort Choice(string attribute, IReadOnlyList<ChoiceOption> options)
-        => new(options, () => Read(attribute), id => { var ok = Write(attribute, id, out var e); return (ok, e); });
+    public ChoiceSetting Choice(string attribute, IReadOnlyList<ChoiceOption> options)
+        => new() { Key = attribute, Port = new ChoicePort(options, () => Read(attribute), id => { var ok = Write(attribute, id, out var e); return (ok, e); }) };
 }

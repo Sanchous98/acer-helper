@@ -51,13 +51,13 @@ public class OptionsPrimeTests
         var usb = new FakeChoicePort("off", "10", "20", "30");
         var timeout = new FakeChoicePort("5", "30", "60");
         var mode = new FakeChoicePort("adaptive", "express");
-        h.F.Device.LcdOverdrive = lcd;
+        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
         h.F.Device.Battery.ChargeLimit = limit.AsBatteryToggle();
         h.F.Device.Battery.Calibration = cal.AsBatteryToggle();
-        h.F.Device.FnLock = fn;
-        h.F.Device.KeyboardBacklight = kbd;
-        h.F.Device.UsbCharging = usb;
-        h.F.Device.KeyboardBacklightTimeout = timeout;
+        h.F.Device.Declare(Keys.FnLock, fn);
+        h.F.Device.Declare(Keys.BacklightTimeout, kbd);
+        h.F.Device.Declare(Keys.Usb, usb);
+        h.F.Device.Declare(Keys.Timeout, timeout);
         h.F.Device.Battery.ChargeMode = mode.AsBatteryChoice();
 
         var toggles = AssemblerRows.Toggles(h).ToList();
@@ -86,10 +86,10 @@ public class OptionsPrimeTests
     public void EveryPlaceholder_IsTheAnswerAFailedReadWouldHaveGiven()
     {
         var h = new OptionsAssemblerHarness();
-        // Ports that would report non-default values, so a placeholder that copied them would show up here.
-        h.F.Device.LcdOverdrive = new FakeFlagPort { State = true };
-        h.F.Device.FnLock = new FakeFlagPort { State = true };
-        h.F.Device.UsbCharging = new FakeChoicePort("off", "10", "20") { CurrentId = "20" };
+        // Settings that would report non-default values, so a placeholder that copied them would show up here.
+        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort { State = true }, readbackVerifiesWrite: false);
+        h.F.Device.Declare(Keys.FnLock, new FakeFlagPort { State = true });
+        h.F.Device.Declare(Keys.Usb, new FakeChoicePort("off", "10", "20") { CurrentId = "20" });
 
         Assert.All(AssemblerRows.Toggles(h), t => Assert.False(t.Initial));
         Assert.All(AssemblerRows.Choices(h), c => Assert.Equal(0, c.InitialIndex));
@@ -124,7 +124,7 @@ public class OptionsPrimeTests
     {
         var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = true };
-        h.F.Device.FnLock = fn;
+        h.F.Device.Declare(Keys.FnLock, fn);
         var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"), Eventually.Sync);
 
         Assert.False(row.IsOn);
@@ -145,7 +145,7 @@ public class OptionsPrimeTests
     {
         var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { State = true };
-        h.F.Device.LcdOverdrive = lcd;
+        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
         var toggle = AssemblerRows.Toggle(h, "LCD overdrive");
 
         Assert.Null(toggle.Read);                    // still NO readback — that is a deliberate, audible choice
@@ -169,7 +169,7 @@ public class OptionsPrimeTests
     {
         var h = new OptionsAssemblerHarness();
         var usb = new FakeChoicePort("off", "10", "20", "30") { CurrentId = "20" };
-        h.F.Device.UsbCharging = usb;
+        h.F.Device.Declare(Keys.Usb, usb);
         var row = new ChoiceRowViewModel(AssemblerRows.Choice(h, "USB charging when off:"), Eventually.Sync);
 
         Assert.Equal(0, row.SelectedIndex);
@@ -226,7 +226,7 @@ public class OptionsPrimeTests
     {
         var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = false };
-        h.F.Device.FnLock = fn;
+        h.F.Device.Declare(Keys.FnLock, fn);
         var row = new ToggleRowViewModel(AssemblerRows.Toggle(h, "Fn lock"), Eventually.Sync);
 
         row.Prime();        // reads the hardware — it is off, and the row shows the placeholder
