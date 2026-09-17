@@ -45,15 +45,21 @@ public sealed partial class LaptopService : IDisposable
         this.store = store;
         this.dynamicLightingFactory = dynamicLightingFactory;
         Reconciler = new HardwareReconciler(this);
-        // Assigned in the body rather than as `Settings { get; } = store.Load()`. Field and property initializers
+        // Assigned in the body rather than as `Settings { get; } = store.Load(...)`. Field and property initializers
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
         // this class reads Settings, so loading it here rather than there is observably the same order.
-        Settings = store.Load();
+        //
         // ...and the settings this machine declares are handed to the model that holds and switches them
-        // (Domain/Settings.cs). They arrive as a constructor argument rather than off the device because they no
-        // longer live on IDevice: the backend's probe finds them, and the composition root is what carries them
-        // here (see DeviceFactory.Create).
-        Settings.Install(declaredSettings);
+        // (Domain/Settings.cs) THROUGH ITS CONSTRUCTOR: the store builds the model with this set, so the set is
+        // fixed before the model exists rather than installed into it afterwards. They arrive as a constructor
+        // argument rather than off the device because they no longer live on IDevice: the backend's probe finds
+        // them, and the composition root is what carries them here (see DeviceFactory.Create).
+        //
+        // The device's list is read HERE, at construction, and the model copies it — so a backend that kept
+        // declaring after this line would be declaring into nothing. Production already had that order (a vendor
+        // declares inside InitVendor, before the service exists); the tests' fakes declare before the fixture
+        // builds this, on the same terms.
+        Settings = store.Load(declaredSettings);
     }
 
     /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this

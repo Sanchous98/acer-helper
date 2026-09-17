@@ -18,10 +18,12 @@ public static class DeviceFactory
     ///
     /// The two travel together because the declared set does not belong to the device any more: the settings
     /// MODEL holds it and switches it (Domain/Settings.cs), and <see cref="IDevice"/> carries no member for it,
-    /// so this factory is the one place that can hand the backend's own list to the service that installs it —
-    /// the concrete device is the only thing that has it.
+    /// so this factory is the one place that can hand the backend's own list to the service that builds the model
+    /// with it — the concrete device is the only thing that has it.
     ///
-    /// The list is complete by the time it is read: a backend declares during its own construction
+    /// The list is COMPLETE by the time it is read, and that is now load-bearing rather than merely true: the
+    /// model copies the set when it is built (<c>Settings</c>'s constructor), so a backend that declared after
+    /// this line would be declaring into nothing. It holds because a backend declares during its own construction
     /// (<c>InitVendor</c>), and <see cref="GenericDevice.FinalizeComposition"/> only adjusts ports.</summary>
     public static (IDevice Device, IReadOnlyList<SettingDeclaration> DeclaredSettings) Create()
     {

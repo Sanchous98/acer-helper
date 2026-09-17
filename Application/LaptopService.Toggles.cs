@@ -17,9 +17,8 @@ public sealed partial class LaptopService
     /// that <see cref="IDevice"/> carries no member for the set.
     ///
     /// Read WITHOUT the graph lock, and that is not an oversight: the lock guards the graph's mutability, and this
-    /// list is installed once in the constructor — before the UI or the refresh pass exists — and is not appended
-    /// to afterwards. (A test's fake backend declares after that constructor, which is why the model holds the list
-    /// by reference; see <c>Settings.Install</c>.)</summary>
+    /// list is fixed in the constructor — the model's own COPY, which nothing can append to afterwards (see
+    /// <c>Settings</c>'s constructor for why a copy rather than the backend's live list).</summary>
     public IReadOnlyList<SettingDeclaration> DeclaredSettings => Settings.DeclaredSettings;
 
     /// <summary>Apply one of the settings this machine declares, then record the value under the setting's own
@@ -30,7 +29,8 @@ public sealed partial class LaptopService
     /// THE ORDER IS THE POINT. The hardware write runs OUTSIDE <c>_state</c>, because a setting is an EC/WMI
     /// write and the lock must never span one (docs/domain-refactoring-plan.md §4). Only the recording takes it,
     /// which is also what makes "released on throw" free: a refused write throws out of the model's Apply before
-    /// the lock is ever taken, and nothing is recorded.
+    /// the lock is ever taken, and nothing is recorded. An option this machine does not declare is refused by the
+    /// same call, in the same place, with the same exception — see <c>Settings.Apply</c>.
     ///
     /// The refusal is an EXCEPTION rather than a returned pair because the reason it carries is information
     /// about what happened, not a sentence: this layer knows the setting only by its opaque key and has no name

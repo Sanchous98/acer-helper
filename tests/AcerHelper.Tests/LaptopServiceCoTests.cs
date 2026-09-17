@@ -712,7 +712,9 @@ public class LaptopServiceApplyModeCoTests
 
         var applied = f.Service.ApplyModeCo();
 
-        Assert.NotSame(settings.CoPresets["balanced"], applied);
+        // The subject is the preset the MODEL holds — the one a later read would hand out — rather than the
+        // instance this test seeded, which the model took a copy of at construction (Settings' constructor).
+        Assert.NotSame(f.Store.Settings.CoPresets["balanced"], applied);
         Assert.Equal(-12, applied.AllCore);
         Assert.Equal(0, f.Store.SaveCount);
     }

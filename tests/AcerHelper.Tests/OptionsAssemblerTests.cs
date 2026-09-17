@@ -18,7 +18,9 @@ namespace AcerHelper.Tests;
 ///
 /// NO REAL HARDWARE: the fixture builds <see cref="LaptopService"/> over <see cref="FakeDevice"/> with nothing
 /// declared, and each test declares the setting its row reads (<c>FakeDevice.Declare</c>, which is what a
-/// backend's <c>InitVendor</c> does with its own key). <c>LampArray</c> is never built — the fixture passes no
+/// backend's <c>InitVendor</c> does with its own key) — through the harness's <c>declare</c> argument, because
+/// the declaration has to be in place before the fixture builds the service: the settings model copies the
+/// declared set at construction (Domain/Settings.cs). <c>LampArray</c> is never built — the fixture passes no
 /// transport — so the "Windows Dynamic Lighting" row does not exist in these tests, and it is the one row whose
 /// failure path is NOT covered here.
 ///
@@ -37,9 +39,9 @@ public class OptionsAssemblerFailureTests
     [Fact]
     public void AFailedSet_PostsOneNotification_WithTheControlNameAndThePortsError()
     {
-        var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = "EC refused the write" },
-                           readbackVerifiesWrite: false);
+        var h = new OptionsAssemblerHarness(declare: d =>
+            d.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = "EC refused the write" },
+                      readbackVerifiesWrite: false));
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -55,9 +57,9 @@ public class OptionsAssemblerFailureTests
     [Fact]
     public void AFailedSet_WithNoErrorText_SaysOnlyThatItFailed()
     {
-        var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = null },
-                           readbackVerifiesWrite: false);
+        var h = new OptionsAssemblerHarness(declare: d =>
+            d.Declare(Keys.Lcd, new FakeFlagPort { SetResult = false, LastError = null },
+                      readbackVerifiesWrite: false));
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -70,9 +72,8 @@ public class OptionsAssemblerFailureTests
     [Fact]
     public void ASuccessfulSet_PostsNothing_AndNotifiesNothing()
     {
-        var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { SetResult = true };
-        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false));
 
         AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
 
@@ -98,9 +99,8 @@ public class OptionsAssemblerFailureTests
     [Fact]
     public void ASuccessfulSet_AfterAFailure_DoesNotNotifyAgain()
     {
-        var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { SetResult = false, LastError = "old news" };
-        h.F.Device.Declare(Keys.FnLock, fn);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.FnLock, fn));
         AssemblerRows.Toggle(h, "Fn lock").OnChange(true);
         Assert.Single(h.Posted);                                // the refusal reported...
 
@@ -127,9 +127,8 @@ public class OptionsAssemblerFailureTests
     [Fact]
     public void AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow()
     {
-        var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { ThrowOnSet = true, LastError = "transport gone" };
-        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false));
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
 
@@ -216,9 +215,8 @@ public class OptionsAssemblerReadbackTests
     [Fact]
     public void AFlagRowsReadback_AsksThePortAgain_AndReportsItsLiveAnswer()
     {
-        var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort { State = true };
-        h.F.Device.Declare(Keys.FnLock, fn);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.FnLock, fn));
 
         var row = AssemblerRows.Toggle(h, "Fn lock");
         Assert.False(row.Initial);           // placeholder: what a FAILED read would have shown
@@ -245,9 +243,8 @@ public class OptionsAssemblerReadbackTests
     [Fact]
     public void TheLcdRowHasNoReadback_BecauseItsWriteSelfConfirms()
     {
-        var h = new OptionsAssemblerHarness();
         var lcd = new FakeFlagPort { State = true };
-        h.F.Device.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Lcd, lcd, readbackVerifiesWrite: false));
 
         var row = AssemblerRows.Toggle(h, "LCD overdrive");
         Assert.Null(row.Read);
@@ -269,8 +266,7 @@ public class OptionsAssemblerReadbackTests
     [Fact]
     public void ADeclarationThatDoesNotSelfConfirm_CarriesAReadback_AndNoSeparatePrime()
     {
-        var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare(Keys.FnLock, new FakeFlagPort { State = true });
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.FnLock, new FakeFlagPort { State = true }));
 
         var row = AssemblerRows.Toggle(h, "Fn lock");
 
@@ -292,9 +288,8 @@ public class OptionsAssemblerReadbackTests
     [InlineData("OFF", 0)]                   // PINNED: ids are matched exactly — no case folding
     public void AChoiceRowsReadback_MapsThePortsLiveIdToADropdownIndex(string? currentId, int expected)
     {
-        var h = new OptionsAssemblerHarness();
         var usb = new FakeChoicePort("off", "10", "20", "30") { CurrentId = currentId };
-        h.F.Device.Declare(Keys.Usb, usb);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Usb, usb));
 
         var row = AssemblerRows.Choice(h, "USB charging when off:");
         Assert.Equal(0, row.InitialIndex);   // placeholder — the build does not ask, so it cannot know
@@ -369,8 +364,8 @@ public class OptionsAssemblerPresenceTests
         var absent = new OptionsAssemblerHarness();
         Assert.DoesNotContain(Loc.T(locKey), AssemblerRows.Labels(absent));
 
-        var present = new OptionsAssemblerHarness();
-        AssemblerRows.Wire(present, locKey, new FakeFlagPort(), new FakeChoicePort("off", "on"));
+        var present = new OptionsAssemblerHarness(declare: d =>
+            AssemblerRows.Wire(d, locKey, new FakeFlagPort(), new FakeChoicePort("off", "on")));
         Assert.Contains(Loc.T(locKey), AssemblerRows.Labels(present));
     }
 
@@ -381,8 +376,8 @@ public class OptionsAssemblerPresenceTests
     [Fact]
     public void AnUnknownKey_StillGetsARow_AndFailsUnderTheKeyItself()
     {
-        var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare("acer.somethingNew", new FakeFlagPort { SetResult = false });
+        var h = new OptionsAssemblerHarness(declare: d =>
+            d.Declare("acer.somethingNew", new FakeFlagPort { SetResult = false }));
 
         var row = AssemblerRows.Toggle(h, "acer.somethingNew");
         Assert.Equal("acer.somethingNew", row.Label);
@@ -397,8 +392,7 @@ public class OptionsAssemblerPresenceTests
     [Fact]
     public void TheTimeoutRowsAreIndependent_OneForTheFlagSetting_OneForTheChoiceSetting()
     {
-        var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare(Keys.Timeout, new FakeChoicePort("5", "30", "60"));
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Timeout, new FakeChoicePort("5", "30", "60")));
 
         Assert.Contains(Loc.T("Keyboard backlight timeout:"), AssemblerRows.Labels(h));
         Assert.DoesNotContain(Loc.T("Keyboard backlight timeout"), AssemblerRows.Labels(h));
@@ -540,9 +534,13 @@ internal sealed class OptionsAssemblerHarness
     /// <param name="fixture">The device to build over; a bare fixture (no ports) when omitted.</param>
     /// <param name="confirmCalibration">The dialog delegate the calibration row should carry; a
     /// delegate that always answers "yes" when omitted.</param>
-    public OptionsAssemblerHarness(LaptopServiceFixture? fixture = null, Func<Task<bool>>? confirmCalibration = null)
+    /// <param name="declare">The fake backend's probe, run BEFORE the service (and so before the settings model)
+    /// is built — the only order there is now, and the same one a vendor backend has. Omitted with a
+    /// <paramref name="fixture"/>, which was built with its own.</param>
+    public OptionsAssemblerHarness(LaptopServiceFixture? fixture = null, Func<Task<bool>>? confirmCalibration = null,
+                                   Action<FakeDevice>? declare = null)
     {
-        F = fixture ?? new LaptopServiceFixture();
+        F = fixture ?? new LaptopServiceFixture(declare: declare);
         Assembler = new OptionsAssembler(F.Service, Notices.Add,
                                          confirmCalibration ?? (() => Task.FromResult(true)),
                                          Posted.Add);
@@ -601,18 +599,22 @@ internal static class AssemblerRows
     /// on the English KEY because that is what identifies the row independently of any translation table; the
     /// fakes of the other kind are ignored, so a caller may pass both without knowing which one the row wants.
     /// The battery's three properties are not declared settings, so they are still attached to the object.
+    ///
+    /// It takes the DEVICE rather than the harness because a declared setting has to be declared before the
+    /// settings model is built (<see cref="OptionsAssemblerHarness"/>'s <c>declare</c> argument), and the
+    /// device is what exists at that point.
     /// </summary>
-    public static void Wire(OptionsAssemblerHarness h, string locKey, FakeFlagPort flag, FakeChoicePort choice)
+    public static void Wire(FakeDevice device, string locKey, FakeFlagPort flag, FakeChoicePort choice)
     {
         switch (locKey)
         {
-            case "LCD overdrive":                 h.F.Device.Declare(Keys.Lcd, flag, readbackVerifiesWrite: false); break;
-            case "Keyboard backlight timeout":    h.F.Device.Declare(Keys.BacklightTimeout, flag); break;
-            case "Fn lock":                       h.F.Device.Declare(Keys.FnLock, flag); break;
-            case "Charge limit (~80%)":           h.F.Device.Battery.ChargeLimit = flag.AsBatteryToggle(); break;
-            case "Calibration (full cycle)":      h.F.Device.Battery.Calibration = flag.AsBatteryToggle(); break;
-            case "USB charging when off:":        h.F.Device.Declare(Keys.Usb, choice); break;
-            case "Charge mode":                   h.F.Device.Battery.ChargeMode = choice.AsBatteryChoice(); break;
+            case "LCD overdrive":                 device.Declare(Keys.Lcd, flag, readbackVerifiesWrite: false); break;
+            case "Keyboard backlight timeout":    device.Declare(Keys.BacklightTimeout, flag); break;
+            case "Fn lock":                       device.Declare(Keys.FnLock, flag); break;
+            case "Charge limit (~80%)":           device.Battery.ChargeLimit = flag.AsBatteryToggle(); break;
+            case "Calibration (full cycle)":      device.Battery.Calibration = flag.AsBatteryToggle(); break;
+            case "USB charging when off:":        device.Declare(Keys.Usb, choice); break;
+            case "Charge mode":                   device.Battery.ChargeMode = choice.AsBatteryChoice(); break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(locKey), locKey, "no setting or property is mapped to this row");
         }
@@ -636,11 +638,12 @@ internal static class AssemblerRows
     /// row.</summary>
     public static OptionsAssemblerHarness AllRefusing()
     {
-        var h = new OptionsAssemblerHarness();
         var flag = new FakeFlagPort { SetResult = false };
         var choice = new FakeChoicePort("off", "10", "20", "30") { SetResult = false };
-        foreach (var key in RunSetRowKeys) Wire(h, key, flag, choice);
-        return h;
+        return new OptionsAssemblerHarness(declare: d =>
+        {
+            foreach (var key in RunSetRowKeys) Wire(d, key, flag, choice);
+        });
     }
 
     /// <summary>Drop the nulls out of an optional row (the battery rows are nullable rather than absent).</summary>

@@ -78,7 +78,9 @@ public class HardwareReconcilerTests
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal([ModeAxis.GpuOc, ModeAxis.CpuPower, ModeAxis.Co], a.Log.Axes);
-        Assert.NotNull(settings.FanPresets["balanced"]);   // there IS a fan preset for this mode, and it is not applied
+        // Control: the model really holds a preset for this mode — read off the MODEL rather than off the
+        // instance this test seeded, which the model took a copy of at construction (Settings' constructor).
+        Assert.NotNull(a.F.Store.Settings.FanPresets["balanced"]);  // there IS a fan preset for this mode, and it is not applied
     }
 
     /// <summary>A mode switch drives every axis, fans FIRST — <c>All</c>'s order is the mode-switch order, which

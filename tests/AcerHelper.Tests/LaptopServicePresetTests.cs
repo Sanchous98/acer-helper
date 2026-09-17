@@ -403,7 +403,7 @@ public class LaptopServiceApplyModeGraphTests
         f.Device.CurveOptimizer = new FakeCurveOptimizer();
         f.Device.CpuPower = new FakeCpuPower();
 
-        var before = PresetGraph.Counts(settings);
+        var before = PresetGraph.Counts(f.Store.Settings);
 
         switch (which)
         {
@@ -413,11 +413,13 @@ public class LaptopServiceApplyModeGraphTests
             case "co":        f.Service.ApplyModeCo(); break;
         }
 
-        Assert.Equal(before, PresetGraph.Counts(settings));
-        Assert.Equal(["quiet"], settings.FanPresets.Keys);
-        Assert.Equal(["quiet"], settings.GpuOcPresets.Keys);
-        Assert.Equal(["quiet"], settings.CpuPowerModes.Keys);
-        Assert.Equal(["quiet"], settings.CoPresets.Keys);
+        // Read off the MODEL rather than off the instance this test seeded: the model took a copy of the
+        // persisted half at construction (Settings' constructor), so "the graph" is the model's.
+        Assert.Equal(before, PresetGraph.Counts(f.Store.Settings));
+        Assert.Equal(["quiet"], f.Store.Settings.FanPresets.Keys);
+        Assert.Equal(["quiet"], f.Store.Settings.GpuOcPresets.Keys);
+        Assert.Equal(["quiet"], f.Store.Settings.CpuPowerModes.Keys);
+        Assert.Equal(["quiet"], f.Store.Settings.CoPresets.Keys);
         Assert.Equal(0, f.Store.SaveCount);
     }
 
@@ -471,8 +473,9 @@ public class LaptopServiceApplyModeGraphTests
 
         var applied = f.Service.ApplyModeFan();
 
-        Assert.NotSame(settings.FanPresets["balanced"], applied);
-        Assert.Equal(settings.FanPresets["balanced"].Mode, applied!.Mode);
+        // As above: the stored preset is the MODEL's, not the instance this test seeded.
+        Assert.NotSame(f.Store.Settings.FanPresets["balanced"], applied);
+        Assert.Equal(f.Store.Settings.FanPresets["balanced"].Mode, applied!.Mode);
         Assert.Empty(fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);
         Assert.Equal(0, f.Store.SaveCount);
@@ -563,7 +566,7 @@ public class LaptopServiceApplyModeGraphTests
         var g = f.Service.ApplyModeGpuOc();
 
         Assert.Equal(0, g.Core);
-        Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(settings));
+        Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(f.Store.Settings));
         Assert.Equal(0, f.Store.SaveCount);
     }
 
@@ -609,7 +612,7 @@ public class LaptopServiceApplyModeGraphTests
 
         Assert.Null(f.Service.ApplyModeCpuPower());
         Assert.Equal(0, f.Store.SaveCount);
-        Assert.Equal(["balanced"], settings.CpuPowerModes.Keys);
+        Assert.Equal(["balanced"], f.Store.Settings.CpuPowerModes.Keys);   // read off the MODEL — see above
     }
 }
 
@@ -788,12 +791,15 @@ public class LaptopServicePresetGetOrAddTests
             case "cpu-power": f.Service.SetCpuPower("best-performance"); break;
         }
 
+        // Read off the MODEL rather than off the instance this test seeded: the model took its own copy of the
+        // persisted half at construction (Settings' constructor), so "the bucket the write landed in" is the
+        // model's — and reading it here does not depend on how deep that copy goes.
         IEnumerable<string> keys = which switch
         {
-            "fan"       => settings.FanPresets.Keys,
-            "gpu-oc"    => settings.GpuOcPresets.Keys,
-            "co"        => settings.CoPresets.Keys,
-            "cpu-power" => settings.CpuPowerModes.Keys,
+            "fan"       => f.Store.Settings.FanPresets.Keys,
+            "gpu-oc"    => f.Store.Settings.GpuOcPresets.Keys,
+            "co"        => f.Store.Settings.CoPresets.Keys,
+            "cpu-power" => f.Store.Settings.CpuPowerModes.Keys,
             _           => throw new ArgumentOutOfRangeException(nameof(which)),
         };
 

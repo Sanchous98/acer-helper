@@ -14,10 +14,10 @@ namespace AcerHelper.Tests;
 /// setting names at all. What the value MEANS once applied is the row's business
 /// (<c>OptionsAssemblerTests</c>), and what survives a restart is the settings bag.
 ///
-/// WHERE THE SET LIVES. The declarations are NOT on <c>IDevice</c>: the settings model holds the set it was
-/// handed (<c>Settings.DeclaredSettings</c>/<c>Install</c>) and carries the logic of switching one, so these
-/// tests arrange them through the fixture's fake backend — whose list the fixture hands over exactly as
-/// composition hands a real device's — and read them back off the service.
+/// WHERE THE SET LIVES. The declarations are NOT on <c>IDevice</c>: the settings model is CONSTRUCTED with the
+/// set of options this machine declares (<c>Settings</c>'s constructor) and carries the logic of switching one,
+/// so these tests arrange them through the fixture's fake backend — which declares before the fixture builds the
+/// service, exactly as a vendor backend declares inside <c>InitVendor</c> — and read them back off the service.
 ///
 /// WHY THESE CAN EXIST. <c>LaptopService</c>, its settings store and a declared setting are all reachable
 /// without hardware: the setting's transport is a fake, and the row's failure path was already made observable
@@ -105,13 +105,16 @@ public class DeclaredSettingTests
     /// <summary>Applying a setting is not only a hardware write: the value is recorded under the setting's own
     /// key, in the bag the backend-owned flags already live in, and the graph is saved. That is the whole of
     /// what the contract adds to persistence — no new property, no renamed key, so the settings.json guards see
-    /// exactly what they saw before.</summary>
+    /// exactly what they saw before.
+    ///
+    /// The declaration applied here is read back OFF THE MODEL, which is what the UI does: every row is built
+    /// from <see cref="LaptopService.DeclaredSettings"/> and hands that very declaration back on a click.</summary>
     [Fact]
     public void AnAppliedSetting_IsRecordedUnderItsOwnKey_AndSaved()
     {
-        var f = new LaptopServiceFixture();
         var port = new FakeFlagPort();
-        var setting = f.Device.Declare("lcd_override", port, readbackVerifiesWrite: false);
+        var f = new LaptopServiceFixture(declare: d => d.Declare("lcd_override", port, readbackVerifiesWrite: false));
+        var setting = f.Service.DeclaredSettings.OfType<FlagSetting>().Single();
 
         f.Service.ApplySetting(setting, FlagSetting.Value(true));
 
@@ -127,8 +130,8 @@ public class DeclaredSettingTests
     [Fact]
     public void AChoiceSettingsValue_IsRecordedVerbatim_BecauseTheBagCarriesMoreThanOneAndZero()
     {
-        var f = new LaptopServiceFixture();
-        var setting = f.Device.Declare("stop_timeout", new FakeChoicePort("5s", "30s", "1h"));
+        var f = new LaptopServiceFixture(declare: d => d.Declare("stop_timeout", new FakeChoicePort("5s", "30s", "1h")));
+        var setting = f.Service.DeclaredSettings.Single();
 
         f.Service.ApplySetting(setting, "30s");
 
@@ -141,9 +144,10 @@ public class DeclaredSettingTests
     [Fact]
     public void ARefusedSetting_RecordsNothing_AndSavesNothing()
     {
-        var f = new LaptopServiceFixture();
-        var setting = f.Device.Declare("lcd_override", new FakeFlagPort { SetResult = false, LastError = "EC said no" },
-                                       readbackVerifiesWrite: false);
+        var f = new LaptopServiceFixture(declare: d =>
+            d.Declare("lcd_override", new FakeFlagPort { SetResult = false, LastError = "EC said no" },
+                      readbackVerifiesWrite: false));
+        var setting = f.Service.DeclaredSettings.Single();
 
         Assert.Throws<SettingNotAppliedException>(() => f.Service.ApplySetting(setting, "1"));
 
@@ -154,15 +158,19 @@ public class DeclaredSettingTests
     /// <summary>The hardware write runs OUTSIDE <c>_state</c> — docs/domain-refactoring-plan.md §4 forbids
     /// holding the graph lock across a blocking hardware operation, and a setting is an EC/WMI write. A fake
     /// observes the CALL and never the lock around it, so <see cref="LaptopService.StateHeld"/> is the only way
-    /// to assert this at all; without it the invariant would be untestable on this path.</summary>
+    /// to assert this at all; without it the invariant would be untestable on this path.
+    ///
+    /// The probe is handed the service AFTER the fixture is built, which is not sloppiness: the declaration it
+    /// rides in has to exist before the service does (the model copies the set at construction), and the probe
+    /// is only asked at WRITE time — so what it reports is the lock state then, which is the fact under test.</summary>
     [Fact]
     public void TheHardwareWrite_HappensOutsideTheStateLock()
     {
-        var f = new LaptopServiceFixture();
-        var probe = new LockProbe(f.Service);
-        var setting = f.Device.Declare("lcd_override", probe, readbackVerifiesWrite: false);
+        var probe = new LockProbe();
+        var f = new LaptopServiceFixture(declare: d => d.Declare("lcd_override", probe, readbackVerifiesWrite: false));
+        probe.Service = f.Service;
 
-        f.Service.ApplySetting(setting, "1");
+        f.Service.ApplySetting(f.Service.DeclaredSettings.Single(), "1");
 
         Assert.True(probe.SetCalled);        // non-vacuity: the probe really was written through
         Assert.False(probe.HeldDuringSet);   // the lock never spanned that write
@@ -170,36 +178,108 @@ public class DeclaredSettingTests
 
     // ---------------------------------------------------------------- the model half: it holds the set, and switches it
 
-    /// <summary>The set of declared options belongs to the MODEL and is supplied from outside: it holds what it
-    /// was handed and invents nothing, because what a machine HAS is what its backend's probe found and there is
-    /// no other source for it now that <c>IDevice</c> carries no member. Pinned because the failure would be
-    /// silent and would read as "this machine has no settings": a model that ignored the hand-off leaves every
-    /// row unbuildable and every apply unreachable.</summary>
+    /// <summary>The set of declared options belongs to the MODEL and is supplied through its CONSTRUCTOR: it
+    /// holds what it was constructed with and invents nothing, because what a machine HAS is what its backend's
+    /// probe found and there is no other source for it now that <c>IDevice</c> carries no member. Pinned because
+    /// the failure would be silent and would read as "this machine has no settings": a model that ignored the
+    /// hand-off leaves every row unbuildable and every apply unreachable.</summary>
     [Fact]
-    public void TheModelHoldsTheSetItWasHanded_AndInventsNoneOfItsOwn()
+    public void TheModelHoldsTheSetItWasConstructedWith_AndInventsNoneOfItsOwn()
     {
         var declared = new FlagSetting { Key = "lcd_override", Port = new FakeFlagPort() };
-        var settings = new Settings();
 
-        Assert.Empty(settings.DeclaredSettings);       // nothing is declared until something declares it
-
-        settings.Install([declared]);
+        var settings = new Settings([declared]);
 
         Assert.Equal([declared], settings.DeclaredSettings);
     }
 
+    /// <summary>THE SET IS FIXED AT CONSTRUCTION, which is the rule the copy in <c>Settings</c>'s constructor
+    /// exists for: a declaration made after the model exists does not reach it. Holding the backend's live list
+    /// instead would let a probe keep adding options to a machine that had already been described — and it is
+    /// what the fakes in this suite used to rely on, which is why they now declare before the fixture builds the
+    /// service. Pinned as its own fact because every other test here arranges the two in the order that makes a
+    /// live list look correct.
+    ///
+    /// Mutation that reddens it: hold the list by reference in the constructor (what this type did before the
+    /// owner's ruling) — reddens this test alone.</summary>
+    [Fact]
+    public void ADeclarationMadeAfterTheModelExists_DoesNotReachIt()
+    {
+        var f = new LaptopServiceFixture();
+
+        f.Device.Declare("lcd_override", new FakeFlagPort());
+
+        Assert.Empty(f.Service.DeclaredSettings);
+    }
+
+    /// <summary>CHANGING A SETTING THAT DOES NOT EXIST IS AN ERROR — the other half of the owner's rule, and the
+    /// one that is a behaviour change rather than a move. The model consults the set it holds and refuses,
+    /// instead of writing to a transport the machine does not have.
+    ///
+    /// Three things are asserted, and all three are the claim: the refusal is the SAME exception the refusal
+    /// channel already carries (one name — the UI composes "&lt;row label&gt; failed: &lt;reason&gt;" from it, so
+    /// a second exception type would be a second channel), the reason is THIS layer's own words rather than a
+    /// transport's, and nothing was written or recorded on the way out.
+    ///
+    /// It cannot fire through the UI — every row is built from the declared set — so it is pinned here, at the
+    /// model, which is the only place it can be asked. That is also why no OptionsAssembler test covers it.
+    ///
+    /// Mutation that reddens it: delete the declared-set check in <c>Settings.Apply</c> — the undeclared write
+    /// then lands, so this test alone reddens. Mutating the check to test the wrong polarity
+    /// (<c>if (Declares(...)) throw</c>) reddens the whole positive path instead: every test above that applies
+    /// a DECLARED setting.</summary>
+    [Fact]
+    public void AnUndeclaredSetting_IsRefusedBeforeTheTransportIsTouched()
+    {
+        var f = new LaptopServiceFixture(declare: d => d.Declare("FnLock", new FakeFlagPort()));
+        var undeclaredPort = new FakeFlagPort();
+        var undeclared = new FlagSetting { Key = "lcd_override", Port = undeclaredPort };
+
+        var ex = Assert.Throws<SettingNotAppliedException>(() => f.Service.ApplySetting(undeclared, "1"));
+
+        Assert.Equal("lcd_override", ex.Key);
+        Assert.Equal("this machine does not declare it", ex.Reason);   // the clause the UI would append
+        Assert.Empty(undeclaredPort.SetCalls);                        // the transport was never reached
+        Assert.Empty(f.Store.Settings.DeviceSettings);                // nothing was recorded under its key
+        Assert.Equal(0, f.Store.SaveCount);                           // ...and nothing was saved
+    }
+
+    /// <summary>The set is consulted by KEY, not by declaration INSTANCE, and that is a decision worth pinning
+    /// where it can be seen: the key is the backend's own name for a setting — the identity this set holds, and
+    /// the string a value is recorded under (<c>Settings.Remember</c>) — so a declaration rebuilt over a key
+    /// this machine declares still describes a setting it HAS, and refusing it would be a false refusal. Only a
+    /// key outside the set is an error (the test above).
+    ///
+    /// The difference is invisible on the production path, where every caller hands back the very declaration
+    /// the model gave it, which is why it needs a test rather than a comment:
+    ///
+    /// Mutation that reddens it: match by instance instead (<c>_declaredSettings.Contains(option)</c>) — this
+    /// test alone.</summary>
+    [Fact]
+    public void ADeclarationRebuiltOverADeclaredKey_IsStillSwitchable()
+    {
+        var f = new LaptopServiceFixture(declare: d => d.Declare("FnLock", new FakeFlagPort()));
+        var rebuiltPort = new FakeFlagPort();
+        var rebuilt = new FlagSetting { Key = "FnLock", Port = rebuiltPort };
+
+        f.Service.ApplySetting(rebuilt, "1");
+
+        Assert.Equal([true], rebuiltPort.SetCalls);                  // the rebuilt declaration's own transport ran
+        Assert.Equal("1", f.Store.Settings.DeviceSettings["FnLock"]); // ...and the value is recorded under the key
+    }
+
     /// <summary>The hand-off itself: the set a backend declared reaches the model through the service's
-    /// constructor, which is the only route there is now. Pinned because a service that skipped the install would
-    /// still build, still save, and offer no hardware row at all — the failure would look like a machine with no
-    /// settings rather than like a missing line. It also pins that the list is held BY REFERENCE: the fake backend
-    /// declares after the service exists, and a copying install would make that declaration invisible.</summary>
+    /// constructor, which is the only route there is now. Pinned because a service that skipped the hand-off
+    /// would still build, still save, and offer no hardware row at all — the failure would look like a machine
+    /// with no settings rather than like a missing line. The fake backend declares before the fixture builds the
+    /// service, as a vendor backend declares inside <c>InitVendor</c>.</summary>
     [Fact]
     public void TheDeclaredSetReachesTheModel_ThroughTheServicesConstructor()
     {
-        var f = new LaptopServiceFixture();
-        var declared = f.Device.Declare("lcd_override", new FakeFlagPort(), readbackVerifiesWrite: false);
+        var f = new LaptopServiceFixture(declare: d =>
+            d.Declare("lcd_override", new FakeFlagPort(), readbackVerifiesWrite: false));
 
-        Assert.Equal([declared], f.Service.DeclaredSettings);
+        Assert.Equal(["lcd_override"], f.Service.DeclaredSettings.Select(s => s.Key));
     }
 
     /// <summary>The switching logic, taken on the model directly: an apply goes through the option's OWN contract
@@ -207,13 +287,17 @@ public class DeclaredSettingTests
     /// lands the value in the bag under the option's own key. The two are separate calls because the graph lock
     /// must not span the write; the row-level path that places the lock is pinned by
     /// <see cref="AnAppliedSetting_IsRecordedUnderItsOwnKey_AndSaved"/> and
-    /// <see cref="TheHardwareWrite_HappensOutsideTheStateLock"/>.</summary>
+    /// <see cref="TheHardwareWrite_HappensOutsideTheStateLock"/>.
+    ///
+    /// The model is CONSTRUCTED with the declaration it switches, which is what makes the switch legal at all —
+    /// the refusal of an option outside that set is pinned by
+    /// <see cref="AnUndeclaredSetting_IsRefusedBeforeTheTransportIsTouched"/>.</summary>
     [Fact]
     public void TheModelSwitchesThroughTheOptionsOwnContract_AndRemembersUnderItsOwnKey()
     {
         var port = new FakeFlagPort();
         var declared = new FlagSetting { Key = "lcd_override", Port = port };
-        var settings = new Settings();
+        var settings = new Settings([declared]);
 
         settings.Apply(declared, FlagSetting.Value(true));
         settings.Remember(declared, FlagSetting.Value(true));
@@ -231,9 +315,8 @@ public class DeclaredSettingTests
     [Fact]
     public void ARowsClick_ReachesTheHardware_AndIsRecorded()
     {
-        var h = new OptionsAssemblerHarness();
         var fn = new FakeFlagPort();
-        h.F.Device.Declare("FnLock", fn);
+        var h = new OptionsAssemblerHarness(declare: d => d.Declare("FnLock", fn));
 
         AssemblerRows.Toggle(h, "Fn lock").OnChange(true);
 
@@ -242,9 +325,14 @@ public class DeclaredSettingTests
         Assert.Empty(h.Posted);              // and a write that landed says nothing to the user
     }
 
-    /// <summary>A transport whose write records the lock state it was called under.</summary>
-    private sealed class LockProbe(LaptopService svc) : IFlagPort
+    /// <summary>A transport whose write records the lock state it was called under. The SERVICE is attached after
+    /// the fixture is built — the declaration this probe rides in has to exist before the service does, and the
+    /// probe is only asked when a write happens — so what it reports is the lock state at WRITE time, which is
+    /// the fact under test. <c>null!</c> rather than a default that answers <c>false</c>: an unwired probe must
+    /// blow up, because <c>false</c> is precisely the value this test asserts.</summary>
+    private sealed class LockProbe : IFlagPort
     {
+        public LaptopService Service { get; set; } = null!;
         public string? LastError { get; private set; }
         public bool SetCalled { get; private set; }
         public bool HeldDuringSet { get; private set; }
@@ -254,7 +342,7 @@ public class DeclaredSettingTests
         public bool Set(bool on)
         {
             SetCalled = true;
-            HeldDuringSet = svc.StateHeld;
+            HeldDuringSet = Service.StateHeld;
             return true;
         }
     }

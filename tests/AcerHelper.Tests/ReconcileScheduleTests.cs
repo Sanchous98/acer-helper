@@ -185,7 +185,7 @@ public class ReconcileScheduleTests
         // Controls: the run happened, and it drove the axes it is supposed to.
         Assert.Equal(new[] { (-150, 800) }, a.Gpu.SetCalls);
         Assert.Equal(["best-performance"], a.Cpu.SetCalls);
-        Assert.NotNull(settings.FanPresets["balanced"]);   // there IS a preset for this mode...
+        Assert.NotNull(a.F.Store.Settings.FanPresets["balanced"]);  // the MODEL holds a preset for this mode...
 
         Assert.Empty(a.Fan.ModeCalls);                     // ...and it is still not applied
         Assert.Empty(a.Fan.SpeedCalls);
@@ -200,11 +200,11 @@ public class ReconcileScheduleTests
         var settings = new Settings();
         settings.GpuOcPresets["quiet"] = new GpuOcPreset { Core = 100, Mem = 200 };
         var a = Setup(settings);
-        var before = PresetGraph.Counts(settings);
+        var before = PresetGraph.Counts(a.F.Store.Settings);
 
         a.F.Service.ApplyStartupState();
 
-        Assert.Equal(before, PresetGraph.Counts(settings));
+        Assert.Equal(before, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
     }
 }

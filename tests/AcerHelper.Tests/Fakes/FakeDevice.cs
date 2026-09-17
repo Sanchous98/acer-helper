@@ -7,10 +7,9 @@ namespace AcerHelper.Tests.Fakes;
 /// <c>null</c> = "this device does not have that feature", so a test declares exactly the hardware its
 /// scenario needs and nothing else:
 ///
-///     var f = new LaptopServiceFixture();
+///     var f = new LaptopServiceFixture(declare: d => d.Declare("lcd_override", new FakeFlagPort()));
 ///     f.Device.PowerProfiles = new FakePowerProfiles(profiles);
 ///     f.Device.FanControl    = new FakeFanControl();
-///     f.Device.Declare("lcd_override", new FakeFlagPort());       // a declared setting
 ///
 /// Ports are read lazily by <c>LaptopService</c> on each call, so assigning them after the service is
 /// constructed is correct. <see cref="Dispose"/> is a no-op that records the call: nothing here owns a
@@ -23,9 +22,12 @@ namespace AcerHelper.Tests.Fakes;
 /// THE DECLARED SETTINGS ARE THE SAME KIND OF THING, one step further out: <see cref="Declare"/> is this fake's
 /// probe — what a real backend's <c>InitVendor</c> does with its own key — and the list it fills goes to the
 /// settings MODEL, which holds it and switches it (Domain/Settings.cs), exactly as composition hands a real
-/// device's list over (<c>DeviceFactory</c> -> <c>LaptopService</c>, see <see cref="LaptopServiceFixture"/>).
-/// <see cref="IDevice"/> has no member for it. An empty device is the canonical "this machine has nothing"
-/// device.
+/// device's list over (<c>DeviceFactory</c> -> <c>LaptopService</c> -> the model's constructor). <see cref="IDevice"/>
+/// has no member for it. An empty device is the canonical "this machine has nothing" device.
+///
+/// <see cref="Declare"/> IS ORDER-SENSITIVE, unlike the ports above: the model copies the set when it is
+/// CONSTRUCTED, so every declaration has to be made before the fixture builds the service (the fixture's
+/// <c>declare</c> argument is where they go). A declaration made later changes this list and nothing else.
 /// </summary>
 public sealed class FakeDevice : IDevice
 {
@@ -49,8 +51,8 @@ public sealed class FakeDevice : IDevice
 
     /// <summary>The settings this fake machine declares, in the order its backend would add them. This is the
     /// fake BACKEND's own list rather than an <see cref="IDevice"/> member — the settings model holds the set, and
-    /// the fixture hands this very list to it (see <see cref="LaptopServiceFixture"/>), so a test may either
-    /// declare before the service exists or, as every test here does, after it.</summary>
+    /// the fixture hands this very list over (see <see cref="LaptopServiceFixture"/>), which copies it into the
+    /// model at construction.</summary>
     public IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
 
     private readonly List<SettingDeclaration> _declaredSettings = [];

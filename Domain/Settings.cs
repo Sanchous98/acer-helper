@@ -76,12 +76,17 @@ public sealed class Settings
     // ---- the options this machine declares (this type's runtime half) ----------------------------------------
     //
     // A backend declares which settings THIS machine has, each under its own opaque key; this type HOLDS that set
-    // and carries the logic of switching it — applying one goes through the option's own contract, and a refusal
-    // comes out of that call as an exception. The FORM of a declaration and what applying one is are stated once,
-    // with the contract types at the bottom of this file; nothing here interprets a key or invents a declaration.
+    // and carries the logic of switching it — applying one goes through the option's own contract, a refusal comes
+    // out of that call as an exception, and an option this machine does not declare is refused by THIS type before
+    // any transport is touched. The FORM of a declaration and what applying one is are stated once, with the
+    // contract types at the bottom of this file; nothing here interprets a key or invents a declaration.
     //
-    // THE SET IS SUPPLIED FROM OUTSIDE (Install). What a machine has is what its probe found, so this type builds
-    // nothing itself; the backend fills the list while it is constructed and the composition path hands it over.
+    // THE SET ARRIVES THROUGH THE CONSTRUCTOR AND IS FIXED THERE. What a machine has is what its probe found, so
+    // this type builds nothing itself: the composition path constructs the model with the set the backend filled
+    // while probing, and COPIES it, so nothing that happens after construction can add an option to a machine
+    // that did not have it. The order that makes the copy work is the order production already had — a vendor
+    // backend declares inside InitVendor, before the service (and so before the model) exists — which is why the
+    // tests' fakes had to be re-pointed to declare before the fixture builds the service.
     //
     // NOT PERSISTED, and the accessor below is `internal` rather than public because of it: the guard
     // EveryDeclaredPropertyStillReachesTheDisk (tests) holds every PUBLIC property of this type to reaching
@@ -89,30 +94,88 @@ public sealed class Settings
     // A public property would either put a list of live transports in the user's file or force that guard to grow
     // an exemption, and noticing exactly that is what the guard is for.
 
-    private IReadOnlyList<SettingDeclaration> _declaredSettings = [];
+    private readonly IReadOnlyList<SettingDeclaration> _declaredSettings;
 
     /// <summary>The settings this machine's backend declared, in the order their rows should read. Empty on a
     /// machine that declares none.</summary>
     internal IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
 
-    /// <summary>Hand over the set of options this machine declares. Called once, from the composition path
-    /// (<c>LaptopService</c>'s constructor), with the list the backend filled while probing.
+    /// <summary>The shape the FILE has: a Settings with no declarations at all. It exists because settings.json
+    /// carries only what the user CHOSE and never what the machine HAS, so the store's reader has to be able to
+    /// build one before the backend's set is in hand. It is not a session's model — that is the constructor
+    /// below, which is given both halves — and a model built here declares nothing, so it switches nothing.</summary>
+    public Settings() : this([]) { }
+
+    /// <summary>The session's model: the options this machine declares, plus, when a previous run left a file,
+    /// the values it persisted.
     ///
-    /// The list is held BY REFERENCE rather than copied, and the difference is deliberate: the shipped backends
-    /// have finished declaring before the app service exists, so there is nothing a copy would protect, while a
-    /// test's fake backend declares AFTER the service exists — the same live list is how a test says which row it
-    /// means, and copying would silently make a later declaration invisible to the model.</summary>
-    internal void Install(IReadOnlyList<SettingDeclaration> options) => _declaredSettings = options;
+    /// The set is COPIED rather than held by reference, and the difference is the rule this constructor exists
+    /// for: a declaration made after it returns must not show up on a machine that was probed without it. Holding
+    /// the live list would let a backend keep adding options to a model that had already stated what this machine
+    /// has — which is exactly what the set means.
+    ///
+    /// <paramref name="persisted"/> is taken over BY REFERENCE, member by member: it is the reader's throwaway
+    /// product, so the collections it holds are this model's from here on and nothing else reads or writes
+    /// them.</summary>
+    internal Settings(IReadOnlyList<SettingDeclaration> declaredSettings, Settings? persisted = null)
+    {
+        _declaredSettings = [.. declaredSettings];
+        if (persisted is null) return;
+
+        // One line per persisted member. A member added to this type without a line here would come back as its
+        // default after a save/load, which is a FEATURE quietly forgetting — EverySettingSurvivesTheRoundTrip
+        // compares the whole instance for exactly that, so the omission reddens rather than ships.
+        Language        = persisted.Language;
+        TurboToggles    = persisted.TurboToggles;
+        Clamshell       = persisted.Clamshell;
+        OnAc            = persisted.OnAc;
+        OnBattery       = persisted.OnBattery;
+        FanPresets      = persisted.FanPresets;
+        Bluelight       = persisted.Bluelight;
+        DynamicLighting = persisted.DynamicLighting;
+        LightPresets    = persisted.LightPresets;
+        GpuOcPresets    = persisted.GpuOcPresets;
+        CoPresets       = persisted.CoPresets;
+        CpuPowerModes   = persisted.CpuPowerModes;
+        DeviceSettings  = persisted.DeviceSettings;
+    }
 
     /// <summary>Switch one declared option: hand the value to the option's own contract, which is where the write
     /// happens and where a refusal comes from — a <see cref="SettingNotAppliedException"/> carrying the key and
     /// the transport's own reason.
     ///
+    /// AN OPTION THIS MACHINE DOES NOT DECLARE IS AN ERROR, not a silent no-op. The set this model was
+    /// constructed with is the whole of what it can switch, so an option outside it is refused the same way a
+    /// refused write is — the same exception, carrying this layer's reason instead of a transport's — and no
+    /// transport is touched at all. It is unreachable through the UI by construction (every row is built from the
+    /// declared set, OptionsAssembler), which is why it is pinned at the model, where it CAN fire.
+    ///
     /// THE CALLER MUST NOT HOLD THE GRAPH LOCK ACROSS THIS CALL. It is an EC/WMI write and the lock must never
     /// span one (docs/domain-refactoring-plan.md §4), so the recording that follows a write that took is a
     /// separate call — <see cref="Remember"/> — which the caller makes under the lock instead. This type keeps no
     /// lock of its own: a lock in Domain/ is the same thing §4 forbids.</summary>
-    internal void Apply(SettingDeclaration option, string value) => option.Apply(value);
+    internal void Apply(SettingDeclaration option, string value)
+    {
+        if (!Declares(option.Key)) throw new SettingNotAppliedException(option.Key, NotDeclaredReason);
+        option.Apply(value);
+    }
+
+    /// <summary>Whether this machine declared <paramref name="key"/>. Matched by KEY rather than by the
+    /// declaration INSTANCE, because the key is the only name either layer has for a setting and it is the key
+    /// <see cref="Remember"/> records the value under — so a declaration rebuilt over the same key is still a
+    /// setting this machine has, and only a key outside the set is refused.</summary>
+    private bool Declares(string key)
+    {
+        foreach (var declared in _declaredSettings)
+            if (declared.Key == key)
+                return true;
+        return false;
+    }
+
+    /// <summary>Why an option outside the declared set was refused — this layer's own words, sitting where a
+    /// transport's words sit on a refused write. The UI composes the sentence from the row's label and this
+    /// reason (<c>OptionsAssembler.RunSet</c>), so it has to read as the clause after "&lt;label&gt; failed: ".</summary>
+    private const string NotDeclaredReason = "this machine does not declare it";
 
     /// <summary>Remember a value the hardware took, under the option's OWN key — the bag is keyed by the
     /// backend's name for the setting, which is the only name either layer has for it, and a choice's value is an
@@ -229,18 +292,26 @@ public sealed record ChoiceSetting : SettingDeclaration
     }
 }
 
-/// <summary>Why a declared setting could not be applied. Carries INFORMATION — which setting, and the
-/// transport's own words when it gave any — and deliberately not a sentence for the user: the domain knows no
-/// setting names, so the message the user reads is composed by the UI from the row's own label (see
-/// <c>OptionsAssembler.RunSet</c>). <see cref="Exception.Message"/> exists for a log or a stack trace and is not
-/// what the UI shows.</summary>
+/// <summary>Why a declared setting could not be applied, whichever of the two failures it was: the transport
+/// refused the write (and gave its own words), or the option is not one this machine declares at all (and the
+/// MODEL gave the words — <see cref="Settings.Apply"/>). Carries INFORMATION — which setting, and the reason —
+/// and deliberately not a sentence for the user: the domain knows no setting names, so the message the user
+/// reads is composed by the UI from the row's own label (see <c>OptionsAssembler.RunSet</c>).
+/// <see cref="Exception.Message"/> exists for a log or a stack trace and is not what the UI shows.
+///
+/// ONE TYPE FOR BOTH, deliberately. The two failures differ in what happened, not in what the caller must do
+/// about it, and the whole channel is one name: the UI catches this and composes "&lt;label&gt; failed: &lt;reason&gt;"
+/// for both, so a second type would buy a programmatic distinction no caller in this tree wants — the
+/// not-declared case cannot be reached from the UI, since every row is built from the declared set.</summary>
 public sealed class SettingNotAppliedException(string key, string? reason)
     : Exception($"{key} was not applied" + (reason != null ? $": {reason}" : ""))
 {
     /// <summary>The declared setting's key — its backend's own name, opaque here.</summary>
     public string Key { get; } = key;
 
-    /// <summary>The transport's own words, when it gave any.</summary>
+    /// <summary>The transport's own words when it refused the write, or the model's when it refused an option it
+    /// does not declare; null when the transport gave none (<see cref="FlagSetting.Write"/> reads
+    /// <c>IFlagPort.LastError</c>, which a port may never have set).</summary>
     public string? Reason { get; } = reason;
 }
 
@@ -342,9 +413,14 @@ public sealed class CoPreset
     public CoPreset Snapshot() => new() { AllCore = AllCore, Domains = new(Domains) };
 }
 
-/// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.</summary>
+/// <summary>Port for persisting <see cref="Settings"/>. Implemented in Infrastructure.
+///
+/// <see cref="Load"/> builds the SESSION'S MODEL, so the set of options this machine declares is a parameter of
+/// it: the model takes that set at construction (<see cref="Settings"/>'s constructor) and fixes it there, and
+/// the store is the only thing that constructs one. The store is not where the set lives — it is handed over and
+/// passes it straight through on its way to the constructor.</summary>
 public interface ISettingsStore
 {
-    Settings Load();
+    Settings Load(IReadOnlyList<SettingDeclaration> declaredSettings);
     void Save(Settings settings);
 }

@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
+using AcerHelper.Tests.Fakes;
 
 namespace AcerHelper.Tests;
 
@@ -95,8 +96,39 @@ public class JsonSettingsStoreTests
         new JsonSettingsStore(dir.SettingsPath).Save(Populated());
 
         // A SECOND store, so nothing survives merely by being the same object in memory.
-        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
+        AssertNothingWasLost(loaded);
+
+        // And the WHOLE instance, not the hand-written list above: Load builds the model through Settings'
+        // constructor, which takes the persisted half over member by member, so a member added to Settings and
+        // forgotten there comes back as its default — which this comparison sees and the list above only would
+        // if someone remembered to extend it. (Mutation: delete one line of that constructor's copy — for
+        // instance the DynamicLighting one — and this assertion reddens.)
+        Assert.Equal(JsonSerializer.Serialize(Populated(), SettingsJsonContext.Default.Settings),
+                     JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.Settings));
+    }
+
+    /// <summary>The store's half of the hand-off: <see cref="JsonSettingsStore.Load"/> builds the session's
+    /// model WITH the set it is handed, the same way the test fake does — the real path, not only the fake's.
+    /// Both halves are asserted: the model holds the declarations, and the file's values still came through, so
+    /// the two arguments of the constructor were not confused for one another.
+    ///
+    /// The set is NOT in the file and must not be: settings.json says what the user CHOSE, and the declarations
+    /// are what the machine HAS (<c>EveryDeclaredPropertyStillReachesTheDisk</c> is the guard on that side).
+    ///
+    /// Mutation that reddens it: build the model without the set (Load returning <c>new Settings()</c>) — this
+    /// test alone.</summary>
+    [Fact]
+    public void LoadBuildsTheModelWithTheDeclaredSetItIsHanded()
+    {
+        using var dir = new TempDir();
+        new JsonSettingsStore(dir.SettingsPath).Save(Populated());
+        var declared = new FlagSetting { Key = "lcd_override", Port = new FakeFlagPort() };
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([declared]);
+
+        Assert.Equal([declared], loaded.DeclaredSettings);
         AssertNothingWasLost(loaded);
     }
 
@@ -179,7 +211,7 @@ public class JsonSettingsStoreTests
         using var dir = new TempDir();
         File.Copy(Fixture("settings-0.33.0.json"), dir.SettingsPath);
 
-        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
         Assert.False(File.Exists(dir.SettingsPath + ".bad"));   // a readable file, not a rescued one
         AssertNothingWasLost(loaded);
@@ -231,7 +263,7 @@ public class JsonSettingsStoreTests
     {
         using var dir = new TempDir();
 
-        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
         Assert.Equal(AppLanguage.System, loaded.Language);
         Assert.False(loaded.TurboToggles);
@@ -254,7 +286,7 @@ public class JsonSettingsStoreTests
         using var dir = new TempDir();
         File.WriteAllText(dir.SettingsPath, "{ this is not json");
 
-        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
         Assert.Equal(AppLanguage.System, loaded.Language);
         Assert.Empty(loaded.FanPresets);
@@ -272,9 +304,9 @@ public class JsonSettingsStoreTests
         var store = new JsonSettingsStore(dir.SettingsPath);
 
         File.WriteAllText(dir.SettingsPath, "first corruption");
-        store.Load();
+        store.Load([]);
         File.WriteAllText(dir.SettingsPath, "second corruption");
-        store.Load();
+        store.Load([]);
 
         Assert.Equal("second corruption", File.ReadAllText(dir.SettingsPath + ".bad"));
     }
@@ -328,7 +360,7 @@ public class JsonSettingsStoreTests
             }
             """);
 
-        var loaded = new JsonSettingsStore(dir.SettingsPath).Load();
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
         Assert.Equal(AppLanguage.English, loaded.Language);   // 1 == English, not a string
         Assert.True(loaded.TurboToggles);

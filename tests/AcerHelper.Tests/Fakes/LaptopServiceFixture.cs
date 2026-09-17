@@ -9,9 +9,16 @@ namespace AcerHelper.Tests.Fakes;
 /// construction. <c>LampArray</c> is never built: the fixture passes no lighting factory, so nothing P/Invokes.
 /// A test that wants the surface built supplies one — see <c>DynamicLightingSeamTests</c>.
 ///
-/// The fake backend's declared settings are handed to the service exactly as composition hands a real device's
-/// (<c>DeviceFactory.Create</c> -> this constructor -> <c>Settings.Install</c>), and by REFERENCE, which is what
-/// lets a test call <see cref="FakeDevice.Declare"/> after this line and still have the model see it.
+/// THE DECLARATIONS ARE MADE BEFORE THE SERVICE EXISTS, through <paramref name="declare"/> — the fake backend's
+/// probe, run against the bare device. That order is the contract now: the settings model is CONSTRUCTED with the
+/// set of options this machine declares and copies it (Domain/Settings.cs), so a declaration that lands after the
+/// service was built cannot reach the model, exactly as a vendor backend that declared after <c>InitVendor</c>
+/// could not. A test that declares too late fails loudly rather than silently — the row it is about is simply
+/// absent (<c>AssemblerRows.Toggle</c> finds rows by <c>Single</c>).
+///
+/// The declared set travels to the model the way composition sends a real device's: <c>DeviceFactory.Create</c>
+/// hands the pair to this constructor, which passes the list to <see cref="LaptopService"/>, which passes it to
+/// the store's Load — one hand-off, ending in the model's constructor.
 /// </summary>
 public sealed class LaptopServiceFixture
 {
@@ -22,8 +29,13 @@ public sealed class LaptopServiceFixture
     /// <summary>The power-profiles port, when <see cref="Power"/> or <see cref="WithProfiles"/> created one.</summary>
     public FakePowerProfiles? Pp { get; private set; }
 
-    public LaptopServiceFixture(Settings? settings = null)
+    /// <param name="settings">The values to start from, as a file would supply them.</param>
+    /// <param name="declare">The fake backend's probe: whatever this does to the device happens BEFORE the
+    /// service — and so before the settings model — is built. This is where <see cref="FakeDevice.Declare"/>
+    /// calls belong.</param>
+    public LaptopServiceFixture(Settings? settings = null, Action<FakeDevice>? declare = null)
     {
+        declare?.Invoke(Device);
         Store = new FakeSettingsStore(settings);
         Service = new LaptopService(Device, Store, Device.DeclaredSettings);
     }
@@ -41,9 +53,10 @@ public sealed class LaptopServiceFixture
     public static LaptopServiceFixture WithProfiles(Settings? settings = null,
                                                     IEnumerable<PerformanceProfile>? all = null,
                                                     IEnumerable<PerformanceProfile>? selectable = null,
-                                                    PerformanceProfile? current = null)
+                                                    PerformanceProfile? current = null,
+                                                    Action<FakeDevice>? declare = null)
     {
-        var fixture = new LaptopServiceFixture(settings);
+        var fixture = new LaptopServiceFixture(settings, declare);
         fixture.Power(all ?? TestProfiles.All, selectable, current);
         return fixture;
     }

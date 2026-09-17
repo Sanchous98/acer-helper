@@ -27,12 +27,20 @@ public sealed class JsonSettingsStore : ISettingsStore
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "AcerHelper", "settings.json");
 
-    public Settings Load()
+    /// <summary>Read the file and build the session's model: the set of options this machine declares
+    /// (<paramref name="declaredSettings"/>, which the service hands over from the backend's probe) plus whatever
+    /// the file persisted. The two halves come from different places and only THIS call has both, which is why
+    /// the set is a parameter here rather than a property of the store — the store holds no part of the model.
+    ///
+    /// The file itself is read through <see cref="Settings"/>'s parameterless constructor, which is the shape the
+    /// file has: settings.json says what the user chose, never what the machine has.</summary>
+    public Settings Load(IReadOnlyList<SettingDeclaration> declaredSettings)
     {
         try
         {
             if (File.Exists(filePath))
-                return JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.Settings) ?? new Settings();
+                return new Settings(declaredSettings,
+                                    JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.Settings));
         }
         catch (JsonException)
         {
@@ -42,7 +50,7 @@ public sealed class JsonSettingsStore : ISettingsStore
             try { File.Move(filePath, filePath + ".bad", overwrite: true); } catch { }
         }
         catch { /* locked/unreadable — fall back to defaults */ }
-        return new Settings();
+        return new Settings(declaredSettings);
     }
 
     public void Save(Settings settings)
