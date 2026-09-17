@@ -30,6 +30,14 @@ The *analysis* is unaffected — no claim in this document rests on a folder's n
 mattered to a defect (`WmiSession`'s gate) is identified by symbol. Only the addresses moved. Rationale and the
 resulting `Vendors/Generic` naming oddity: `04229ff` (the 85-file move) + `dd9f8d9` (the stale references).
 
+**Wave numbers here are the pre-2026-09-17 plan's (noted 2026-09-17).** They are `docs/refactoring-plan.md`'s
+wave list — the plan this document was written against — which has since been deleted and replaced by
+`docs/domain-refactoring-plan.md`, and that plan re-specified its waves (see its §5 and the blocks under each
+wave, `f4483ec` onwards). So a number here does not name the same work as the same number there: in this
+document **Wave 5 is the actor** — which `docs/open-decisions.md` §1, its sibling on the same numbering, still
+calls «Волна 5» — and "Wave 5, step 5" is the actor's own Step 5 from Part 4.7 below. Where a note below cites
+a commit hash, that hash is its anchor — the number is not.
+
 ## Scope
 
 This is an inventory and a design, not a patch. Nothing here is implemented. Two boundaries are load-bearing
@@ -99,6 +107,9 @@ Scope column: **HW** = the gate is held across hardware I/O; **MEM** = in-memory
 G1  2   Infrastructure/Vendors/Generic/WmiSession.Windows.cs:83,116
 G2  33  the 33 `lock (_state)` statements in the six `LaptopService*.cs` parts — note the count is
         stale: it predates three added scalar accessors and the locking fixes; measured today: 38
+        (re-measured 2026-09-17: 42 — wave 6 added one to each of the four profile-taking overloads,
+        `CurrentFan(cur)`, `CurrentGpuOc(cur)`, `CurrentCo(cur)` and `CurrentCoDomains(cur)`, and 38
+        was already the count at the `LaptopService` split, not the 33 above)
 G3  1   `LaptopService.Lighting.cs` `LampArray` (its getter's `lock (_lampGate)`)
 G4  2   Domain/LampArrayBridge.cs:88,117
 G5  3   Domain/LampArrayBridge.cs:145,178,182
@@ -155,6 +166,11 @@ replaces wholesale**, and the re-entrancy is the part that must survive.
 | `_stopped` | `ResumeWatcher.Linux.cs:15` | UI thread | gdbus stdout pump thread | Yes |
 | `_closing` | `Infrastructure/Vendors/Acer/AcerHotkeys.Linux.cs:21` | UI thread | evdev reader thread | Yes |
 
+**Corrected 2026-09-17: there are eight volatile fields today, not seven.** Wave 6 added
+`AppController._cpuPrimed` — written by the background pass, cleared on the UI thread in `RebuildForLanguage`
+when a rebuild puts the CPU-power row's placeholder back — and it is correct for the same reason as the first
+row above: the pass is single-flight. The six rows still describe the fields they name.
+
 Counter-example worth noting: `EneHidController._stopping` (`:127`) and `AcerEcHidController._stopping`
 (`:103`) are **not** volatile, and are correct because they are only ever touched under G10/G11 — including
 inside the `Monitor.Wait` predicate, which is the one place a plain bool is safe by construction.
@@ -196,6 +212,14 @@ must not be folded into an actor: debouncing is a policy about the user's hand, 
 startup), `LaptopService.cs` `ApplyStartupState` (the `Task.Run` for `LampArray.Enable`); `LightingCoordinator.cs:255` (resume re-assert of GPU OC + CPU power +
 CO); `LightingViewModel.cs:214` (brightness read loop).
 
+**Corrected 2026-09-17: three of those ten sites are gone, and the work they did is now one site.** The two
+`ApplyModeCo` hand-offs (`AppController.cs:492` and `ApplyStartupState`'s) and the resume re-assert
+(`LightingCoordinator.cs:255`) all became `HardwareReconciler.Reapply`'s single deferred `Task.Run`, which
+drives the trigger's off-thread axes under ONE catch (`c384d12`). A site now names only the MOMENT it is
+(`ReapplyTrigger`); the hand-off is the reconciler's. Measured today: **eight** `Task.Run` hand-offs of this
+kind. The same substitution applies wherever those three sites are named below — **T5**, **T7**, **D20**,
+**D22**, **R10**'s hand-guard, and Part 4.7's Step 4 — none of which is a live site any more.
+
 Four of these exist for the same stated reason — *the SMU mailbox / the PnP publish can block for seconds* —
 and each one independently re-derives "get it off the calling thread". That is the strongest concrete argument
 for the actor: the app currently has four ad-hoc answers to one problem.
@@ -219,6 +243,14 @@ single-purpose actor for one control. The general actor subsumes it exactly.
 `ResumeWatcher`'s and AcerHotkeys' threads, the gdbus pump, the HID writer threads and the `[UnmanagedCallersOnly]`
 lamp callback all arrive off the UI thread and must come back to it. An actor can *produce* the values that
 get posted; it can never do the posting for the caller without taking a UI dependency.
+
+**Corrected 2026-09-17: two entries in the list above have moved, and the count is 16.** `OptionsAssembler`
+no longer calls `Dispatcher.UIThread.Post` at all — it takes the marshaller as a `post` parameter (which
+`RunSet` calls), supplied by `AppController.BuildUi` and defaulted in `OptionsViewModel` and
+`LightingViewModel`, exactly so that the Application layer needs no UI toolkit. And `LightingCoordinator` has
+**three** posts today, not two: the resume watcher, the LidWatcher (whose callback the doc's T13 argues is
+already on the UI thread — the post is the defensive marshal) and `LampArrayBridge.OwnerChanged`. Nothing in
+the paragraph above changes: every one of them survives, and the actor still cannot do the posting.
 
 ### CancellationToken (3)
 
@@ -266,7 +298,7 @@ serializes *everyone's*.
 | T6 | `LampArray.Enable` pool task | `LaptopService.cs` `ApplyStartupState` (the `Task.Run` calling `la.Enable()`) | G9, PnP | driver start, seconds | No |
 | T7 | Resume re-assert pool task | `LightingCoordinator.cs:255` | G7/G1/G2 | 5 s | No |
 | T8 | `ene-hid-writer` | `EneHidController.cs:39` | `_pending` under G10, then a HID write | `Monitor.Wait`; the HID write | No — but it raises `OwnerChanged`? (no: the bridge does) |
-| T9 | `acer-ec-hid-writer` | `AcerEcHidController.cs:65` | `_pending` under G11, `LastError` **unlocked** (`:127,128`) | `Monitor.Wait` | No — `LastError` written at `:113,114` and **read nowhere** (corrected 2026-09-14: no reader exists in the tree) |
+| T9 | `acer-ec-hid-writer` | `AcerEcHidController.cs:65` | `_pending` under G11, `LastError` **unlocked** (`:127,128`) | `Monitor.Wait` | No — `LastError` written at `:113,114` and **read nowhere** (corrected 2026-09-14: no reader exists in the tree). **Corrected again 2026-09-17: there is no `LastError` on this class at all now** (`d7be021` deleted the dead field), so this thread touches only `_pending`. |
 | T10 | `lamparray-bridge` | `LampArrayBridge.cs:106` | `_apply`, `_written`, `_frame`, `HostOwnsLighting`, `LastError`, `Enabled` | `WaitFrame` (blocking), 100 ms min interval | Yes — `OwnerChanged` → `LightingCoordinator.cs:113` |
 | T11 | `acer-hotkeys` (Linux) | `AcerHotkeys.Linux.cs:47` | `_closing` | `read()` | Yes — `AppController.cs:382,305` |
 | T12 | `SystemEvents` window thread | `ResumeWatcher.Windows.cs:9`, `Clamshell.Windows` | `Clamshell._sync` | — | Yes — `LightingCoordinator.cs:99` |
@@ -276,7 +308,7 @@ serializes *everyone's*.
 | T16 | `LightViewModel` brightness loop | `LightingViewModel.cs:214` | `_reading`/`_readPending` under G13; `LightSettings` fields | G1 | Yes — `:220` |
 | T17 | `[UnmanagedCallersOnly] CreateCallback` | driver, `LampArrayTransport.Windows.cs:354` | `_createResult` | — | No |
 | T18 | 8 UI debounce/anim timers | see 1.3 | view-model fields | — | — |
-| T19 | `ApplyStartupState` | `AppController.cs:53`, **on the UI thread** | `Settings.Clamshell`, `Bluelight`, GPU OC, CPU power — all synchronous, all through G2→G1 before the window is even built | G2, G1 | — |
+| T19 | `ApplyStartupState` | `AppController.cs:53`, **on the UI thread** | `Settings.Clamshell`, `Bluelight`, GPU OC, CPU power — all synchronous, all through G2→G1 before the window is even built | G2, G1 | — *(the `_state` half of that row is superseded — see D17's correction: `ApplyStartupState` reads its three scalars under G2 and makes the hardware calls outside it. The GPU OC and CPU power axes are still driven inline on this thread; the Curve Optimizer is the one that is not.)* |
 
 ## 2.2 The boundary that does not move
 
@@ -284,7 +316,9 @@ serializes *everyone's*.
 
 1. **OS callbacks** arrive on foreign threads (T12, T14, T11) — `ResumeWatcher`, `LidWatcher`, hotkeys.
 2. **Worker threads** produce events the VMs must hear — `OwnerChanged` (`LightingCoordinator.cs:113`),
-   `HwSerial` readbacks (`OptionsViewModel.cs:36`), failure notifications (`OptionsAssembler.cs` `RunSet`, its `Dispatcher.UIThread.Post` call).
+   `HwSerial` readbacks (`OptionsViewModel.cs:36`), failure notifications (`OptionsAssembler.RunSet`, which posts
+   through the marshaller it is handed — the direct `Dispatcher.UIThread.Post` call moved to whoever supplies it;
+   see 1.3).
 3. **Pool tasks** must not touch VMs — `UiPass` (`AppController.cs:507`), `SetCo` (`:372`),
    `GrantHardwareAccessAsync` (`:287`).
 4. **Reentrancy deferral** — `SetLanguage` (`:184`) posts `RebuildForLanguage` so the dropdown's own change
@@ -332,6 +366,17 @@ Also violating the spirit of the same invariant, without the plan saying so:
   dictionary `LightsForCurrentMode` hands it and writes into it in place. Closing those means returning copies,
   which is a redesign of the lighting path (writing into the graph *is* the feature there), not a visibility
   change.
+  **Corrected 2026-09-17: six of those eight no longer hand back a live preset — and which six matters.**
+  `CurrentFan`, `ApplyModeFan`, `CurrentGpuOc`, `ApplyModeGpuOc`, `CurrentCo` and `ApplyModeCo` return
+  `Snapshot()` (`d7be021`, release 0.33.1): a copy that shares no array and no dictionary with the stored
+  instance, so the caller cannot reach the graph through it. **The two lighting entries were deliberately left
+  live**, and that is a recorded decision, not an oversight: `LightsForCurrentMode` (both forms) and
+  `EnsureLightZone` still hand back the stored reference, because writing into the graph there IS the feature —
+  `LightsForCurrentModeTests` and `LaptopServicePresetTests` hold `Assert.Same` on the live dictionary, and they
+  passed unchanged through `d7be021`, which is the evidence that the copies did not touch this path
+  (`docs/open-decisions.md` §4). So the closing sentence is true, and true only of the light: for the six preset
+  accessors a copy WAS the answer, and spreading one to the lighting entries would silently stop per-mode
+  lighting from persisting.
 - `LaptopService.cs` `LastError` — `public string? LastError { get; private set; }`, written under `_state` on some
   paths and outside it on others (e.g. `WmiInvoker`'s port results), read from the UI thread at
   `AppController` (`ApplyProfile`, `SetTurbo`, `SetGpuOc`, `SetCpuPower`, `SetCo`) and `OptionsAssembler.cs` `RunSet`. Reference writes are atomic so nothing
@@ -346,14 +391,22 @@ Also violating the spirit of the same invariant, without the plan saying so:
   deterministic, not rarer, because it guarantees the reader sees the newest write, including the other
   thread's. The fix is to remove the shared side channel (return the error from the call), not to widen its
   visibility.
+  **Fixed 2026-09-17 (`d7be021`, release 0.33.1) — and with the fix this bullet names.** `public string?
+  LastError { get; private set; }` no longer exists on `LaptopService`: a write returns `(bool ok, string?
+  error)` from `Attempt`, so the reason travels with the result and cannot be another call's. All six readers
+  were migrated, and the compiler found them rather than a grep — deleting the property makes a forgotten reader
+  a build error. `volatile` was not applied, for exactly the reason given above. The analysis here is kept as
+  the record of why the field had to go; `docs/open-decisions.md` §2 records the closure and the rule that kept
+  it from changing behaviour (a channel is given only where a reader exists today, so the silent points stay
+  silent).
 
 ## 3.2 State guarded by nothing, touched from more than one thread
 
 | # | Site | State | Writers | Readers | Severity |
 |---|---|---|---|---|---|
 | **D6** | `Domain/LampArrayBridge.cs:70` | `LastError` | worker at `:151` (unlocked); `Enable()` at `:83,86,88` under G4 — but `Enable()` **never runs on the UI thread** (corrected 2026-09-14: it is reached only via `OptionsAssembler.RunSet` on an `HwSerial` continuation, or `LaptopService.cs` `ApplyStartupState` on a `Task.Run`) | `LaptopService.Lighting.cs` `SetDynamicLighting`, and only on a *failed* `Enable` — i.e. when no worker is live | **Not reachable.** The worker exists only between a successful `Enable` and its own exit, and `Enable` returns early (`if (Enabled) return true`) while a worker is live, so the two writes cannot overlap a read. Downgraded to a latent hazard on the zombie-worker path: if `Disable`'s 1 s join times out (`:121`), the survivor can re-arm the transport's write. |
-| **D7** | `Domain/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. |
-| **D8** | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. |
+| **D7** | `Domain/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. **Corrected 2026-09-17: "all writers are the UI thread" is not right.** `HostOwnsLighting` is also written by the bridge's own worker — `WorkerLoop` sets it true when a host takes the surface, and `ReleaseOwnership` (which `Disable` calls too) clears it on hand-back and teardown — so the field has a writer on the worker thread and a reader on the paint path. `Enabled` is written under `_gate` by whatever thread calls `Enable`/`Disable`: D6's correction above records that `Enable` is never the UI thread, and `Disable` is reached from there (a hand-off too, and from `LaptopService.Dispose`). The read side of this row is accurate: `Paint` reads `HostOwnsLighting` unlocked on the paint path. |
+| **D8** | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. **Deleted 2026-09-17 (`d7be021`):** the dead field and the comment that falsely claimed it was "read by the UI" are gone from `AcerEcHidController`, and the write site now says plainly that an EC write failure goes nowhere. The *gap* stays open — `docs/open-decisions.md` §5. |
 | **D9** | `Infrastructure/Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | the port's own caller, through `Set` (`:21,33,43,44,58,67`) | the **same** thread — `LaptopService.cs` `Attempt` (the method this row called `Run` until it was renamed in the tree) | **Corrected 2026-09-14: no race in three of the five.** The write and the copy-out happen on the same `HwSerial` continuation, and `FlagPort`/`ChoicePort`/`LevelPort` are single-threaded by construction (each row owns its own port instance). The genuine `DelegatePorts` races are `ProfilesPort` (`:54`) and `FanPort` (`:41`) — UI vs POLL, a shape this table did not list. |
 | **D10** | `UI/ViewModels/LightingViewModel.cs:345` (`SaveState()`) | `LightSettings` fields | UI thread | `BackgroundPass` → `Save()` → `JsonSettingsStore` | `LaptopService.Lighting.cs` `EnsureLightZone` exists to make the *structural* insert safe, and the comment says per-field edits "stay unguarded". That is true only because a per-field write cannot restructure the dictionary — the JSON serializer can still observe a half-updated `LightSettings` and persist it. Low impact (one debounce interval of stale brightness), but it is an unguarded cross-thread read of a mutable object. |
 
@@ -361,9 +414,9 @@ Also violating the spirit of the same invariant, without the plan saying so:
 
 | # | Overlap | Assessment |
 |---|---|---|
-| **D11** | `WmiSession.Gate` (G1) vs the fan-out of ports | G1 is correct and minimal. Every `GmGet`/`GmSet`/`Sensor`/`UiGet`/`UiSet` and every `AcerBattery`, `DellBiosWmi`, `OverlayCpuPower` call funnels through it. It is the *good* example in this codebase and the model the actor should copy, not delete. |
+| **D11** | `WmiSession.Gate` (G1) vs the fan-out of ports | G1 is correct and minimal. Every `GmGet`/`GmSet`/`Sensor`/`UiGet`/`UiSet` and every `AcerBattery`, `DellBiosWmi`, `OverlayCpuPower` call funnels through it. It is the *good* example in this codebase and the model the actor should copy, not delete. **Corrected 2026-09-17: `AcerBattery` is not a symbol in the tree any more** — the Acer battery's reads live in `BatteryWmi` (`AcerDevice`, in the file still named `AcerBattery.Windows.cs`), which reaches WMI through `WmiInvoker` and so through this gate. The claim holds; only the name is gone. |
 | **D12** | G10/G11 vs G1 | **None.** The ENE and EC-HID writers do *not* take G1 — they are a genuinely separate transport (see `docs/power-an18-61.md`: on the AN18-61 the real power envelope is HID, not WMI). Any design that routes them through one actor must not accidentally put them behind G1. |
-| **D13** | G7 (`RyzenCurveOptimizer._gate`) vs G1 | `_gate` guards lazy `Io()` and `Dispose`; the SMU transaction is guarded by X1. No overlap with G1 — different transport, different process boundary. |
+| **D13** | G7 (`RyzenCurveOptimizer._gate`) vs G1 | `_gate` guards lazy `Io()` and `Dispose`; the SMU transaction is guarded by X1. No overlap with G1 — different transport, different process boundary. **Corrected 2026-09-17: the transaction is guarded by G7 *and* X1, not by X1 alone** — every `Transact` call site runs inside `lock (_gate)` (`Set`, `SetDomains`, and the private `SetGpu` helper whose own doc says "Caller holds `_gate`"), which is what G7's own row says; the PCI mutex is taken inside that. The difference is load-bearing: `TryOpenPciMutex` can return null, and then G7 is the only guard the transaction has. |
 | **D14** | G3 (`_lampGate`) vs G2 (`_state`) | **Deliberate and correct.** `LaptopService.Lighting.cs` `_lampGate` (its declaration comment) documents it: sharing `_state` would put an ACPI-EC stall in front of a UI-thread lighting repaint. This is a design the actor must preserve as a *latency* property, not a data property. |
 | **D15** | G4/G5 (`LampArrayBridge`) | Correctly split: `_gate` for lifecycle, `_apply` for the frame-critical section. The only reason two exist is that `Reassert()` is called from the UI thread while the worker is mid-apply. |
 
@@ -431,7 +484,10 @@ profile is the one used, and the two callers without a profile still read.
 - `OptionsAssembler.BatteryLimit()` / `BatteryCalibration()` → `limit.Get()`, `cal.Get()`
 - `OptionsAssembler.PowerSourceProfiles()` → `svc.SourceProfile(onAc)` under G2
 - `LaptopService.CurrentFan` / `CurrentGpuOc` / `CurrentCpuPower` / `CurrentCoDomains` → G2
-  *(superseded — see the second correction above: none of those four is read in `BuildUi` today)*
+  *(superseded — see the second correction above; precisely, three of the four are still **called** in
+  `BuildUi`, through the profile-taking overload, so they still take G2 — what is gone is the port read, not the
+  call. `CurrentCpuPower` alone is not called there at all: its row is built with a placeholder and primed from
+  the background pass.)*
 
 Every one of those `Get()` calls is a WMI transaction and therefore takes **G1** (`WmiSession.Windows.cs:83`).
 `BuildUi` is called at startup (from the `AppController` constructor) and on **every live language switch** (`RebuildForLanguage`).
@@ -511,7 +567,7 @@ Three ways the actor introduces one:
 | **D22** | `AppController.cs:492` | `ApplyModeCo()` on every mode switch | Same as D20, per switch. |
 | **D23** | `LightingCoordinator.cs:255` | GPU OC + CPU power + CO on resume | All three volatile states silently stay at their post-sleep values. The comment says "the next resume or mode switch re-asserts" — true, but a user who never switches mode never gets their offsets back. |
 | **D24** | `Infrastructure/Vendors/Acer/AcerDevice.Windows.cs:91` (in `SetProfile`, `:89`) and `:50` (`InitVendor`) | `_ec?.Apply(p.Kind)` then the WMI write | Two transports, one logical operation, no readback of either. If the HID write lands and the WMI one fails (or vice versa), the profile is half-applied and the app has no way to know. `docs/power-an18-61.md` says these two carry *different* things. |
-| **D25** | `LaptopService.ApplyModeGpuOc/ApplyModeCpuPower/ApplyModeFan` | hardware writes | Return the preset for UI reflection; the hardware result is folded into the shared `LastError`, which a later unrelated operation can overwrite (see 3.1). |
+| **D25** | `LaptopService.ApplyModeGpuOc/ApplyModeCpuPower/ApplyModeFan` | hardware writes | Return the preset for UI reflection; the hardware result is folded into the shared `LastError`, which a later unrelated operation can overwrite (see 3.1). **Corrected 2026-09-17:** there is no shared `LastError` to fold into (`d7be021`), and these three discard the port's result — still deliberately, and for the reason `ApplyFan`'s own comment gives: no caller of any of them has ever had a reader for the failure, so a channel would start showing a message the app has never shown (the rule in `docs/open-decisions.md` §2). |
 
 The pattern: **the app cannot distinguish "applied" from "accepted for sending"**. `AcerEcHidController.Apply`
 even says so in its own return contract. An actor that returns a `Task` per command does not by itself fix
@@ -648,6 +704,8 @@ So the end state is a **split**:
   mutation and the `Save()` snapshot, **and never hardware I/O**. That is the change that matters. Today
   `ApplyCustom` holds G2 across a fan write and `ApplyStartupState` holds it across two hardware writes on the
   UI thread (D17). After the split, a command is built under the lock and executed outside it.
+  *(Half of that `Today` is already past — the `ApplyStartupState` half; see D17's correction. `ApplyCustom`
+  still holds G2 across a fan write, and `ApplyModeCpuPower`'s own `cp.Set` with it.)*
 
 This also removes the `_state → Gate` ordering question entirely: there is no Gate to order against.
 
@@ -671,6 +729,18 @@ is a UI-generation counter, not a lock, and it stays on the VM side.
 
 Every step below is separately buildable, keeps the app working, and is revertable on its own. The zero-warning
 baseline holds throughout.
+
+**Status 2026-09-17: two of the steps have partly happened, and the rest have not.** `Step 0` is in place as
+`Infrastructure/Diagnostics/GateStats` (`4ba84cf`), with two differences from what the step asks: the counters
+are deliberately **always on** rather than debug-only — they have to come from the build the owner actually runs
+— and they are split by pool/non-pool thread rather than counted per pass. The `_state` half was **not** done,
+so the UI-thread `_state` wait this step wanted is still unmeasured. `Step 5` is partly done:
+`ApplyStartupState` no longer holds G2 across its hardware calls (D17's correction) and `SetGpuOc`'s port write
+is outside the lock, but `ApplyCustom` and `ApplyModeCpuPower`'s own `cp.Set` keep it by recorded decision
+(`docs/open-decisions.md` §3), the `Settings` property became `internal` rather than a locked read accessor, and
+D1-D5 were fixed by `303beca` rather than here. Steps 1-4 and 6-8 are untouched. A reader of the numbers below
+should also read `docs/open-decisions.md` §1: Step 0's measurement was never taken, so no step here has been
+decided by it.
 
 **Step 0 — instrument, change nothing.** Add a debug-only counter around `WmiSession.Gate`: total wait time,
 max wait, acquisitions per pass. Same for the `_state` wait on the UI thread. This is the only way to know
@@ -721,6 +791,16 @@ Detectability is judged against the state of the project: **no behavioural tests
 planned in Wave 2, and a mock transport feasible for everything that goes through `IDevice`'s ports (the ports
 are already narrow interfaces with `null`-means-absent, and `VerifiedHwValue` already accepts an injectable
 poster "so this can run under a plain unit test" — `OptionsViewModel.cs:31`).
+
+**Corrected 2026-09-17: the test project is not planned, it exists.** `tests/AcerHelper.Tests` landed
+(`7dcf6b4`) and has grown with every wave since — this document's own later corrections point at tests inside
+it (`PresetReadsWithProfileTests`, `LightsForCurrentModeTests`, `LaptopServicePresetTests`), and the mock
+transport this paragraph calls feasible is what `tests/AcerHelper.Tests/Fakes` already holds for the ports it
+covers. So the *mock-sufficient* column below describes tests that can be written against a suite that exists
+rather than a project that does not. The *hardware-only* column does not change: no mock replaces a
+suspend/resume cycle, a second tuning tool, or a paced HID bus. One port-shaped detail has moved with it: the
+battery's four ports are gone (wave 4b, `9c17ae5`), so a mock of that section is built on the `Battery`
+object's ops, not on `IBatteryInfo`/`IBatteryChargeLimit`/`IBatteryCalibration`/`IBatteryChargeMode`.
 
 | # | Risk | What breaks | User-visible symptom | Detectable without hardware? |
 |---|---|---|---|---|

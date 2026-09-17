@@ -68,12 +68,17 @@ public sealed partial class LaptopService : IDisposable
     /// surface, so it stops reading as an invitation, and it makes the eventual assembly split — the only thing
     /// that WOULD enforce a layer boundary, see the plan's Wave 1 note — mechanical instead of a redesign.
     ///
-    /// Honest limit: the accessors that hand back a LIVE preset from this graph still let a caller mutate
-    /// settings without holding the lock — <c>CurrentFan</c>, <c>ApplyModeFan</c>, <c>CurrentGpuOc</c>,
-    /// <c>ApplyModeGpuOc</c>, <c>CurrentCo</c>, <c>ApplyModeCo</c>, both forms of <c>LightsForCurrentMode</c>,
-    /// and <c>EnsureLightZone</c>. The lighting one is the widest door in the tree:
-    /// <c>LightingViewModel</c> keeps the returned dictionary and writes into it in place. Sealing those means
-    /// returning copies, which is a redesign of the lighting path, not a visibility change.</summary>
+    /// Honest limit: the accessors that hand back a LIVE reference into this graph still let a caller mutate
+    /// settings without holding the lock — both forms of <c>LightsForCurrentMode</c> and <c>EnsureLightZone</c>,
+    /// and nothing else beyond the property itself. The six accessors that used to be in this list —
+    /// <c>CurrentFan</c>, <c>ApplyModeFan</c>, <c>CurrentGpuOc</c>, <c>ApplyModeGpuOc</c>, <c>CurrentCo</c>,
+    /// <c>ApplyModeCo</c> — now hand back <c>Snapshot()</c>, a copy sharing nothing mutable with the stored
+    /// instance. The two lighting ones are left live ON PURPOSE, and that is a recorded decision rather than an
+    /// omission (docs/open-decisions.md §4). They are the widest door in the tree and the reason it stays open
+    /// is that writing into the graph is the feature there: <c>LightingViewModel</c> keeps the returned
+    /// dictionary and writes into it in place, and <c>EnsureLightZone</c> is that path's structural insert —
+    /// the one that must share _state with Save(), or a "collection modified" throws mid-serialization. Sealing
+    /// those means returning copies, which is a redesign of the lighting path, not a visibility change.</summary>
     internal Settings Settings { get; }
 
     /// <summary>Run a hardware write and report BOTH halves of its outcome: whether it succeeded, and — when it
