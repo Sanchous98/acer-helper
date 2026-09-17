@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Lighting;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 

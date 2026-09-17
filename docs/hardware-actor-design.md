@@ -26,6 +26,13 @@ substitutions a reader needs:
 | `Os/…` | `Infrastructure/Vendors/Generic/…` (the folder no longer exists) |
 | `AcerHelper.Features`, `AcerHelper.Vendors.*`, `AcerHelper.Os`, `AcerHelper.Composition`, `AcerHelper.Diagnostics` | `AcerHelper.Domain`, `AcerHelper.Infrastructure.Vendors.*`, `AcerHelper.Infrastructure.*` |
 
+**And the LampArray layer left `Domain/` too (2026-09-17).** `Domain/LampArrayBridge.cs` and
+`Domain/LampArray.cs` are now `Infrastructure/Lighting/LampArrayBridge.cs` and
+`Infrastructure/Lighting/LampArray.cs`; the transport types of `Domain/Rgb.cs` (`IRgbController`, `RgbDevice`)
+are in `Infrastructure/Lighting/RgbController.cs`, while `RgbZone` and `IRgbDevice` stayed in `Domain/Rgb.cs`.
+That move also added lines near the top of `LampArrayBridge.cs`, so every line number below it drifted a second
+time — the symbol names remain the anchor, as noted above.
+
 The *analysis* is unaffected — no claim in this document rests on a folder's name, and the one path that
 mattered to a defect (`WmiSession`'s gate) is identified by symbol. Only the addresses moved. Rationale and the
 resulting `Vendors/Generic` naming oddity: `04229ff` (the 85-file move) + `dd9f8d9` (the stale references).

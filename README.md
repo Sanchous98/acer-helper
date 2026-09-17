@@ -58,14 +58,18 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
   backend's own opaque key, so the domain knows no hardware-specific setting name. See
   `docs/domain-refactoring-plan.md` §3.1 and §5 (waves 5 + 9).
   Also the pieces that are logic rather than I/O: `Fan` (one fan's duty curve and the duty applied to it)
-  with `FanCurveEngine` (the pair of fans and the deadband over them), `LampArrayBridge`, the
+  with `FanCurveEngine` (the pair of fans and the deadband over them), and the
   compile-time version constant.
 - **`Application/`** (`AcerHelper.Application`) — the use cases, and nothing else: `LaptopService`
   (split across `LaptopService.*.cs` partials, one per feature family) and `OptionsAssembler`.
   This is the only layer the UI talks to.
 - **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
-  `ResumeWatcher`, plus `Composition/`, `Diagnostics/` and `Vendors/`.
+  `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.
+- **`Infrastructure/Lighting/`** (`AcerHelper.Infrastructure.Lighting`) — the RGB transport framework
+  (`IRgbController`, `RgbDevice`) and the HID **LampArray** translation layer (`LampArrayLayout`,
+  `LampArrayBridge`): how the app's zones are published as a virtual lighting device, how host frames
+  become zone writes, and who owns the backlight while a host paints it.
 - **`Infrastructure/Vendors/Acer/`** (`AcerHelper.Infrastructure.Vendors.Acer`) — Acer feature
   implementations. There is **no
   separate platform layer**: the OS access is folded into the vendor implementation, split per OS
@@ -102,7 +106,7 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
   in-box Virtual HID Framework that publishes the keyboard's zones as a **HID LampArray** so Windows Dynamic
   Lighting can paint them. Windows only enumerates lighting devices as LampArray HID collections, so a driver
   has to exist; it is kept deliberately dumb (static report descriptor + a lamp table pushed down over three
-  IOCTLs) with all the logic in `Domain/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
+  IOCTLs) with all the logic in `Infrastructure/Lighting/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
 
 OS-specific code is selected by the `*.Windows.cs` / `*.Linux.cs` file-name suffix (MSBuild
 `<Compile Remove>` globs per target framework) — **no preprocessor directives**. Adding a laptop

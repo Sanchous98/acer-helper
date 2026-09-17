@@ -1,4 +1,6 @@
-namespace AcerHelper.Domain;
+using AcerHelper.Domain;
+
+namespace AcerHelper.Infrastructure.Lighting;
 
 // ---------------------------------------------------------------------------------------------------------
 // HID LampArray — the vendor- and OS-neutral half of the "translation layer" that lets Windows Dynamic

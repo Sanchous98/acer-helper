@@ -26,7 +26,7 @@ public partial class App : Avalonia.Application
             // and IDevice carries no member for it — this is the hand-off.
             var (device, declaredSettings) = DeviceFactory.Create();
             var service = new LaptopService(device, new JsonSettingsStore(), declaredSettings,
-                                            DeviceFactory.CreateLampArrayTransport());
+                                            DeviceFactory.CreateDynamicLightingFactory());
             // Activate the persisted UI language before any window/view-model is built (they read their
             // strings via Loc at construction). Default is "System" -> follow the OS UI culture. Read through
             // the service's locked accessor rather than off the settings graph: the graph is mutable and the

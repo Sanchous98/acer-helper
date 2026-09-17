@@ -1,12 +1,15 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Lighting;
 using AcerHelper.Tests.Fakes;
 
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// The RGB framework's DOMAIN half — <see cref="RgbZone"/>'s apply/read semantics, the capability defaults an
-/// <see cref="IRgbController"/> inherits, and the aggregation <see cref="RgbDevice"/> performs over several
-/// controllers.
+/// The RGB framework's zone and controller halves — <see cref="RgbZone"/>'s apply/read semantics, the
+/// capability defaults an <see cref="IRgbController"/> inherits, and the aggregation <see cref="RgbDevice"/>
+/// performs over several controllers. The file lives with the tests, not with a layer: <see cref="RgbZone"/>
+/// is Domain and the two controller types are Infrastructure (Infrastructure/Lighting/RgbController.cs), and
+/// the rules below span both.
 ///
 /// It had no coverage at all, and it is worth having because every rule here is a SILENT one on real hardware:
 /// a zone that claims sub-zones it cannot address paints the wrong region, a controller that "supports" a profile

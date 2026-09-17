@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Lighting;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 

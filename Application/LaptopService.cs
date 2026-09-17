@@ -36,14 +36,14 @@ public sealed partial class LaptopService : IDisposable
     // parameter names, so not one call site in the file moved.
     private readonly IDevice device;
     private readonly ISettingsStore store;
-    private readonly ILampArrayTransport? lampArray;
+    private readonly IDynamicLightingFactory? dynamicLightingFactory;
 
     public LaptopService(IDevice device, ISettingsStore store, IReadOnlyList<SettingDeclaration> declaredSettings,
-                         ILampArrayTransport? lampArray = null)
+                         IDynamicLightingFactory? dynamicLightingFactory = null)
     {
         this.device = device;
         this.store = store;
-        this.lampArray = lampArray;
+        this.dynamicLightingFactory = dynamicLightingFactory;
         Reconciler = new HardwareReconciler(this);
         // Assigned in the body rather than as `Settings { get; } = store.Load()`. Field and property initializers
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in

@@ -136,6 +136,40 @@ public class ArchitectureMapTests
             "Domain must not depend on a layer above it:\n  " + string.Join("\n  ", offenders));
     }
 
+    /// <summary>Application points DOWN at Domain, not UP at Infrastructure. The rule needs stating because
+    /// the compiler does not state it: this is one assembly, so an Infrastructure type is perfectly nameable
+    /// from Application and the build stays green either way.
+    ///
+    /// The case that made the rule concrete is the LampArray surface. <c>LaptopService</c> publishes a virtual
+    /// lighting device whose implementation is Infrastructure's
+    /// (<c>Infrastructure/Lighting/LampArrayBridge.cs</c>), and the direct route — let the service name the
+    /// bridge and the transport under it — would have made Application depend on the layer it orchestrates.
+    /// It names <c>IDynamicLighting</c> and <c>IDynamicLightingFactory</c>
+    /// (<c>Application/DynamicLighting.cs</c>) instead, and composition supplies the implementation.
+    ///
+    /// Today Application imports Domain and Localization and nothing else. Localization is allowed for the same
+    /// reason <see cref="DomainPointsAtNothingButItselfAndLocalization"/> allows it — it is the shared kernel
+    /// below Domain — and a settings store arrives as the <c>ISettingsStore</c> port rather than as the class
+    /// that implements it. The UI may still reach Infrastructure (it does, by design; see the file's own
+    /// docstring); this rule fences Application, which has no such need.
+    ///
+    /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Lighting;</c> added to
+    /// <c>Application/DynamicLighting.cs</c> reddens this test and no other in the file.</summary>
+    [Fact]
+    public void ApplicationPointsAtDomainNotInfrastructure()
+    {
+        string[] allowed = ["AcerHelper.Application", "AcerHelper.Domain", "AcerHelper.Localization"];
+
+        var offenders = SourcesIn("Application")
+            .SelectMany(p => UsingsOf(File.ReadAllText(p)).Select(u => (File: Relative(p), Using: u)))
+            .Where(x => x.Using.StartsWith("AcerHelper.", StringComparison.Ordinal) && !allowed.Contains(x.Using))
+            .Select(x => $"{x.File}: using {x.Using};")
+            .ToArray();
+
+        Assert.True(offenders.Length == 0,
+            "Application must not depend on Infrastructure (or on the UI):\n  " + string.Join("\n  ", offenders));
+    }
+
     /// <summary>No toolkit below the UI. <c>Bootstrap</c> is exempt because it is the composition root and
     /// legitimately starts the Avalonia app; <c>UI</c> is the layer that exists to hold it. The exemption is
     /// narrow on purpose — every mention of Avalonia in Domain, Application, Infrastructure and Localization is

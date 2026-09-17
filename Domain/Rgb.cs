@@ -1,11 +1,14 @@
 namespace AcerHelper.Domain;
 
-// A small OpenRGB-style RGB framework. A device's lighting is assembled from bricks:
-//   RgbZone        — a controllable region (its effect list + apply ops), optionally split into sub-zones.
-//   IRgbController — a hardware transport that produces the zones it can drive (ENE HID, a future LampArray, …).
-//   RgbDevice      — an IRgbDevice assembled by concatenating one or more controllers' zones.
+// The model half of a small OpenRGB-style RGB framework. A device's lighting is assembled from bricks, and
+// these are the two the application reasons about:
+//   RgbZone    — a controllable region (its effect list + apply ops), optionally split into sub-zones.
+//   IRgbDevice — the device's RGB surface, built by concatenating the zones its transports produce.
 // The UI binds to IRgbDevice.Zones and renders one panel per zone, so it adapts to whatever the active
 // controllers advertise — no keyboard/lightbar assumptions baked into the port.
+// The transport half of the framework — IRgbController, the brick that DRIVES hardware, and RgbDevice, which
+// concatenates controllers' zones and owns them — is Infrastructure/Lighting/RgbController.cs: assembling
+// transports and releasing their handles is integration, and the domain names neither of them.
 
 /// <summary>One controllable lighting region: an effect list plus apply operations. A zone may be split
 /// into <see cref="SubZones"/> individually-addressable regions (e.g. a 4-zone keyboard); when it can't,
@@ -66,49 +69,4 @@ public interface IRgbDevice
     /// zone is stored, or null if the device has none. The key string is owned by the backend (opaque here), so
     /// the flag stays vendor-scoped while the app plumbing (LaptopService.GetDeviceFlag) stays generic.</summary>
     string? ProfileFollowKey { get; }
-}
-
-/// <summary>A hardware RGB transport brick that produces the zones it can drive. One per transport (ENE HID
-/// on both Windows and Linux — hidraw there, no kernel module, a future LampArray, …); a device may aggregate
-/// several. IDisposable for controllers holding a handle (e.g. a HID stream).</summary>
-public interface IRgbController : IDisposable
-{
-    IReadOnlyList<RgbZone> Zones { get; }
-
-    /// <summary>Paint the "operating mode" indicator colour (see <see cref="IRgbDevice.SetProfileFlash"/>).
-    /// Default: unsupported (controllers without a profile indicator don't override this).</summary>
-    bool SetProfileFlash(AccentColor color) => false;
-
-    /// <summary>Turn every zone this controller drives off (see <see cref="IRgbDevice.Blank"/>). Default:
-    /// unsupported (no-op) — controllers that can blank their zones override this.</summary>
-    bool Blank() => false;
-
-    /// <summary>Settings key for this controller's "follows performance profile" preference (see
-    /// <see cref="IRgbDevice.ProfileFollowKey"/>); null when it has no profile-indicator zone.</summary>
-    string? ProfileFollowKey => null;
-}
-
-/// <summary>Assembles an <see cref="IRgbDevice"/> from one or more controllers by concatenating their zones,
-/// and owns them (disposes on device teardown).</summary>
-public sealed class RgbDevice(params IRgbController[] controllers) : IRgbDevice, IDisposable
-{
-    public IReadOnlyList<RgbZone> Zones { get; } = controllers.SelectMany(c => c.Zones).ToList();
-
-    public bool SetProfileFlash(AccentColor color)
-    {
-        return controllers.Aggregate(false, (current, c) => current | c.SetProfileFlash(color));
-    }
-
-    public bool Blank()
-    {
-        return controllers.Aggregate(false, (current, c) => current | c.Blank());
-    }
-
-    public string? ProfileFollowKey => controllers.Select(c => c.ProfileFollowKey).FirstOrDefault(k => k != null);
-
-    public void Dispose()
-    {
-        foreach (var c in controllers)
-            try { c.Dispose(); } catch { /* best-effort teardown */ }
-    }
 }

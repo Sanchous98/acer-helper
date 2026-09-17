@@ -1,4 +1,7 @@
-namespace AcerHelper.Domain;
+using AcerHelper.Application;
+using AcerHelper.Domain;
+
+namespace AcerHelper.Infrastructure.Lighting;
 
 /// <summary>
 /// The translation layer proper: takes lamp frames a host (Windows Dynamic Lighting, or any LampArray-aware
@@ -21,8 +24,11 @@ namespace AcerHelper.Domain;
 /// writes it makes are themselves non-blocking (EneHidController queues them onto its own writer). Public
 /// members are safe to call from any thread. <see cref="OwnerChanged"/> fires on the worker thread — marshal
 /// it if you touch UI state.
+///
+/// It implements <see cref="IDynamicLighting"/>, the contract Application names (Application/DynamicLighting.cs),
+/// so the layer that orchestrates lighting never has to name this type or the transport under it.
 /// </summary>
-public sealed class LampArrayBridge : IDisposable
+public sealed class LampArrayBridge : IDynamicLighting
 {
     /// <summary>Slowest we ever repaint the hardware, and the value advertised to the host as
     /// MinUpdateInterval. 10 Hz is a deliberate compromise: fast enough that breathing/wave effects read as

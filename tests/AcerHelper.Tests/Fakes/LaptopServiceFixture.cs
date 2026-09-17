@@ -6,7 +6,8 @@ namespace AcerHelper.Tests.Fakes;
 /// <summary>
 /// A <see cref="LaptopService"/> wired to the hand-written fakes, with no port assigned until a test asks
 /// for one. Ports are read lazily on every call, so a test may assign <c>Device.&lt;Port&gt;</c> after
-/// construction. <c>LampArray</c> is never built: the fixture passes no transport, so nothing P/Invokes.
+/// construction. <c>LampArray</c> is never built: the fixture passes no lighting factory, so nothing P/Invokes.
+/// A test that wants the surface built supplies one — see <c>DynamicLightingSeamTests</c>.
 ///
 /// The fake backend's declared settings are handed to the service exactly as composition hands a real device's
 /// (<c>DeviceFactory.Create</c> -> this constructor -> <c>Settings.Install</c>), and by REFERENCE, which is what

@@ -45,9 +45,9 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         }
 
         // Publish the keyboard's zones as a virtual HID LampArray, so Windows Dynamic Lighting and
-        // LampArray-aware apps can paint them (Domain/LampArrayBridge.cs). The row only exists where the
-        // bridge can exist at all — the OS transport plus the installed driver (see docs/lamparray.md) — so on a
-        // machine without the driver there is nothing to promise the user. NOT a declared setting: it is the
+        // LampArray-aware apps can paint them (Infrastructure/Lighting/LampArrayBridge.cs). The row only exists
+        // where the bridge can exist at all — the OS transport plus the installed driver (see docs/lamparray.md) —
+        // so on a machine without the driver there is nothing to promise the user. NOT a declared setting: it is the
         // app's own feature rather than a knob the firmware owns, so its state lives in the bridge, not in
         // Settings.DeviceSettings. `Read` is the bridge's REAL state: publishing can fail (driver removed, PnP
         // refused), and then the switch snaps back by itself.

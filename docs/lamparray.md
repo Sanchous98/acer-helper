@@ -37,7 +37,7 @@ AcerHelperLampArray.sys  ── driver/                     virtual HID device v
         ▼
 LampArrayTransport       ── Infrastructure/Vendors/Generic/*.Windows.cs  device node (SwDeviceCreate) + IOCTL channel
         ▼
-LampArrayBridge          ── Domain/LampArrayBridge.cs   rate limit, write collapsing, ownership arbitration
+LampArrayBridge          ── Infrastructure/Lighting/    rate limit, write collapsing, ownership arbitration
         ▼
 RgbZone.ApplySubZone /   ── Domain/Rgb.cs               the existing zone model
 RgbZone.ApplyEffect

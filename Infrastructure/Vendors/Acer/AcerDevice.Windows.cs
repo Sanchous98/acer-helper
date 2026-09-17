@@ -7,7 +7,7 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // per-feature encoding methods below. All the Acer-on-Windows encoding lives here (indices, bit-packing,
 // magic values) as named methods + a few WMI call helpers; there are no per-feature classes. If the gaming
 // WMI isn't accessible (not elevated) we keep the inherited generic ports and say why. RGB is assembled from
-// the EneHidController brick (Rgb.cs framework); hotkeys stay their own class.
+// the EneHidController brick (the Infrastructure/Lighting RGB framework); hotkeys stay their own class.
 public sealed partial class AcerDevice
 {
     private const ulong LcdOn = 0x1000000000010, LcdOff = 0x10, LcdGetBit = 0x1000000000000;

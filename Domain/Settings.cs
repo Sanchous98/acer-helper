@@ -34,8 +34,8 @@ public sealed class Settings
     public int Bluelight { get; set; }       // 0=off, 1=Low, 2=Medium, 3=High, 4=Long-use
 
     // Publish the keyboard's zones as a virtual HID LampArray so Windows Dynamic Lighting (and any
-    // LampArray-aware app) can paint them — see Domain/LampArrayBridge.cs and docs/lamparray.md. Off by
-    // default: it needs the separately-installed driver, and while a host holds the surface the app's own
+    // LampArray-aware app) can paint them — see Infrastructure/Lighting/LampArrayBridge.cs and docs/lamparray.md.
+    // Off by default: it needs the separately-installed driver, and while a host holds the surface the app's own
     // per-mode lighting is not what's on the keyboard.
     public bool DynamicLighting { get; set; }
 
