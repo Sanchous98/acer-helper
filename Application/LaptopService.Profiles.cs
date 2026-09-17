@@ -26,20 +26,40 @@ public sealed partial class LaptopService
     /// pass can read the hardware profile ONCE and derive the key without a second EC round-trip.</summary>
     public string CurrentModeKey(PerformanceProfile? cur)
     {
-        // The derivation itself now lives in Domain/ModeKey.cs; this keeps the method's exact former shape,
-        // including the early return that does NOT take the lock — the null case reads nothing, and the original
-        // deliberately answered it without acquiring _state.
+        // This keeps the method's exact former shape, including the early return that does NOT take the lock —
+        // the null case reads nothing, and the original deliberately answered it without acquiring _state.
         //
         // The SLOT is read here, under the lock, and passed by value. That is not a style choice: it is the
-        // remembered mode of the LIVE power source, so reading it inside the domain type would either put the
+        // remembered mode of the LIVE power source, so reading it inside the derivation would either put the
         // lock there or drop it, and hoisting a guarded read out of its lock is the hazard recorded in
-        // docs/open-decisions.md §3. The lock is now held across the whole derivation rather than only the Turbo
-        // branch — a superset, and free: `cur` is already materialised and ModeKey.For is pure, so the hold is
-        // two field reads.
+        // docs/open-decisions.md §3. The lock is held across the whole derivation, which is free: `cur` is
+        // already materialised and ModeKeyFor is pure, so the hold is two field reads.
         if (cur == null) return ModeKey.None.Value;
         lock (_state)
-            return ModeKey.For(cur, Settings.TurboToggles, Slot).Value;
+            return ModeKeyFor(cur, Settings.TurboToggles, Slot).Value;
     }
+
+    /// <summary>The key the per-mode presets are filed under for <paramref name="cur"/>: the profile's own id,
+    /// EXCEPT Turbo used as a switch, which shares its base profile's key — so what the user configured for that
+    /// base is what applies while Turbo sits over it, and the presets do not fragment when the switch is toggled.
+    ///
+    /// That exception lives HERE and not in <see cref="ModeKey"/>, because it is a rule about the switch and not
+    /// about a profile switch: whether Turbo is layered on a base at all is <c>Settings.TurboToggles</c>, and
+    /// which base it is layered over is the remembered <see cref="ProfileMemory"/> — both are this layer's, and
+    /// the firmware's Turbo really is an ordinary profile the domain has no reason to single out. The keys are
+    /// unchanged by where the rule sits: this is <see cref="ModeKey.For"/> with the sharing branch wrapped
+    /// around it, and the fallback to the own id — including the verbatim stale base a device no longer offers —
+    /// is unchanged.
+    ///
+    /// <paramref name="slot"/> and <paramref name="turboToggles"/> are PARAMETERS because the slot is read by
+    /// the caller under <c>_state</c> and handed over by value; a static rule that read service state itself
+    /// would either need that lock or drop it (see the sibling comment above). Internal rather than private so
+    /// the rule can be asserted directly against literal keys (<c>ModeKeyTests</c>) instead of only through the
+    /// service that calls it.</summary>
+    internal static ModeKey ModeKeyFor(PerformanceProfile? cur, bool turboToggles, ProfileMemory slot)
+        => turboToggles && cur is { Kind: ProfileKind.Turbo } && slot.BaseId.Length > 0
+            ? ModeKey.From(slot.BaseId)
+            : ModeKey.For(cur);
 
     public PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
 
