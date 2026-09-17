@@ -145,6 +145,13 @@ public class ModeAxisTableTests
     /// fans must NOT appear: the EC latches the fan mode across a reboot, so there is nothing to restore. The
     /// lights must not appear either, for a different reason — they are re-applied by the UI layer
     /// (<see cref="ModeAxisTable.Owner"/>), not by the boot path.
+    ///
+    /// WHAT CHANGED IN WAVE 2. The boot path no longer owns an axis list: it calls the reconciler with
+    /// <c>ReapplyTrigger.Startup</c>, whose schedule IS <see cref="ModeAxisTable.IsVolatile"/> applied to
+    /// <see cref="ModeAxisTable.All"/>. The site can therefore no longer disagree with the table — which makes
+    /// this test a check of the DOMAIN's internal agreement (schedule vs volatility) rather than of the site, and
+    /// the call log below is the third party that can disagree with both. It is kept, and it is kept unweakened,
+    /// because that is exactly the drift it would still catch.
     /// </summary>
     [Fact]
     public void StartupDrivesExactlyTheAxesTheTableCallsVolatile()
@@ -168,6 +175,21 @@ public class ModeAxisTableTests
         Assert.Equal(volatileAxes, driven);
         Assert.DoesNotContain(ModeAxis.Lights, driven);   // re-applied by the UI, not at startup
         Assert.NotEmpty(driven);                          // ...and the assertion above is not vacuous
+    }
+
+    /// <summary>The two triggers whose schedule is the volatile set are the same SET as the volatility fact, and
+    /// stated in <see cref="ModeAxisTable.All"/>'s order — a boot and a wake do not get to disagree about which
+    /// axes the platform forgets. Internal agreement rather than an observation: the observation is the test
+    /// above (a boot) and <c>HardwareReconcilerTests</c> (a wake), which read a call log.</summary>
+    [Fact]
+    public void ABootAndAWakeBothScheduleTheVolatileAxesInAllOrder()
+    {
+        var volatileAxes = ModeAxisTable.All.Where(ModeAxisTable.IsVolatile).ToArray();
+
+        Assert.Equal(volatileAxes, ModeAxisTable.Schedule(ReapplyTrigger.Startup));
+        // A wake drives the same set and adds the lighting, which the firmware drops over suspend and the UI puts
+        // back — first, because that repaint happens before the hardware re-assert rather than after it.
+        Assert.Equal([ModeAxis.Lights, .. volatileAxes], ModeAxisTable.Schedule(ReapplyTrigger.Resume));
     }
 
     /// <summary>Which layer owns each axis's re-apply. Lighting is the one that is not a hardware concern.</summary>

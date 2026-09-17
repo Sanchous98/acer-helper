@@ -39,6 +39,28 @@ public enum ReassertOwner
     Ui,
 }
 
+/// <summary>What asks for volatile state to be put back. These are the three moments
+/// <c>docs/state-and-events.md</c> calls a re-apply rather than a read — a boot, a mode switch and a wake — and
+/// each drives a different set of axes. A trigger is therefore a fact about the SCHEDULE, not about any one
+/// axis: "which axes are volatile" is <see cref="ModeAxisTable.IsVolatile"/>, "what puts them back" is
+/// <see cref="ModeAxisTable.Schedule"/>.</summary>
+public enum ReapplyTrigger
+{
+    /// <summary>The app has just started: the driver has zeroed the GPU offsets, the SMU holds stock and the OS
+    /// power overlay is the firmware's. The EC has NOT forgotten the fan mode, so that axis is not in this
+    /// trigger's schedule.</summary>
+    Startup,
+
+    /// <summary>The performance mode changed — a pick, the Turbo key, or a power-source restore. Every axis
+    /// takes the new mode's preset, absent or not: that is what stops a mode inheriting the previous one's
+    /// settings.</summary>
+    ModeChange,
+
+    /// <summary>Wake from sleep or hibernation. The same volatile set as a boot (the dGPU power-cycles and comes
+    /// back at zero offset) plus the lighting, which the EC drops over suspend.</summary>
+    Resume,
+}
+
 /// <summary>
 /// The five per-mode axes as DATA: which "no preset" policy each one follows, which the platform forgets on a
 /// reboot / resume / driver reload, and who re-asserts it.
@@ -49,10 +71,11 @@ public enum ReassertOwner
 /// and the consequence is on record: adding a sixth axis means remembering four separate places (the preset
 /// bag, the accessors, the schedule, and the UI section), with no compiler and no test to catch a forgotten one.
 ///
-/// WHAT IT IS NOT. This is not a refactor of the axes into a model, and nothing in the product reads it yet. It
-/// is the one place the five policies and the volatility set are stated, so that the test beside it can assert
-/// them against the service's OBSERVED behaviour — which is the only reason it earns its place over the
-/// comments it replaces. Prose that a test cannot check is what let the drift go unnoticed.
+/// WHAT IT IS NOT. This is not a refactor of the axes into a model: it holds no state, and it does not know how
+/// to talk to a port. What it does is answer "which axes, in what order" for the operation that does — the
+/// re-apply schedule (<see cref="Schedule"/>) is read by <c>Application/HardwareReconciler</c>, which is the one
+/// place that executes it. Until that reconciler existed this table was read by NOTHING but the test beside it,
+/// which is the drift it was written to prevent.
 /// </summary>
 public static class ModeAxisTable
 {
@@ -60,6 +83,28 @@ public static class ModeAxisTable
     /// itself is applied first (it moves the power envelope), and the axes follow.</summary>
     public static readonly IReadOnlyList<ModeAxis> All =
         [ModeAxis.Fans, ModeAxis.GpuOc, ModeAxis.CpuPower, ModeAxis.Co, ModeAxis.Lights];
+
+    /// <summary>The axes a trigger drives, in the order it drives them — including the ones a layer above owns,
+    /// because WHICH layer drives an axis is <see cref="Owner"/> and stating it twice is how the two facts drift
+    /// apart. The executing layer skips what is not its own.
+    ///
+    /// These lists are BUILT from <see cref="All"/> and <see cref="IsVolatile"/> rather than written out a third
+    /// time. A hand-written copy of the volatility set is the disease this class exists to cure, and it had
+    /// already been written twice (the prose blocks it replaced, and the sites' own axis lists).
+    ///
+    /// Boot and wake drive exactly the volatile set, in <see cref="All"/> order — that is what
+    /// <see cref="IsVolatile"/> means ("the app must re-assert it after a reboot, a resume or a driver reload"),
+    /// so spelling the list out could only be a chance to disagree with it. A mode switch drives every axis,
+    /// which is why <see cref="All"/> is documented as the order a mode switch applies them. On a wake the
+    /// lighting axis comes FIRST and on a mode switch LAST: the wake path repaints before it re-asserts the
+    /// hardware, and the mode-switch path repaints after it.</summary>
+    public static IReadOnlyList<ModeAxis> Schedule(ReapplyTrigger trigger) => trigger switch
+    {
+        ReapplyTrigger.Startup => [.. All.Where(IsVolatile)],
+        ReapplyTrigger.ModeChange => All,
+        ReapplyTrigger.Resume => [ModeAxis.Lights, .. All.Where(IsVolatile)],
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "a new ReapplyTrigger needs a schedule here"),
+    };
 
     /// <summary>What happens when the current mode has no preset for <paramref name="axis"/>.</summary>
     public static EmptyAxisPolicy Policy(ModeAxis axis) => axis switch
@@ -88,7 +133,8 @@ public static class ModeAxisTable
         => axis == ModeAxis.Co ? EmptyAxisPolicy.LeaveUntouched : Policy(axis);
 
     /// <summary>Whether the platform forgets this axis, so the app must re-assert it after a reboot, a resume
-    /// (the dGPU power-cycles and comes back at zero offset) or a driver reload.
+    /// (the dGPU power-cycles and comes back at zero offset) or a driver reload. This is also the SELECTOR for
+    /// two triggers' schedules — a boot and a wake drive exactly this set (see <see cref="Schedule"/>).
     ///
     /// The fans are deliberately NOT here: the EC latches the fan mode, so it survives sleep and reboot and
     /// there is nothing to put back. The lighting axis is absent for a different reason — it IS forgotten, but

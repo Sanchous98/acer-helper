@@ -246,19 +246,17 @@ internal sealed class LightingCoordinator : IDisposable
         if ((now - _lastResume).TotalSeconds < 3) return;
         _lastResume = now;
         Paint();
-        // GPU clock offsets and the CPU curve-optimizer offset are both VOLATILE hardware state: the dGPU
-        // power-cycles across suspend (Optimus D3-cold) and comes back at 0 offset, and the Curve Optimizer offset
-        // lives in SMU state the platform restores to stock across a power transition — so re-assert the current
-        // mode's values, together with the CPU power mode. Off the UI thread (ApplyModeCpuPower reads the EC, which
-        // can stall right after wake, and we must not block the UI). No UI reflect needed (values unchanged); no-op
-        // when those ports are absent. Guarded because the device can be tearing down (an exit racing the wake), and
-        // an escaping throw here would be an unobserved task exception.
+        // The HARDWARE half of a wake, from the one place that knows the schedule: the GPU clock offsets (the dGPU
+        // power-cycles across suspend, Optimus D3-cold, and comes back at 0), the CPU power overlay and the Curve
+        // Optimizer (SMU state the platform restores to stock across a power transition). The reconciler drives
+        // all three off this (UI) thread — ApplyModeCpuPower reads the EC, which can stall right after wake, and
+        // we must not block the UI — in the domain's order, under ONE catch, which is this path's guarantee and
+        // not one shared with the other sites: the failure is swallowed because the device can be tearing down
+        // (an exit racing the wake) while the task runs, because the next resume or mode switch re-asserts, and
+        // because an escaping throw here would be an unobserved task exception. No UI reflect needed (the values
+        // are unchanged), so the outcome is discarded. No-op where those ports are absent.
         // See docs/nvidia-gpu-oc.md and docs/curve-optimizer-strix-point.md.
-        _ = Task.Run(() =>
-        {
-            try { _svc.ApplyModeGpuOc(); _svc.ApplyModeCpuPower(); _svc.ApplyModeCo(); }
-            catch { /* the next resume or mode switch re-asserts */ }
-        });
+        _svc.Reconciler.Reapply(ReapplyTrigger.Resume);
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without

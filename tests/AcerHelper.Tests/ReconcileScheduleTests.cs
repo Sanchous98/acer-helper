@@ -11,12 +11,14 @@ namespace AcerHelper.Tests;
 ///
 /// WHY THIS IS NOT ALREADY COVERED. <c>LaptopServicePresetTests</c> pins each <c>ApplyMode*</c> on its own.
 /// What no test pinned is the COMPOSITION at startup: the boot path drives the GPU offsets, the CPU power
-/// overlay and the Curve Optimizer, and leaves the fans alone. That composition is written by hand in three
-/// places — startup, mode change, resume — and startup is the only one of the three a test can reach.
-/// <c>AppController.BackgroundPass</c> and <c>LightingCoordinator.OnResume</c> each need a desktop lifetime
-/// and a live refresh loop, which this suite does not have (<c>CpuPrimeTests</c> records that); a test that
-/// drove those two would be asserting its own copy of the schedule rather than the product's. They are
-/// therefore NOT characterised here, and the title of this file is narrow on purpose.
+/// overlay and the Curve Optimizer, and leaves the fans alone. That composition used to be written by hand in
+/// four places; since wave 2 the schedule lives in the domain (<c>ModeAxisTable.Schedule</c>), one operation
+/// executes it (<c>Application/HardwareReconciler</c>) and the sites name only the trigger. Startup is the only
+/// site this suite can drive end to end, so it is still the only one characterised here: the reconcile
+/// operation itself is covered — set, order, thread and throw behaviour — in <c>HardwareReconcilerTests</c>,
+/// while <c>AppController.BackgroundPass</c> and <c>LightingCoordinator.OnResume</c> need a desktop lifetime and
+/// a live refresh loop, which this suite does not have (<c>CpuPrimeTests</c> records that). A test that drove
+/// those two would be asserting its own copy of the schedule rather than the product's.
 ///
 /// THE NAMES SAY WHAT HAPPENS, NOT WHAT SHOULD. <c>StartupDoesNotTouchTheFans</c> is a fact about today, not a
 /// requirement. Whether a boot should also push the mode's fan preset is an open question — the fan axis

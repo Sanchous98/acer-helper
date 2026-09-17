@@ -546,16 +546,16 @@ internal sealed class AppController
             if (modeChanged)
             {
                 _lastModeKey = modeKey;
-                fan = _svc.ApplyModeFan();
-                gpu = _svc.ApplyModeGpuOc();       // re-apply this mode's GPU clock offsets
-                cpu = _svc.ApplyModeCpuPower();    // re-apply this mode's CPU power mode
-                // CPU undervolt: read the stored value here (a dictionary lookup) so the UI can reflect it on this
-                // pass, but APPLY it off-pass. The mailbox waits on the machine-wide PCI lock other tuning tools
-                // also take, so it can block for seconds — inline it would delay the Tick post (chip/tray/presets)
-                // and hold the single-flight guard behind it. Like the GPU offsets it is SMU state a power cycle
-                // clears, so it has to be re-applied on every switch.
-                co = _svc.CurrentCoDomains();
-                _ = Task.Run(() => { try { _svc.ApplyModeCo(); } catch { /* stays as it was */ } });
+                // The mode's axes come from ONE place — the domain's schedule, executed by the reconciler — which
+                // drives the fans, the GPU offsets and the CPU power overlay on THIS thread (a mode switch is the
+                // only trigger that touches the fans: ApplyModeFan is the one axis that takes _state while calling
+                // its port, and it does that inside LaptopService) and hands the Curve Optimizer to the pool. Its
+                // SMU mailbox waits on the machine-wide PCI lock other tuning tools also take, so inline it would
+                // delay the Tick post below (chip/tray/presets) and hold the single-flight guard behind it. What
+                // comes back is what this pass reflects in the UI — including the Curve Optimizer's stored
+                // domains, read here rather than from the deferred apply, which has no value on this thread.
+                var applied = _svc.Reconciler.Reapply(ReapplyTrigger.ModeChange);
+                fan = applied.Fan; gpu = applied.GpuOc; cpu = applied.CpuPower; co = applied.Co;
             }
             // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block
             // above won't fire) repaint the lighting on the UI pass (immediately, then a couple of retries).
@@ -587,7 +587,15 @@ internal sealed class AppController
                              modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights);
             Dispatcher.UIThread.Post(() => UiPass(t));
         }
-        catch { /* transient hardware error — next tick retries */ }
+        // A hardware throw aborts the WHOLE pass, not just the axis it came from: the reads above, the
+        // mode-change re-apply and the UI post are all inside this try. Swallowed because a stalled ACPI-EC is
+        // routine and the poll comes round again in 3 s — but the next pass does NOT retry what this one skipped,
+        // and the comment here used to say it did. _lastModeKey is latched at the top of the mode-change block,
+        // BEFORE any axis is applied, so a throw leaves the key recorded and the next pass computes
+        // modeChanged == false: the axis that never ran is never run, until some other event changes the mode
+        // again. Whether the axes SHOULD be retried is a question about hardware this machine cannot settle, so
+        // it is recorded as the owner's call rather than decided here — docs/domain-refactoring-plan.md §7.
+        catch { }
         finally
         {
             Interlocked.Exchange(ref _busy, 0);   // release even on throw, or every future tick wedges

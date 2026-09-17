@@ -43,11 +43,19 @@ public sealed partial class LaptopService : IDisposable
         this.device = device;
         this.store = store;
         this.lampArray = lampArray;
+        Reconciler = new HardwareReconciler(this);
         // Assigned in the body rather than as `Settings { get; } = store.Load()`. Field and property initializers
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
         // this class reads Settings, so loading it here rather than there is observably the same order.
         Settings = store.Load();
     }
+
+    /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this
+    /// class's own <see cref="ApplyStartupState"/>, <c>AppController</c>'s refresh pass and
+    /// <c>LightingCoordinator</c>'s resume handler. It holds no state of its own — it is one instance so that
+    /// there is one place that knows HOW to re-apply, not to share anything (see
+    /// <see cref="HardwareReconciler"/>).</summary>
+    internal HardwareReconciler Reconciler { get; }
 
     /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
@@ -128,11 +136,12 @@ public sealed partial class LaptopService : IDisposable
         // one NvAPI — so any other thread's _state acquirer waited behind all four).
         //
         // Hoisting the CALLS rather than their arguments is what makes this safe, and the distinction is the whole
-        // point: ApplyModeGpuOc and ApplyModeCpuPower re-read the current mode under their own _state acquisition,
-        // so moving them out of this outer lock cannot leave them applying a stale mode — it only shortens the
-        // hold. (Hoisting the *argument* of a hardware write is a different change and not safe in general: it
-        // lets a concurrent writer land first and be overwritten by the stale execution. That is why ApplyCustom
-        // and ApplyModeCpuPower's own cp.Set are left alone — see docs/open-decisions.md §3.)
+        // point: the mode axes re-read the current mode under their own _state acquisition (ApplyModeGpuOc takes
+        // one, ApplyModeCpuPower keeps its own), so moving them out of this outer lock cannot leave them applying
+        // a stale mode — it only shortens the hold. (Hoisting the *argument* of a hardware write is a different
+        // change and not safe in general: it lets a concurrent writer land first and be overwritten by the stale
+        // execution. That is why ApplyCustom and ApplyModeCpuPower's own cp.Set are left alone — see
+        // docs/open-decisions.md §3.)
         //
         // The ordering these four had relative to each other is preserved: they are still sequential on this
         // thread, and "clamshell takeover before the option rows read it" (its own comment below) still holds.
@@ -150,15 +159,18 @@ public sealed partial class LaptopService : IDisposable
 
         if (clamshell) device.Clamshell?.SetEnabled(true);
         if (bluelight > 0) device.DisplayTint?.Apply(bluelight);
-        ApplyModeGpuOc();     // GPU clock offsets reset to 0 on boot/driver-reload -> re-apply the current mode's
-        ApplyModeCpuPower();  // enforce the current profile's CPU power mode (if the user set one for it)
 
-        // Re-apply the current mode's CPU undervolt. Deliberately OUTSIDE the _state lock and off the caller's (UI)
-        // thread: unlike the GPU offsets above (a fast NvAPI call), an SMU mailbox transaction waits on the
-        // machine-wide PCI access lock that HWiNFO/Ryzen Master/RyzenAdj also take, so it can block for seconds —
-        // holding _state across it would stall the background refresh pass and, through it, the UI.
-        if (device.CurveOptimizer != null)
-            _ = Task.Run(() => { try { ApplyModeCo(); } catch { /* stays stock */ } });
+        // The volatile axes, from the one place that knows how to re-apply them: the GPU offsets (the driver
+        // zeroed them at boot) and the CPU power overlay are written on THIS thread, and the Curve Optimizer is
+        // handed to the pool, because its SMU mailbox transaction waits on a machine-wide PCI lock that other
+        // tuning tools also take and can block for seconds — holding _state (or the UI thread) across it would
+        // stall the background refresh pass and, through it, the UI. The schedule and the per-axis threads are
+        // the reconciler's; this site names only the moment.
+        //
+        // A throw from either synchronous axis escapes this method to its caller, which is the AppController
+        // constructor. That gap is old — it used to be the same two writes by hand — and it is recorded rather
+        // than closed: docs/domain-refactoring-plan.md §7 (see also §5, wave 2).
+        Reconciler.Reapply(ReapplyTrigger.Startup);
 
         // Bring the virtual LampArray back up if the user left it on. Off the caller's (UI) thread on purpose:
         // publishing it creates a PnP device node and waits for the driver to start — up to a few seconds on a
