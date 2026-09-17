@@ -26,9 +26,9 @@ namespace AcerHelper.Tests;
 /// THE CONTROL IN EVERY CASE. "Nothing changed" passes vacuously against a panel that never wrote, or a port that
 /// was never asked, so every negative assertion is paired with proof that the write really went out, that the
 /// register really would have reported the stale number, and that the event really was delivered. Delivery is
-/// counted through the injectable poster (see <see cref="Poster"/>) — the same seam the option rows take, and
-/// for the same measured reason: the real dispatcher is thread-affine and a bare xUnit process creates it from
-/// whichever thread first touches it, so a headless test cannot pump it (see <see cref="Eventually"/>).
+/// counted through the injectable poster (see <see cref="Eventually.Poster"/>) — the same seam the option rows
+/// take, and for the same measured reason: the real dispatcher is thread-affine and a bare xUnit process creates
+/// it from whichever thread first touches it, so a headless test cannot pump it (see <see cref="Eventually"/>).
 ///
 /// MUTATION-VERIFIED — each of these was run against this file, and each reddened the test named. The mutations
 /// are the six ways the rule can be broken, not six spellings of one:
@@ -82,7 +82,7 @@ public class LightingAdoptionTests
         var register = new StaleRegister(100);   // the register still holds the previous mode's brightness
         var written = new List<byte>();
         var saves = 0;
-        var poster = new Poster();               // the same seam AppController builds the section with (default:
+        var poster = new Eventually.Poster();    // the same seam AppController builds the section with (default:
                                                  // the real dispatcher) — without it a read-and-adopt restored on
                                                  // these paths would be invisible here, which is the whole mutation
         var zone = Zone(register, written);
@@ -130,7 +130,7 @@ public class LightingAdoptionTests
         var written = new List<byte>();
         var saves = 0;
         var state = new LightSettings { Brightness = 60, Configured = true };
-        var poster = new Poster();
+        var poster = new Eventually.Poster();
         var panel = Panel(state, written, register, () => saves++, poster.Post);
 
         // Controls: the panel is built from the hardware read rather than the stored 60, and that reading is what
@@ -161,7 +161,7 @@ public class LightingAdoptionTests
         var written = new List<byte>();
         var saves = 0;
         var state = new LightSettings { Brightness = 10 };   // Configured stays off
-        var poster = new Poster();
+        var poster = new Eventually.Poster();
         var panel = Panel(state, written, register, () => saves++, poster.Post);
 
         Assert.Empty(written);                   // Control: an unconfigured zone writes nothing at all
@@ -191,7 +191,7 @@ public class LightingAdoptionTests
         var written = new List<byte>();
         var saves = 0;
         var state = new LightSettings { Brightness = 60, Configured = true };
-        var poster = new Poster();
+        var poster = new Eventually.Poster();
         var panel = Panel(state, written, register, () => saves++, poster.Post);
 
         register.Value = 0;                      // the profile flash zeroes the register under a lit keyboard
@@ -218,7 +218,7 @@ public class LightingAdoptionTests
         var written = new List<byte>();
         var saves = 0;
         var state = new LightSettings { Brightness = 60, Configured = true };
-        var poster = new Poster();
+        var poster = new Eventually.Poster();
         var panel = Panel(state, written, register, () => saves++, poster.Post);
 
         panel.Brightness = 80;                   // the user drags the slider: the 120 ms debounce is now pending
@@ -248,10 +248,18 @@ public class LightingAdoptionTests
                lights, EnsureZone, save, followsProfile: false, _ => { }, post: post);
 
     /// <summary>Give an asynchronous read-and-adopt — the shape a restored poll has — its chance to land before a
-    /// NEGATIVE assertion is made. There is no completion signal for "nothing happened", so this window is bounded
-    /// by time; the house precedent is <c>LightingPrimeTests.ABacklightsPrime_DoesNotWrite_EvenWhenItChangesThe
-    /// Slider</c>, which waits the same way for the same reason. The event-path tests below need no window: their
-    /// adoption arrives through a counted poster, which is an event.</summary>
+    /// NEGATIVE assertion is made. The event-path tests below need no window: their adoption arrives through a
+    /// counted poster, which is an event.
+    ///
+    /// THIS ONE HAS NO SIGNAL TO WAIT FOR, AND THAT IS A GAP RATHER THAN A STYLE. The adoption is a
+    /// <c>Task.Run</c> with no join handle, and the only thing it ever produces is a post — which the CORRECT
+    /// code must never make, so there is nothing to wait for that is not also the failure. Unlike the prime in
+    /// <c>LightingPrimeTests.ABacklightsPrime_DoesNotWrite_EvenWhenItChangesTheSlider</c> (which is settled
+    /// through the counted poster) there is no serial worker here to ask for a draining read either. So this
+    /// window is bounded by time and can only ever be too short: it cannot make the test fail, because correct
+    /// code leaves nothing in flight, but a mutation that DOES leave a read in flight can slip past it on a busy
+    /// machine. Closing it needs a completion signal the production code does not have — reported, not papered
+    /// over with a longer wait.</summary>
     private static void Settle() => Thread.Sleep(50);
 
     /// <summary>Same contract as <c>LaptopService.EnsureLightZone</c>: the mode's per-zone entry, created on first
@@ -295,20 +303,6 @@ public class LightingAdoptionTests
         {
             Reads++;
             return Value;
-        }
-    }
-
-    /// <summary>The UI-thread marshaller, replaced by a direct call and COUNTING the deliveries. The count is what
-    /// makes a negative assertion decidable — "the adoption ran and was refused" is observable, where "the read
-    /// has not come back yet" would otherwise look identical.</summary>
-    private sealed class Poster
-    {
-        public int Delivered { get; private set; }
-
-        public void Post(Action action)
-        {
-            action();
-            Delivered++;
         }
     }
 }

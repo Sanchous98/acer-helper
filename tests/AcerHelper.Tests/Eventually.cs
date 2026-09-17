@@ -30,4 +30,22 @@ internal static class Eventually
     /// <summary>A synchronous poster: the UI-thread marshaller the rows use by default, replaced by a direct
     /// call so a test can observe the correction without a dispatcher at all.</summary>
     public static void Sync(Action action) => action();
+
+    /// <summary>A synchronous poster that also COUNTS what it delivered. Same seam as <see cref="Sync"/>, with
+    /// the count that makes a claim about a NON-event decidable: "the read was delivered and refused" is
+    /// observable, where "the read has not come back yet" and "no read was ever asked for" look identical from
+    /// the test thread. Pass <see cref="Post"/> as the row's or panel's <c>post</c> and wait on
+    /// <see cref="Delivered"/> with <see cref="Until"/> — a signal, not an elapsed-time budget.</summary>
+    internal sealed class Poster
+    {
+        /// <summary>How many actions have been delivered. Incremented AFTER the action runs, so a caller that
+        /// observes a count this high knows that much work has already happened.</summary>
+        public int Delivered { get; private set; }
+
+        public void Post(Action action)
+        {
+            action();
+            Delivered++;
+        }
+    }
 }

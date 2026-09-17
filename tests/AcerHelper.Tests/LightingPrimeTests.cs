@@ -87,13 +87,18 @@ public class LightingPrimeTests
     // ---------------------------------------------------------------- deferred: the plain backlight
 
     /// <summary>The backlight's level is a placeholder, and it is safe because a backlight's constructor writes
-    /// nothing: the value has nowhere to leak. `SyncFromHardware` then brings the real one off the UI thread.</summary>
+    /// nothing: the value has nowhere to leak. `SyncFromHardware` then brings the real one off the UI thread.
+    ///
+    /// The port's own <c>Set</c> is the apply delegate here, which is the shape the app wires it in
+    /// (<c>AppController.BuildUi</c> passes <c>lvl =&gt; _svc.SetKeyboardBrightness(lvl).ok</c> — the delegate
+    /// IS the device write). With the old <c>_ =&gt; true</c> stand-in, <c>SetCalls</c> was a list nothing
+    /// could ever add to, so "a prime never writes" was a claim no mutation could falsify.</summary>
     [Fact]
     public void ABacklightsLevel_IsAPlaceholder_ThePrimeReplaces()
     {
         var port = new FakeKeyboardBrightness { Level = 2 };
 
-        var vm = new BacklightViewModel(port, _ => true, Eventually.Sync);
+        var vm = new BacklightViewModel(port, l => port.Set(l), Eventually.Sync);
 
         Assert.Equal(0, vm.Level);                       // placeholder: what a failed read would give
         Assert.Equal(0, port.GetCount);                  // ...and the build cost no read at all
@@ -106,19 +111,39 @@ public class LightingPrimeTests
         Assert.Empty(port.SetCalls);                     // a prime reads; it must never write
     }
 
-    /// <summary>A backlight with nothing readable keeps its placeholder and stays quiet: the prime must not
-    /// throw, and the slider must not move.</summary>
+    /// <summary>The prime's read really does move the slider (0 -&gt; 1, the level the hardware reports), and
+    /// that must not make the slider's change look like a user edit and write the level straight back. The prime
+    /// reads; it never writes. The port's <c>Set</c> is the apply delegate (see
+    /// <see cref="ABacklightsLevel_IsAPlaceholder_ThePrimeReplaces"/>), so <c>SetCalls</c> is the app's real
+    /// write path and not a list nothing can add to.
+    ///
+    /// BOTH halves wait for a signal, because neither is decided by the clock. The correction is one delivery
+    /// through the counted poster: until it lands, the slider is still on its placeholder — which is what a
+    /// fixed sleep got wrong, measured, on a busy machine (this test failed on
+    /// <c>Assert.Equal(1, vm.Level)</c>, reading 0). And "the prime did not write" is a claim about a non-event:
+    /// see the draining read below.</summary>
     [Fact]
     public void ABacklightsPrime_DoesNotWrite_EvenWhenItChangesTheSlider()
     {
         var port = new FakeKeyboardBrightness { Level = 1 };
-        var vm = new BacklightViewModel(port, _ => true, Eventually.Sync);
+        var poster = new Eventually.Poster();
+        var vm = new BacklightViewModel(port, l => port.Set(l), poster.Post);
 
         vm.SyncFromHardware();
-        Thread.Sleep(50);
 
+        // The signal: the worker reads, then posts, and the post is this delivery. Wait for it rather than for
+        // 50 ms of wall clock — the read and its post are one unit apart, and that unit is the whole race.
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the prime's correction was never delivered");
         Assert.Equal(1, vm.Level);
         Assert.Equal(Loc.T("Dim"), vm.LevelName);
+
+        // The other half is a non-event, so it needs a signal of its own or it is decided by elapsed time. The
+        // control's worker is FIFO, so a write the snap-back had wrongly queued would run BEFORE whatever is
+        // queued next: ask the worker for one more read and wait for that read. By the time it lands, anything
+        // the prime queued has already run, and the answer is decided rather than hoped for.
+        vm.SyncFromHardware();
+        Assert.True(Eventually.Until(() => port.GetCount >= 2), "the follow-up read never ran");
+
         Assert.Empty(port.SetCalls);
     }
 
