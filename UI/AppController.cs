@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Diagnostics;
 using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;

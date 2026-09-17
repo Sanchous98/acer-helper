@@ -1,14 +1,21 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
-namespace AcerHelper.Application;
+namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>
-/// Application facade / use-case layer. The UI talks only to this and to the Domain model;
-/// this talks only to Domain feature ports (<see cref="IDevice"/>) and the settings store.
-/// All orchestration (profile cycling/toggling, persistence of changes) lives here, never in
-/// the UI or in Infrastructure.
+/// The hardware-facing service the UI talks to: it owns the connected device, the settings graph and the store
+/// that reads and writes it, and it talks to the Domain feature ports (<see cref="IDevice"/>) on the machine's
+/// behalf. All orchestration (profile cycling/toggling, persistence of changes) lives here, never in the UI.
+///
+/// IT IS INFRASTRUCTURE BY THE OWNER'S RULING, and the reason is worth keeping beside the class: the name says
+/// what it is — a service over hardware and the form settings are kept in, not a use case — and it is also what
+/// names the persisted container (FanPreset, CoPreset, …) and calls the store that builds it. What stays in
+/// Application is the PLAN of a re-apply (<c>Application/ReapplyPlan.cs</c>), which this class's
+/// <see cref="Reconciler"/> executes; the contracts Application declares and the UI names live in
+/// <c>Application/DynamicLighting.cs</c>.
 ///
 /// Split across partial files by feature, because one 814-line file was the only place this
 /// layer could be read. This part holds identity and the shared infrastructure every other

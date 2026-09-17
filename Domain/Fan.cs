@@ -8,7 +8,7 @@ namespace AcerHelper.Domain;
 /// which one is the CPU and which the GPU — that is a fact about a particular machine's layout, not about what
 /// a fan does — so nothing here names a position, a label or an index. The persisted container holds BOTH fans
 /// in one object (and that shape is a compatibility surface), so the mapping from its two halves to two of
-/// these lives with the layer that reads presets: Application/LaptopService.Fans.cs. That is also what keeps
+/// these lives with the layer that reads presets: Infrastructure/Composition/LaptopService.Fans.cs. That is also what keeps
 /// Domain from naming the stored schema at all.
 /// </summary>
 /// <param name="UseCurve">Drive this fan from <paramref name="Curve"/> rather than from
@@ -29,7 +29,7 @@ public readonly record struct FanSettings(bool UseCurve, int[] Curve, int FixedD
 ///
 /// WHAT IT DOES NOT KNOW. Which fan it is: there is no CPU/GPU flag, no half-of-a-preset selector and no
 /// constructor argument that picks one, because a fan is a fan — it answers for its own speed and nothing
-/// above it changes that. The caller decides the identity (Application/LaptopService.Fans.cs maps the preset's
+/// above it changes that. The caller decides the identity (Infrastructure/Composition/LaptopService.Fans.cs maps the preset's
 /// two halves onto two of these), and the fan it hands over is told only its own data.
 ///
 /// WHAT IT DOES NOT DECIDE. Whether a duty is written at all. The controller's deadband is decided for the PAIR

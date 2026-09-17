@@ -1,5 +1,6 @@
 using AcerHelper.Application;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;
 

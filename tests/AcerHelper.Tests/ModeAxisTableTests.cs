@@ -183,7 +183,7 @@ public class ModeAxisTableTests
     /// axes the platform forgets. Internal agreement rather than an observation: the observation is the test
     /// above (a boot) and <c>HardwareReconcilerTests</c> (a wake), which read a call log.
     ///
-    /// The schedule is <see cref="HardwareReconciler.Schedule"/> — Application, not the table — so this is a
+    /// The schedule is <see cref="ReapplyPlan.Schedule"/> — Application, not the table — so this is a
     /// cross-layer agreement test by construction: the domain states which axes are volatile, the layer that
     /// drives them states the order, and the two are compared here rather than in either one's own file.</summary>
     [Fact]
@@ -191,10 +191,10 @@ public class ModeAxisTableTests
     {
         var volatileAxes = ModeAxisTable.All.Where(ModeAxisTable.IsVolatile).ToArray();
 
-        Assert.Equal(volatileAxes, HardwareReconciler.Schedule(ReapplyTrigger.Startup));
+        Assert.Equal(volatileAxes, ReapplyPlan.Schedule(ReapplyTrigger.Startup));
         // A wake drives the same set and adds the lighting, which the firmware drops over suspend and the UI puts
         // back — first, because that repaint happens before the hardware re-assert rather than after it.
-        Assert.Equal([ModeAxis.Lights, .. volatileAxes], HardwareReconciler.Schedule(ReapplyTrigger.Resume));
+        Assert.Equal([ModeAxis.Lights, .. volatileAxes], ReapplyPlan.Schedule(ReapplyTrigger.Resume));
     }
 
     /// <summary>Which layer owns each axis's re-apply. Lighting is the one that is not a hardware concern.</summary>

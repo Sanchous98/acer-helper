@@ -1,7 +1,7 @@
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
-namespace AcerHelper.Application;
+namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>Builds the generic <see cref="OptionToggle"/>/<see cref="OptionChoice"/> models from whatever
 /// hardware the device exposes, wrapping each setter so failures are reported via <paramref name="notify"/>
@@ -17,7 +17,7 @@ namespace AcerHelper.Application;
 /// gets a row rather than silence.
 ///
 /// <paramref name="post"/> is a parameter rather than a direct <c>Dispatcher.UIThread.Post</c> call so this
-/// file — the last one that would have kept the Application layer Avalonia-bound — needs no toolkit at all.
+/// file — the one that would have kept the layer it used to live in Avalonia-bound — needs no toolkit at all.
 /// It also makes <see cref="RunSet"/>'s failure path testable: its only observable effect is what it hands
 /// to that delegate, which a test can capture without a UI thread.</summary>
 internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration,

@@ -1,8 +1,9 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
-namespace AcerHelper.Application;
+namespace AcerHelper.Infrastructure.Composition;
 
 public sealed partial class LaptopService
 {

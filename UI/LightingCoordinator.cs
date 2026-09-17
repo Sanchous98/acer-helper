@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 using AcerHelper.UI.ViewModels;
 

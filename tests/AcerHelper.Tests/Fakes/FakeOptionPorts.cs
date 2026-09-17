@@ -149,7 +149,8 @@ public sealed class FakeDisplayTint(int levels = 5) : IDisplayTint
 /// still reported instead of escaping the row.
 ///
 /// WHAT IT DOES NOT DO, corrected by measurement: it does not reach <c>OptionsAssembler.RunSet</c>'s own
-/// <c>catch</c>. <c>Attempt</c> absorbs the throw one layer below (Application/LaptopService.cs:92-97), reached
+/// <c>catch</c>. <c>Attempt</c> absorbs the throw one layer below (Infrastructure/Composition/LaptopService.cs),
+/// reached
 /// through <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>Attempt(() =&gt; pp.Set(…))</c>, and the same is
 /// true of the flag and choice ports. The reason is visible in the message rather than in the trace:
 /// <c>RunSet</c>'s catch discards the reason, and a message that carries one therefore did not come from it.

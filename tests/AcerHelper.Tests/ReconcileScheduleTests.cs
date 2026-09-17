@@ -13,8 +13,8 @@ namespace AcerHelper.Tests;
 /// What no test pinned is the COMPOSITION at startup: the boot path drives the GPU offsets, the CPU power
 /// overlay and the Curve Optimizer, and leaves the fans alone. That composition used to be written by hand in
 /// four places; since wave 2 the schedule lives in the operation's own layer
-/// (<c>Application/HardwareReconciler.Schedule</c>), one operation
-/// executes it (<c>Application/HardwareReconciler</c>) and the sites name only the trigger. Startup is the only
+/// (<c>Application/ReapplyPlan.Schedule</c>), one operation
+/// executes it (<c>Infrastructure/Composition/HardwareReconciler</c>) and the sites name only the trigger. Startup is the only
 /// site this suite can drive end to end, so it is still the only one characterised here: the reconcile
 /// operation itself is covered — set, order, thread and throw behaviour — in <c>HardwareReconcilerTests</c>,
 /// while <c>AppController.BackgroundPass</c> and <c>LightingCoordinator.OnResume</c> need a desktop lifetime and

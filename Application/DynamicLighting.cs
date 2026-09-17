@@ -2,13 +2,19 @@ using AcerHelper.Domain;
 
 namespace AcerHelper.Application;
 
-// Application's side of the one seam where the app publishes a virtual lighting device. The implementation is
-// the LampArray bridge (Infrastructure/Lighting/LampArrayBridge.cs): it opens the OS channel, runs the worker
-// that turns host lamp frames into zone writes, and arbitrates who owns the backlight. Application needs two
-// things from it — switching it on and off, and knowing when to yield — so that is all these contracts
-// declare. They are the reason `LaptopService` names no Infrastructure type: without them the constructor's
-// transport parameter and the `LampArray` property would both point Application upward, at the layer that is
-// supposed to depend on it and not the other way round.
+// The contract for the one seam where the app publishes a virtual lighting device — the half of the owner's
+// layering that lives here: Application declares what Infrastructure implements. The implementation is the
+// LampArray bridge (Infrastructure/Lighting/LampArrayBridge.cs): it opens the OS channel, runs the worker that
+// turns host lamp frames into zone writes, and arbitrates who owns the backlight. The two consumers need two
+// things from it — switching it on and off, and knowing when to yield — so that is all these contracts declare.
+//
+// WHAT THEY BUY, today. They keep the service naming `IDynamicLighting` rather than the bridge, so the OS
+// choice and the driver probe stay in composition (DeviceFactory.CreateDynamicLightingFactory), and the UI
+// paints against the same narrow surface. The reason they were introduced was stronger and is now spent: while
+// this service sat in Application, naming the bridge would have made Application depend on the layer it
+// orchestrates. That is no longer the arrangement — the service is Infrastructure too — so the seam is now a
+// boundary WITHIN Infrastructure, kept because a narrow contract over a 300-line worker is still the cheaper
+// thing to write against, not because a rule demands it.
 
 /// <summary>The virtual lighting surface this application publishes so an OS or a third-party app can paint the
 /// machine's backlight (Windows Dynamic Lighting, any LampArray-aware app — see docs/lamparray.md). The LampArray

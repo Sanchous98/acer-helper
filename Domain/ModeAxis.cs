@@ -53,7 +53,7 @@ public enum ReassertOwner
 /// to talk to a port. What it holds is what the platform does to an axis and what an absent preset means for it —
 /// WHICH axes are volatile, WHAT to do with one the mode has no preset for, and WHO re-asserts it. The ORDER the
 /// operation drives them in is a plan of action, so it lives with the operation:
-/// <c>Application/HardwareReconciler.Schedule</c> builds each trigger's list from <see cref="All"/> and
+/// <c>Application/ReapplyPlan.Schedule</c> builds each trigger's list from <see cref="All"/> and
 /// <see cref="IsVolatile"/> here, and is the only place that executes it. Until that reconciler existed this
 /// table was read by NOTHING but the test beside it, which is the drift it was written to prevent.
 /// </summary>
@@ -93,7 +93,7 @@ public static class ModeAxisTable
     /// <summary>Whether the platform forgets this axis, so the app must re-assert it after a reboot, a resume
     /// (the dGPU power-cycles and comes back at zero offset) or a driver reload. This is also the SELECTOR for
     /// two triggers' schedules — a boot and a wake drive exactly this set (see
-    /// <c>Application/HardwareReconciler.Schedule</c>).
+    /// <c>Application/ReapplyPlan.Schedule</c>).
     ///
     /// The fans are deliberately NOT here: the EC latches the fan mode, so it survives sleep and reboot and
     /// there is nothing to put back. The lighting axis is absent for a different reason — it IS forgotten, but

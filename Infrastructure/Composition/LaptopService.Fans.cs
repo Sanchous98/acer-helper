@@ -2,7 +2,7 @@ using System.Threading;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
-namespace AcerHelper.Application;
+namespace AcerHelper.Infrastructure.Composition;
 
 public sealed partial class LaptopService
 {
@@ -44,8 +44,9 @@ public sealed partial class LaptopService
     /// FAN'S IDENTITY IS DECIDED: the schema keeps both fans in one object and its halves are named Cpu and
     /// Gpu, so "this one is the GPU fan" is a fact this layer establishes and the domain models are never told
     /// — Domain/Fan.cs has no CPU/GPU flag to set. It is also the ONLY place the frozen field layout is read,
-    /// so a reader of the other half cannot be mistaken for this one, and it is the seam that lets the stored
-    /// container move to Infrastructure without touching Domain.
+    /// so a reader of the other half cannot be mistaken for this one; it was the seam that let the stored
+    /// container move to Infrastructure without touching Domain, and it is what keeps Domain naming no stored
+    /// shape now that the container sits beside this file.
     ///
     /// The curve array is passed through verbatim: SetFanCurve stores whatever the UI hands it, with no length
     /// validation, and Fan is the thing that tolerates a null, short or over-long one. Caller holds _state or

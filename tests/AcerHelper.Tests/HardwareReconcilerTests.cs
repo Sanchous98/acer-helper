@@ -129,7 +129,7 @@ public class HardwareReconcilerTests
             a.F.Service.Reconciler.Reapply(trigger);
 
             a.Log.WaitFor(ModeAxis.Co);
-            var scheduled = HardwareReconciler.Schedule(trigger)
+            var scheduled = ReapplyPlan.Schedule(trigger)
                 .Where(axis => ModeAxisTable.Owner(axis) == ReassertOwner.Hardware)
                 .ToArray();
             Assert.Equal(scheduled, a.Log.Axes);
