@@ -146,7 +146,18 @@ back.
 | lid shut in clamshell mode | blanking still wins — a hidden keyboard stays dark whoever owns it |
 
 The Lighting panel's controls are **not** disabled while a host owns the surface (they would need a
-rebuild-time flag); a value changed there is simply overwritten within ~100 ms. The status line is the signal.
+rebuild-time flag); a value changed there is overwritten by the host's next frame — **but only if that frame
+differs from the one before it**. The bridge's dedupe (`LampArrayBridge.Paint`/`Unchanged`, ±5 per channel)
+compares each incoming frame against `_written`, the mirror of what was last written, and a panel's apply goes
+straight to the zone without touching that mirror: so against a STATIC host frame — the common case, a solid
+colour — the host's re-sends look unchanged, are skipped, and the app's value stays on the keyboard. That
+window is a defect, recorded here rather than described as behaviour; it is the same mechanism that made the
+drawer's re-apply on open visible, and the open is now gated on ownership (`LightingViewModel.Reapply`). The
+status line is the signal that a host is in charge.
+
+**The open of the Lighting drawer is gated; the controls in it are not.** Opening it re-applies the app's own
+lighting *except* while a host owns the surface, when it writes nothing at all — that path does not go through
+`LightingCoordinator.Paint`, so it has its own check rather than inheriting that one.
 
 ## Limitations
 

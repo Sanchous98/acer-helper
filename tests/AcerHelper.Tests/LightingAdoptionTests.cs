@@ -59,11 +59,13 @@ namespace AcerHelper.Tests;
 /// and the event path behave as the rule requires. The call-site change itself — the poller's removal from
 /// <c>UiPass</c> — is covered by nothing in this suite.
 ///
-/// One consequence of the wave is outside this file and is named rather than left implicit: opening the Lighting
-/// drawer on a device whose only control is the PLAIN backlight now does nothing at all (the drawer path re-applies
-/// RGB panels, and a backlight has no stored value to push), where it used to re-read the level. That slider is
-/// primed at startup and on a rebuild, and re-read on an input event — both pinned in <c>LightingPrimeTests</c> —
-/// but the drawer command itself is not exercised anywhere, here or there.
+/// One consequence of the wave was outside this file and is named rather than left implicit: opening the Lighting
+/// drawer on a device whose only control is the PLAIN backlight does nothing at all for that control (the drawer
+/// path re-applies RGB panels, and a backlight has no stored value to push), where it used to re-read the level.
+/// That slider is primed at startup and on a rebuild, and re-read on an input event — both pinned in
+/// <c>LightingPrimeTests</c>. The drawer command itself is exercised by <c>LightingDrawerTests</c>, which also
+/// pins the open's other duty (it must not paint while a host owns the surface), and is not reached from this
+/// file.
 /// </summary>
 public class LightingAdoptionTests
 {

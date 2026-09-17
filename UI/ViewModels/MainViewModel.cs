@@ -153,7 +153,10 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenLighting()
     {
-        _lighting?.Reapply();   // doubt moment: push our value at the device, do NOT ask the wire what it holds
+        // The doubt moment at the composite level, and the whole rule lives in the method it calls: re-apply OUR
+        // lighting rather than ask the wire what it holds, yield to a host that owns the surface, and settle the
+        // plain backlight (the one control here with no stored value to push) by reading it.
+        _lighting?.Reapply();
         OpenDrawer(Loc.T("Lighting"), _lighting);
     }
 

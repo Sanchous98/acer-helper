@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
@@ -36,6 +37,9 @@ public sealed partial class LightingViewModel : ObservableObject
     // must be serialized with it (see LaptopService.EnsureLightZone).
     private readonly Func<Dictionary<string, LightSettings>, string, LightSettings> _ensureZone;
     private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
+    // The virtual lighting surface the app publishes for a host (Windows Dynamic Lighting / any LampArray app),
+    // or null where this machine has none. Read only for its ownership flag — see Reapply.
+    private readonly IDynamicLighting? _host;
     private Dictionary<string, LightSettings> _lights;   // current performance mode's per-zone state (swapped by Reload)
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
@@ -56,18 +60,25 @@ public sealed partial class LightingViewModel : ObservableObject
     /// <c>OptionsViewModel.TryCreate(device, o, post)</c>: the real dispatcher is thread-affine in a bare xUnit
     /// process, so a headless test cannot pump it (see <c>Eventually</c>). Without the seam the wave's rule could
     /// not be tested where the app actually calls it: a read that is not an event must leave state alone, and a
-    /// "nothing changed" assertion against a post that never runs proves nothing.</summary>
+    /// "nothing changed" assertion against a post that never runs proves nothing.
+    ///
+    /// <paramref name="host"/> is the virtual lighting surface a host may be holding (AppController passes
+    /// <c>LaptopService.LampArray</c>; null where this machine publishes none). This section reads it for its
+    /// ownership flag and never drives it: while a host owns the surface the panels must not paint, and the
+    /// re-assertion of the host's frame belongs to <c>LightingCoordinator</c>, which is the only caller that
+    /// has to hand because something clobbered it.</summary>
     public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights,
                              Func<Dictionary<string, LightSettings>, string, LightSettings> ensureZone, Action save,
                              bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null,
-                             Action<Action>? post = null)
+                             Action<Action>? post = null, IDynamicLighting? host = null)
     {
         _lights = lights;
         _ensureZone = ensureZone;
         _save = save;
         _saveFollowsProfile = saveFollowsProfile;
         _post = post;
+        _host = host;
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
@@ -129,12 +140,21 @@ public sealed partial class LightingViewModel : ObservableObject
 
     /// <summary>The doubt moment (the drawer opening, a mode change, a resume): push OUR stored value at the
     /// device rather than asking the device what it holds. Re-applying is idempotent and cannot be wrong; reading
-    /// can, because the write we just sent may not have landed yet. The plain backlight is not in here: it exists
-    /// only on a device with no RGB zones, it has no stored value to push, and it is settled by <see cref="Prime"/>
-    /// at startup and re-read by <see cref="AdoptFromInput"/> on an event — so opening the drawer leaves its
-    /// slider exactly as it is.</summary>
+    /// can, because the write we just sent may not have landed yet.
+    ///
+    /// A HOST OWNS THE SURFACE (Windows Dynamic Lighting / a LampArray app) and nothing is written at all. The
+    /// panels write STRAIGHT to the zones — this method does not go through <c>LightingCoordinator.Paint</c>,
+    /// which is where every other painting path yields to the host — so an ungated re-apply would land the app's
+    /// frame on a surface the host owns, and would land it out of band: the bridge's dedupe mirror
+    /// (<c>LampArrayBridge._written</c>) is not told about it, so the host's next frame of the SAME colours is
+    /// judged unchanged and skipped, and the app's colour stays on the keyboard until the host's frame moves by
+    /// more than its colour epsilon. Nothing is lost by yielding: the stored value is what
+    /// <c>LightingCoordinator.OnHostOwnerChanged</c> paints the moment the host lets go. The host's own frame is
+    /// deliberately NOT re-asserted here — opening a drawer clobbers nothing, and the callers that do need a
+    /// re-assertion are the ones <c>Paint</c> already serves.</summary>
     public void Reapply()
     {
+        if (_host is { HostOwnsLighting: true }) return;
         foreach (var panel in Panels) panel.Reapply();
     }
 
