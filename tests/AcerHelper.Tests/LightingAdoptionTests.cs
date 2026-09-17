@@ -231,7 +231,57 @@ public class LightingAdoptionTests
         Assert.Equal(0, saves);
     }
 
+    // ---------------------------------------------------------------- the follow switch
+
+    /// <summary>
+    /// The follow-flip handler (<c>LightingViewModel.OnFollowsProfileChanged</c>), which nothing exercised
+    /// before this test: the delegate the <c>Lighting</c> helper below passes for it is <c>_ =&gt; { }</c>, so
+    /// dropping the persist, or transposing the two branches that add and remove a panel, was invisible to the
+    /// whole suite.
+    ///
+    /// WHAT THE HANDLER OWES, and both halves are asserted because they fail independently. Flipping the switch
+    /// OFF takes the follow-capable zone over from the firmware: a panel is built for it — from the current
+    /// mode's stored state, through the same <c>BuildPanel</c> the constructor uses — so the user can drive it.
+    /// Flipping it back ON hands the zone back, and the panel goes away so the app stops sending it anything
+    /// while the firmware's per-profile palette shows. Either way the choice is PERSISTED through the
+    /// follow-save delegate, which is the half that had no witness.
+    ///
+    /// MUTATION-VERIFIED, each named: dropping <c>_saveFollowsProfile(value)</c> reddens the two flip
+    /// assertions; transposing the branches inside <c>OnFollowsProfileChanged</c> (so ON builds a panel and OFF
+    /// removes it) reddens the two panel assertions. The zone is arranged as a lightbar is
+    /// (<c>canFollowProfile: true</c>), and the switch is only offered at all when such a zone exists
+    /// (<c>ShowFollowsProfile</c>) — asserted first, so the test cannot pass by having nothing to flip.
+    /// </summary>
+    [Fact]
+    public void FlippingTheFollowSwitch_HandsTheZoneBackAndForth_AndPersistsTheChoice()
+    {
+        var flips = new List<bool>();
+        var lights = new Dictionary<string, LightSettings>();
+        var vm = new LightingViewModel(new RgbDevice(new FakeRgbController { Zones = [FollowZone()] }),
+                                       lights, EnsureZone, save: () => { }, followsProfile: true,
+                                       saveFollowsProfile: flips.Add);
+
+        Assert.True(vm.ShowFollowsProfile);
+        Assert.Empty(vm.Panels);              // Control: while following, the firmware owns the zone — no panel
+
+        vm.FollowsProfile = false;            // the user takes it over
+        Assert.Equal("Lightbar", Assert.Single(vm.Panels).Title);   // a panel for THAT zone, and only it
+        Assert.Equal([false], flips);
+
+        vm.FollowsProfile = true;             // ...and hands it back to the firmware
+        Assert.Empty(vm.Panels);
+        Assert.Equal([false, true], flips);
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /// <summary>A lightbar: the one zone shape the follow switch exists for (<c>canFollowProfile: true</c>),
+    /// with the single "Static" effect the other helpers use and no brightness read — this test never reads it,
+    /// and the zone writes nothing on its own while the mode it is bound to has no stored state to apply.</summary>
+    private static RgbZone FollowZone()
+        => new("Lightbar", 1, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
+               (_, _, _, _, _) => true,
+               canFollowProfile: true);
 
     /// <summary>A per-mode zone store: the current mode's per-zone state, keyed by the panel's title. One dict per
     /// mode is exactly what <c>LaptopService.LightsForCurrentMode</c> hands the view-model, and

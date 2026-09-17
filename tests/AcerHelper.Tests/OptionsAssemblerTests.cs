@@ -84,19 +84,32 @@ public class OptionsAssemblerFailureTests
     /// <summary>...and a STALE <c>LastError</c> left over from an earlier failure must not resurrect the
     /// message: the branch is on the write's outcome, not on the error text. The port's <c>LastError</c> is
     /// a property of the PORT, not of the write (Domain/Ports.cs's <c>IFlagPort.LastError</c>), so it can be
-    /// non-null while the current write is perfectly fine.</summary>
+    /// non-null while the current write is perfectly fine.
+    ///
+    /// THE STALE ERROR HAS TO SIT ON THE PORT THE SECOND WRITE REACHES, or the test does not arrange the
+    /// scenario it names. It used to declare a FRESH, clean port for that second write — a port whose
+    /// <c>LastError</c> is null — so the stale error it describes was never in play and the assertion held for
+    /// a reason the name did not mention (measured: under a mutation that branches on the error text, that form
+    /// stayed green and this one reddens). The SAME port now carries the failure into the success: its
+    /// <c>SetResult</c> is flipped while <c>LastError</c> is left exactly as the refusal left it.
+    ///
+    /// The second <c>SetCalls</c> assertion is the control: "no second notification" would also hold for a
+    /// click whose write never happened.</summary>
     [Fact]
     public void ASuccessfulSet_AfterAFailure_DoesNotNotifyAgain()
     {
         var h = new OptionsAssemblerHarness();
-        h.F.Device.Declare(Keys.FnLock, new FakeFlagPort { SetResult = false, LastError = "old news" });
+        var fn = new FakeFlagPort { SetResult = false, LastError = "old news" };
+        h.F.Device.Declare(Keys.FnLock, fn);
         AssemblerRows.Toggle(h, "Fn lock").OnChange(true);
-        Assert.Single(h.RunPosted());
+        Assert.Single(h.Posted);                                // the refusal reported...
 
-        h.F.Device.Declare(Keys.Lcd, new FakeFlagPort());       // succeeds
-        AssemblerRows.Toggle(h, "LCD overdrive").OnChange(true);
+        fn.SetResult = true;                                    // ...and the SAME port now takes the write,
+        AssemblerRows.Toggle(h, "Fn lock").OnChange(true);      // with "old news" still sitting on it
 
-        Assert.Single(h.Posted);                                // still only the one from the Fn-lock failure
+        Assert.Equal([true, true], fn.SetCalls);                // Control: the second write really went out
+        Assert.Equal("Fn lock failed: old news",                // and only the FIRST failure spoke
+                     Assert.Single(h.RunPosted()));
     }
 
     /// <summary>PINNED BEHAVIOUR: a transport whose <c>Set</c> THROWS is a failed write, not a crashed row. This

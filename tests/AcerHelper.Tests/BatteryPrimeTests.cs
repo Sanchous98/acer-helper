@@ -225,7 +225,19 @@ public class BatteryPrimeTests
     }
 
     /// <summary>Absent ports are unchanged: no port, no row, and priming a section with nothing to settle is a
-    /// no-op rather than a throw.</summary>
+    /// no-op rather than a throw.
+    ///
+    /// THE NO-OP IS NOW ASSERTED RATHER THAN PERFORMED. It used to end in a bare <c>vm.Prime();</c> — a
+    /// statement of the claim the name makes, with nothing that reads as a check of it. <c>Prime</c> reaches
+    /// each row through a null-conditional (<c>BatteryViewModel.Prime</c>), so "the section has nothing to
+    /// settle" means exactly this: the call runs to completion on a section whose three rows are all null.
+    /// MUTATION-VERIFIED, and named: replacing those <c>?.</c> with <c>!</c> reddens this test, the
+    /// NullReferenceException escaping <c>Prime</c> instead of the section shrugging.
+    ///
+    /// What this canNOT be is a count. A section with no rows has no port to read, no row to move and nothing
+    /// to post, so there is no second observable for a no-op to be measured against — the absence of rows
+    /// asserted above is the whole of the arrangement. That is why the assertion is a non-throw and not, say,
+    /// a read counter the way the row-level no-op test in <c>OptionsPrimeTests</c> has one.</summary>
     [Fact]
     public void WithNoBatteryPorts_ThereAreNoRows_AndPrimingIsANoOp()
     {
@@ -238,7 +250,10 @@ public class BatteryPrimeTests
         Assert.False(vm.ShowCalibration);
         Assert.False(vm.ShowMode);
 
-        vm.Prime();
+        Assert.Null(Record.Exception(vm.Prime));   // nothing to settle -> nothing throws, and nothing moves
+        Assert.Null(vm.Limit);                     // ...and the prime created no row to settle either
+        Assert.Null(vm.Calibration);
+        Assert.Null(vm.Mode);
     }
 
     // ---------------------------------------------------------------- helpers
