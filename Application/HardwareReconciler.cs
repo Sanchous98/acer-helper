@@ -34,8 +34,8 @@ internal sealed class HardwareReconciler
 
     internal HardwareReconciler(LaptopService service) => _svc = service;
 
-    /// <summary>Re-apply every axis <paramref name="trigger"/> schedules, in the order the domain states them,
-    /// and return the values the calling site's UI pass reflects.
+    /// <summary>Re-apply every axis <paramref name="trigger"/> schedules, in the order <see cref="Schedule"/>
+    /// states them, and return the values the calling site's UI pass reflects.
     ///
     /// Callers and what they discard: the mode-change site consumes the outcome (it feeds the view-models on its
     /// UI pass), the startup and resume sites discard it.</summary>
@@ -44,7 +44,7 @@ internal sealed class HardwareReconciler
         var outcome = new ReapplyOutcome();
         List<ModeAxis>? deferred = null;
 
-        foreach (var axis in ModeAxisTable.Schedule(trigger))
+        foreach (var axis in Schedule(trigger))
         {
             if (ModeAxisTable.Owner(axis) != ReassertOwner.Hardware) continue;
 
@@ -76,6 +76,34 @@ internal sealed class HardwareReconciler
 
         return outcome;
     }
+
+    /// <summary>The axes a trigger drives, in the order it drives them — including the ones a layer above owns,
+    /// because WHICH layer drives an axis is <see cref="ModeAxisTable.Owner"/> and stating it twice is how the two
+    /// facts drift apart. The executing layer skips what is not its own.
+    ///
+    /// WHY THIS IS HERE AND NOT ON THE TABLE IN <c>Domain/</c>. A set of actions is a use case, and a use case is
+    /// Application — that is the owner's rule, and the schedule is the plan of action this class executes. The
+    /// TABLE keeps the facts about the problem, which are the domain's: which axes carry a preset, what an absent
+    /// one means for each (<see cref="ModeAxisTable.Policy"/>, <see cref="ModeAxisTable.PolicyWhenNoModeWasEverConfigured"/>),
+    /// which the platform forgets (<see cref="ModeAxisTable.IsVolatile"/>) and who re-asserts it
+    /// (<see cref="ModeAxisTable.Owner"/>). This method is a reader of those, not a second copy: the lists below
+    /// are BUILT from <see cref="ModeAxisTable.All"/> and <see cref="ModeAxisTable.IsVolatile"/> rather than
+    /// written out a third time. A hand-written copy of the volatility set is the disease the table exists to
+    /// cure, and it had already been written twice (the prose blocks it replaced, and the sites' own axis lists).
+    ///
+    /// Boot and wake drive exactly the volatile set, in <see cref="ModeAxisTable.All"/> order — that is what
+    /// <see cref="ModeAxisTable.IsVolatile"/> means ("the app must re-assert it after a reboot, a resume or a
+    /// driver reload"), so spelling the list out could only be a chance to disagree with it. A mode switch drives
+    /// every axis, which is why <see cref="ModeAxisTable.All"/> is documented as the order a mode switch applies
+    /// them. On a wake the lighting axis comes FIRST and on a mode switch LAST: the wake path repaints before it
+    /// re-asserts the hardware, and the mode-switch path repaints after it.</summary>
+    internal static IReadOnlyList<ModeAxis> Schedule(ReapplyTrigger trigger) => trigger switch
+    {
+        ReapplyTrigger.Startup => [.. ModeAxisTable.All.Where(ModeAxisTable.IsVolatile)],
+        ReapplyTrigger.ModeChange => ModeAxisTable.All,
+        ReapplyTrigger.Resume => [ModeAxis.Lights, .. ModeAxisTable.All.Where(ModeAxisTable.IsVolatile)],
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "a new ReapplyTrigger needs a schedule here"),
+    };
 
     /// <summary>Drive one axis against its port, and (for the three axes that have one) report the value the UI
     /// should show for it. The return value is always discarded — the arms write into the outcome, and a switch
@@ -119,6 +147,31 @@ internal sealed class HardwareReconciler
     /// transaction. Doing it for a caller that throws the answer away would be a new hardware read on the UI
     /// thread at every boot, not a free no-op.</summary>
     private static bool Reflects(ReapplyTrigger trigger) => trigger == ReapplyTrigger.ModeChange;
+}
+
+/// <summary>What asks for volatile state to be put back. These are the three moments
+/// <c>docs/state-and-events.md</c> calls a re-apply rather than a read — a boot, a mode switch and a wake — and
+/// each drives a different set of axes. A trigger is therefore a fact about the SCHEDULE, not about any one axis:
+/// "which axes are volatile" is <see cref="ModeAxisTable.IsVolatile"/>, "what puts them back" is
+/// <see cref="HardwareReconciler.Schedule"/>.
+///
+/// It lives beside the schedule rather than with the axes because a set of actions is a use case: the axes and
+/// their policies are the domain's facts, and which ones a given moment drives is this layer's plan of action.</summary>
+public enum ReapplyTrigger
+{
+    /// <summary>The app has just started: the driver has zeroed the GPU offsets, the SMU holds stock and the OS
+    /// power overlay is the firmware's. The EC has NOT forgotten the fan mode, so that axis is not in this
+    /// trigger's schedule.</summary>
+    Startup,
+
+    /// <summary>The performance mode changed — a pick, the Turbo key, or a power-source restore. Every axis
+    /// takes the new mode's preset, absent or not: that is what stops a mode inheriting the previous one's
+    /// settings.</summary>
+    ModeChange,
+
+    /// <summary>Wake from sleep or hibernation. The same volatile set as a boot (the dGPU power-cycles and comes
+    /// back at zero offset) plus the lighting, which the EC drops over suspend.</summary>
+    Resume,
 }
 
 /// <summary>What a re-apply left for the calling site's UI pass to show: one member per axis that can report a

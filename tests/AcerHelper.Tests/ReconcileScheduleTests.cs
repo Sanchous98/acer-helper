@@ -12,7 +12,8 @@ namespace AcerHelper.Tests;
 /// WHY THIS IS NOT ALREADY COVERED. <c>LaptopServicePresetTests</c> pins each <c>ApplyMode*</c> on its own.
 /// What no test pinned is the COMPOSITION at startup: the boot path drives the GPU offsets, the CPU power
 /// overlay and the Curve Optimizer, and leaves the fans alone. That composition used to be written by hand in
-/// four places; since wave 2 the schedule lives in the domain (<c>ModeAxisTable.Schedule</c>), one operation
+/// four places; since wave 2 the schedule lives in the operation's own layer
+/// (<c>Application/HardwareReconciler.Schedule</c>), one operation
 /// executes it (<c>Application/HardwareReconciler</c>) and the sites name only the trigger. Startup is the only
 /// site this suite can drive end to end, so it is still the only one characterised here: the reconcile
 /// operation itself is covered — set, order, thread and throw behaviour — in <c>HardwareReconcilerTests</c>,

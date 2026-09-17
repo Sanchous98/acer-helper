@@ -114,8 +114,8 @@ public class HardwareReconcilerTests
         Assert.Equal(0, a.Rgb.BlankCalls);
     }
 
-    /// <summary>The schedule the reconciler executes is the domain's, and for a mode switch it is every axis:
-    /// this is the cross-check between "what the ports saw" above and "what the table says". The two are separate
+    /// <summary>The schedule the reconciler executes is its own, and for a mode switch it is every axis: this is
+    /// the cross-check between "what the ports saw" above and "what the schedule says". The two are separate
     /// facts — a mode switch could drive three axes with a five-axis schedule and nothing would notice.</summary>
     [Fact]
     public void EveryTriggerDrivesExactlyTheHardwareAxesItsScheduleNames()
@@ -127,7 +127,7 @@ public class HardwareReconcilerTests
             a.F.Service.Reconciler.Reapply(trigger);
 
             a.Log.WaitFor(ModeAxis.Co);
-            var scheduled = ModeAxisTable.Schedule(trigger)
+            var scheduled = HardwareReconciler.Schedule(trigger)
                 .Where(axis => ModeAxisTable.Owner(axis) == ReassertOwner.Hardware)
                 .ToArray();
             Assert.Equal(scheduled, a.Log.Axes);
