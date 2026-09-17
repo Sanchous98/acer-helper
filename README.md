@@ -48,14 +48,15 @@ One project, organised by layer; **namespaces match the directories** (`AcerHelp
 
 - **`Domain/`** (`AcerHelper.Domain`) — the vendor- and OS-agnostic core: model
   (`PerformanceProfile`, `FanMode`, `SensorSnapshot`, `HotkeyAction`, …) and one fine-grained
-  *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `ILcdOverdrive`,
-  `IUsbCharging`, `IKeyboardBacklight`, `ILighting`, `IHotkeys`,
+  *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `ILighting`, `IHotkeys`,
   `IDisplayTint`, `IAutostart`, `IClamshell`). The aggregate `IDevice` exposes each port as
   **nullable** — `null` means the feature is absent, so the UI shows exactly what the hardware has.
-  The battery is the one capability that is an OBJECT rather than a port (`Battery`): it declares
-  its own properties one by one, so a firmware with no charge limiter is a battery whose
-  `ChargeLimit` is null instead of a missing port beside three others. See
-  `docs/domain-refactoring-plan.md` §3.1.
+  Two capabilities state their own shape instead of occupying a port: the battery is an OBJECT
+  (`Battery`) declaring its properties one by one, so a firmware with no charge limiter is a battery
+  whose `ChargeLimit` is null instead of a missing port beside three others; and the settings a
+  backend owns are **declared** (`SettingDeclaration` on `IDevice.DeclaredSettings`) under the
+  backend's own opaque key, so the domain knows no hardware-specific setting name. See
+  `docs/domain-refactoring-plan.md` §3.1 and §5 (waves 5 + 9).
   Also the pieces that are logic rather than I/O: `Fan` (one fan's duty curve and the duty applied to it)
   with `FanCurveEngine` (the pair of fans and the deadband over them), `LampArrayBridge`, the
   compile-time version constant.
