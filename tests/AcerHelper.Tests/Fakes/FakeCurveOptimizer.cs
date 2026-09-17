@@ -28,21 +28,32 @@ public sealed class FakeCurveOptimizer : ICurveOptimizer
     public bool SetResult { get; set; } = true;
     public bool SetDomainsResult { get; set; } = true;
 
-    /// <summary>Every count handed to <see cref="Set"/>, in order, including refused ones.</summary>
+    /// <summary>When true, <see cref="Set"/> and <see cref="SetDomains"/> record the call and then THROW
+    /// instead of returning — the same path <see cref="FakeFlagPort.ThrowOnSet"/> models, on the tuning shape
+    /// (the two writes that reach the SMU mailbox). A throwing write and a refused one are different failure
+    /// paths and the caller must survive both; they also differ in what they leave behind, which is the point
+    /// here: a refused write may set <see cref="LastError"/>, a throwing one cannot, so a test that leaves a
+    /// value there can tell whether the caller read it.</summary>
+    public bool ThrowOnSet { get; set; }
+
+    /// <summary>Every count handed to <see cref="Set"/>, in order, including refused and throwing ones.</summary>
     public List<int> SetCalls { get; } = [];
 
-    /// <summary>A copy of every array handed to <see cref="SetDomains"/>, in order.</summary>
+    /// <summary>A copy of every array handed to <see cref="SetDomains"/>, in order, including refused and
+    /// throwing ones.</summary>
     public List<int[]> SetDomainsCalls { get; } = [];
 
     public bool Set(int counts)
     {
         SetCalls.Add(counts);
+        if (ThrowOnSet) throw new InvalidOperationException("FakeCurveOptimizer: the write blew up");
         return SetResult;
     }
 
     public bool SetDomains(IReadOnlyList<int> counts)
     {
         SetDomainsCalls.Add([.. counts]);
+        if (ThrowOnSet) throw new InvalidOperationException("FakeCurveOptimizer: the write blew up");
         return SetDomainsResult;
     }
 

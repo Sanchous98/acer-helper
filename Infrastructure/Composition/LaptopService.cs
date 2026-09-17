@@ -112,11 +112,21 @@ public sealed partial class LaptopService : IDisposable
     /// The rule that keeps this from being a behaviour change: a channel is given ONLY where a reader exists
     /// today. The points that are silent now stay silent — <c>ApplyFan</c>, <c>ApplyStoredMode</c> (when reached
     /// from the refresh loop) and <c>ApplyModeCo</c> have no reader, and wiring one up would start showing the
-    /// user messages the app has never shown, which is a feature, not a refactor.</summary>
+    /// user messages the app has never shown, which is a feature, not a refactor.
+    ///
+    /// <paramref name="reason"/> is fetched ONLY from a write that RETURNED. A port that THROWS reports no reason
+    /// — deliberately, because the reason it would be read from is a field the port owns and assigns at the end
+    /// of a call that runs to completion, so a throw leaves it holding an EARLIER call's words. Reporting those
+    /// is the exact failure docs/open-decisions.md §2 exists to remove ("a reader picking up ANOTHER call's
+    /// error"), and this wrapper was the one place that still did it after <c>FlagSetting.Write</c> and
+    /// <c>ChoiceSetting.Write</c> (Domain/DeclaredSetting.cs) were corrected. A refusal that RETURNED keeps its
+    /// reason, which is how every real transport in this tree reports (see the measurement on
+    /// <c>FlagSetting.Write</c>).</summary>
     private static (bool ok, string? error) Attempt(Func<bool> write, Func<string?> reason)
     {
         bool ok;
-        try { ok = write(); } catch { ok = false; }   // a port that throws is a failed write, not a crash
+        try { ok = write(); }
+        catch { return (false, null); }   // a throw assigns nothing: LastError still belongs to an earlier call
         return (ok, ok ? null : reason());
     }
 

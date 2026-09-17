@@ -168,14 +168,37 @@
 > ВЕРНУВШИЙ пару, по-прежнему печатает причину порта — это отдельный тест, и он не
 > менялся.
 >
-> **Тот же дефект остался в `LaptopService.Attempt(Func<bool>, Func<string?>)`:** десять
-> его вызовов читают `LastError` порта после броска точно так же — `SetDynamicLighting`,
-> `ApplyProfile`, `SetTurbo`, `ApplyStoredMode` (два места), `SetGpuOc`, `SetCpuPower`,
-> `SetCo`, `SetCoDomains`, `SetKeyboardBrightness`. Не тронуто — правка волны названа для
-> четырёх настроек, и менять эти сообщения вне её объёма; доложено владельцу. Замер:
-> тест `AThrowingProfileSet_...` (`OptionsAssemblerTests`) уже сегодня ожидает ГОЛОЕ
-> «Profile on AC power: failed» — его фейк причину не выставляет, поэтому та же правка
-> там ничего видимого не изменила бы.
+> **Тот же дефект жил и в `LaptopService.Attempt(Func<bool>, Func<string?>)` — исправлен
+> 2026-09-18.** Десять его вызовов читали `LastError` порта после броска точно так же:
+> `SetDynamicLighting`, `ApplyProfile`, `SetTurbo`, `ApplyStoredMode` (два места),
+> `SetGpuOc`, `SetCpuPower`, `SetCo`, `SetCoDomains`, `SetKeyboardBrightness`. Теперь
+> бросок отвечает `(false, null)` и здесь — той же строкой, что в `FlagSetting.Write`;
+> отказ, ВЕРНУВШИЙ пару, по-прежнему печатает причину порта, потому что так сообщает
+> о себе каждый реальный транспорт в дереве.
+>
+> **Видимый текст не изменился ни у одного прежнего теста, и это замер, а не ожидание:**
+> мутация «вернуть чтение `LastError` в `catch`» краснит ровно два новых теста
+> (`AThrowingProfileSet_CarriesNoReasonOfAnEarlierCall` в `OptionsAssemblerTests`,
+> `SetCo_WhenThePortThrows_ReportsNoReasonOfAnEarlierCall` в `LaptopServiceCoTests`) и ни
+> одного прежнего. Причина у прежних нет: все их бросающие фейки
+> (`FakeThrowingPowerProfiles`, `ThrowingGpu`/`ThrowingCo`) `LastError` не выставляют, а
+> все тесты с причиной (`AFailedApply_ReturnsFalse_AndPropagatesTheError` и соседи)
+> пишут её отказом, ВЕРНУВШИМ пару, — эта ветка не тронута, и обратная мутация
+> («причину не возвращать никогда») краснит именно их, а новый тест `SetCo_...` при ней
+> остаётся зелёным.
+>
+> **Правка ЛАТЕНТНАЯ, и это проверено, а не предположено:** ни один транспорт в дереве
+> не бросает из записи. Acer `GmSet`/`UiSet`, `SysfsInvoker.Write`,
+> `FirmwareAttributes.Write`, `SysfsKbdBacklight.Set`, `HwmonFanControl.Write`,
+> `SysfsPowerProfiles.Set`, `OverlayPowerProfiles.Set`, `OverlayCpuPower.Set`,
+> `BatteryWmi.SetControl`, `SysfsChargeLimit.Set` целиком лежат в `try`/`catch` и
+> возвращают пару; Dell и PawnIO бросающие шаги гасят внутри (`WmiSession`,
+> `PawnIo.Execute`). Единственное исключение — `DellBiosWmi.Set`: у него своего `try` нет,
+> и `outp.GetU64("Status")` вместе с `CoInitializeEx` внутри `WmiSession.Connect` стоят
+> вне чужого `catch`, то есть бросок структурно возможен (отсутствующий `ole32`, сбой
+> COM-обёртки), хотя обычный отказ WMI до них не доходит. Сегодня такая ветка вернула бы
+> `LaptopService` и `FlagSetting.Write` `(false, null)` — то есть сообщение без причины,
+> а не чужую причину.
 
 Решение за владельцем. Отдельный разбор опроверг и прежний список, и лекарство.
 
@@ -480,6 +503,14 @@ nothing here and is a thermal and stability risk, so it is not offered». Обе
 > отбрасывает (`(false, null)`) — сообщение с причиной из него прийти не может.
 > Заодно устарело и имя: метода `Run` в `Application/` нет вовсе (он стал
 > `Attempt` в `d7be021`), так что «`Run` уже ловит» тоже ни на что не указывает.
+>
+> **...и это измерение перестало различать поглотителей 2026-09-18.** Оно опиралось на
+> то, что причина порта в сообщении могла прийти ТОЛЬКО из `Attempt` (`RunSet`'s `catch`
+> её отбрасывает). После правки §2 `Attempt` на бросок отвечает `(false, null)`, то есть
+> причина не приходит **ниоткуда**, и тот же фейк даёт голое «Power-source profile
+> failed». Вывод «ловит `Attempt`, а не `RunSet`» остаётся верным, но держится теперь на
+> форме кода — обёртка вокруг записи, — а не на этом измерении; свидетель поглотителя для
+> настройкового канала — тест строки-флага, где причина приходит ОТКАЗОМ, вернувшим пару.
 
 Сегодня позиция узкая, и читать её надо целиком: **любой вызывающий `RunSet`
 передаёт ему метод, который оборачивает свой порт в `Attempt`**, поэтому бросающая
@@ -487,8 +518,9 @@ nothing here and is a thermal and stability risk, so it is not offered». Обе
 бросок **из-за пределов** обёрнутого вызова: чтение профильного порта (`pp.All`,
 `pp.Current()`, `pp.Selectable()` берутся без `Attempt` и в `SetSourceProfile`, и в
 `ApplyStoredMode`) или арифметика индекса в самой строке (`profiles[i]`, `levels[i]`).
-Третья дверь есть в форме кода — `Attempt` зовёт `reason()` **после** `try`, то есть
-чтение `LastError` не защищено, — но открыть её сегодня нечем: все реализации
+Третья дверь была в форме кода — `Attempt` звал `reason()` **после** `try`, то есть
+чтение `LastError` не было защищено, — и её закрыли 2026-09-18 (§2): бросок отвечает
+`(false, null)`, не читая поле вовсе. Открыть её было нечем и тогда: все реализации
 `LastError` в дереве либо автосвойство, либо проброс к нему.
 
 Поддерживающая фраза «Оба пути закреплены тестами» отозвана вместе с остальным:

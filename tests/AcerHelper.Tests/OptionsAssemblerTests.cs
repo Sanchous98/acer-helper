@@ -141,7 +141,9 @@ public class OptionsAssemblerFailureTests
     }
 
     /// <summary>PINNED BEHAVIOUR: a throwing PROFILE port is reported as a failure and does not escape the row,
-    /// and the message is BARE here because <see cref="FakeThrowingPowerProfiles"/> carries no reason.
+    /// and the message is BARE here because <see cref="FakeThrowingPowerProfiles"/> carries no reason. The
+    /// sibling below arranges a STALE reason on the same fake, which is the sharper form of the same assertion
+    /// — read them together: this one pins the outcome, that one pins what may not be read to produce it.
     ///
     /// WHICH LAYER ABSORBS THIS THROW: the write goes <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> ->
     /// <c>Attempt</c>, whose <c>try { ok = write(); } catch { ok = false; }</c> catches it
@@ -169,6 +171,36 @@ public class OptionsAssemblerFailureTests
         Assert.Null(Record.Exception(() => row.OnChange(1)));      // the throw must not leave the row
         Assert.Single(pp.SetCalls);                        // the write was attempted once, then threw
         Assert.Equal("Profile on AC power: failed", Assert.Single(h.RunPosted()));
+    }
+
+    /// <summary>A throwing PROFILE port must not report an EARLIER call's reason, and this is the test that
+    /// can tell — the one above cannot, because its fake carries no reason at all.
+    ///
+    /// <c>Attempt</c> fetches its reason ONLY from a write that RETURNED (<c>LaptopService.Attempt</c>):
+    /// <see cref="IPowerProfiles.LastError"/> is a field the port assigns at the end of a call that runs to
+    /// completion, so a write that THREW never assigned it, and whatever is in it belongs to a previous call.
+    /// The fake below is arranged exactly that way — a leftover "old news" beside a write that blows up — so a
+    /// caller that read the field after catching would print "...: old news": a real failure wearing another
+    /// call's words, which is the failure mode docs/open-decisions.md §2 exists to remove.
+    ///
+    /// THE CONTROL IS THE SERVICE-LEVEL SIBLING, not a second case here: <c>LaptopServiceModeTests</c>'
+    /// <c>AFailedApply_ReturnsFalse_AndPropagatesTheError</c> pins a refusal that RETURNS and asserts that the
+    /// port's words DO cross (<c>r.error == "EC refused"</c>), which is how every real transport in this tree
+    /// reports. Without it, "no reason is reported" and "no reason ever crosses this layer" would be the same
+    /// observation.</summary>
+    [Fact]
+    public void AThrowingProfileSet_CarriesNoReasonOfAnEarlierCall()
+    {
+        var h = new OptionsAssemblerHarness(LaptopServiceFixture.WithProfiles(current: TestProfiles.Quiet));
+        var pp = new FakeThrowingPowerProfiles { LastError = "old news" };   // an earlier call's words
+        h.F.Device.PowerProfiles = pp;
+
+        var row = AssemblerRows.Choice(h, "Profile on AC power:");
+
+        row.OnChange(1);
+
+        Assert.Single(pp.SetCalls);                        // the write was attempted once, then threw
+        Assert.Equal("Profile on AC power: failed", Assert.Single(h.RunPosted()));   // the stale words are not read
     }
 
     /// <summary>Every row that reports a failure must name ITSELF — an error that does not say which control

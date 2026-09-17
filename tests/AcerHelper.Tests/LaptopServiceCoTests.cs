@@ -117,6 +117,32 @@ public class LaptopServiceCoClampTests
         Assert.Equal(1, f.Store.SaveCount);
     }
 
+    /// <summary>A port that THROWS reports NO reason — the same rule as the refusal above, differing only in
+    /// which half of it applies. The reason is fetched from <see cref="ICurveOptimizer.LastError"/> ONLY when
+    /// the write RETURNED, because that field is assigned at the end of a call that runs to completion: a write
+    /// that threw never assigned it, so whatever sits there belongs to an EARLIER call, and reporting it pins
+    /// another call's failure on this one (docs/open-decisions.md §2). That is why the stale words below are put
+    /// on the SAME port whose write blows up — arranged any other way the assertion would be about a scenario
+    /// the test never set up.
+    ///
+    /// The refusal in the test above is the control, and it is what keeps this from being satisfied by a caller
+    /// that never reports anything: <c>(false, null)</c> and "the error channel was dropped" are the same
+    /// observation here without it.</summary>
+    [Fact]
+    public void SetCo_WhenThePortThrows_ReportsNoReasonOfAnEarlierCall()
+    {
+        var co = new FakeCurveOptimizer { ThrowOnSet = true, LastError = "an earlier call's words" };
+        var f = Setup(co);
+
+        var r = f.Service.SetCo(-12);
+
+        Assert.False(r.ok);
+        Assert.Null(r.error);                                    // this call has no words of its own to report
+        Assert.Equal([-12], co.SetCalls);                        // the write really was attempted, and threw
+        Assert.Equal(-12, f.Store.Settings.CoPresets["balanced"].AllCore);   // and the preset is still persisted
+        Assert.Equal(1, f.Store.SaveCount);
+    }
+
     [Fact]
     public void SetCo_IsPerMode()
     {
