@@ -165,13 +165,20 @@ public class ArchitectureMapTests
     /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
     /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
-    /// already reads the preset. Application is four files, and the rule is the reason for every boundary in
-    /// them — not an accident of the moves.
+    /// already reads the preset. Application is NINE files today — the four this docstring used to name, plus the
+    /// family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
+    /// Undervolt, DeclaredSetting, DynamicLightingSwitch, each one contract plus its use cases) — and the rule is
+    /// the reason for every boundary in each of them, not an accident of the moves.
     ///
     /// WHAT IT STILL FORBIDS, so nobody mistakes the above for a relaxation: a use case that needs the STORED
     /// CONTAINER (the per-mode presets and the graph they live in) or a vendor port by name still cannot live
     /// here, and that is most of what the service does. The re-apply got in because it needs a schedule, the
-    /// axes that schedule names, and a contract — nothing else.
+    /// axes that schedule names, and a contract — nothing else. The applied edits got in the same way and not by
+    /// an exception: an axis's state crosses as the Domain value it already had
+    /// (<c>FanAxisState</c>, <c>GpuAxisState</c>), so the container is never named and the rule the use case
+    /// states — what an edit must not clobber, what is remembered before it is written — is stated without it.
+    /// What could NOT get in that way is measured in docs/device-and-application.md §8: the per-mode lighting
+    /// (a live reference the UI edits in place) and the profile switch (a lock held across the port call).
     ///
     /// Today Application imports Domain and nothing else: Localization is still permitted for the same reason
     /// <see cref="DomainPointsAtNothingButItselfAndLocalization"/> permits it, but the <c>AppLanguage</c> the

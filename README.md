@@ -70,11 +70,18 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   implements. `ReapplyPlan` states which axes a boot, a mode switch and a wake re-apply, in what order
   and on what thread; `ReapplySettings` is the use case that drives them over `IReapplyTarget`, the one
   contract it declares (an axis per call, not an interface per axis), and its result is Domain
-  vocabulary (`FanAxisState`, `GpuAxisState`) so that it can cross this boundary at all.
+  vocabulary (`FanAxisState`, `GpuAxisState`) so that it can cross this boundary at all. Then the
+  family of APPLIED EDITS, one use case and one contract per thing the user sets: `FanAxis`
+  (`IFanAxisTarget` — a curve edit names one fan and carries the other fan's half over), `GpuOffsets`,
+  `CpuPowerOverlay`, `Undervolt`, `DeclaredSetting`, `DynamicLightingSwitch`. Each states a rule the
+  method body it came from only happened to implement — what a fan edit must not clobber, that an
+  offset is remembered BEFORE it is written, that a refused declared setting is never remembered — and
+  each is pinned through its own contract with a stub, without Infrastructure.
   `IDynamicLighting`/`IDynamicLightingFactory` are the virtual-lighting surface the bridge implements,
   and `AppArgs` the CLI constant. It names no Infrastructure type — see the arrow above, and note what
   that still forbids: a use case needing the stored settings container or a vendor port by name cannot
-  live here yet (docs/domain-layering-map.md §2).
+  live here yet, which is why the per-mode lighting and the profile switch did not move
+  (docs/device-and-application.md §8 measures each).
 - **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
   `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.
