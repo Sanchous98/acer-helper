@@ -169,10 +169,10 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
     /// <summary>Reflect a mode's fan preset in the fan section (called when the performance mode changes).</summary>
-    public void ReloadFans(FanPreset preset) => _fans?.Load(preset);
+    public void ReloadFans(FanAxisState state) => _fans?.Load(state);
 
-    /// <summary>Reflect a mode's GPU-OC preset in the GPU section (called when the performance mode changes).</summary>
-    public void ReloadGpuOc(GpuOcPreset preset) => _tuning?.Gpu?.Load(preset);
+    /// <summary>Reflect a mode's GPU-OC offsets in the GPU section (called when the performance mode changes).</summary>
+    public void ReloadGpuOc(GpuAxisState state) => _tuning?.Gpu?.Load(state);
 
     /// <summary>Reflect a mode's CPU power choice in the CPU section — on a performance-mode change, and on the
     /// pass that fills the row's construction placeholder (wave 6: <c>AppController</c>'s <c>Tick.CpuPrimed</c>).

@@ -67,9 +67,14 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   with `FanCurveEngine` (the pair of fans and the deadband over them), and the
   compile-time version constant.
 - **`Application/`** (`AcerHelper.Application`) — the use cases, and the contracts Infrastructure
-  implements: `ReapplyPlan` (which axes a boot, a mode switch and a wake re-apply, in what order, on
-  what thread), `IDynamicLighting`/`IDynamicLightingFactory` (the virtual-lighting surface the bridge
-  implements), and `AppArgs`. It names no Infrastructure type — see the arrow above.
+  implements. `ReapplyPlan` states which axes a boot, a mode switch and a wake re-apply, in what order
+  and on what thread; `ReapplySettings` is the use case that drives them over `IReapplyTarget`, the one
+  contract it declares (an axis per call, not an interface per axis), and its result is Domain
+  vocabulary (`FanAxisState`, `GpuAxisState`) so that it can cross this boundary at all.
+  `IDynamicLighting`/`IDynamicLightingFactory` are the virtual-lighting surface the bridge implements,
+  and `AppArgs` the CLI constant. It names no Infrastructure type — see the arrow above, and note what
+  that still forbids: a use case needing the stored settings container or a vendor port by name cannot
+  live here yet (docs/domain-layering-map.md §2).
 - **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
   `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.

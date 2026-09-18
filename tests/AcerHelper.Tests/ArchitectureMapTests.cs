@@ -160,10 +160,18 @@ public class ArchitectureMapTests
     ///
     /// WHAT IT FORCED, and this is the part worth reading before moving anything else. When the service layer
     /// and the persisted container moved to Infrastructure, this rule is what decided the SHAPE of that move:
-    /// the re-apply operation could not stay whole, because its result is built out of the container's types
+    /// the re-apply operation could not stay whole, because its result was built out of the container's types
     /// and Application may not name them, so only the PLAN stayed (<c>Application/ReapplyPlan.cs</c>, stated in
-    /// Domain vocabulary) and the executor went with the service. Application is now three files, and the rule
-    /// is the reason — not an accident of the move.
+    /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
+    /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
+    /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
+    /// already reads the preset. Application is four files, and the rule is the reason for every boundary in
+    /// them — not an accident of the moves.
+    ///
+    /// WHAT IT STILL FORBIDS, so nobody mistakes the above for a relaxation: a use case that needs the STORED
+    /// CONTAINER (the per-mode presets and the graph they live in) or a vendor port by name still cannot live
+    /// here, and that is most of what the service does. The re-apply got in because it needs a schedule, the
+    /// axes that schedule names, and a contract — nothing else.
     ///
     /// Today Application imports Domain and nothing else: Localization is still permitted for the same reason
     /// <see cref="DomainPointsAtNothingButItselfAndLocalization"/> permits it, but the <c>AppLanguage</c> the

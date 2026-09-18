@@ -23,7 +23,7 @@ public sealed partial class GpuViewModel : SectionViewModel
     public int MemMax { get; }
 
     public GpuViewModel(string name, (int Min, int Max) coreRange, (int Min, int Max) memRange,
-                        GpuOcPreset preset, Action<int, int> set)
+                        GpuAxisState initial, Action<int, int> set)
     {
         _loading = true;
         _set = set;
@@ -32,8 +32,8 @@ public sealed partial class GpuViewModel : SectionViewModel
         MemMin = memRange.Min; MemMax = memRange.Max;
         _debounce.Tick += (_, _) => { _debounce.Stop(); Apply(); };
 
-        _core = Math.Clamp(preset.Core, CoreMin, CoreMax);
-        _mem = Math.Clamp(preset.Mem, MemMin, MemMax);
+        _core = Math.Clamp(initial.Core, CoreMin, CoreMax);
+        _mem = Math.Clamp(initial.Mem, MemMin, MemMax);
         _coreLabel = Fmt(_core);
         _memLabel = Fmt(_mem);
         _loading = false;
@@ -58,13 +58,17 @@ public sealed partial class GpuViewModel : SectionViewModel
 
     /// <summary>Reflect a mode's saved offsets without triggering apply/persist (the service already set the
     /// hardware on the mode switch). The <c>_loading</c> guard neuters the change hooks; a pending debounce
-    /// from the PREVIOUS mode is dropped so it can't fire the new mode's values and re-persist them.</summary>
-    public void Load(GpuOcPreset preset)
+    /// from the PREVIOUS mode is dropped so it can't fire the new mode's values and re-persist them.
+    ///
+    /// The value is the DOMAIN's <see cref="GpuAxisState"/>, for the same reason as its fan twin: this Load is
+    /// reached from the build path and from the re-apply outcome, and the outcome crosses into Application,
+    /// which may not name the stored preset.</summary>
+    public void Load(GpuAxisState state)
     {
         _debounce.Stop();
         _loading = true;
-        Core = Math.Clamp(preset.Core, CoreMin, CoreMax);
-        Mem = Math.Clamp(preset.Mem, MemMin, MemMax);
+        Core = Math.Clamp(state.Core, CoreMin, CoreMax);
+        Mem = Math.Clamp(state.Mem, MemMin, MemMax);
         _loading = false;
     }
 

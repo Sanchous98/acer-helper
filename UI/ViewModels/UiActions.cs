@@ -20,17 +20,21 @@ public sealed record UiActions(
 public sealed record ProfileActions(
     Action<PerformanceProfile> Apply, bool TurboToggles, Action<bool> SetTurbo);
 
-/// <summary>Fan section: the current mode's preset plus the apply/persist delegates.</summary>
+/// <summary>Fan section: the current mode's fan state plus the apply/persist delegates. <c>Initial</c> is the
+/// DOMAIN's <see cref="FanAxisState"/> and not the stored preset, because the same value arrives here twice
+/// over the life of the section — once at build time from the stored preset, and once per mode switch from the
+/// re-apply outcome, which crosses into Application and may not name the container.</summary>
 public sealed record FanSection(
-    FanPreset Initial,
+    FanAxisState Initial,
     Action<FanMode, byte, byte> SetFan,
     Action<bool, bool, int[]> SetFanCurve,
     Func<FanCurveDialogViewModel, Task> ShowCurve);
 
 /// <summary>GPU-overclock section: the current mode's saved core/memory offsets (MHz) plus the apply/persist
-/// delegate. The section is only built when the device exposes an <see cref="IGpuOverclock"/> port.</summary>
+/// delegate. The section is only built when the device exposes an <see cref="IGpuOverclock"/> port.
+/// <c>Initial</c> is the domain's <see cref="GpuAxisState"/>, for the same reason as the fan section's.</summary>
 public sealed record GpuSection(
-    GpuOcPreset Initial,
+    GpuAxisState Initial,
     Action<int, int> SetGpuOc);
 
 /// <summary>CPU-power section: the available power-mode overlays, the current mode's chosen id (or the live

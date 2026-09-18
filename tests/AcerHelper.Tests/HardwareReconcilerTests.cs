@@ -251,7 +251,9 @@ public class HardwareReconcilerTests
         Assert.Equal([-20], switched.Co);                       // the stored all-core value, as the row always showed
         Assert.Equal("best-performance", switched.CpuPower);
         Assert.Equal(-150, switched.GpuOc?.Core);
-        Assert.Equal((int)FanMode.Max, switched.Fan!.Mode);
+        // The DOMAIN's mode rather than the stored integer, so `.Value` is part of the assertion: an outcome
+        // that never reported the fans throws here instead of reading as a pass.
+        Assert.Equal(FanMode.Max, switched.Fan!.Value.Mode);
     }
 }
 

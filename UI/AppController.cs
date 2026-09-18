@@ -215,11 +215,15 @@ internal sealed class AppController
         // performs no profile read of its own. Through the parameterless forms these were three EC round-trips
         // taken on the UI thread while the UI was being built (the hazard recorded as D16 in
         // docs/hardware-actor-design.md); the values were always Settings' — only the key needed the hardware.
-        var fan0 = _svc.CurrentFan(cur);   // current mode's fan preset (defaults if none saved)
+        // The current mode's per-mode values arrive in the DOMAIN's vocabulary rather than as the stored
+        // presets, because the same view-model slots are reloaded by the re-apply outcome
+        // (Application/ReapplySettings.cs, which Application may not build out of the container). The mapping
+        // is the service's, and it is the one place the stored shape is read for this purpose.
+        var fan0 = LaptopService.AxisStateOf(_svc.CurrentFan(cur));   // defaults if this mode has none
         var vm = new MainViewModel(d, new UiActions(
             new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
-            new GpuSection(_svc.CurrentGpuOc(cur), SetGpuOc),
+            new GpuSection(LaptopService.AxisStateOf(_svc.CurrentGpuOc(cur)), SetGpuOc),
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
             // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
             // maps an unknown id to Balanced. The real value arrives from the first background pass (see the
@@ -507,7 +511,7 @@ internal sealed class AppController
     private readonly record struct Tick(
         PerformanceProfile? Current, IReadOnlyList<PerformanceProfile> Selectable, PerformanceProfile? Base,
         SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
-        bool ModeChanged, FanPreset? Fan, GpuOcPreset? Gpu, string? CpuId, int[]? Co,
+        bool ModeChanged, FanAxisState? Fan, GpuAxisState? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
         Dictionary<string, LightSettings>? Lights);
 
@@ -562,7 +566,7 @@ internal sealed class AppController
             // profile read this pass" claim two lines up was not true — this lookup did its own, inside the lock.
             var lights = (modeChanged || profileChanged) ? _svc.LightsForCurrentMode(current) : null;
 
-            FanPreset? fan = null; GpuOcPreset? gpu = null; string? cpu = null; int[]? co = null;
+            FanAxisState? fan = null; GpuAxisState? gpu = null; string? cpu = null; int[]? co = null;
             AccentColor? flash = null;
             // Performance mode changed (user pick / hotkey / power-source restore)? Apply that mode's saved fan +
             // GPU/CPU presets to the hardware here (background); reflect them in the UI on the UI pass.

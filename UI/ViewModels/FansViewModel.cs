@@ -35,7 +35,7 @@ public sealed partial class FansViewModel : SectionViewModel
     public ObservableCollection<CurvePointViewModel> CpuCurve { get; } = [];
     public ObservableCollection<CurvePointViewModel> GpuCurve { get; } = [];
 
-    public FansViewModel(FanCapability cap, FanPreset preset,
+    public FansViewModel(FanCapability cap, FanAxisState state,
                          Action<FanMode, byte, byte> setFan, Action<bool, bool, int[]> setFanCurve,
                          Func<FanCurveDialogViewModel, Task> showCurve)
     {
@@ -52,19 +52,18 @@ public sealed partial class FansViewModel : SectionViewModel
 
         for (var i = 0; i < Anchors.Length; i++)
         {
-            CpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(preset.CpuCurve, i), () => OnCurveChanged(false)));
-            GpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(preset.GpuCurve, i), () => OnCurveChanged(true)));
+            CpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(state.Cpu.Curve, i), () => OnCurveChanged(false)));
+            GpuCurve.Add(new CurvePointViewModel(Anchors[i], CurveVal(state.Gpu.Curve, i), () => OnCurveChanged(true)));
         }
 
-        _cpu = Math.Clamp(preset.Cpu, 0, 100);
-        _gpu = Math.Clamp(preset.Gpu, 0, 100);
+        _cpu = Math.Clamp(state.Cpu.FixedDuty, 0, 100);
+        _gpu = Math.Clamp(state.Gpu.FixedDuty, 0, 100);
         _cpuPct = $"{(int)_cpu}%";
         _gpuPct = $"{(int)_gpu}%";
-        _cpuUseCurve = preset.CpuUseCurve;
-        _gpuUseCurve = preset.GpuUseCurve;
-        var mode = (FanMode)preset.Mode;
-        _isMax    = mode == FanMode.Max && HasMax;
-        _isCustom = mode == FanMode.Custom && HasCustom;
+        _cpuUseCurve = state.Cpu.UseCurve;
+        _gpuUseCurve = state.Gpu.UseCurve;
+        _isMax    = state.Mode == FanMode.Max && HasMax;
+        _isCustom = state.Mode == FanMode.Custom && HasCustom;
         _isAuto   = !_isMax && !_isCustom;
         _loading = false;
     }
@@ -116,29 +115,34 @@ public sealed partial class FansViewModel : SectionViewModel
         try { await _showCurve(dlg); } finally { _gpuDialog = null; }
     }
 
-    /// <summary>Reflect a mode's saved fan preset without triggering apply/persist (the service already set
-    /// the hardware on the mode switch). The <c>_loading</c> guard neuters the hooks.</summary>
-    public void Load(FanPreset preset)
+    /// <summary>Reflect a mode's saved fan state without triggering apply/persist (the service already set
+    /// the hardware on the mode switch). The <c>_loading</c> guard neuters the hooks.
+    ///
+    /// The value is the DOMAIN's <see cref="FanAxisState"/> rather than the stored preset, because this is
+    /// reached from two places that cannot both name the container: the UI's own build path (which maps the
+    /// stored preset at the service) and the re-apply outcome, whose type crosses into Application
+    /// (<c>Application/ReapplySettings.cs</c>). One vocabulary for both paths, so a value reloaded by a mode
+    /// switch and one loaded at build time cannot mean different things.</summary>
+    public void Load(FanAxisState state)
     {
         // A pending debounce belongs to the PREVIOUS mode: letting it tick after this reload would fire
         // the NEW mode's just-loaded values at the hardware and persist them under the new key (silently
         // creating a preset from leftover UI state). The stale edit raced the mode switch — drop it.
         _fixedDebounce.Stop(); _cpuCurveDebounce.Stop(); _gpuCurveDebounce.Stop();
         _loading = true;
-        Cpu = Math.Clamp(preset.Cpu, 0, 100);
-        Gpu = Math.Clamp(preset.Gpu, 0, 100);
-        var m = (FanMode)preset.Mode;
-        IsMax    = m == FanMode.Max && HasMax;
-        IsCustom = m == FanMode.Custom && HasCustom;
+        Cpu = Math.Clamp(state.Cpu.FixedDuty, 0, 100);
+        Gpu = Math.Clamp(state.Gpu.FixedDuty, 0, 100);
+        IsMax    = state.Mode == FanMode.Max && HasMax;
+        IsCustom = state.Mode == FanMode.Custom && HasCustom;
         IsAuto   = !IsMax && !IsCustom;
-        CpuUseCurve = preset.CpuUseCurve;
-        GpuUseCurve = preset.GpuUseCurve;
-        LoadCurve(CpuCurve, preset.CpuCurve);
-        LoadCurve(GpuCurve, preset.GpuCurve);
+        CpuUseCurve = state.Cpu.UseCurve;
+        GpuUseCurve = state.Gpu.UseCurve;
+        LoadCurve(CpuCurve, state.Cpu.Curve);
+        LoadCurve(GpuCurve, state.Gpu.Curve);
         // An open curve dialog shows the new mode's points already (shared collection) — keep its
         // "Follow curve" switch in step too, or it would show the old mode's flag and look broken.
-        _cpuDialog?.SyncUseCurve(preset.CpuUseCurve);
-        _gpuDialog?.SyncUseCurve(preset.GpuUseCurve);
+        _cpuDialog?.SyncUseCurve(state.Cpu.UseCurve);
+        _gpuDialog?.SyncUseCurve(state.Gpu.UseCurve);
         _loading = false;
     }
 

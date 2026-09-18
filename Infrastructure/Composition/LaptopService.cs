@@ -13,10 +13,11 @@ namespace AcerHelper.Infrastructure.Composition;
 ///
 /// IT IS INFRASTRUCTURE BY THE OWNER'S RULING, and the reason is worth keeping beside the class: the name says
 /// what it is — a service over hardware and the form settings are kept in, not a use case — and it is also what
-/// names the persisted container (FanPreset, CoPreset, …) and calls the store that builds it. What stays in
-/// Application is the PLAN of a re-apply (<c>Application/ReapplyPlan.cs</c>), which this class's
-/// <see cref="Reconciler"/> executes; the contracts Application declares and the UI names live in
-/// <c>Application/DynamicLighting.cs</c>.
+/// names the persisted container (FanPreset, CoPreset, …) and calls the store that builds it. Application holds
+/// the re-apply use case (<c>Application/ReapplyPlan.cs</c>: the plan and, since the outcome stopped being built
+/// out of the container, the loop that walks it), and this class's <see cref="Reconciler"/> implements the
+/// contract that loop drives — it is where the axis writes and the preset translation live. The other contracts
+/// Application declares, and the UI names, live in <c>Application/DynamicLighting.cs</c>.
 ///
 /// Split across partial files by feature, because one 814-line file was the only place this
 /// layer could be read. This part holds identity and the shared infrastructure every other
@@ -72,8 +73,9 @@ public sealed partial class LaptopService : IDisposable
     /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this
     /// class's own <see cref="ApplyStartupState"/>, <c>AppController</c>'s refresh pass and
     /// <c>LightingCoordinator</c>'s resume handler. It holds no state of its own — it is one instance so that
-    /// there is one place that knows HOW to re-apply, not to share anything (see
-    /// <see cref="HardwareReconciler"/>).</summary>
+    /// there is one place that knows HOW TO WRITE each axis, not to share anything. What a re-apply IS (which
+    /// axes, in what order, on what thread) is Application's and is read from there (see
+    /// <see cref="HardwareReconciler"/> and Application's <c>ReapplySettings</c>).</summary>
     internal HardwareReconciler Reconciler { get; }
 
     /// <summary>The machine composition built. The UI reads its (nullable) feature ports to decide which

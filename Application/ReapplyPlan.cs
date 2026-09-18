@@ -31,20 +31,21 @@ public enum ReapplyTrigger
 /// whether that moment's caller reflects the result. This is the USE CASE half of the operation, and the reason
 /// it is here rather than beside the code that executes it.
 ///
-/// WHY THE SPLIT, and it was forced rather than chosen. Executing the plan means calling the service that owns
-/// the hardware and the settings graph, and collecting what the calling site's UI pass must show — and that
-/// result is built out of the PERSISTED CONTAINER's types (<c>FanPreset</c>, <c>GpuOcPreset</c>), which belong to
-/// Infrastructure. Application may not name them (`ArchitectureMapTests.
-/// ApplicationPointsAtDomainNotInfrastructure`), so the executor cannot live here; what CAN live here is
-/// everything the plan decides, because it is stated in Domain vocabulary alone (<see cref="ModeAxis"/>,
-/// <see cref="ModeAxisTable"/>). The executor is <c>Infrastructure/Composition/HardwareReconciler.cs</c>, which
-/// reads this plan and drives the ports.
+/// WHAT EXECUTES IT, and why the two are separate files rather than one. The operation is
+/// <see cref="ReapplySettings"/>, which lives here beside the plan because a set of actions is a use case: it
+/// walks this schedule and asks a contract (<see cref="IReapplyTarget"/>) to write each axis. The contract's
+/// implementation is Infrastructure's (<c>Infrastructure/Composition/HardwareReconciler.cs</c>), because that
+/// is the layer that owns the hardware and the stored presets.
 ///
-/// WHY IT IS NOT A CONTRACT AGAINST THE SERVICE. Wrapping the five axis operations in an Application-declared
-/// interface would not have worked: two of them return the container's types, so Application would have had to
-/// re-declare the stored preset's own field layout to receive them — that is, put back into Application exactly
-/// the shape the container was moved out for, and change the UI's view-model signatures to match. The
-/// measurement is recorded in the commit that did this; the plan is what remained.</summary>
+/// THE HISTORY IS WORTH KEEPING, because it decided both shapes. When the service and the container moved to
+/// Infrastructure, this plan is what stayed here: the executor could not come along, because the value it
+/// returns for the calling site's UI pass was built out of the container's types (<c>FanPreset</c>,
+/// <c>GpuOcPreset</c>) and Application may not name them
+/// (`ArchitectureMapTests.ApplicationPointsAtDomainNotInfrastructure`). What changed since is the SHAPE OF THE
+/// RESULT, not the rule: the outcome now speaks Domain vocabulary (<see cref="FanAxisState"/>,
+/// <see cref="GpuAxisState"/> — see <see cref="ReapplyOutcome"/>), the implementing layer does the translating
+/// where it already reads the preset, and so the whole operation could come back — the loop, the deferral, the
+/// reflect and the exception guarantee with it.</summary>
 internal static class ReapplyPlan
 {
     /// <summary>The axes a trigger drives, in the order it drives them — including the ones a layer above owns,

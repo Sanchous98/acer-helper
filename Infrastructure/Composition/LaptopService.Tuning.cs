@@ -63,6 +63,11 @@ public sealed partial class LaptopService
         return g;
     }
 
+    /// <summary>The GPU axis's state in the DOMAIN's vocabulary (<see cref="GpuAxisState"/>,
+    /// Domain/AxisState.cs) — the two offsets the stored preset holds, named as the axis names them, which is
+    /// what a use case in Application may receive. Sits beside the accessor that reads the same pair.</summary>
+    internal static GpuAxisState AxisStateOf(GpuOcPreset g) => new(g.Core, g.Mem);
+
     // ---- CPU power mode (per-mode) ----
 
     /// <summary>The CPU power-mode overlay id for the current mode: the stored choice if the user set one for

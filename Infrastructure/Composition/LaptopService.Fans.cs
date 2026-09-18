@@ -43,10 +43,10 @@ public sealed partial class LaptopService
     /// <summary>The two fans' own settings, read out of their halves of the stored preset. THIS IS WHERE A
     /// FAN'S IDENTITY IS DECIDED: the schema keeps both fans in one object and its halves are named Cpu and
     /// Gpu, so "this one is the GPU fan" is a fact this layer establishes and the domain models are never told
-    /// — Domain/Fan.cs has no CPU/GPU flag to set. It is also the ONLY place the frozen field layout is read,
-    /// so a reader of the other half cannot be mistaken for this one; it was the seam that let the stored
-    /// container move to Infrastructure without touching Domain, and it is what keeps Domain naming no stored
-    /// shape now that the container sits beside this file.
+    /// — Domain/Fan.cs has no CPU/GPU flag to set. It and <see cref="AxisStateOf"/> are the ONLY readers of the
+    /// frozen field layout, and both live in this file, so a reader of the other half cannot be mistaken for
+    /// this one; it was the seam that let the stored container move to Infrastructure without touching Domain,
+    /// and it is what keeps Domain naming no stored shape now that the container sits beside this file.
     ///
     /// The curve array is passed through verbatim: SetFanCurve stores whatever the UI hands it, with no length
     /// validation, and Fan is the thing that tolerates a null, short or over-long one. Caller holds _state or
@@ -54,6 +54,20 @@ public sealed partial class LaptopService
     private static (FanSettings cpu, FanSettings gpu) FanSettingsOf(FanPreset f)
         => (new FanSettings(f.CpuUseCurve, f.CpuCurve, f.Cpu),
             new FanSettings(f.GpuUseCurve, f.GpuCurve, f.Gpu));
+
+    /// <summary>The same reading as <see cref="FanSettingsOf"/>, for a whole preset: the axis's state in the
+    /// DOMAIN's vocabulary (<see cref="FanAxisState"/>, Domain/AxisState.cs), which is what a use case in
+    /// Application may receive — it may not name the stored preset. The mode is read here too, and it is the
+    /// one field the UI used to cast for itself: the stored form keeps it as an <c>int</c> because that is what
+    /// <c>settings.json</c> holds, and this is where that stops being the rest of the tree's business.
+    ///
+    /// It takes a preset that EXISTS; a mode with no stored preset is the caller's own null to pass on, which
+    /// the fan axis reports as "nothing to show".</summary>
+    internal static FanAxisState AxisStateOf(FanPreset f)
+    {
+        var (cpu, gpu) = FanSettingsOf(f);
+        return new FanAxisState((FanMode)f.Mode, cpu, gpu);
+    }
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
     /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
