@@ -91,7 +91,35 @@ COPY . .
 # stay comparable with a release built on a runner. The NuGet cache is a BuildKit cache mount rather than an
 # image layer: without it every source change invalidates the layer and re-downloads the AOT compiler and
 # runtime packs (hundreds of MB).
-RUN --mount=type=cache,target=/root/.nuget/packages \
+#
+# sharing=locked, from the first real build of this file (2026-09-18, measured the next day). That build died
+# inside this RUN with
+#
+#   NuGet.targets(198,5): error : Directory not empty : '/root/.nuget/packages/skiasharp/3.119.4/lib'
+#
+# NuGet.targets:198 is the <RestoreTask> of the target `Restore`, so the failure is restore's package install
+# refusing to lay a package into a directory that already had content. What that install left behind is the
+# evidence: skiasharp/3.119.4 was a half-deleted tree — .signature.p7s, interactive-extensions/ and ref/
+# intact, lib/ down to 17 of its 22 target-framework directories, and every loose file gone (the .nuspec,
+# icon.png, LICENSE.txt, README.md, the .nupkg, its .sha512, and the .nupkg.metadata that marks an install
+# complete). A delete that runs out of a directory it is emptying is what leaves a tree shaped like that, and
+# it can only run out because something is writing into it at the same time — two writers in one directory.
+#
+# The default here is sharing=shared, which lets every exec that mounts this path write into it at once, and
+# `docker buildx build` may be run more than once over a working tree (the build cache holds a second "local
+# source for dockerfile" record created while the failing build was still running, so a second invocation was
+# indeed submitted). sharing=locked serialises the writers: a second exec waits for the first instead of
+# restoring into the same directories. It costs that wait and nothing else — the packages are not re-fetched,
+# because the mount is still the same persistent cache.
+#
+# The trigger is NOT proven, and this is not a demonstrated repair. Every attempt to reproduce the error here
+# succeeded instead: the exact command on a never-used cache mount, cold and then warm; the same command
+# against a deliberately recreated half-deleted skiasharp; two concurrent restores in one build; six
+# concurrent restores into one fresh mount; and a restore alone against the mount the failing build had left
+# behind — which repaired it. NuGet repairs a half-deleted package directory whenever it is the only writer.
+# What is measured is the two-writer hazard and the half-deleted tree; sharing=locked is the one change among
+# the candidates that makes a second writer impossible.
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet publish AcerHelper.csproj \
       -c Release \
       -f net10.0 \
