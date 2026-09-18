@@ -6,7 +6,7 @@ namespace AcerHelper.Application;
 ///
 /// WHAT IT CARRIES, and why it is an array rather than a domain type. The offsets cross the way the SMU takes
 /// them: index-aligned with the port's voltage domains, or a single entry on a CPU that exposes no domain control.
-/// That IS the domain vocabulary here — the alignment is the domain rule (Domain/CoAxis.cs's <c>Rows</c> builds
+/// That IS the domain vocabulary here — the alignment is the domain rule (Infrastructure/Vendors/Generic/CoAxis.cs's <c>Rows</c> builds
 /// the UI's rows from the same alignment) — and the stored form is not it: the container holds a per-rail
 /// DICTIONARY keyed by the rail's hardware identity, precisely so a preset survives a reorder or a relabel of the
 /// hardware's rails. The list is the caller's, and it is not copied.

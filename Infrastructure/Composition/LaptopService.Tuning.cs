@@ -175,7 +175,7 @@ public sealed partial class LaptopService
 
     /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
     /// all-core value — so the UI has a single entry point. Call OFF the UI thread. The fork itself is the DOMAIN's
-    /// rule (Domain/CoAxis.cs, <c>UsesRails</c>), asked by the members below rather than restated here, so the same
+    /// rule (Infrastructure/Vendors/Generic/CoAxis.cs, <c>UsesRails</c>), asked by the members below rather than restated here, so the same
     /// fork decides what a mode change sends and two sites cannot come to disagree.</summary>
     public (bool ok, string? error) SetCoValues(IReadOnlyList<int> counts)
         => ApplyUndervolt.Run(counts, this);
@@ -273,7 +273,7 @@ public sealed partial class LaptopService
         // hardware call of its own: the one EC transaction reachable from here is the mode-key read inside the
         // parameterless CurrentCo(), which call sites hold _state for by decision (docs/open-decisions.md §3) —
         // co.Domains is an immutable descriptor list built in the port's constructor, and the index alignment and
-        // the key lookup are the domain's (Domain/CoAxis.cs).
+        // the key lookup are the domain's (Infrastructure/Vendors/Generic/CoAxis.cs).
         lock (_state)
             return new CoAxis(co.Domains, co.Range).Rows(CurrentCo());
     }
@@ -311,7 +311,7 @@ public sealed partial class LaptopService
             // race the copy-out used to exist for: the dictionary read here races SetCoDomains' structural write
             // of that same dictionary, exactly as in CurrentCoDomains above.
             //
-            // What reaches the SMU is the domain's answer (Domain/CoAxis.cs, Reapply), which is also where the
+            // What reaches the SMU is the domain's answer (Infrastructure/Vendors/Generic/CoAxis.cs, Reapply), which is also where the
             // never-configured guard lives. On this axis that guard means DO NOT WRITE AT ALL, not "write stock":
             // an empty store says the user never opted into undervolting, so the mailbox message would be traffic
             // nobody asked for on an opcode this CPU does not confirm. The distinction is the whole point — an
