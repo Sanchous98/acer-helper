@@ -1,5 +1,4 @@
 using AcerHelper.Application;
-using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Acer;
 using AcerHelper.Infrastructure.Vendors.Dell;
 using AcerHelper.Infrastructure.Vendors.Generic;
@@ -14,18 +13,20 @@ namespace AcerHelper.Infrastructure.Composition;
 /// </summary>
 public static class DeviceFactory
 {
-    /// <summary>The machine, and the settings its backend declared while probing it.
+    /// <summary>The machine: the model <see cref="Device"/> this laptop's backend filled while probing it, with
+    /// the settings that backend declared travelling on it (<see cref="Device.DeclaredSettings"/>).
     ///
-    /// The two travel together because the declared set does not belong to the device any more: the settings
-    /// MODEL holds it and switches it (Infrastructure/Composition/Settings.cs), and <see cref="IDevice"/> carries no member for it,
-    /// so this factory is the one place that can hand the backend's own list to the service that builds the model
-    /// with it — the concrete device is the only thing that has it.
+    /// A MACHINE AND NOT AN INVENTORY, which is what the return type used to be. It carried a tuple because the
+    /// declared set had no home: the interface had no member for it, so composition had to hand the list over
+    /// beside the device. A machine can hold what was declared about it, so the second half of the tuple is gone
+    /// and the list is read off the model (<c>LaptopService</c>'s constructor is where).
     ///
-    /// The list is COMPLETE by the time it is read, and that is now load-bearing rather than merely true: the
-    /// model copies the set when it is built (<c>Settings</c>'s constructor), so a backend that declared after
-    /// this line would be declaring into nothing. It holds because a backend declares during its own construction
-    /// (<c>InitVendor</c>), and <see cref="GenericDevice.FinalizeComposition"/> only adjusts ports.</summary>
-    public static (IDevice Device, IReadOnlyList<SettingDeclaration> DeclaredSettings) Create()
+    /// The list is COMPLETE by the time the machine is returned, and that is load-bearing rather than merely
+    /// true: the settings model copies the set when it is built (<c>Settings</c>'s constructor), so a backend
+    /// that declared after this line would be declaring into nothing. It holds because a backend declares during
+    /// its own construction (<c>InitVendor</c>), and <see cref="GenericDevice.FinalizeComposition"/> only
+    /// adjusts ports.</summary>
+    public static Device Create()
     {
         var (manufacturer, product) = MachineInfo.Read();
 
@@ -38,7 +39,7 @@ public static class DeviceFactory
         // performance profiles are a vendor WMI/EC port or the generic Windows overlay — let the device make
         // the composition decisions that depend on it (e.g. the overlay-CPU-power axis; see GenericDevice).
         device.FinalizeComposition();
-        return (device, device.DeclaredSettings);
+        return device;
     }
 
     /// <summary>How the application obtains this machine's virtual LampArray surface (Windows Dynamic

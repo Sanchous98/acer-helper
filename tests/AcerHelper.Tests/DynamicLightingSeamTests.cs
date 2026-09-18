@@ -64,7 +64,7 @@ public class DynamicLightingSeamTests
             Lighting = new FakeRgbDevice { ProfileFollowKey = "follow", Zones = [Keyboard(), Lightbar()] },
         };
         store = new FakeSettingsStore();
-        return new LaptopService(device, store, device.DeclaredSettings, factory);
+        return new LaptopService(device, store, factory);
     }
 
     /// <summary>The whole point of the seam: what composition hands over is what the service publishes, and

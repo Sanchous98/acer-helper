@@ -2,16 +2,16 @@
 namespace AcerHelper.Domain;
 
 // Feature ports: one fine-grained interface per laptop capability. Infrastructure implements
-// them; the Application/UI depend only on these. A feature a device lacks is represented by a
-// null port on IDevice (see below), so the UI shows exactly the features that exist.
+// them, and the machine that HOLDS them is Infrastructure's too (Infrastructure/Composition/Device.cs),
+// so no aggregate of these slots is declared here any more — see the note at the end of this file.
 //
-// Two capabilities have moved off that scheme, both by declaring their own shape instead of
-// occupying a nullable slot: the battery is a domain OBJECT (Domain/Battery.cs) that declares its
+// A capability a machine lacks is absent rather than modelled: where a backend can leave a slot
+// empty it does, and where it declares its own shape it declares it. Two capabilities have taken
+// that second road — the battery is a domain OBJECT (Domain/Battery.cs) that declares its
 // properties one by one, and the settings a backend owns are DECLARED
-// (Settings.DeclaredSettings, Infrastructure/Composition/Settings.cs) under the backend's own keys. The declared set is
-// held by the settings MODEL, not by IDevice: the backend's probe finds the settings, and the
-// composition path hands the set over. In both cases "this machine does not have that" is the
-// absence of a property/declaration rather than a null port.
+// (Settings.DeclaredSettings, Infrastructure/Composition/Settings.cs) under the backend's own keys.
+// In both cases "this machine does not have that" is the absence of a property/declaration rather
+// than a null port.
 
 /// <summary>Switchable performance/platform profiles.</summary>
 public interface IPowerProfiles
@@ -72,8 +72,8 @@ public interface IChoicePort
 
 // Five more interface types used to stand here — ILcdOverdrive, IKeyboardBacklight, IKeyboardBacklightTimeout,
 // IUsbCharging and IFnLock — one per setting of the four the declared-settings contract was introduced for (the
-// keyboard backlight is two settings on two different machines), each occupying its own nullable slot on
-// IDevice. They are gone: a setting is now DECLARED by the backend that owns its key
+// keyboard backlight is two settings on two different machines), each occupying its own nullable slot on the
+// machine. They are gone: a setting is now DECLARED by the backend that owns its key
 // (Settings.DeclaredSettings, Infrastructure/Composition/Settings.cs), so "this machine has an LCD-overdrive setting" is the presence
 // of a declaration rather than the presence of a dedicated type. The one thing they carried that a declaration
 // does not is the port's LastError, and the declaration reads it (<see cref="IFlagPort.LastError"/>). IUsbCharging
@@ -253,38 +253,24 @@ public interface IClamshell : IDisposable
     void Evaluate();
 }
 
-/// <summary>
-/// The connected laptop. Each feature is a nullable port: <c>null</c> means the device does not
-/// support that feature (so the UI hides its section). This <i>is</i> the capability model —
-/// the set of non-null ports describes exactly what this vendor × OS combination can do.
-///
-/// The battery is the exception, and the first capability to change shape: <see cref="Battery"/> is always
-/// there and declares its OWN properties one by one (Domain/Battery.cs), because "this laptop has no charge
-/// limiter" is a fact about the battery rather than about the machine. A machine with no battery at all is
-/// simply one whose battery object has nothing on it.
-///
-/// The settings a backend declares are NOT a member here, and their absence is the point rather than an
-/// omission: the set belongs to the settings MODEL, which holds it and switches it (Infrastructure/Composition/Settings.cs), and
-/// the backend's own list is handed over at composition (DeviceFactory → <c>LaptopService</c>'s constructor).
-/// A device that declares nothing therefore offers nothing, and no port slot has to be interpreted to say so.
-/// </summary>
-public interface IDevice : IDisposable
-{
-    string VendorName { get; }
-    string? StatusMessage { get; }
-
-    IPowerProfiles?      PowerProfiles      { get; }
-    IFanControl?         FanControl         { get; }
-    ISensors?            Sensors            { get; }
-    Battery              Battery            { get; }
-    IKeyboardBrightness? KeyboardBrightness { get; }
-    IRgbDevice?          Lighting           { get; }
-    IHotkeys?            Hotkeys            { get; }
-    IDisplayTint?        DisplayTint        { get; }
-    IGpuOverclock?       GpuOverclock       { get; }
-    ICpuPower?           CpuPower           { get; }
-    ICurveOptimizer?     CurveOptimizer     { get; }
-    IDriverSetup?        DriverSetup        { get; }
-    IAutostart?          Autostart          { get; }
-    IClamshell?          Clamshell          { get; }
-}
+// NO AGGREGATE OF THESE PORTS IS DECLARED HERE, and that is a decision rather than an omission. `IDevice`
+// used to stand at this point: one interface listing every port above plus Battery, so "the set of non-null
+// ports describes exactly what this vendor × OS combination can do". It is gone, and what replaced it is not a
+// slimmer interface but a MODEL: the machine the composition root builds and hands over
+// (Infrastructure/Composition/Device.cs), whose members are these ports and whose content is the probing the
+// vendor backends did.
+//
+// WHY THE TYPE COULD NOT STAY A DOMAIN CONTRACT, and it was measured rather than argued (`IDevice` had no
+// reader in Domain or Application — only `cref`s in doc comments — while all 25 of its use sites were
+// Infrastructure, UI and tests). A domain interface had one real effect: it kept ten ports whose SUBJECT is a
+// vendor technology (`IKeyboardBrightness`, `IHotkeys`, `IDisplayTint`, `IGpuOverclock`, `ICpuPower`,
+// `ICurveOptimizer` with `VoltageDomain`, `IDriverSetup`, `IAutostart`, `IClamshell`) in this file, because
+// moving any of them alone would have made a Domain declaration name Infrastructure
+// (`ArchitectureMapTests.DomainPointsAtNothingButItselfAndLocalization`). They are still here because moving
+// them is a separate decision about the DOMAIN's vocabulary — one no aggregate now gates, since nothing in
+// this file names them as a group.
+//
+// The ports above that DO belong here — `IPowerProfiles`, `IFanControl`, `ISensors`, `IRgbDevice`, and the
+// declared-setting shapes — stay because a Domain type or an Application contract names them and reasons in
+// their vocabulary: `IDynamicLightingFactory` (Application/DynamicLighting.cs) takes an `IRgbDevice`, and the
+// curve models in Domain/Fan.cs are written against `SensorSnapshot`.

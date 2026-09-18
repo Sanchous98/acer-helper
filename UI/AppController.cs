@@ -151,7 +151,7 @@ internal sealed class AppController
     // answer, and never nag: the port only exists on a machine where the driver is relevant and the build carries
     // its installer, so this is silent everywhere else. Declining is sticky — the user can still install it by hand,
     // and the feature appears by itself on the next launch either way, because the port probes for it.
-    private async Task OfferDriverAsync(IDevice d, bool startMinimized)
+    private async Task OfferDriverAsync(Device d, bool startMinimized)
     {
         if (d.DriverSetup is not { Installed: false } setup) return;
         // A logon start runs us into the tray with no window on screen — a modal dialog there would be an ambush, so

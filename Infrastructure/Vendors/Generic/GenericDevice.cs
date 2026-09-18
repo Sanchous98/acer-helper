@@ -1,59 +1,24 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 using GenericBattery = AcerHelper.Infrastructure.Vendors.Generic.BatteryInfo;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
-/// The generic laptop device: the capabilities any laptop exposes through standard OS APIs — performance
-/// profiles, battery telemetry, autostart, and (where the OS/hardware allow) sensors, clamshell and
-/// blue-light. This is the base every vendor backend EXTENDS: <c>AcerDevice : GenericDevice</c> inherits
-/// these common ports and overrides/adds only its proprietary ones. Ports are <c>protected set</c> so a
-/// subclass can override them; the cross-platform common wiring is in the constructor and the per-OS bits
-/// in <see cref="InitPlatform"/> (GenericDevice.Windows.cs / .Linux.cs).
+/// The generic laptop backend: it fills the machine (<see cref="Device"/>) with the capabilities any laptop
+/// exposes through standard OS APIs — performance profiles, battery telemetry, autostart, and (where the
+/// OS/hardware allow) sensors, clamshell and blue-light. This is the base every vendor backend EXTENDS:
+/// <c>AcerDevice : GenericDevice</c> inherits these common ports and overrides/adds only its proprietary ones.
+/// The cross-platform common wiring is in the constructor and the per-OS bits in <see cref="InitPlatform"/>
+/// (GenericDevice.Windows.cs / .Linux.cs).
+///
+/// IT IS A BACKEND, NOT THE MACHINE. The ports live on <see cref="Device"/> and are inherited rather than
+/// re-declared here, because they are not this backend's property: a machine has ports, and a backend is one of
+/// the things that can fill them. What this class owns is the PROBING — which of those slots a generic OS can
+/// answer for on this platform — and the teardown of what it created.
 /// </summary>
-public partial class GenericDevice : IDevice
+public partial class GenericDevice : Device
 {
-    public string VendorName { get; protected set; } = "Generic";
-    public string? StatusMessage { get; protected set; }
-
-    public IPowerProfiles?      PowerProfiles      { get; protected set; }
-    public IFanControl?         FanControl         { get; protected set; }
-    public ISensors?            Sensors            { get; protected set; }
-    public Battery              Battery            { get; } = new();
-    public IKeyboardBrightness? KeyboardBrightness { get; protected set; }
-    public IRgbDevice?          Lighting           { get; protected set; }
-    public IHotkeys?            Hotkeys            { get; protected set; }
-    public IDisplayTint?        DisplayTint        { get; protected set; }
-    public IGpuOverclock?       GpuOverclock       { get; protected set; }
-    public ICpuPower?           CpuPower           { get; protected set; }
-    public ICurveOptimizer?     CurveOptimizer     { get; protected set; }
-    public IDriverSetup?        DriverSetup        { get; protected set; }
-    public IAutostart?          Autostart          { get; protected set; }
-    public IClamshell?          Clamshell          { get; protected set; }
-
-    /// <summary>The settings this machine declares — this backend's own list, and the source of the set the
-    /// settings MODEL holds (Infrastructure/Composition/Settings.cs). A LIST rather than a slot per capability, because a declaration
-    /// carries its own shape and its own key: each vendor's <c>InitVendor</c> adds the entries its own probe
-    /// found, in the order the rows should read, and a setting it did not find is simply not declared.
-    ///
-    /// It is deliberately NOT a member of <see cref="IDevice"/>: the model holds the set and switches it, so the
-    /// composition root carries this list there — <c>DeviceFactory</c> hands it alongside the device, and
-    /// <c>LaptopService</c>'s constructor installs it into the loaded settings. This property is what that
-    /// hand-off reads.</summary>
-    public IReadOnlyList<SettingDeclaration> DeclaredSettings => _declaredSettings;
-
-    private readonly List<SettingDeclaration> _declaredSettings = [];
-
-    /// <summary>Register one setting this machine's probe found, under the backend's own key for it. The list is
-    /// finished before the app service is built (probing happens in the device's construction), so nothing
-    /// appends to it once the settings model holds it.</summary>
-    protected void Declare(SettingDeclaration setting) => _declaredSettings.Add(setting);
-
-    private readonly List<IDisposable> _owned = [];
-
-    /// <summary>Register a service/transport this device owns; disposed with the device.</summary>
-    protected void Own(IDisposable d) => _owned.Add(d);
-
     public GenericDevice(string? status = null)
     {
         StatusMessage = status;
@@ -76,12 +41,4 @@ public partial class GenericDevice : IDevice
     internal void FinalizeComposition() => FinalizeCompositionPlatform();
 
     partial void FinalizeCompositionPlatform();
-
-    public void Dispose()
-    {
-        foreach (var d in _owned)
-        {
-            try { d.Dispose(); } catch { /* best effort */ }
-        }
-    }
 }

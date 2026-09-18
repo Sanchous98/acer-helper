@@ -48,7 +48,7 @@ public sealed class RgbZone(
 }
 
 /// <summary>A device's RGB surface: a set of independently-controllable <see cref="RgbZone"/>s. This is the
-/// capability port — <c>null</c> on <see cref="IDevice.Lighting"/> means no RGB; an empty zone list means
+/// capability port — a machine whose <c>Lighting</c> slot is <c>null</c> has no RGB; an empty zone list means
 /// the transport was present but exposed nothing.</summary>
 public interface IRgbDevice
 {

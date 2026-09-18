@@ -15,7 +15,7 @@ namespace AcerHelper.Tests;
 /// setting names at all. What the value MEANS once applied is the row's business
 /// (<c>OptionsAssemblerTests</c>), and what survives a restart is the settings bag.
 ///
-/// WHERE THE SET LIVES. The declarations are NOT on <c>IDevice</c>: the settings model is CONSTRUCTED with the
+/// WHERE THE SET LIVES. The declarations are NOT a port on the machine: the settings model is CONSTRUCTED with the
 /// set of options this machine declares (<c>Settings</c>'s constructor) and carries the logic of switching one,
 /// so these tests arrange them through the fixture's fake backend — which declares before the fixture builds the
 /// service, exactly as a vendor backend declares inside <c>InitVendor</c> — and read them back off the service.
@@ -221,7 +221,7 @@ public class DeclaredSettingTests
 
     /// <summary>The set of declared options belongs to the MODEL and is supplied through its CONSTRUCTOR: it
     /// holds what it was constructed with and invents nothing, because what a machine HAS is what its backend's
-    /// probe found and there is no other source for it now that <c>IDevice</c> carries no member. Pinned because
+    /// probe found and the machine carries it only so the service can hand it over. Pinned because
     /// the failure would be silent and would read as "this machine has no settings": a model that ignored the
     /// hand-off leaves every row unbuildable and every apply unreachable.</summary>
     [Fact]

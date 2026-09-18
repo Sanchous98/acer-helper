@@ -38,7 +38,7 @@ public sealed class LaptopServiceFixture
     {
         declare?.Invoke(Device);
         Store = new FakeSettingsStore(settings);
-        Service = new LaptopService(Device, Store, Device.DeclaredSettings);
+        Service = new LaptopService(Device, Store);
     }
 
     /// <summary>Attach a <see cref="FakePowerProfiles"/> and return it, for arranging and asserting.</summary>

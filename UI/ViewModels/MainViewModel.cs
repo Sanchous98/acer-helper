@@ -89,7 +89,7 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsTuningPage));
     }
 
-    public MainViewModel(IDevice device, UiActions a, LightingViewModel? lighting)
+    public MainViewModel(Device device, UiActions a, LightingViewModel? lighting)
     {
         DeviceName = device.VendorName;
         _lighting = lighting;

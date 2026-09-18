@@ -153,7 +153,8 @@ public class RgbDeviceTests
     }
 
     /// <summary>Only the zones a controller actually advertises are aggregated; a controller with none
-    /// contributes none (and does not, say, make the device null — <c>IDevice.Lighting</c> is the nullable one).</summary>
+    /// contributes none (and does not, say, make the device null — the machine's <c>Lighting</c> slot is the
+    /// nullable one).</summary>
     [Fact]
     public void AControllerWithNoZonesContributesNoZones()
     {

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
+using AcerHelper.Infrastructure.Composition;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -80,7 +81,7 @@ public sealed class OptionsViewModel : SectionViewModel
 {
     public ObservableCollection<ObservableObject> Rows { get; } = [];
 
-    public static OptionsViewModel? TryCreate(IDevice device, OptionsSection o, Action<Action>? post = null)
+    public static OptionsViewModel? TryCreate(Device device, OptionsSection o, Action<Action>? post = null)
     {
         var vm = new OptionsViewModel();
 

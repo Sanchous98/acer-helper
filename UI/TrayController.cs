@@ -1,5 +1,6 @@
 using System.Globalization;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 using Avalonia;
 using Avalonia.Controls;
@@ -19,7 +20,7 @@ internal sealed class TrayController : IDisposable
     private readonly Dictionary<string, NativeMenuItem> _menuItems = new();
     private NativeMenuItem? _updateItem;
 
-    public TrayController(IDevice device, Action<PerformanceProfile> applyProfile,
+    public TrayController(Device device, Action<PerformanceProfile> applyProfile,
                           Action toggleMain, Action openMain, Action showLighting, Action exit)
     {
         _menu = BuildMenu(device, applyProfile, openMain, showLighting, exit);
@@ -62,7 +63,7 @@ internal sealed class TrayController : IDisposable
         _tray.Dispose();
     }
 
-    private NativeMenu BuildMenu(IDevice device, Action<PerformanceProfile> applyProfile,
+    private NativeMenu BuildMenu(Device device, Action<PerformanceProfile> applyProfile,
                                  Action openMain, Action showLighting, Action exit)
     {
         var menu = new NativeMenu();

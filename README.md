@@ -52,8 +52,9 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
 - **`Domain/`** (`AcerHelper.Domain`) — the vendor- and OS-agnostic core: model
   (`PerformanceProfile`, `FanMode`, `SensorSnapshot`, `HotkeyAction`, …) and one fine-grained
   *port* per capability (`IPowerProfiles`, `IFanControl`, `ISensors`, `IRgbDevice`, `IHotkeys`,
-  `IDisplayTint`, `IAutostart`, `IClamshell`). The aggregate `IDevice` exposes each port as
-  **nullable** — `null` means the feature is absent, so the UI shows exactly what the hardware has.
+  `IDisplayTint`, `IAutostart`, `IClamshell`). The machine that HOLDS them is Infrastructure's
+  (`Device`, in `Infrastructure/Composition/`): each port is **nullable** — `null` means the feature
+  is absent, so the UI shows exactly what the hardware has.
   Two capabilities state their own shape instead of occupying a port: the battery is an OBJECT
   (`Battery`) declaring its properties one by one, so a firmware with no charge limiter is a battery
   whose `ChargeLimit` is null instead of a missing port beside three others; and the settings a
@@ -104,7 +105,8 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   partials, one per feature family), `OptionsAssembler` (the hardware rows), `HardwareReconciler`
   (executes `Application`'s re-apply plan against the ports), `Settings` and the persisted presets
   (`FanPreset`, `GpuOcPreset`, `CoPreset`, `LightSettings`, …) with `ModeKey` and `ISettingsStore`,
-  and `JsonSettingsStore`. `DeviceFactory` detects the device and assembles an `IDevice`. When no
+  and `JsonSettingsStore`. `DeviceFactory` detects the machine and BUILDS it — `Device`, whose ports
+  the vendor backend fills and which carries the settings its backend declared. When no
   vendor backend matches (a non-Acer laptop, or no elevation), it falls back to a **generic
   device** offering those OS-standard basics — so the app is useful on any laptop. (Validated on a
   Dell Latitude 5540 on Linux: shows the firmware's cool/quiet/balanced/performance profiles.)

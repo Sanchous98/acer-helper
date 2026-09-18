@@ -5,7 +5,7 @@ namespace AcerHelper.Domain;
 /// declared BY THE PROPERTY: a firmware with no charge limiter is a battery whose <see cref="ChargeLimit"/> is
 /// null, while the same object on a machine that has one carries a <see cref="BatteryToggle"/> there. The
 /// battery's own shape is therefore the answer to "what does this battery have", rather than four separate
-/// slots on <see cref="IDevice"/> whose absence each had to be interpreted by the caller.
+/// nullable slots whose absence each had to be interpreted by the caller.
 ///
 /// COMPOSED INCREMENTALLY, which is why the members are settable rather than constructor arguments: the base
 /// device has only telemetry to offer (<c>GenericDevice</c>), and every vendor then adds the properties its

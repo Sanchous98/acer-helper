@@ -120,7 +120,7 @@ public class BatteryShapeTests
 /// <summary>
 /// The SERVICE half of the criterion: which of the three battery rows exist, over every present/absent
 /// combination. The rows are built by <c>OptionsAssembler</c> over <c>LaptopService</c> and read
-/// <c>IDevice.Battery</c>, so this is the path the app takes — the port slots the presence tests used to
+/// <c>Device.Battery</c>, so this is the path the app takes — the port slots the presence tests used to
 /// assign are gone, and a row that appears without its property is a row promising a control that cannot work.
 /// </summary>
 public class BatteryRowPresenceTests

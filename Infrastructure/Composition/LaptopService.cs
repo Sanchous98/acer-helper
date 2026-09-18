@@ -6,9 +6,10 @@ using AcerHelper.Localization;
 namespace AcerHelper.Infrastructure.Composition;
 
 /// <summary>
-/// The hardware-facing service the UI talks to: it owns the connected device, the settings graph and the store
-/// that reads and writes it, and it talks to the Domain feature ports (<see cref="IDevice"/>) on the machine's
-/// behalf. All orchestration (profile cycling/toggling, persistence of changes) lives here, never in the UI.
+/// The hardware-facing service the UI talks to: it owns the machine composition built (<see cref="Device"/>), the
+/// settings graph and the store that reads and writes it, and it talks to the Domain feature ports on the
+/// machine's behalf. All orchestration (profile cycling/toggling, persistence of changes) lives here, never in
+/// the UI.
 ///
 /// IT IS INFRASTRUCTURE BY THE OWNER'S RULING, and the reason is worth keeping beside the class: the name says
 /// what it is — a service over hardware and the form settings are kept in, not a use case — and it is also what
@@ -41,12 +42,11 @@ public sealed partial class LaptopService : IDisposable
     // the part that declares them, so while one was in use this class could not be split across partial files
     // (LaptopService.*.cs) — which is the point of the change. The field names are deliberately the former
     // parameter names, so not one call site in the file moved.
-    private readonly IDevice device;
+    private readonly Device device;
     private readonly ISettingsStore store;
     private readonly IDynamicLightingFactory? dynamicLightingFactory;
 
-    public LaptopService(IDevice device, ISettingsStore store, IReadOnlyList<SettingDeclaration> declaredSettings,
-                         IDynamicLightingFactory? dynamicLightingFactory = null)
+    public LaptopService(Device device, ISettingsStore store, IDynamicLightingFactory? dynamicLightingFactory = null)
     {
         this.device = device;
         this.store = store;
@@ -58,15 +58,15 @@ public sealed partial class LaptopService : IDisposable
         //
         // ...and the settings this machine declares are handed to the model that holds and switches them
         // (Infrastructure/Composition/Settings.cs) THROUGH ITS CONSTRUCTOR: the store builds the model with this set, so the set is
-        // fixed before the model exists rather than installed into it afterwards. They arrive as a constructor
-        // argument rather than off the device because they no longer live on IDevice: the backend's probe finds
-        // them, and the composition root is what carries them here (see DeviceFactory.Create).
+        // fixed before the model exists rather than installed into it afterwards. The set is read OFF THE MACHINE
+        // — the backend's probe is what found it, and a machine holds what was declared about it — so nothing has
+        // to carry the list here beside the device, which is what DeviceFactory's old tuple was for.
         //
-        // The device's list is read HERE, at construction, and the model copies it — so a backend that kept
+        // The machine's list is read HERE, at construction, and the model copies it — so a backend that kept
         // declaring after this line would be declaring into nothing. Production already had that order (a vendor
         // declares inside InitVendor, before the service exists); the tests' fakes declare before the fixture
         // builds this, on the same terms.
-        Settings = store.Load(declaredSettings);
+        Settings = store.Load(device.DeclaredSettings);
     }
 
     /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this
@@ -76,9 +76,9 @@ public sealed partial class LaptopService : IDisposable
     /// <see cref="HardwareReconciler"/>).</summary>
     internal HardwareReconciler Reconciler { get; }
 
-    /// <summary>The connected device. The UI reads its (nullable) feature ports to decide which
+    /// <summary>The machine composition built. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
-    public IDevice Device => device;
+    public Device Device => device;
 
     /// <summary>The mutable settings graph. <c>internal</c> as a SIGNPOST, not a fence — and the difference
     /// matters, so it is stated rather than implied. This is ONE assembly: <c>AcerHelper.csproj</c> compiles
