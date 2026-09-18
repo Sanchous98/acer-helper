@@ -1,3 +1,4 @@
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
@@ -24,30 +25,41 @@ public class LightingPrimeTests
     // ---------------------------------------------------------------- not deferred: the RGB zone
 
     /// <summary>The construction read works exactly as it did before this wave, and the value it produces is
-    /// what the startup re-apply sends — the fact that makes a placeholder unsafe here.</summary>
+    /// what the startup re-apply sends — the fact that makes a placeholder unsafe here.
+    ///
+    /// THE THIRD ASSERTION WAS REPAIRED RATHER THAN TRANSLATED. It used to read "the stored value is not
+    /// consulted while the read works" off <c>state.Brightness</c>, where <c>state</c> was the stored OBJECT the
+    /// panel held; the state is now a VALUE the panel copies, so that line could no longer fail whatever the
+    /// panel did — the sixth-of-six failure mode this suite keeps finding. What it was protecting is that the
+    /// construction path does not PERSIST, and that is asserted against the door instead.
+    ///
+    /// MUTATIONS THAT REDDEN IT: sending the stored brightness instead of the read one (<c>written</c>); storing
+    /// on the construction path (<c>Writes</c>).</summary>
     [Fact]
     public void AnRgbZonesBrightness_IsReadAtConstruction_AndIsWhatStartupWrites()
     {
         var written = new List<byte>();
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
 
-        var panel = Panel(state, written, readBrightness: () => 30);
+        var panel = Panel(mode, written, readBrightness: () => 30);
 
         Assert.Equal(30, panel.Brightness);   // the hardware value wins over the stored one...
         Assert.Equal([30], written);          // ...and it is exactly what the re-apply sends
-        Assert.Equal(60, state.Brightness);   // the stored value is not consulted while the read works
+        Assert.Empty(mode.Writes);            // the stored value is not rewritten while the read works
     }
 
     /// <summary>The placeholder rule, on the path where it is already the live behaviour: an unreadable zone
     /// falls back to the stored value. This is what the wave's "placeholder = the answer a failed read would
-    /// have given" means for this row — and it is why 0 could never have been the answer here.</summary>
+    /// have given" means for this row — and it is why 0 could never have been the answer here.
+    ///
+    /// MUTATION THAT REDDENS IT: taking the read's null as a zero.</summary>
     [Fact]
     public void AnRgbZonesBrightness_FallsBackToTheStoredValue_WhenTheReadReportsNothing()
     {
         var written = new List<byte>();
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
 
-        var panel = Panel(state, written, readBrightness: () => null);
+        var panel = Panel(mode, written, readBrightness: () => null);
 
         Assert.Equal(60, panel.Brightness);
         Assert.Equal([60], written);
@@ -58,14 +70,17 @@ public class LightingPrimeTests
     /// is lit, which is the bug the spurious-zero guard documents — makes the panel write 0, so a configured
     /// keyboard comes up dark. That is today's behaviour on the one path the guard does not cover, and this wave
     /// preserves it verbatim: putting a placeholder in that write's place would be a device-visible change with
-    /// no way to check it without the machine.</summary>
+    /// no way to check it without the machine.
+    ///
+    /// MUTATION THAT REDDENS IT: running the spurious-zero guard on the construction path (nothing would be
+    /// sent, or the stored 60 would be).</summary>
     [Fact]
     public void ASpuriousZeroAtConstruction_IsWrittenAsIs_BecauseThatIsTodaysBehaviour()
     {
         var written = new List<byte>();
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
 
-        var panel = Panel(state, written, readBrightness: () => 0);
+        var panel = Panel(mode, written, readBrightness: () => 0);
 
         Assert.Equal(0, panel.Brightness);
         Assert.Equal([0], written);           // the guard in AdoptBrightness does NOT run on the construction path
@@ -73,14 +88,16 @@ public class LightingPrimeTests
 
     /// <summary>Nothing is re-applied while the user has never set this zone: a fresh install must not override
     /// whatever the firmware was showing. Unchanged by this wave, pinned because the tests above turn
-    /// <c>Configured</c> on to reach the re-apply at all.</summary>
+    /// <c>Configured</c> on to reach the re-apply at all.
+    ///
+    /// MUTATION THAT REDDENS IT: applying whatever the read gave, <c>Configured</c> or not.</summary>
     [Fact]
     public void AnUnconfiguredZone_WritesNothingAtAll()
     {
         var written = new List<byte>();
-        var state = new LightSettings { Brightness = 60 };   // Configured stays false
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(false, 0, 60, 5, 1, 0xFF0000, []));
 
-        _ = Panel(state, written, readBrightness: () => 30);
+        _ = Panel(mode, written, readBrightness: () => 30);
 
         Assert.Empty(written);
     }
@@ -165,11 +182,14 @@ public class LightingPrimeTests
 
     // ---------------------------------------------------------------- helpers
 
-    /// <summary>A one-zone static panel over the given state; <paramref name="written"/> collects every
-    /// brightness the panel sends to the device, which is the whole subject of this file.</summary>
-    private static LightViewModel Panel(LightSettings state, List<byte> written, Func<int?>? readBrightness)
+    /// <summary>A one-zone static panel over the mode's stored state; <paramref name="written"/> collects every
+    /// brightness the panel sends to the device, which is the whole subject of this file. Edits go through the
+    /// real store the section uses (<c>LightingViewModel.Store</c>), so a test can see whether the panel STORED
+    /// anything as well as whether it applied — and so "the construction path stores nothing" is a claim that
+    /// can fail.</summary>
+    private static LightViewModel Panel(FakeLightZones mode, List<byte> written, Func<int?>? readBrightness)
         => new("Keyboard", [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                zones: 1,
                applyAll: (_, _, brightness, _, _) => written.Add(brightness),
-               applyZone: null, state, save: () => { }, readBrightness);
+               applyZone: null, mode["Keyboard"], s => ApplyLightZone.Run("Keyboard", s, mode), readBrightness);
 }

@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using AcerHelper.Application;
 using AcerHelper.Domain;
-using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -12,9 +11,10 @@ namespace AcerHelper.UI.ViewModels;
 
 /// <summary>The lighting drawer root: one panel per RGB zone the device advertises (keyboard, lightbar,
 /// or anything a future controller exposes), shown as tabs. Built generically from <see cref="IRgbDevice"/>
-/// — no fixed keyboard/lightbar assumptions. Each panel loads its persisted state (keyed by zone name; the
-/// app is the source of truth), re-applies it to the device on startup, and saves changes via
-/// <paramref name="save"/>.</summary>
+/// — no fixed keyboard/lightbar assumptions. Each panel holds its persisted state as a VALUE (a
+/// <see cref="LightZoneState"/> for the mode it is bound to) and writes it back through the mode door
+/// (<see cref="ILightZoneMode"/>), which is what replaced the live dictionary this section used to hold and
+/// edit in place.</summary>
 public sealed partial class LightingViewModel : ObservableObject
 {
     public ObservableCollection<LightViewModel> Panels { get; } = [];
@@ -30,17 +30,18 @@ public sealed partial class LightingViewModel : ObservableObject
     // we build no panel for them and never send them anything, so the firmware's per-profile palette shows
     // seamlessly (no flash). See docs/lighting-an18-61.md.
     private readonly IReadOnlyList<RgbZone> _followZones;
-    private readonly Action _save;
     private readonly Action<bool> _saveFollowsProfile;
-    // Create-if-missing a zone entry in the live per-mode dict, UNDER the service's _state lock — the dict is
-    // aliased into LaptopService.Settings and now enumerated by a background Save(), so the structural insert
-    // must be serialized with it (see LaptopService.EnsureLightZone).
-    private readonly Func<Dictionary<string, LightSettings>, string, LightSettings> _ensureZone;
     private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
     // The virtual lighting surface the app publishes for a host (Windows Dynamic Lighting / any LampArray app),
     // or null where this machine has none. Read only for its ownership flag — see Reapply.
     private readonly IDynamicLighting? _host;
-    private Dictionary<string, LightSettings> _lights;   // current performance mode's per-zone state (swapped by Reload)
+
+    // THE MODE THIS SECTION IS BOUND TO, and the values of its zones. The mode is FIXED when the door is taken
+    // (LaptopService.LightsForCurrentMode), so every edit here lands in the mode the user is looking at — which
+    // is what the old live dictionary did too, since the read handed over one mode's bucket and the UI wrote
+    // into that. Reload swaps both when the performance mode changes.
+    private ILightZoneMode _mode;
+    private readonly Dictionary<string, LightZoneState> _lights = [];
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
     public bool ShowFollowsProfile => _followZones.Count > 0;
@@ -50,9 +51,12 @@ public sealed partial class LightingViewModel : ObservableObject
     /// zones (custom colour/effects), at the cost of a brief palette flash on each profile switch.</summary>
     [ObservableProperty] private bool _followsProfile;
 
-    /// <summary><paramref name="lights"/> is the CURRENT performance mode's per-zone state (from
-    /// LaptopService.LightsForCurrentMode). On a mode change the panels are rebound to the new mode's state
-    /// via <see cref="Reload"/>. <paramref name="backlight"/> is a plain (non-RGB) backlight, if any.
+    /// <summary><paramref name="mode"/> is the CURRENT performance mode, as the door this section reads and
+    /// writes lighting through (<see cref="LaptopService.LightsForCurrentMode()"/>). It replaces the pair the
+    /// constructor used to take — the stored zone dictionary and the create-if-missing callback — because the
+    /// dictionary WAS the settings graph, held here and written in place, which the owner overruled. On a mode
+    /// change the panels are rebound through <see cref="Reload"/>. <paramref name="backlight"/> is a plain
+    /// (non-RGB) backlight, if any.
     ///
     /// <paramref name="post"/> is the UI-thread marshaller each panel (and the backlight) is built with; it
     /// defaults to <c>Dispatcher.UIThread.Post</c> and exists so a test can drive the whole section with a
@@ -67,15 +71,13 @@ public sealed partial class LightingViewModel : ObservableObject
     /// ownership flag and never drives it: while a host owns the surface the panels must not paint, and the
     /// re-assertion of the host's frame belongs to <c>LightingCoordinator</c>, which is the only caller that
     /// has to hand because something clobbered it.</summary>
-    public LightingViewModel(IRgbDevice? rgb, Dictionary<string, LightSettings> lights,
-                             Func<Dictionary<string, LightSettings>, string, LightSettings> ensureZone, Action save,
+    public LightingViewModel(IRgbDevice? rgb, ILightZoneMode mode,
                              bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null,
                              Action<Action>? post = null, IDynamicLighting? host = null)
     {
-        _lights = lights;
-        _ensureZone = ensureZone;
-        _save = save;
+        _mode = mode;
+        foreach (var (name, state) in mode.Stored()) _lights[name] = state;
         _saveFollowsProfile = saveFollowsProfile;
         _post = post;
         _host = host;
@@ -95,16 +97,35 @@ public sealed partial class LightingViewModel : ObservableObject
             Backlight = new BacklightViewModel(backlight, applyBacklight, post);
     }
 
+    // The value this section is holding for a zone, creating it when the mode has none. The creation is the
+    // READ's (Application/LightZone.cs ReadLightZone), not this section's: what a mode with no entry yet IS —
+    // the zone in its defaults, held by the mode from that moment on, and not persisted — is a rule the use case
+    // states and a stub pins, and it lived here as `EnsureLightZone` plumbing before.
+    private LightZoneState ZoneFor(string zone)
+    {
+        if (_lights.TryGetValue(zone, out var state)) return state;
+        return _lights[zone] = ReadLightZone.Run(zone, _mode);
+    }
+
+    // Write one zone's value back for the mode this section is bound to, and keep the local copy in step so the
+    // next re-apply paints the user's own value rather than a stale one. The mirror happens only when the write
+    // was TAKEN: a zone this machine does not advertise is refused by the use case, and a value the graph does
+    // not hold must not be what the burst re-applies.
+    private void Store(string zone, LightZoneState state)
+    {
+        if (ApplyLightZone.Run(zone, state, _mode)) _lights[zone] = state;
+    }
+
     // Build a panel for one zone, bound to the current mode's per-zone state (created on first sight). Seeds
     // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness is what the
     // event path re-reads it with (AdoptFromInput -> LightViewModel.AdoptFromHardware).
     private void BuildPanel(RgbZone zone)
     {
-        var state = _ensureZone(_lights, zone.Name);   // create-if-missing under the service lock (see _ensureZone)
+        var state = ZoneFor(zone.Name);
         Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
-            state, _save, zone.ReadBrightness, _post));
+            state, s => Store(zone.Name, s), zone.ReadBrightness, _post));
     }
 
     // Flip the switch live: turning it OFF builds the follow-capable panels (each applies the mode's stored
@@ -177,13 +198,35 @@ public sealed partial class LightingViewModel : ObservableObject
         Backlight?.SyncFromHardware();
     }
 
-    /// <summary>Rebind every panel to a different mode's per-zone state and re-apply it (called when the
-    /// performance mode changes, so each mode carries its own lighting).</summary>
-    public void Reload(Dictionary<string, LightSettings> lights)
+    /// <summary>Rebind every panel to a different mode's lighting and re-apply it (called when the performance
+    /// mode changes, so each mode carries its own lighting). The mode arrives as the door for THAT mode —
+    /// resolved by the caller against a profile it had already read (LaptopService.LightsForCurrentMode) — and
+    /// this section adopts both it and its values, so every later edit lands in the mode the user is looking
+    /// at.</summary>
+    public void Reload(ILightZoneMode mode)
     {
-        _lights = lights;   // keep for BuildPanel when the follow switch is flipped mid-mode
+        _mode = mode;
+        _lights.Clear();
+        foreach (var (name, state) in mode.Stored()) _lights[name] = state;
         foreach (var panel in Panels)
-            panel.Rebind(_ensureZone(lights, panel.Title));   // create-if-missing under the service lock
+            panel.Rebind(ZoneFor(panel.Title));   // created on first sight, through the read use case
+    }
+
+    /// <summary>Push the values this section is holding at the device again — the re-apply the coordinator's
+    /// burst, the drawer open, the resume and the lid each ask for.
+    ///
+    /// IT TAKES NO STATE AND READS NOTHING, which is what makes the burst safe to run: the values below are the
+    /// ones the USER's edits have been updating all along, so a repaint that lands mid-edit re-applies the
+    /// edit rather than the mode's state as it stood when the burst began. (The version this replaced re-read
+    /// the live dictionary on every tick — same values, because the UI had written into it; the copy is now
+    /// here, and it is what lets the coordinator hold no lighting state at all.)
+    ///
+    /// The panels reflect the value they are bound to before applying, exactly as a rebind does: that is what
+    /// turns a stored state into what the device is told, and it is also what marks a mode's first sight of a
+    /// zone as configured (see <see cref="LightViewModel.Rebind"/>).</summary>
+    public void Repaint()
+    {
+        foreach (var panel in Panels) panel.Rebind(_lights[panel.Title]);
     }
 }
 
@@ -200,8 +243,12 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly Func<int?>? _readBrightness;
     private readonly Action<Action> _post;   // UI-thread marshaller for an adopted read (see the ctor)
-    private LightSettings _state;   // swapped by Rebind when the performance mode changes
-    private readonly Action _save;
+    // This zone's lighting for the mode the section is bound to, as a VALUE — replaced by Rebind when the mode
+    // changes, and by every edit this panel makes. It is deliberately not the stored object: what crosses is
+    // Domain's LightZoneState (Domain/LightZoneState.cs), and the write goes back through _store.
+    private LightZoneState _state;
+    // Write this zone's value back for the bound mode (LightingViewModel.Store -> ApplyLightZone.Run).
+    private readonly Action<LightZoneState> _store;
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _loading;
     private readonly object _readGate = new();   // guards the off-thread brightness read coalescing
@@ -227,13 +274,16 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private double _brightness;
     [ObservableProperty] private double _speed;
 
+    /// <param name="state">This zone's stored lighting for the mode being bound, as a value.
+    /// <param name="store">Where an edit goes: the section's write for THIS zone, which is the contract call
+    /// plus the local copy of the value (see <c>LightingViewModel.Store</c>).</param>
     /// <param name="post">The UI-thread marshaller the out-of-band read posts its adopted value through;
     /// defaults to <c>Dispatcher.UIThread.Post</c>. Injectable for the same reason the option rows' poster is
     /// (see <c>Eventually</c>): the real dispatcher is thread-affine and a bare xUnit process creates it from
     /// whichever thread first touches it, so a headless test cannot pump it. Same seam, same reason.</param>
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
                           Action<RgbModeInfo, AccentColor, byte, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
-                          LightSettings state, Action save, Func<int?>? readBrightness = null,
+                          LightZoneState state, Action<LightZoneState> store, Func<int?>? readBrightness = null,
                           Action<Action>? post = null)
     {
         Title = title;
@@ -243,7 +293,7 @@ public sealed partial class LightViewModel : ObservableObject
         _readBrightness = readBrightness;
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _state = state;
-        _save = save;
+        _store = store;
         EffectNames = effects.Select(e => Loc.T(e.Name)).ToList();
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
@@ -329,19 +379,17 @@ public sealed partial class LightViewModel : ObservableObject
     /// already actively driving the lighting, so leaving the previous mode's colours on the device would be
     /// wrong (this is why e.g. the lightbar seemed "stuck" when switching to a mode it wasn't set in). A mode
     /// never configured yet inherits the look we're leaving (and remembers it), so the switch stays coherent
-    /// instead of snapping to a bare default.</summary>
-    public void Rebind(LightSettings state)
+    /// instead of snapping to a bare default.
+    ///
+    /// THE INHERITANCE IS A WRITE, so it goes through the same door every edit does: the look we are leaving is
+    /// this panel's own current state, captured as a value and handed to the contract — where it used to be
+    /// written into the stored object the panel was holding. Nothing else about the rule moved.</summary>
+    public void Rebind(LightZoneState state)
     {
         if (!state.Configured)
         {
-            state.EffectIndex = SelectedEffectIndex;
-            state.Brightness  = (int)Brightness;
-            state.Speed       = (int)Speed;
-            state.Direction   = ReverseDirection ? 2 : 1;
-            state.Color       = Pack(Color);
-            state.ZoneColors  = Zones.Select(z => Pack(z.Color)).ToArray();
-            state.Configured  = true;
-            _save();
+            state = Captured(configured: true);
+            _store(state);
         }
 
         _state = state;
@@ -386,8 +434,10 @@ public sealed partial class LightViewModel : ObservableObject
         _loading = true;
         Brightness = value;
         _loading = false;
-        _state.Brightness = value;   // the read is the new intent, so persist it — nothing else in _state moves
-        _save();
+        // The read is the new intent, so persist it — and `with` states that nothing else in the state moves,
+        // where the assignment this replaced left the same guarantee only as a comment.
+        _state = _state with { Brightness = value };
+        _store(_state);
     }
 
     partial void OnSelectedEffectIndexChanged(int value) { UpdateColorMode(); Schedule(); }
@@ -449,16 +499,24 @@ public sealed partial class LightViewModel : ObservableObject
         return true;
     }
 
+    /// <summary>This panel's controls as a value — the whole zone at once, which is the shape the contract
+    /// takes and the shape the UI has always written (every field it knows, then save). <paramref name="configured"/>
+    /// is the one field that is not read off a control: a user edit and the inheritance both mean "the user has
+    /// this zone now", which is what the stored flag records (and what decides whether the next launch drives
+    /// this zone at all).</summary>
+    private LightZoneState Captured(bool configured) => new(
+        Configured: configured,
+        EffectIndex: SelectedEffectIndex,
+        Brightness: (int)Brightness,
+        Speed: (int)Speed,
+        Direction: ReverseDirection ? 2 : 1,
+        Color: Pack(Color),
+        ZoneColors: Zones.Select(z => Pack(z.Color)).ToArray());
+
     private void SaveState()
     {
-        _state.Configured = true;
-        _state.EffectIndex = SelectedEffectIndex;
-        _state.Brightness = (int)Brightness;
-        _state.Speed = (int)Speed;
-        _state.Direction = ReverseDirection ? 2 : 1;
-        _state.Color = Pack(Color);
-        _state.ZoneColors = Zones.Select(z => Pack(z.Color)).ToArray();
-        _save();
+        _state = Captured(configured: true);
+        _store(_state);
     }
 
     private static Color FromPacked(int rgb) => Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);

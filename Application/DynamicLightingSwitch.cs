@@ -4,12 +4,14 @@ namespace AcerHelper.Application;
 /// choice — the contract for one of the things the owner's model applies, declared here and implemented by the
 /// layer that owns both (Infrastructure/Composition/LaptopService.Lighting.cs).
 ///
-/// WHAT THIS IS NOT, and the distinction is the reason the lighting can land at all. This contract is the
-/// LampArray SWITCH — publish the surface, or take it down. It is not the per-mode lighting state: that path
-/// (<c>LightsForCurrentMode</c> both forms and <c>EnsureLightZone</c>) hands out a LIVE reference into the
-/// settings graph, the UI edits it in place, and a mapping across this boundary would break it by construction —
-/// the recorded cost of the earlier investigation, and the reason those accessors are untouched. The switch
-/// touches none of that: it reads and writes one bool beside a call to the bridge.
+/// WHAT THIS IS NOT. This contract is the LampArray SWITCH — publish the surface, or take it down. It is not the
+/// per-mode lighting state, which is <see cref="ILightZoneMode"/> (Application/LightZone.cs) and a different
+/// question with a different door: that one reads and writes one zone of one mode, this one reads and writes one
+/// bool beside a call to the bridge. The two used to be described together here, because the per-mode path then
+/// handed out a LIVE reference into the settings graph that the UI edited in place, and the note existed to say
+/// why that one was left alone. The owner has since overruled that decision and the per-mode path crosses as
+/// values; the note is kept, corrected, rather than deleted, because it is the record of what this contract
+/// deliberately never touched.
 ///
 /// TWO MEMBERS, AND THE FIRST ONE ANSWERS IN TWO DEGREES. Publishing has three outcomes and they are not two: it
 /// worked, it did not (the driver is missing, the transport refused, and the bridge's own <c>LastError</c> says

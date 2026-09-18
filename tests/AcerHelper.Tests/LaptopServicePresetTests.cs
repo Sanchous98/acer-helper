@@ -619,43 +619,62 @@ public class LaptopServiceApplyModeGraphTests
 
 /// <summary>
 /// <c>GetOrAdd</c> (`LaptopService.cs` `GetOrAdd`) — the "look up, create and INSERT when absent, otherwise hand
-/// back the instance already there" idiom every per-mode preset shares — plus its one reader that DOES
-/// insert: <see cref="LaptopService.LightsForCurrentMode"/>. That one is the documented exception to the
-/// rule the previous classes pin, and it is worth its own assertions precisely because it looks like the
-/// readers around it.
+/// back the instance already there" idiom every per-mode preset shares — plus the two reads on the lighting path
+/// that DO insert: <see cref="LaptopService.LightsForCurrentMode()"/>, which creates the mode's preset, and
+/// <see cref="ReadLightZone"/>, which creates the zone's entry inside it. Those two are the documented exception
+/// to the rule the previous classes pin, and they are worth their own assertions precisely because they look
+/// like the readers around them.
+///
+/// THE LIGHTING ACCESSORS CHANGED SHAPE, AND THAT IS THE OWNER'S RULING rather than this file's convenience:
+/// the mode's lighting used to leave the service as the stored zone DICTIONARY, which the UI held and edited in
+/// place, and the guards here pinned the aliasing with <c>Assert.Same</c>. What leaves now is a door
+/// (<see cref="ILightZoneMode"/>) that reads and writes VALUES, so those guards are gone. Every rule they were
+/// protecting is still pinned below, against the door instead of against the dictionary.
 /// </summary>
 public class LaptopServicePresetGetOrAddTests
 {
+    /// <summary>The read creates the mode's preset and NOTHING inside it, and it saves nothing: a mode that has
+    /// merely been looked at has been configured by nobody, which is why the app can restore a mode's lighting
+    /// without inventing state for the modes it never touched.
+    ///
+    /// MUTATION THAT REDDENS IT: dropping the bucket creation (`LightZoneMode`'s field initializer) leaves
+    /// <c>LightPresets</c> empty; calling <c>Save()</c> on the read path makes <c>SaveCount</c> one.</summary>
     [Fact]
     public void LightsForCurrentMode_InsertsOneEmptyPreset_ButSavesNothing()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
-        var zones = f.Service.LightsForCurrentMode();
+        var mode = f.Service.LightsForCurrentMode();
 
-        Assert.Empty(zones);
+        Assert.Empty(mode.Stored());
         Assert.Equal(["balanced"], f.Store.Settings.LightPresets.Keys);
-        // NOTE: this read DOES mutate the graph (it is the one exception) but it does NOT persist — the
-        // lighting view-models mutate the live Zones dict and call PersistLighting() once they are done
-        // (`LaptopService.Lighting.cs` `LightsForCurrentMode`, `LaptopService.Toggles.cs` `PersistLighting`).
         Assert.Equal(0, f.Store.SaveCount);
     }
 
-    /// <summary>Present key -> the SAME instance, not a fresh one. Otherwise a view-model's edits would
-    /// land on an object nobody ever saves.</summary>
+    /// <summary>Both calls reach ONE mode, and the guard that says so is no longer an aliasing assertion. The
+    /// door used to BE the stored dictionary, so <c>Assert.Same</c> was the whole proof; the doors are now
+    /// deliberately different objects, and the rule underneath — that the app has one bucket per mode and not a
+    /// fresh one per call — is pinned by writing through one door and reading through the other.
+    ///
+    /// MUTATION THAT REDDENS IT: a fresh key per call (the write lands in a bucket the second door never sees).</summary>
     [Fact]
-    public void LightsForCurrentMode_ReturnsTheSameDictionaryInstance_OnEveryCall()
+    public void LightsForCurrentMode_ReachesTheSameModeOnEveryCall()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
         var first = f.Service.LightsForCurrentMode();
         var second = f.Service.LightsForCurrentMode();
+        first.Write("keyboard", Zone(brightness: 37));
 
-        Assert.Same(first, second);
-        Assert.Same(f.Store.Settings.LightPresets["balanced"].Zones, first);
+        Assert.Equal(37, second.Stored()["keyboard"].Brightness);
         Assert.Single(f.Store.Settings.LightPresets);             // absent inserted exactly one, present none
     }
 
+    /// <summary>Each mode keeps its own zones, and the door is the only way to see them, so the assertion is that
+    /// a write through one mode's door is INVISIBLE through another's — which is what "the zones do not bleed
+    /// across modes" meant when the caller could reach into the dictionary directly.
+    ///
+    /// MUTATION THAT REDDENS IT: keying every door off one bucket (the write would show up in both).</summary>
     [Fact]
     public void LightsForCurrentMode_IsPerMode()
     {
@@ -664,57 +683,105 @@ public class LaptopServicePresetGetOrAddTests
         var balanced = f.Service.LightsForCurrentMode();
         f.Pp!.CurrentProfile = TestProfiles.Performance;
         var performance = f.Service.LightsForCurrentMode();
+        balanced.Write("keyboard", Zone(brightness: 42));
 
-        Assert.NotSame(balanced, performance);
         Assert.Equal(["balanced", "performance"], f.Store.Settings.LightPresets.Keys.Order());
-
-        balanced["keyboard"] = new LightSettings();               // the zones do not bleed across modes
-        Assert.Empty(performance);
+        Assert.Empty(performance.Stored());                       // the zones do not bleed across modes
+        Assert.Equal(42, balanced.Stored()["keyboard"].Brightness);
     }
 
+    /// <summary>The read's insertion rule, which used to be <c>EnsureLightZone</c>'s and is now
+    /// <see cref="ReadLightZone"/>'s: a zone this mode has none for is CREATED, once, holding the defaults — and
+    /// the creation is not persisted.
+    ///
+    /// MUTATION THAT REDDENS IT: answering with the defaults without writing (the entry would not exist), or
+    /// writing on every read (a second read would overwrite what is stored, caught by the sibling below).</summary>
     [Fact]
-    public void EnsureLightZone_InsertsOnce_AndReturnsTheStoredInstance()
+    public void ReadLightZone_InsertsTheZoneOnFirstSight_WithTheDefaults()
     {
-        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
-        var zones = f.Service.LightsForCurrentMode();
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced, declare: Keyboard());
+        var mode = f.Service.LightsForCurrentMode();
 
-        var first = f.Service.EnsureLightZone(zones, "keyboard");
-        var second = f.Service.EnsureLightZone(zones, "keyboard");
+        // Control: the machine really does advertise this zone — without it, "nothing was created" would hold
+        // for a zone the door refuses to know about, which is the sibling branch's subject and not this one.
+        Assert.True(mode.Advertises("keyboard"));
 
-        Assert.Same(first, second);
-        Assert.Same(first, zones["keyboard"]);
-        Assert.Single(zones);
+        var first = ReadLightZone.Run("keyboard", mode);
+        var second = ReadLightZone.Run("keyboard", mode);
+
+        Assert.Equal(LightZoneState.Default.Brightness, first.Brightness);
+        Assert.False(first.Configured);                          // looked at is not configured
+        Assert.Equal(first.Brightness, second.Brightness);
+        Assert.Equal(["keyboard"], f.Store.Settings.LightPresets["balanced"].Zones.Keys);
         Assert.Equal(0, f.Store.SaveCount);
     }
 
     /// <summary>GetOrAdd must return what is THERE, not overwrite it with a default — an entry the user has
-    /// already configured surviving a second EnsureLightZone is the whole reason the method exists.</summary>
+    /// already configured surviving a second read is the whole reason the creation exists at all.
+    ///
+    /// MUTATION THAT REDDENS IT: writing the defaults unconditionally in <c>ReadLightZone</c>.</summary>
     [Fact]
-    public void EnsureLightZone_KeepsAnExistingEntrysState()
+    public void ReadLightZone_KeepsAnExistingEntrysState()
     {
-        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
-        var zones = f.Service.LightsForCurrentMode();
-        zones["keyboard"] = new LightSettings { Configured = true, Brightness = 37 };
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced, declare: Keyboard());
+        var mode = f.Service.LightsForCurrentMode();
+        mode.Write("keyboard", Zone(brightness: 37));
 
-        var zone = f.Service.EnsureLightZone(zones, "keyboard");
+        var zone = ReadLightZone.Run("keyboard", mode);
 
         Assert.True(zone.Configured);
         Assert.Equal(37, zone.Brightness);
-        Assert.Single(zones);
+        Assert.Single(mode.Stored());
     }
 
+    /// <summary>A zone per name, and no more: two names are two entries.
+    ///
+    /// MUTATION THAT REDDENS IT: keying the insertion off something other than the zone name.</summary>
     [Fact]
-    public void EnsureLightZone_WithDifferentNames_AddsOneEntryEach()
+    public void ReadLightZone_WithDifferentNames_AddsOneEntryEach()
     {
-        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
-        var zones = f.Service.LightsForCurrentMode();
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced,
+                                                  declare: Keyboard("keyboard", "lightbar"));
+        var mode = f.Service.LightsForCurrentMode();
 
-        var a = f.Service.EnsureLightZone(zones, "keyboard");
-        var b = f.Service.EnsureLightZone(zones, "lightbar");
+        ReadLightZone.Run("keyboard", mode);
+        ReadLightZone.Run("lightbar", mode);
 
-        Assert.NotSame(a, b);
-        Assert.Equal(["keyboard", "lightbar"], zones.Keys.Order());
+        Assert.Equal(["keyboard", "lightbar"], f.Store.Settings.LightPresets["balanced"].Zones.Keys.Order());
     }
+
+    /// <summary>What the door hands out is a COPY, down to the zone-colour array — the rule the six closed
+    /// accessors state for the presets, and here the difference is measurable because the graph is reachable:
+    /// rewriting the array a caller was given must not reach the stored one.
+    ///
+    /// MUTATION THAT REDDENS IT: returning the stored array itself in <c>LightZoneMode.ToDomain</c>.</summary>
+    [Fact]
+    public void TheStateTheDoorHandsOut_SharesNoArrayWithTheGraph()
+    {
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced, declare: Keyboard());
+        var mode = f.Service.LightsForCurrentMode();
+        mode.Write("keyboard", new LightZoneState(true, 0, 50, 5, 1, 0x00FF00, [0x111111, 0x222222]));
+
+        var handed = mode.Stored()["keyboard"];
+        handed.ZoneColors[0] = 0x999999;
+
+        Assert.Equal(0x111111, f.Store.Settings.LightPresets["balanced"].Zones["keyboard"].ZoneColors[0]);
+    }
+
+    /// <summary>A configured zone as the value the contract carries; the fields this file does not vary are the
+    /// schema's own defaults, so the value reads as a zone the user has set rather than as a bare struct.</summary>
+    private static LightZoneState Zone(int brightness)
+        => new(Configured: true, EffectIndex: 0, Brightness: brightness, Speed: 5, Direction: 1, Color: 0xFF0000,
+               ZoneColors: []);
+
+    /// <summary>Declare RGB zones on the fake device BEFORE the service exists — the advertised list is what
+    /// <c>ReadLightZone</c> and <c>ApplyLightZone</c> ask about, and a declaration that lands after construction
+    /// cannot reach the model (see <see cref="LaptopServiceFixture"/>).</summary>
+    private static Action<FakeDevice> Keyboard(params string[] zones) => d =>
+    {
+        var names = zones.Length > 0 ? zones : ["keyboard"];
+        d.Lighting = new FakeRgbDevice { Zones = [.. names.Select(n => FakeRgbController.Zone(n))] };
+    };
 
     /// <summary>The writers' half of GetOrAdd: a SECOND write to the same mode must reuse the instance the
     /// first one stored (a replaced instance would lose the fields this call does not set — the per-fan

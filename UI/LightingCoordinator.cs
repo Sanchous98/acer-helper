@@ -17,10 +17,12 @@ namespace AcerHelper.UI;
 /// <see cref="OnModeChanged"/>) and forwards the startup/rebuild repaint (<see cref="ApplyFollowLighting"/>)
 /// and the follows-profile flip (<see cref="OnFollowsProfileFlipped"/>).
 ///
-/// It does NO hardware reads of its own: the current profile's flash colour and the mode's per-zone lights are
-/// read on the (background) refresh pass and handed in, then cached here so the timer / resume / lid / follows-
-/// flip re-paints reuse them. This keeps every path on the UI thread free of a blocking EC read — the HID
-/// writes it issues are already async (EneHidController's background writer).</summary>
+/// It does NO hardware reads of its own: the current profile's flash colour is read on the (background) refresh
+/// pass and handed in, and cached here so the timer / resume / lid / follows-flip re-paints reuse it. The
+/// per-zone lighting is not cached here at all — the section holds it as values and re-applies them when asked
+/// (<see cref="LightingViewModel.Repaint"/>), and a pass that reports a change hands in the mode's own door
+/// instead of a copy of its contents. This keeps every path on the UI thread free of a blocking EC read — the
+/// HID writes it issues are already async (EneHidController's background writer).</summary>
 internal sealed class LightingCoordinator : IDisposable
 {
     private readonly LaptopService _svc;
@@ -57,11 +59,16 @@ internal sealed class LightingCoordinator : IDisposable
     private DateTime _lastResume = DateTime.MinValue;   // coalesce Windows' double Resume event (see OnResume)
 
     // Cached lighting inputs, refreshed by the caller (who reads them off the UI thread): the current profile's
-    // palette flash colour and the current mode's per-zone lights. The re-paint paths (timer/resume/lid/follows-
-    // flip) reuse these instead of reading the EC/Settings on the UI thread. _lights is the LIVE dictionary
-    // reference (same aliasing as before — only the UI thread touches it after hand-off).
+    // palette flash colour. The per-zone lights are NOT cached here any more — they belong to the lighting
+    // section, which holds them as values and re-applies them itself (LightingViewModel.Repaint), so this class
+    // keeps no reference into the settings graph and a burst tick cannot paint a state older than the user's
+    // last edit.
     private AccentColor? _flash;
-    private Dictionary<string, LightSettings> _lights = new();
+
+    // A mode the refresh pass reported while the backlight was hidden: the panels could not be rebound then
+    // (nothing may paint under a shut lid in clamshell), so the door is kept for the paint that restores them —
+    // the lid watcher's (see OnLidChanged). Null the rest of the time, which is the ordinary case.
+    private ILightZoneMode? _rebindWhenVisible;
 
     // A profile WE applied that the refresh pass hasn't reported back yet (id + when we applied it). The pass
     // discovers the profile by polling, so for the ~1 s until it catches up every pass still describes the
@@ -157,12 +164,15 @@ internal sealed class LightingCoordinator : IDisposable
         KickReapply(withFlash: false);
     }
 
-    /// <summary>The refresh pass observed a profile and/or mode change (the profile's flash colour and the
-    /// mode's per-zone lights are read off the UI thread by the caller and handed in). Covers changes we did
-    /// NOT make — the firmware's own Turbo key, another tool, a power-source restore — and delivers the new
-    /// mode's saved zone colours after one of our own switches.</summary>
-    public void OnStateChanged(bool profileChanged, string? profileId, AccentColor? flash,
-                               Dictionary<string, LightSettings> lights)
+    /// <summary>The refresh pass observed a profile and/or mode change (the profile's flash colour and the door
+    /// for the current mode's lighting are read off the UI thread by the caller and handed in). Covers changes we
+    /// did NOT make — the firmware's own Turbo key, another tool, a power-source restore — and delivers the new
+    /// mode's saved zone colours after one of our own switches.
+    ///
+    /// <paramref name="mode"/> is the MODE's own door, not a copy of its values: the panels rebind through it, so
+    /// the mode they end up bound to is the one this pass read, and the values they take are read under the graph
+    /// lock by whoever asks (LaptopService.LightsForCurrentMode states why the mode is fixed at the read).</summary>
+    public void OnStateChanged(bool profileChanged, string? profileId, AccentColor? flash, ILightZoneMode mode)
     {
         // A switch of ours that the poll hasn't caught up to yet: until it does, every pass still reports the
         // PREVIOUS profile, and repainting from one of those puts the old palette and the old mode's zones back
@@ -176,36 +186,55 @@ internal sealed class LightingCoordinator : IDisposable
             else { _pendingId = null; profileChanged = false; }   // caught up — OnProfileApplied already painted it
         }
 
-        _lights = lights;
-        if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
+        if (BacklightHidden)
+        {
+            // Lid shut in clamshell mode: nothing may paint, so the panels are NOT rebound yet — but the mode this
+            // pass reported is KEPT, because the lid watcher's restore is the paint that will need it. Without
+            // the hand-off a mode that moved under a shut lid would surface on the next lid-open as the OLD
+            // mode's lighting: the panels would still be bound to it, and nothing else would tell them otherwise
+            // until the following pass. This is the door and not a copy of its values, so nothing is held here
+            // that is not already the section's to read.
+            _rebindWhenVisible = mode;
+            BlankBacklight();
+            return;
+        }
+        _rebindWhenVisible = null;
 
         // An out-of-band profile change is the only case left that still needs the palette: nobody has painted
         // it yet, so adopt the colour, show it at once (otherwise the previous one lingers for a beat) and let
         // the burst re-assert it. Everything else — a mode-only change, or the tail of our own switch — just
         // binds the new mode's zones; the profile's colour is either unchanged or already on screen.
         if (profileChanged) _flash = flash;
-        Paint(includeFlash: profileChanged);
+        Paint(includeFlash: profileChanged, rebind: mode);
         KickReapply(withFlash: profileChanged);
     }
 
-    /// <summary>Startup / language-rebuild paint: seed the cached flash colour + mode lights (read by the caller
-    /// off the UI thread) and paint, then re-apply for a few seconds. Startup is exactly the boot-with-external-
-    /// display case where the first apply is most likely to land corrupted on the contended HID-over-I2C bus, so
-    /// the burst gives the initial lighting several chances to settle correctly.</summary>
-    public void ApplyFollowLighting(AccentColor? flash, Dictionary<string, LightSettings> lights)
+    /// <summary>Startup / language-rebuild paint: seed the cached flash colour (read by the caller off the UI
+    /// thread) and paint, then re-apply for a few seconds. Startup is exactly the boot-with-external-display case
+    /// where the first apply is most likely to land corrupted on the contended HID-over-I2C bus, so the burst
+    /// gives the initial lighting several chances to settle correctly.
+    ///
+    /// IT TAKES NO LIGHTING: the sections are built with the current mode's values only moments before this runs
+    /// (<c>BuildUi</c> hands them over, then <c>Attach</c>, then this), so there is nothing to rebind and the
+    /// paint is the panels' own values.</summary>
+    public void ApplyFollowLighting(AccentColor? flash)
     {
         _flash = flash;
-        _lights = lights;
         Paint();
         KickReapply(withFlash: true);
     }
 
-    // Repaint from the cached (flash, lights). First paint the profile's palette on a follow-lightbar (a GLOBAL
-    // write that also flashes the keyboard), then re-apply the per-zone colours so the keyboard settles back to
-    // its own custom colour on top. The HID writes are async (EneHidController queues them), so this never
-    // blocks the UI thread; and it reads nothing from the EC (uses the cache). Called immediately on a switch
+    // Repaint from the cached flash colour and the section's own values. First paint the profile's palette on a
+    // follow-lightbar (a GLOBAL write that also flashes the keyboard), then re-apply the per-zone colours so the
+    // keyboard settles back to its own custom colour on top. The HID writes are async (EneHidController queues
+    // them), so this never blocks the UI thread; and it reads nothing from the EC — it asks the section, which
+    // holds the values as its own (LaptopService's door is not re-entered here). Called immediately on a switch
     // and repeated by _lightReapply / resume / lid as a safety net against a late firmware repaint.
-    private void Paint(bool includeFlash = true)
+    //
+    // `rebind` is the ONE case that needs state this class does not have: a pass that reports the mode or the
+    // profile moved hands in the new mode's door, and the panels rebind through it before painting (exactly one
+    // apply per Paint either way — a rebind already applies, so the two must not both run).
+    private void Paint(bool includeFlash = true, ILightZoneMode? rebind = null)
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
 
@@ -219,7 +248,8 @@ internal sealed class LightingCoordinator : IDisposable
 
         if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
-        _vm.ReloadLighting(_lights);
+        if (rebind is { } mode) _vm.ReloadLighting(mode);
+        else _vm.RepaintLighting();
     }
 
     /// <summary>A LampArray host took (or released) the backlight. Taking it: nothing to do — the bridge is
@@ -273,8 +303,14 @@ internal sealed class LightingCoordinator : IDisposable
         if (open)
         {
             // Restore the mode's lighting we blanked on close — one apply (the machine stayed awake in
-            // clamshell mode, so the handle is live).
-            if (_blankedByLid) { _blankedByLid = false; Paint(); }
+            // clamshell mode, so the handle is live). A mode the pass reported while the lid was shut is bound
+            // HERE, which is the paint that has to carry it (see OnStateChanged).
+            if (_blankedByLid)
+            {
+                _blankedByLid = false;
+                Paint(rebind: _rebindWhenVisible);
+                _rebindWhenVisible = null;
+            }
         }
         else if (_svc.Device.Clamshell?.Enabled == true)
             BlankBacklight();

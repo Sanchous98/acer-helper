@@ -101,8 +101,8 @@ public class LightingDrawerTests
     {
         var port = new FakeKeyboardBrightness { Level = 1 };
         var poster = new Eventually.Poster();
-        var vm = new LightingViewModel(null, new Dictionary<string, LightSettings>(), EnsureZone,
-                                       save: () => { }, followsProfile: false, _ => { },
+        var vm = new LightingViewModel(null, FakeLightZones.Empty(),
+                                       followsProfile: false, saveFollowsProfile: _ => { },
                                        backlight: port, applyBacklight: l => port.Set(l), post: poster.Post);
 
         Assert.Empty(vm.Panels);                                  // the device shape this control exists on
@@ -224,26 +224,25 @@ public class LightingDrawerTests
                                AppLanguage.System, _ => { })), lighting);
     }
 
-    /// <summary>The section as <c>AppController.BuildUi</c> builds it: one device, one mode's per-zone state, and
-    /// the surface a host may be holding.</summary>
-    private static LightingViewModel Lighting(RgbZone zone, Dictionary<string, LightSettings> lights,
-                                              IDynamicLighting host)
+    /// <summary>The section as <c>AppController.BuildUi</c> builds it: one device, one mode's lighting as the
+    /// service's door, and the surface a host may be holding.</summary>
+    private static LightingViewModel Lighting(RgbZone zone, FakeLightZones mode, IDynamicLighting host)
         => new(new RgbDevice(new FakeRgbController { Zones = [zone] }),
-               lights, EnsureZone, save: () => { }, followsProfile: false, _ => { }, host: host);
+               mode, followsProfile: false, _ => { }, host: host);
 
     /// <summary>The same build for the other device shape: an RGB device whose only zone is the firmware's while
     /// the follow switch is on (so no panel is built and the backlight is), plus that backlight.</summary>
     private static LightingViewModel BacklightDevice(FakeKeyboardBrightness port, Eventually.Poster poster,
                                                      IDynamicLighting host)
         => new(new RgbDevice(new FakeRgbController { Zones = [FollowZone()] }),
-               new Dictionary<string, LightSettings>(), EnsureZone,
-               save: () => { }, followsProfile: true, _ => { },
+               FakeLightZones.Of("Lightbar", LightZoneState.Default),
+               followsProfile: true, _ => { },
                backlight: port, applyBacklight: l => port.Set(l), post: poster.Post, host: host);
 
-    /// <summary>A mode's per-zone state for the one zone below, already configured — so the panel's
-    /// construction re-apply is the write the host gate has to stop.</summary>
-    private static Dictionary<string, LightSettings> Brightness(int brightness)
-        => new() { [ZoneName] = new LightSettings { Brightness = brightness, Configured = true } };
+    /// <summary>A mode whose one zone is already configured — so the panel's construction re-apply is the write
+    /// the host gate has to stop.</summary>
+    private static FakeLightZones Brightness(int brightness)
+        => FakeLightZones.Of(ZoneName, new LightZoneState(true, 0, brightness, 5, 1, 0xFF0000, []));
 
     /// <summary>One static zone that records every brightness it is sent. No brightness READ: this file is
     /// about writes, and a read would add a hardware round-trip to every construction for nothing.</summary>
@@ -257,15 +256,6 @@ public class LightingDrawerTests
     private static RgbZone FollowZone()
         => new("Lightbar", 1, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                (_, _, _, _, _) => true, canFollowProfile: true);
-
-    /// <summary>Same contract as <c>LaptopService.EnsureLightZone</c>: the mode's per-zone entry, created on
-    /// first sight under the service's lock. Never reached by the backlight-only devices — they build no panels —
-    /// but it is what the constructor is handed, so the fake matches the real call.</summary>
-    private static LightSettings EnsureZone(Dictionary<string, LightSettings> lights, string name)
-    {
-        if (!lights.TryGetValue(name, out var s)) lights[name] = s = new LightSettings();
-        return s;
-    }
 
     /// <summary>The virtual LampArray surface, as the ONE thing this file needs from it: an ownership flag. Its
     /// other members are stubs because the app reads none of them here — the drawer never drives the surface,

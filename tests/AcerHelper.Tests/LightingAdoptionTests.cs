@@ -1,3 +1,4 @@
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Lighting;
@@ -40,8 +41,9 @@ namespace AcerHelper.Tests;
 /// reachable stand-in for the plan's "restore the poller", and it reddens
 /// <c>AStaleRead_ChangesNothing_OnEitherPathTheAppCalls</c> — the mode's stored brightness comes back as 100, the
 /// register's stale value, which is the reported bug exactly;</item>
-/// <item><b>drop the persistence</b> (<c>_state.Brightness = value; _save();</c> removed) — reddens
-/// <c>AnOutOfBandInput_IsAdopted_AndStored</c> and <c>AnAdoption_NeverClaimsTheZoneAsConfigured</c>;</item>
+/// <item><b>drop the persistence</b> (the <c>_state = _state with { Brightness = value }; _store(_state);</c>
+/// pair removed) — reddens <c>AnOutOfBandInput_IsAdopted_AndStored</c> and
+/// <c>AnAdoption_NeverClaimsTheZoneAsConfigured</c>;</item>
 /// <item><b>drop the spurious-zero guard</b> — reddens <c>ASpuriousZeroRead_IsIgnored_AndNotStored</c>;</item>
 /// <item><b>drop the user-edit guard</b> (<c>_debounce.IsEnabled</c>) — reddens
 /// <c>AUserEditInFlight_BeatsTheEvent</c>, which also proves the guard's precondition is real without a
@@ -85,14 +87,13 @@ public class LightingAdoptionTests
     {
         var register = new StaleRegister(100);   // the register still holds the previous mode's brightness
         var written = new List<byte>();
-        var saves = 0;
         var poster = new Eventually.Poster();    // the same seam AppController builds the section with (default:
                                                  // the real dispatcher) — without it a read-and-adopt restored on
                                                  // these paths would be invisible here, which is the whole mutation
         var zone = Zone(register, written);
         var modeA = Mode(100);
         var modeB = Mode(0);
-        var vm = Lighting(zone, modeA, () => saves++, poster.Post);
+        var vm = Lighting(zone, modeA, poster.Post);
 
         // Controls: the construction read is the value the startup re-apply SENDS (pinned in LightingPrimeTests),
         // and it is the only read so far.
@@ -109,7 +110,8 @@ public class LightingAdoptionTests
 
         Assert.Equal(0, vm.Panels[0].Brightness);       // the slider still shows OUR value
         Assert.Equal(0, modeB[ZoneName].Brightness);    // the lag was NOT persisted as the user's choice
-        Assert.Equal(0, saves);                         // nothing here was an intent, so nothing was saved
+        Assert.Empty(modeB.Writes);                     // ...and nothing was written over it either
+        Assert.Equal(0, modeB.Persists);                // nothing here was an intent, so nothing was saved
         Assert.Equal(0, poster.Delivered);              // ...and no read was even delivered to the UI thread
         Assert.Equal([100, 0, 0], written);             // the doubt moment re-applied OUR value, nothing else
         Assert.Equal(1, register.Reads);                // neither path asked the device: still only the construction read
@@ -132,10 +134,9 @@ public class LightingAdoptionTests
     {
         var register = new StaleRegister(30);
         var written = new List<byte>();
-        var saves = 0;
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = Mode(60);
         var poster = new Eventually.Poster();
-        var panel = Panel(state, written, register, () => saves++, poster.Post);
+        var panel = Panel(mode, written, register, poster.Post);
 
         // Controls: the panel is built from the hardware read rather than the stored 60, and that reading is what
         // the startup re-apply sends.
@@ -147,26 +148,29 @@ public class LightingAdoptionTests
 
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
         Assert.Equal(20, panel.Brightness);
-        Assert.Equal(20, state.Brightness);      // stored — the half that used to be dropped
-        Assert.Equal(1, saves);
+        Assert.Equal(20, mode[ZoneName].Brightness);   // stored — the half that used to be dropped
+        Assert.Equal(1, mode.Persists);
         Assert.Equal([30], written);             // an adoption reads; it never writes
     }
 
     /// <summary>
     /// An adoption writes ONE field and claims nothing else. <c>Configured</c> stays off, so a special key that
     /// moves the brightness of a zone the user never configured (a fresh install) cannot hand us that zone and
-    /// make the app start driving what it does not own — the reason the adoption path writes only
-    /// <c>_state.Brightness</c> and leaves the rest of the slider to <c>SaveState()</c> on the user-edit path.
+    /// make the app start driving what it does not own — the reason the adoption path moves only the brightness
+    /// of the state it is bound to (<c>with</c>, one field) and leaves the rest of it to <c>SaveState()</c> on the
+    /// user-edit path.
+    ///
+    /// MUTATION THAT REDDENS IT: writing the panel's whole state on the adoption path (the capture
+    /// <c>SaveState</c> uses) — <c>Configured</c> would come back true.
     /// </summary>
     [Fact]
     public void AnAdoption_NeverClaimsTheZoneAsConfigured()
     {
         var register = new StaleRegister(10);
         var written = new List<byte>();
-        var saves = 0;
-        var state = new LightSettings { Brightness = 10 };   // Configured stays off
+        var mode = FakeLightZones.Of(ZoneName, new LightZoneState(false, 0, 10, 5, 1, 0xFF0000, []));
         var poster = new Eventually.Poster();
-        var panel = Panel(state, written, register, () => saves++, poster.Post);
+        var panel = Panel(mode, written, register, poster.Post);
 
         Assert.Empty(written);                   // Control: an unconfigured zone writes nothing at all
 
@@ -175,8 +179,8 @@ public class LightingAdoptionTests
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
 
         Assert.Equal(40, panel.Brightness);
-        Assert.Equal(40, state.Brightness);
-        Assert.False(state.Configured);
+        Assert.Equal(40, mode[ZoneName].Brightness);
+        Assert.False(mode[ZoneName].Configured);
         Assert.Empty(written);                   // ...and it still writes nothing
     }
 
@@ -193,10 +197,9 @@ public class LightingAdoptionTests
     {
         var register = new StaleRegister(30);
         var written = new List<byte>();
-        var saves = 0;
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = Mode(60);
         var poster = new Eventually.Poster();
-        var panel = Panel(state, written, register, () => saves++, poster.Post);
+        var panel = Panel(mode, written, register, poster.Post);
 
         register.Value = 0;                      // the profile flash zeroes the register under a lit keyboard
         panel.AdoptFromHardware();
@@ -204,8 +207,9 @@ public class LightingAdoptionTests
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
         Assert.Equal(2, register.Reads);         // Control: the register WAS asked, and answered 0
         Assert.Equal(30, panel.Brightness);      // the slider is not snapped to 0 (where it would stick)
-        Assert.Equal(60, state.Brightness);      // ...and the stored value is not overwritten with the lie
-        Assert.Equal(0, saves);
+        Assert.Equal(60, mode[ZoneName].Brightness);   // ...and the stored value is not overwritten with the lie
+        Assert.Empty(mode.Writes);
+        Assert.Equal(0, mode.Persists);
     }
 
     /// <summary>
@@ -220,10 +224,9 @@ public class LightingAdoptionTests
     {
         var register = new StaleRegister(30);
         var written = new List<byte>();
-        var saves = 0;
-        var state = new LightSettings { Brightness = 60, Configured = true };
+        var mode = Mode(60);
         var poster = new Eventually.Poster();
-        var panel = Panel(state, written, register, () => saves++, poster.Post);
+        var panel = Panel(mode, written, register, poster.Post);
 
         panel.Brightness = 80;                   // the user drags the slider: the 120 ms debounce is now pending
         register.Value = 50;                     // the hardware read lags behind that edit
@@ -231,8 +234,108 @@ public class LightingAdoptionTests
 
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
         Assert.Equal(80, panel.Brightness);      // the user's value stands
-        Assert.Equal(60, state.Brightness);      // ...and nothing was persisted over it
-        Assert.Equal(0, saves);
+        Assert.Equal(60, mode[ZoneName].Brightness);   // ...and nothing was persisted over it
+        Assert.Empty(mode.Writes);
+    }
+
+    // ---------------------------------------------------------------- the re-apply the burst runs
+
+    /// <summary>
+    /// <see cref="LightingViewModel.Repaint"/> — the third composite path, and the one
+    /// <c>LightingCoordinator</c> runs on every tick of its post-switch burst, on a resume, on a lid-open and on
+    /// a host hand-back. It is the ONLY one of the three that takes no state from the graph at all, which is what
+    /// makes the burst safe: the values it re-applies are the section's own, so a tick that lands after an edit
+    /// re-applies the edit rather than the state as it stood when the burst began.
+    ///
+    /// THE NON-READ IS THE POINT, and it is asserted as a COUNT because it is invisible in the values: a repaint
+    /// that re-read the mode every tick would write exactly the same bytes and differ only in the lock it took
+    /// and the graph it walked. The coordinator itself cannot be driven here (it needs a desktop lifetime — the
+    /// limit <c>ReconcileScheduleTests</c> records), so this method is pinned at its own level.
+    ///
+    /// MUTATION THAT REDDENS IT: making <c>Repaint</c> rebind from the door (<c>Reload(_mode)</c>) — the value
+    /// assertions stay green and only the read counter moves, which is exactly why the counter exists.
+    /// </summary>
+    [Fact]
+    public void ARepaint_ReappliesTheSectionsOwnValues_AndReadsNothing()
+    {
+        var register = new StaleRegister(40);
+        var written = new List<byte>();
+        var mode = Mode(40);
+        var poster = new Eventually.Poster();
+        var vm = Lighting(Zone(register, written), mode, poster.Post);
+
+        Assert.Equal([40], written);                  // Control: the construction re-apply did write
+        var readsBefore = mode.StoredCalls;
+
+        vm.Repaint();
+
+        Assert.Equal([40, 40], written);              // the burst re-applied OUR value...
+        Assert.Equal(readsBefore, mode.StoredCalls);  // ...without asking the mode again: the values are the section's
+        Assert.Equal(1, register.Reads);              // ...and without asking the device either
+    }
+
+    /// <summary>
+    /// THE OTHER HALF OF WHAT MAKES THE BURST SAFE, and the reason <c>LightingCoordinator</c> no longer caches
+    /// the mode's lighting at all: an edit the section made is kept LOCALLY as well as written through the door,
+    /// so a tick that lands after it re-applies the user's own value. The version this replaced re-read the live
+    /// stored dictionary on every tick — the same values, because the UI had written into it — and the copy is
+    /// now here.
+    ///
+    /// MUTATION THAT REDDENS IT: dropping the local mirror in <c>LightingViewModel.Store</c> (the repaint then
+    /// rebinds from the value the section was BUILT with and puts 60 back on the device over the user's 20).
+    /// </summary>
+    [Fact]
+    public void ARepaint_AfterAnAdoption_ReappliesTheAdoptedValue_NotTheOneTheModeWasBuiltWith()
+    {
+        var register = new StaleRegister(30);
+        var written = new List<byte>();
+        var mode = Mode(60);
+        var poster = new Eventually.Poster();
+        var vm = Lighting(Zone(register, written), mode, poster.Post);
+
+        register.Value = 20;                     // the Fn key dims it out-of-band; the read is the new intent
+        vm.AdoptFromInput();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
+        Assert.Equal(20, mode[ZoneName].Brightness);   // Control: the adoption really did change the mode
+
+        vm.Repaint();
+
+        Assert.Equal(20, vm.Panels[0].Brightness);     // the burst re-applied the ADOPTED value...
+        Assert.Equal([30, 20], written);               // ...and that is what the device was told
+    }
+
+    // ---------------------------------------------------------------- the mode switch
+
+    /// <summary>
+    /// A mode the user has never configured does not snap to a bare default when it is switched to: it INHERITS
+    /// the look the panel is leaving, and REMEMBERS it — so the switch stays coherent instead of the keyboard
+    /// jumping to the schema's colours the one time nobody asked for them. The rule lives in
+    /// <c>LightViewModel.Rebind</c>'s unconfigured branch, and this change re-routed the write it makes: the
+    /// inherited look is now captured as a value and handed to the contract, where it used to be written into
+    /// the stored object the panel was holding.
+    ///
+    /// MUTATION THAT REDDENS IT: dropping the <c>_store(state)</c> from that branch (the new mode keeps its
+    /// unconfigured defaults and nothing is persisted), or dropping the capture (the mode gets the DEFAULTS
+    /// marked configured — brightness 100 rather than the 70 we were leaving).
+    /// </summary>
+    [Fact]
+    public void AModeThatWasNeverConfigured_InheritsTheLookItsPanelIsLeaving_AndRemembersIt()
+    {
+        var register = new StaleRegister(70);
+        var written = new List<byte>();
+        var modeA = Mode(70);
+        var modeB = FakeLightZones.Of(ZoneName, LightZoneState.Default);   // never configured
+        var poster = new Eventually.Poster();
+        var vm = Lighting(Zone(register, written), modeA, poster.Post);
+
+        Assert.Equal([70], written);                  // Control: the mode we are leaving really was applied
+
+        vm.Reload(modeB);
+
+        Assert.True(modeB[ZoneName].Configured);      // the switch claimed the new mode...
+        Assert.Equal(70, modeB[ZoneName].Brightness); // ...with the look it was leaving, not the schema default
+        Assert.Equal(1, modeB.Persists);              // and it is REMEMBERED, not only applied
+        Assert.Equal([70, 70], written);              // Control: the inherited look is what went out
     }
 
     // ---------------------------------------------------------------- the follow switch
@@ -260,10 +363,9 @@ public class LightingAdoptionTests
     public void FlippingTheFollowSwitch_HandsTheZoneBackAndForth_AndPersistsTheChoice()
     {
         var flips = new List<bool>();
-        var lights = new Dictionary<string, LightSettings>();
+        var mode = FakeLightZones.Of("Lightbar", LightZoneState.Default);
         var vm = new LightingViewModel(new RgbDevice(new FakeRgbController { Zones = [FollowZone()] }),
-                                       lights, EnsureZone, save: () => { }, followsProfile: true,
-                                       saveFollowsProfile: flips.Add);
+                                       mode, followsProfile: true, saveFollowsProfile: flips.Add);
 
         Assert.True(vm.ShowFollowsProfile);
         Assert.Empty(vm.Panels);              // Control: while following, the firmware owns the zone — no panel
@@ -287,19 +389,18 @@ public class LightingAdoptionTests
                (_, _, _, _, _) => true,
                canFollowProfile: true);
 
-    /// <summary>A per-mode zone store: the current mode's per-zone state, keyed by the panel's title. One dict per
-    /// mode is exactly what <c>LaptopService.LightsForCurrentMode</c> hands the view-model, and
-    /// <see cref="LightingViewModel.Reload"/> is the switch between them.</summary>
-    private static Dictionary<string, LightSettings> Mode(int brightness)
-        => new() { [ZoneName] = new LightSettings { Brightness = brightness, Configured = true } };
+    /// <summary>A mode whose one zone the user has configured. One door per mode is what
+    /// <c>LaptopService.LightsForCurrentMode</c> hands the view-model, and <see cref="LightingViewModel.Reload"/>
+    /// is the switch between them.</summary>
+    private static FakeLightZones Mode(int brightness)
+        => FakeLightZones.Of(ZoneName, new LightZoneState(true, 0, brightness, 5, 1, 0xFF0000, []));
 
     /// <summary>The composite: one RGB zone over the given mode, whose brightness read is the controllable
     /// register. Built the way <c>AppController.BuildUi</c> builds it — no poster is passed for the panels, so
     /// nothing here can reach the event path (that is the point of the first test).</summary>
-    private static LightingViewModel Lighting(RgbZone zone, Dictionary<string, LightSettings> lights, Action save,
-                                              Action<Action> post)
+    private static LightingViewModel Lighting(RgbZone zone, FakeLightZones mode, Action<Action> post)
         => new(new RgbDevice(new FakeRgbController { Zones = [zone] }),
-               lights, EnsureZone, save, followsProfile: false, _ => { }, post: post);
+               mode, followsProfile: false, _ => { }, post: post);
 
     /// <summary>Give an asynchronous read-and-adopt — the shape a restored poll has — its chance to land before a
     /// NEGATIVE assertion is made. The event-path tests below need no window: their adoption arrives through a
@@ -316,14 +417,6 @@ public class LightingAdoptionTests
     /// over with a longer wait.</summary>
     private static void Settle() => Thread.Sleep(50);
 
-    /// <summary>Same contract as <c>LaptopService.EnsureLightZone</c>: the mode's per-zone entry, created on first
-    /// sight under the service's lock.</summary>
-    private static LightSettings EnsureZone(Dictionary<string, LightSettings> lights, string name)
-    {
-        if (!lights.TryGetValue(name, out var s)) lights[name] = s = new LightSettings();
-        return s;
-    }
-
     /// <summary>One static zone whose apply records every brightness it is sent
     /// (<paramref name="written"/>), and whose brightness read is the register.</summary>
     private static RgbZone Zone(StaleRegister register, List<byte> written)
@@ -331,14 +424,17 @@ public class LightingAdoptionTests
                (_, brightness, _, _, _) => { written.Add(brightness); return true; },
                readBrightness: register.Read);
 
-    /// <summary>One panel over the given state, built the way <c>LightingViewModel.BuildPanel</c> builds it —
-    /// with the poster injected so the event path can be observed without a dispatcher (see the class docs).</summary>
-    private static LightViewModel Panel(LightSettings state, List<byte> written, StaleRegister register,
-                                        Action save, Action<Action> post)
+    /// <summary>One panel over the given mode, built the way <c>LightingViewModel.BuildPanel</c> builds it —
+    /// with the poster injected so the event path can be observed without a dispatcher (see the class docs), and
+    /// with the panel's write wired to the REAL store the section uses (<c>LightingViewModel.Store</c> is
+    /// <see cref="ApplyLightZone"/> plus the local copy), so a test can see whether the adoption stored anything
+    /// and whether it reached the file — not only whether it applied.</summary>
+    private static LightViewModel Panel(FakeLightZones mode, List<byte> written, StaleRegister register,
+                                        Action<Action> post)
         => new(ZoneName, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                zones: 1,
                applyAll: (_, _, brightness, _, _) => written.Add(brightness),
-               applyZone: null, state, save, register.Read, post);
+               applyZone: null, mode[ZoneName], s => ApplyLightZone.Run(ZoneName, s, mode), register.Read, post);
 
     /// <summary>A controllable brightness register that LIES: nothing we write changes what a read reports, which
     /// is the wire's lag after a profile switch — the write is sent, the EC has not applied it, and the register

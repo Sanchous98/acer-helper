@@ -92,9 +92,10 @@ public sealed partial class LaptopService
         lock (_state) { Settings.Language = language; Save(); }
     }
 
-    /// <summary>Persist the lighting state (the lighting view-models mutate <see cref="Settings"/>'s
-    /// LightSettings in place, then call this to write them out).</summary>
-    public void PersistLighting() => Save();
+    // There is deliberately no `PersistLighting` here any more. It existed because the lighting view-models
+    // mutated the LIVE per-mode dictionary and then asked the service to write it out — two acts, the first of
+    // which had no owner. Both now belong to the per-mode door (LaptopService.Lighting.cs, `LightZoneMode`),
+    // which persists through the same `Save()` under the graph lock, and the UI holds values instead.
 
     /// <summary>Read a vendor-specific device flag from the neutral <see cref="Settings.DeviceSettings"/> bag
     /// (the key is owned by the backend, e.g. Infrastructure/Vendors/Acer). Missing key -> <paramref name="fallback"/>.

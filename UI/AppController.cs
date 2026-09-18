@@ -107,8 +107,9 @@ internal sealed class AppController
 
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch. The
-        // flash colour + mode lights are read here and handed to the coordinator, which caches them.
-        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor, _svc.LightsForCurrentMode(cur0));
+        // flash colour is read here and handed to the coordinator, which caches it; the mode's lighting is NOT
+        // handed over, because the section was built with it a moment ago (BuildUi -> Attach -> this).
+        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor);
 
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
         ApplyHardwareAccessBanner();
@@ -188,7 +189,7 @@ internal sealed class AppController
         // DeviceSettings bag without any vendor coupling here. Null when the device has no such zone.
         var followKey = d.Lighting?.ProfileFollowKey;
         var lighting = d.Lighting != null || d.KeyboardBrightness != null
-            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(cur), _svc.EnsureLightZone, _svc.PersistLighting,
+            ? new LightingViewModel(d.Lighting, _svc.LightsForCurrentMode(cur),
                                     followKey != null && _svc.GetDeviceFlag(followKey, true),
                                     // On flip: persist the flag (AppController owns the vendor key), then have the
                                     // coordinator kick the re-apply so the lightbar repaints now (ON -> this
@@ -280,7 +281,7 @@ internal sealed class AppController
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";
         _cpuPrimed = false;                       // ...and the rebuilt CPU-power row holds a placeholder again
-        _lightingCoord.ApplyFollowLighting(cur?.FlashColor, _svc.LightsForCurrentMode(cur));
+        _lightingCoord.ApplyFollowLighting(cur?.FlashColor);
         ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
         ApplyHardwareAccessBanner();
         Refresh();                                 // push live state into the fresh view-models + tray
@@ -504,7 +505,8 @@ internal sealed class AppController
 
     // One poll's worth of state, read on the background pass and consumed on the UI pass. Immutable snapshot so
     // the UI thread never re-touches the hardware (that's what used to freeze the app when the ACPI-EC stalled
-    // during a display connect). Lights is the live per-mode dict (only the UI thread touches it after hand-off).
+    // during a display connect). Lights is the current mode's DOOR, not its contents: the panels rebind through
+    // it, and its values are read under the graph lock by whoever asks (LaptopService's per-mode lighting).
     // CpuPrimed says the CPU-power row has a value to take and is NOT a mode change (wave 6): its row is built
     // with a placeholder, so without this the first pass's value would be dropped and the row would sit on
     // Balanced until the user switched profile.
@@ -513,7 +515,7 @@ internal sealed class AppController
         SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
         bool ModeChanged, FanAxisState? Fan, GpuAxisState? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
-        Dictionary<string, LightSettings>? Lights);
+        ILightZoneMode? Lights);
 
     // Kick a refresh. All hardware I/O runs on a pool thread (BackgroundPass) so a stalled EC/WMI read can never
     // freeze the UI; the VM/tray updates are posted back to the UI thread (UiPass). Single-flight: if a pass is

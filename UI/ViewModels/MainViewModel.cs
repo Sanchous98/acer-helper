@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
@@ -183,8 +184,15 @@ public sealed partial class MainViewModel : ObservableObject
     /// Index-aligned with the port's core groups.</summary>
     public void ReloadCo(IReadOnlyList<int> counts) => _tuning?.Co?.Load(counts);
 
-    /// <summary>Rebind the lighting panels to a mode's per-zone state (called when the mode changes).</summary>
-    public void ReloadLighting(Dictionary<string, LightSettings> lights) => _lighting?.Reload(lights);
+    /// <summary>Rebind the lighting panels to a mode's lighting (called when the mode changes). The argument is
+    /// the door for THAT mode, taken by whoever had the profile in hand — the panels take their values out of it
+    /// and every later edit goes back through it.</summary>
+    public void ReloadLighting(ILightZoneMode mode) => _lighting?.Reload(mode);
+
+    /// <summary>Re-apply the lighting values the section already holds, without rebinding anything (the
+    /// coordinator's re-apply burst, a resume, a lid open). Takes no argument because there is none to take:
+    /// the values ARE the section's, and re-reading the graph on every tick is what this replaced.</summary>
+    public void RepaintLighting() => _lighting?.Repaint();
 
     /// <summary>True while the Lighting drawer is the one actually on screen. Cheap check the input-driven
     /// brightness adoption gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>

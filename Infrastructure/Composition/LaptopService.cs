@@ -45,6 +45,12 @@ namespace AcerHelper.Infrastructure.Composition;
 /// use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
 /// is remembered before it is written); this class owns the graph and the ports, which is why the rules could move
 /// and the graph could not.
+///
+/// THE SIXTH IS THE LIGHTING, and it is implemented the other way round: the door is taken by
+/// <see cref="LightsForCurrentMode()"/>, which RETURNS the contract (<see cref="ILightZoneMode"/>) rather than
+/// this class implementing its members, because the door has to carry the mode key and this class has no single
+/// lighting mode to be. What that member used to hand out — the stored zone dictionary itself, edited in place
+/// by the UI — is what the owner overruled; see Infrastructure/Composition/LaptopService.Lighting.cs.
 /// </summary>
 public sealed partial class LaptopService : IDisposable,
     IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget,
@@ -100,17 +106,15 @@ public sealed partial class LaptopService : IDisposable,
     /// surface, so it stops reading as an invitation, and it makes the eventual assembly split — the only thing
     /// that WOULD enforce a layer boundary, see the plan's Wave 1 note — mechanical instead of a redesign.
     ///
-    /// Honest limit: the accessors that hand back a LIVE reference into this graph still let a caller mutate
-    /// settings without holding the lock — both forms of <c>LightsForCurrentMode</c> and <c>EnsureLightZone</c>,
-    /// and nothing else beyond the property itself. The six accessors that used to be in this list —
-    /// <c>CurrentFan</c>, <c>ApplyModeFan</c>, <c>CurrentGpuOc</c>, <c>ApplyModeGpuOc</c>, <c>CurrentCo</c>,
-    /// <c>ApplyModeCo</c> — now hand back <c>Snapshot()</c>, a copy sharing nothing mutable with the stored
-    /// instance. The two lighting ones are left live ON PURPOSE, and that is a recorded decision rather than an
-    /// omission (docs/open-decisions.md §4). They are the widest door in the tree and the reason it stays open
-    /// is that writing into the graph is the feature there: <c>LightingViewModel</c> keeps the returned
-    /// dictionary and writes into it in place, and <c>EnsureLightZone</c> is that path's structural insert —
-    /// the one that must share _state with Save(), or a "collection modified" throws mid-serialization. Sealing
-    /// those means returning copies, which is a redesign of the lighting path, not a visibility change.</summary>
+    /// NO ACCESSOR HANDS OUT A LIVE REFERENCE INTO IT ANY MORE, which is worth stating because the list that used
+    /// to be here was the honest exception to that claim. The six fan/GPU/CPU/Co accessors hand back
+    /// <c>Snapshot()</c>; the two lighting ones — both forms of <c>LightsForCurrentMode</c> and
+    /// <c>EnsureLightZone</c> — used to hand back the stored zone dictionary itself, which
+    /// <c>LightingViewModel</c> kept and wrote into in place, and that was a RECORDED decision
+    /// (docs/open-decisions.md §4) rather than an oversight. The owner overruled it, and the per-mode lighting
+    /// now crosses as <see cref="ILightZoneMode"/> with <see cref="LightZoneState"/> values
+    /// (Infrastructure/Composition/LaptopService.Lighting.cs); <c>EnsureLightZone</c> is gone with it.
+    /// So what is left beyond the property itself is the <c>internal</c> keyword — a signpost, as above.</summary>
     internal Settings Settings { get; }
 
     /// <summary>Run a hardware write and report BOTH halves of its outcome: whether it succeeded, and — when it
@@ -239,7 +243,8 @@ public sealed partial class LaptopService : IDisposable,
 
     /// <summary>Look up <paramref name="key"/> in <paramref name="map"/>, creating and inserting a default
     /// instance when it is absent — the per-mode "preset, created on first write" idiom the Stored* and
-    /// per-mode accessors above all share.</summary>
+    /// per-mode accessors above all share, and the one the lighting door's mode bucket is created with
+    /// (LaptopService.Lighting.cs, <c>LightZoneMode.Bucket</c>).</summary>
     private static T GetOrAdd<T>(Dictionary<string, T> map, string key) where T : new()
     {
         if (!map.TryGetValue(key, out var value)) map[key] = value = new T();
