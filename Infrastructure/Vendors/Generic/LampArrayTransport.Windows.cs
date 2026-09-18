@@ -127,7 +127,27 @@ internal sealed class LampArrayTransport : ILampArrayTransport
     public bool WaitFrame(out LampFrame frame)
     {
         frame = default;
-        var h = _frames;
+
+        // The frame handle and the lamp count are taken TOGETHER, under the gate, and the count is read exactly
+        // once — into the local that both bounds the decode and sizes the array.
+        //
+        // It has to be that way, because Stop() is allowed to land while this wait is parked: it calls Close()
+        // under this same gate, and Close() zeroes _lampCount and drops the handles. Two independent reads of
+        // the field straddling that teardown can disagree, and when the first sees the pre-Stop count and the
+        // second the zeroed one, the clamped lamp count says "decode N lamps" while the array says "there is
+        // room for none" — an IndexOutOfRangeException out of the loop below, on the bridge's worker thread,
+        // where LampArrayBridge.WorkerLoop has no catch and the process dies. One read makes that
+        // unrepresentable: whatever count this frame is decoded with, it is the same number the array was
+        // allocated for. The window is not rare in practice — it is the whole of the blocking wait, entered
+        // every time the user turns Windows Dynamic Lighting off while a host is painting.
+        SafeFileHandle? h;
+        int lampCount;
+        lock (_gate)
+        {
+            h = _frames;
+            lampCount = _lampCount;
+        }
+
         if (_stopped || h is null || h.IsInvalid) return false;
 
         var buf = new byte[FrameSize];
@@ -138,18 +158,35 @@ internal sealed class LampArrayTransport : ILampArrayTransport
             return false;
         }
 
-        var seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(0));
-        var autonomous = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(4)) != 0;
-        var count = (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(8)), (uint)_lampCount);
+        frame = DecodeFrame(buf, lampCount);
+        return true;
+    }
 
-        var colors = new LampColor[_lampCount];
+    /// <summary>Turn one WAIT_FRAME payload into a <see cref="LampFrame"/>. <paramref name="lampCount"/> is the
+    /// published lamp count the caller snapshotted; it is the ONLY bound this uses — the array it returns is
+    /// that long and the clamp against the payload's own lamp count is that same number, so the two cannot
+    /// disagree however the device was torn down mid-wait. A test drives this directly: the count arrives as an
+    /// argument instead of being read from the transport, which is what makes the decode reachable without a
+    /// driver, a device node or elevation (LampArrayTransportFrameTests).
+    ///
+    /// The payload's lamp count is a claim about the payload, not about us — the driver fills the frame from
+    /// the layout it holds, so a re-published layout with FEWER lamps than the payload advertises is ordinary,
+    /// and the surplus entries are left at <c>default</c> (intensity 0, i.e. off) rather than read out of the
+    /// buffer. The array stays <paramref name="lampCount"/> long even so, because LampArrayBridge indexes a
+    /// frame's colours BY LAMP against the layout it published, not by position in this frame.</summary>
+    internal static LampFrame DecodeFrame(byte[] buffer, int lampCount)
+    {
+        var seq = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(0));
+        var autonomous = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(4)) != 0;
+        var count = (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(8)), (uint)lampCount);
+
+        var colors = new LampColor[lampCount];
         for (var i = 0; i < count; i++)
         {
             var o = 12 + i * 4;
-            colors[i] = new LampColor(buf[o], buf[o + 1], buf[o + 2], buf[o + 3]);
+            colors[i] = new LampColor(buffer[o], buffer[o + 1], buffer[o + 2], buffer[o + 3]);
         }
-        frame = new LampFrame(seq, autonomous, colors);
-        return true;
+        return new LampFrame(seq, autonomous, colors);
     }
 
     // ---- device node + handles ----
