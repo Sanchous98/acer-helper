@@ -167,8 +167,8 @@ docker run --rm -v "$PWD/driver/AcerHelperLampArray:/src" acerhelper-wdk
 
 The project multi-targets `net10.0-windows` (full Acer/Windows) and `net10.0` (portable; Acer,
 Dell and generic Linux backends). CI (the `build` workflow — two parallel jobs) produces Native-AOT
-artifacts per OS: an `AcerHelper.exe` + WiX MSI on a Windows runner, and a self-updating AppImage in
-a Fedora container. Both are Native AOT. Locally:
+artifacts per OS: an `AcerHelper.exe` + WiX MSI on a Windows runner, and a self-updating AppImage packed
+on the runner out of the publish folder the container build exports. Both are Native AOT. Locally:
 
 ```
 # Windows (Native AOT — must run on Windows)
@@ -197,6 +197,18 @@ and runs `findvcvarsall.bat`). The Windows artefact therefore stays on a Windows
 and the Linux container builds the other two. The line above saying the Windows publish "must run on Windows"
 was already right; what is new is that the reason is measured, and that it is not an installation problem a
 bigger container could solve.
+
+**2026-09-18 — CI now builds through that image.** The `linux` job of the `build` workflow runs the
+`docker buildx build` command above (with `--cache-from`/`--cache-to type=gha,mode=max` and `--build-arg
+GIT_SHA`), packs the AppImage out of the `dist/linux` it exports, and so builds the driver package on every
+tagged run as well. That job no longer sets up the .NET SDK, installs nothing, and no longer runs in a
+`fedora:41` container: the toolchain it used to install (clang, zlib) is pinned inside the image, and a
+job-level container has no route to the Docker daemon buildx talks to. Two consequences worth knowing: the
+binary inside a released AppImage is now the one this image produces — it used to be built in `fedora:41`
+and so differed in bytes, which is what `docs/build-image.md` recorded until this change; and the driver
+package is built but **not** attached to the release, because it is unsigned and the shipping path is
+attestation signing ([driver/README.md](driver/README.md), *Signing*). The `windows` job is untouched by
+all of this.
 
 ## Install (Windows)
 

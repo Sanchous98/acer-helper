@@ -41,6 +41,14 @@ Output in `driver/AcerHelperLampArray/out/`: `AcerHelperLampArray.sys` (~23 KB),
 stampinf's `$TOKENS$` substituted. Verified against the produced binary: format `pei-x86-64`, entry point
 `FxDriverEntry`, sections `.text`/`INIT`(discardable)/`PAGE`, imports `WDFLDR.SYS` + `ntoskrnl.exe`.
 
+**2026-09-18 — CI builds this package too, on every tagged run.** The `linux` job of the `build` workflow
+runs the release image's `artefacts` target, so the driver is built from the tagged commit by the pinned
+toolchain alongside the portable app. What comes out is uploaded as the `AcerHelperLampArray-driver-package`
+workflow artefact (`dist/driver` plus `PROVENANCE.txt`) and is deliberately **not** attached to the GitHub
+Release: an unsigned package is one Windows will not load, so the thing that ships is whatever comes back from
+the attestation signing below. The commands in this section are unchanged and remain the way to build it
+locally.
+
 Details worth knowing about [`build.sh`](build.sh):
 
 - Links **KMDF 1.33**, not the newest the WDK ships: the framework version must be present on the target, and
