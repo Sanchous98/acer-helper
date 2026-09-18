@@ -395,6 +395,14 @@ Also violating the spirit of the same invariant, without the plan saying so:
   (`docs/open-decisions.md` §4). So the closing sentence is true, and true only of the light: for the six preset
   accessors a copy WAS the answer, and spreading one to the lighting entries would silently stop per-mode
   lighting from persisting.
+  **Corrected again 2026-09-18: the two lighting entries are gone, and the owner's reason for keeping them is
+  the one that fell.** «Это неверно с точки зрения архитектуры» — the two accessors handed the UI a live
+  dictionary which it wrote into in place, which is a write into the persisted graph from the UI thread with no
+  lock, and the sentence above read that as a feature. `EnsureLightZone` is deleted outright and
+  `LightsForCurrentMode` returns a per-mode door (`ILightZoneMode`, `Application/LightZone.cs`) whose state
+  crosses as `LightZoneState` values; the `Assert.Same` guards it names here **could not stay green** and were
+  rewritten to pin the rule instead of the aliasing. Full record: `docs/open-decisions.md` §4-бис and
+  `docs/device-and-application.md` §9.
 - `LaptopService.cs` `LastError` — `public string? LastError { get; private set; }`, written under `_state` on some
   paths and outside it on others (e.g. `WmiInvoker`'s port results), read from the UI thread at
   `AppController` (`ApplyProfile`, `SetTurbo`, `SetGpuOc`, `SetCpuPower`, `SetCo`) and `OptionsAssembler.cs` `RunSet`. Reference writes are atomic so nothing
@@ -426,7 +434,7 @@ Also violating the spirit of the same invariant, without the plan saying so:
 | **D7** | `Domain/LampArrayBridge.cs:68,72,81` | `Enabled`, `HostOwnsLighting`, `LampCount` | UI thread under G4 | UI thread unlocked, and `HostOwnsLighting` read in `LightingCoordinator.Paint` (`:215`) | Benign in practice (all writers are the UI thread) but undocumented — the properties *look* like they need `_gate` and two of them are read on a hot paint path. **Corrected 2026-09-17: "all writers are the UI thread" is not right.** `HostOwnsLighting` is also written by the bridge's own worker — `WorkerLoop` sets it true when a host takes the surface, and `ReleaseOwnership` (which `Disable` calls too) clears it on hand-back and teardown — so the field has a writer on the worker thread and a reader on the paint path. `Enabled` is written under `_gate` by whatever thread calls `Enable`/`Disable`: D6's correction above records that `Enable` is never the UI thread, and `Disable` is reached from there (a hand-off too, and from `LaptopService.Dispose`). The read side of this row is accurate: `Paint` reads `HostOwnsLighting` unlocked on the paint path. |
 | **D8** | `Infrastructure/Vendors/Acer/AcerEcHidController.cs:45` | `LastError` | `acer-ec-hid-writer` at `:113,114` | **nowhere** (corrected 2026-09-14: verified by `git grep` — every reference to this class is a declaration, the ctor, or a partial-class header; not one `_ec.LastError`) | **Not a race — dead state.** Written and never read; the EC path surfaces failures through the port's `(ok, error)` tuple instead. A candidate for deletion, not for `volatile`. **Deleted 2026-09-17 (`d7be021`):** the dead field and the comment that falsely claimed it was "read by the UI" are gone from `AcerEcHidController`, and the write site now says plainly that an EC write failure goes nowhere. The *gap* stays open — `docs/open-decisions.md` §5. |
 | **D9** | `Infrastructure/Vendors/Generic/DelegatePorts.cs:19,30,41,54,64` | `LastError` on all five ports | the port's own caller, through `Set` (`:21,33,43,44,58,67`) | the **same** thread — `LaptopService.cs` `Attempt` (the method this row called `Run` until it was renamed in the tree) | **Corrected 2026-09-14: no race in three of the five.** The write and the copy-out happen on the same `HwSerial` continuation, and `FlagPort`/`ChoicePort`/`LevelPort` are single-threaded by construction (each row owns its own port instance). The genuine `DelegatePorts` races are `ProfilesPort` (`:54`) and `FanPort` (`:41`) — UI vs POLL, a shape this table did not list. |
-| **D10** | `UI/ViewModels/LightingViewModel.cs:345` (`SaveState()`) | `LightSettings` fields | UI thread | `BackgroundPass` → `Save()` → `JsonSettingsStore` | `LaptopService.Lighting.cs` `EnsureLightZone` exists to make the *structural* insert safe, and the comment says per-field edits "stay unguarded". That is true only because a per-field write cannot restructure the dictionary — the JSON serializer can still observe a half-updated `LightSettings` and persist it. Low impact (one debounce interval of stale brightness), but it is an unguarded cross-thread read of a mutable object. |
+| **D10** | `UI/ViewModels/LightingViewModel.cs:345` (`SaveState()`) | `LightSettings` fields | UI thread | `BackgroundPass` → `Save()` → `JsonSettingsStore` | `LaptopService.Lighting.cs` `EnsureLightZone` exists to make the *structural* insert safe, and the comment says per-field edits "stay unguarded". That is true only because a per-field write cannot restructure the dictionary — the JSON serializer can still observe a half-updated `LightSettings` and persist it. Low impact (one debounce interval of stale brightness), but it is an unguarded cross-thread read of a mutable object. **CLOSED 2026-09-18.** The row's own premise — that the UI holds the stored `LightSettings` and writes its fields in place — is gone: the state crosses as `LightZoneState` values, and every write goes through `ILightZoneMode.Write`, which takes `_state` itself (`LaptopService.Lighting.cs` `LightZoneMode`). There is no longer an unguarded field write to observe, and the serializer can no longer see a half-updated entry. See `docs/open-decisions.md` §4-бис and `docs/device-and-application.md` §9. |
 
 ## 3.3 Overlapping / redundant guards
 
@@ -714,6 +722,9 @@ This is where the design has to be honest: **`_state` (G2) does not disappear.**
 `Save()` (`LaptopService.cs` `Save`) serializes the whole `Settings` graph to JSON. The UI thread mutates
 `LightSettings` fields between debounce ticks. `LaptopService.Lighting.cs` `EnsureLightZone` exists because a structural
 insert can race the serializer. An actor owning the hardware does nothing about any of that.
+*(Corrected 2026-09-18: that second sentence is no longer true of the lighting — the UI holds values and
+writes through `ILightZoneMode`, which takes `_state` itself, and `EnsureLightZone` is gone. `Save()` still
+serializes the graph under the same lock. See `docs/open-decisions.md` §4-бис.)*
 
 So the end state is a **split**:
 

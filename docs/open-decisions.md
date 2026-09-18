@@ -332,6 +332,61 @@
 
 ---
 
+## 4-бис. ОТМЕНЕНО 2026-09-18: световая дверь закрыта, живой ссылки больше нет
+
+**Решение выше отменено владельцем.** Дословно: «**Это неверно с точки зрения
+архитектуры.**» Отменено именно то, что было записано, а не что-то вокруг него:
+`LightsForCurrentMode` (обе формы) и `EnsureLightZone` отдавали **живую ссылку** —
+словарь зон текущего режима, — `LightingViewModel` держал его и писал в него НА
+МЕСТЕ, а `LightViewModel` (тот же файл) правил его по полям. «Запись в граф и есть
+фича» больше не считается фичей: каждое такое поле было записью в персистентный
+граф из потока UI, не бравшего замок, который этот граф охраняет, — и
+`EnsureLightZone` существовала ровно потому, что вставка структуры без замка роняла
+сериализацию.
+
+**Что стоит на месте.** Дверь — контракт `ILightZoneMode`
+(`Application/LightZone.cs`), а не словарь: `Stored()` отдаёт **копию** значений
+текущего режима, `Write(zone, state)` записывает одну зону, `Advertises` отвечает
+про список зон устройства, `Persist()` пишет граф. Состояние пересекает границу в
+словаре ДОМЕНА — `LightZoneState` (`Domain/LightZoneState.cs`, семь полей зоны плюс
+`Default`), а `LightSettings` остаётся формой ФАЙЛА и живёт в Infrastructure, как и
+решено владельцем в этом же разговоре. Решения держат два use case:
+`ReadLightZone` (режим без записи — это зона в ЗНАЧЕНИЯХ ПО УМОЛЧАНИЮ, и чтение
+создаёт запись, не персистя её) и `ApplyLightZone` (зона, которой у машины нет,
+ОТКАЗЫВАЕТСЯ — ничего не запоминается и ничего не сохраняется; иначе «настройка»
+несуществующей зоны переживёт сессию в файле). Реализация —
+`LightZoneMode` в `Infrastructure/Composition/LaptopService.Lighting.cs`,
+`EnsureLightZone` удалена, `PersistLighting` тоже (её работу делает `Persist()` под
+тем же замком). `LightsForCurrentMode` сохранила имя, но отдаёт дверь.
+
+**Цена, названная заранее, и она уплачена.** Разведка (§ «Что НЕ легло» в
+docs/device-and-application.md) оценивала «второй словарь для каждой формы
+хранения» как запретительную. Владелец постановил, что за **эту** цену — один
+доменный тип на одну ось — платить стоит; полная запись в
+docs/device-and-application.md §8.4.
+
+**Сторожа-`Assert.Same` не могли остаться зелёными, и это вынуждено решением, а
+не удобством.** Их правки:
+
+| Было | Стало | Что пинится теперь |
+|---|---|---|
+| `LightsForCurrentModeTests` ×2: `Assert.Same(withoutProfile, withProfile)` | запись через одну дверь, чтение через другую | обе формы называют ОДИН режим (одна корзина), а не одну ссылку |
+| `LightsForCurrentModeTests`: `Assert.Same(LightPresets["performance"].Zones, zones)` | запись через дверь + чтение графа | дверь открыта ИМЕННО на «performance» |
+| `LaptopServicePresetTests._ReturnsTheSameDictionaryInstance_OnEveryCall` | `_ReachesTheSameModeOnEveryCall` + `Assert.NotSame` на дверях | одна корзина на режим; двери — разные объекты, и это и есть решение |
+| `LaptopServicePresetTests.EnsureLightZone_*` ×3 | `ReadLightZone_*` ×3 | правило вставки переехало в use case: создаётся ОДИН раз, из умолчаний, и не персистится |
+
+**Документы, исправленные тем же заходом:** `docs/domain-refactoring-plan.md` §4
+(инвариант «световая дверь остаётся живой ссылкой»),
+`docs/device-and-application.md` §3 (таблица инвариантов), §7 (последний абзац:
+«маппинг ломает дверь по построению») и §8.2 («Остановлена живой дверью»),
+`docs/domain-layering-map.md` (та же фраза), `docs/hardware-actor-design.md`
+(D10/D-блок про световую дверь), а также доккомментарии
+`ArchitectureMapTests.ApplicationPointsAtDomainNotInfrastructure`,
+`Application/DynamicLightingSwitch.cs`, `LaptopService.Settings` и
+`LaptopServicePresetGetOrAddTests`.
+
+---
+
 ## 5. Отказ EC-записи не выводится никуда
 
 `AcerEcHidController` пишет в EC и **никогда не сообщает о неудаче**: `try { WriteFeature(report); }
