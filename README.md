@@ -154,12 +154,12 @@ The toggle appears in **Options** only once the driver package is installed
 (`pnputil /add-driver`, see [driver/README.md](driver/README.md)); it needs a signature Windows will load, so
 it is not shipped in the MSI. Design, wire format and limitations: [docs/lamparray.md](docs/lamparray.md).
 
-The driver builds **without Visual Studio or a WDK install** — `driver/Dockerfile` cross-compiles it in a Linux
-container with clang-cl/lld-link against the WDK/SDK NuGet packages, and the signing tools (`signtool`,
-`inf2cat`) come out of those same packages:
+The driver builds **without Visual Studio or a WDK install** — the repository's `Dockerfile` cross-compiles it
+in a Linux container with clang-cl/lld-link against the WDK/SDK NuGet packages, and the signing tools
+(`signtool`, `inf2cat`) come out of those same packages. The toolchain is the `driver-image` stage there:
 
 ```
-docker build -t acerhelper-wdk driver
+docker build --target driver-image -t acerhelper-wdk .
 docker run --rm -v "$PWD/driver/AcerHelperLampArray:/src" acerhelper-wdk
 ```
 
@@ -177,6 +177,26 @@ dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self
 # Linux (Native AOT — needs clang + zlib-devel to link)
 dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishAot=true -o publish-linux
 ```
+
+**The two artefacts that can be built on Linux are containerised, in one multi-stage Dockerfile.** One command
+yields them:
+
+```
+docker buildx build --target artefacts --output type=local,dest=dist .
+```
+
+That is the portable app (Native AOT) and the driver package, in `dist/linux/` and `dist/driver/`. Commands,
+what is pinned, how the artefacts come out, and what could not be verified:
+[docs/build-image.md](docs/build-image.md).
+
+**2026-09-18 — the Windows publish above cannot move into that container.** Native AOT refuses to
+cross-compile from Linux to Windows, and the refusals are errors in the toolchain rather than advice
+(`Microsoft.NETCore.Native.Publish.targets`: "Cross-OS native compilation is not supported.", plus a demanded
+`PackageReference` for the host ILCompiler; `Microsoft.NETCore.Native.Windows.targets` hard-wires `link.exe`
+and runs `findvcvarsall.bat`). The Windows artefact therefore stays on a Windows host — the `windows` CI job —
+and the Linux container builds the other two. The line above saying the Windows publish "must run on Windows"
+was already right; what is new is that the reason is measured, and that it is not an installation problem a
+bigger container could solve.
 
 ## Install (Windows)
 

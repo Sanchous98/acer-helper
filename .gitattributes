@@ -10,9 +10,12 @@ packaging/*.desktop         text eol=lf
 packaging/*.rules           text eol=lf
 packaging/*.conf            text eol=lf
 *.sh                        text eol=lf
-# The driver's container cross-build: a Dockerfile with CRLF breaks RUN line continuations, and build.sh is
-# executed inside the image.
-driver/Dockerfile           text eol=lf
+# The container builds: a Dockerfile with CRLF breaks RUN line continuations, and build.sh is executed inside
+# the image (*.sh above covers it). This rule used to name driver/Dockerfile; that file's toolchain moved into
+# the root Dockerfile on 2026-09-18 (docs/build-image.md), so the rule follows it there. .dockerignore is
+# listed for the same reason: a CR left on a pattern makes the exclusion silently not match.
+Dockerfile                  text eol=lf
+.dockerignore               text eol=lf
 
 # Windows scripts — keep CRLF.
 *.cmd                       text eol=crlf

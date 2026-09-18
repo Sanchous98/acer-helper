@@ -13,15 +13,29 @@ collections — there is no user-mode API to register one. This is the same cons
 
 `clang-cl`/`lld-link` speak the MSVC command line and read MSVC objects and libraries, and since WDK
 10.0.26100.1 the WDK and SDK are published as [NuGet packages](https://learn.microsoft.com/en-us/windows-hardware/drivers/install-the-wdk-using-nuget).
-Put those two facts in a Linux container and the driver builds without installing anything on Windows:
+Put those two facts in a Linux container and the driver builds without installing anything on Windows.
+
+**2026-09-18 — this toolchain now lives in the repository's single Dockerfile, as a stage.** The WDK fetch,
+the clang-cl/lld-link setup, the case normalisation of the headers and `build.sh` itself are unchanged; what
+changed is the file they are reached through. The driver-only image is the `driver-image` stage there, so this
+section's two commands become these — same image, same `ENTRYPOINT`, same `/src` mount, same output:
 
 ```bash
-docker build -t acerhelper-wdk driver
+docker build --target driver-image -t acerhelper-wdk .
 ```
 
 ```bash
 docker run --rm -v "$PWD/driver/AcerHelperLampArray:/src" acerhelper-wdk
 ```
+
+`driver/Dockerfile` is gone rather than kept beside it. The WDK version pin is `ARG WDK_VERSION` in the
+Dockerfile and KMDF is pinned in `build.sh`; leaving the old file in place would have put a second copy of
+the first pin on disk, and two copies of a toolchain pin are how a driver ends up built against a framework
+its INF does not declare. The release image's `driver` stage calls the same `build.sh`, so this file's
+description of *what* runs is still exact — only the path to it moved. `KMDF_VERSION=1.35 docker run …`
+still overrides the framework, and `docker build --build-arg KMDF_VERSION=1.35 --target driver …` does the
+same for the release image. Full commands, pins and what is verified:
+[../docs/build-image.md](../docs/build-image.md).
 
 Output in `driver/AcerHelperLampArray/out/`: `AcerHelperLampArray.sys` (~23 KB), its `.pdb`, and the INF with
 stampinf's `$TOKENS$` substituted. Verified against the produced binary: format `pei-x86-64`, entry point

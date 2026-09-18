@@ -1,0 +1,29 @@
+# What the daemon receives is this file's business, not an afterthought: bin/ alone is 563 MB of local publish
+# output in this working tree, and .git is the whole history. Neither is an input to anything the image builds,
+# and shipping them makes every build slow for no gain.
+#
+# Excluding them is also what keeps the image honest about what it builds FROM: the image is built from
+# committed sources, never from whatever happens to be lying in the working tree. A stale local publish output
+# can therefore not leak into a release artefact. docs/build-image.md is the document for all of this.
+
+# Version control and editor/agent state.
+.git
+.gitattributes
+.idea
+.claude
+*.DotSettings.user
+
+# Local build output (both TFMs, the RID-specific publish folders, and the test runner's own droppings).
+**/bin
+**/obj
+**/TestResults
+publish
+publish-linux
+dist
+
+# Driver build output. The driver image unpacks its own tools, and the driver stage COPYs the five files
+# build.sh reads and nothing else — so the locally built .sys/.pdb and the extracted signtool.exe are dead
+# weight here. (`driver/**/out` is git-ignored, so it is only ever present on a machine that has built it.)
+driver/**/out
+driver/**/x64
+driver/**/tools
