@@ -47,7 +47,8 @@ namespace AcerHelper.Infrastructure.Composition;
 /// and the graph could not.
 /// </summary>
 public sealed partial class LaptopService : IDisposable,
-    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget
+    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget,
+    ILightingSwitchTarget
 {
     // Explicit fields instead of a primary constructor. A primary constructor's parameters are in scope only in
     // the part that declares them, so while one was in use this class could not be split across partial files

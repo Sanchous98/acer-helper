@@ -45,17 +45,30 @@ public sealed partial class LaptopService
     /// <summary>Turn the virtual LampArray on/off and persist the choice. Returns false if it could not be
     /// published (see <see cref="IDynamicLighting.LastError"/>) — the setting is then left off, so the UI row
     /// snaps back on its next read instead of claiming a device that isn't there. Blocking (opens the driver);
-    /// call off the UI thread — the Options rows already do.</summary>
+    /// call off the UI thread — the Options rows already do.
+    ///
+    /// WHAT IS STATED HERE AND WHAT MOVED: what gets REMEMBERED (the state the surface is in, not the wish) and
+    /// what a machine with no surface does (refuse without remembering) are <see cref="ApplyDynamicLighting"/>
+    /// (Application); the bridge call and the graph write are the two members below.</summary>
     public (bool ok, string? error) SetDynamicLighting(bool on)
+        => ApplyDynamicLighting.Run(on, this);
+
+    /// <summary>Publish or take down the surface, or null when this machine has none. The lazy
+    /// <see cref="LampArray"/> build is what decides the null — it goes through the factory composition handed in
+    /// rather than a <c>new</c>, so this class names no Infrastructure type.</summary>
+    (bool ok, string? error)? ILightingSwitchTarget.Switch(bool on)
     {
         var la = LampArray;
-        if (la == null) return (false, null);
+        if (la == null) return null;
 
         // Disable() reports nothing and cannot fail; only Enable has an outcome to report.
-        var (ok, error) = on ? Attempt(la.Enable, () => la.LastError) : (true, (string?)null);
+        return on ? Attempt(la.Enable, () => la.LastError) : (true, (string?)null);
+    }
 
-        lock (_state) { Settings.DynamicLighting = on && ok; Save(); }
-        return (ok, error);
+    /// <summary>Remember the choice, under the graph lock.</summary>
+    void ILightingSwitchTarget.Store(bool on)
+    {
+        lock (_state) { Settings.DynamicLighting = on; Save(); }
     }
 
     // ---- lighting (per-mode) ----
