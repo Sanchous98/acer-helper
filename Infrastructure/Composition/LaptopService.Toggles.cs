@@ -1,4 +1,5 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
@@ -27,21 +28,28 @@ public sealed partial class LaptopService
     /// own contract (a refusal is a <see cref="SettingNotAppliedException"/>) and <c>Settings.Remember</c> records
     /// what took; what stays here is what the model cannot own: the graph lock and the save.
     ///
-    /// THE ORDER IS THE POINT. The hardware write runs OUTSIDE <c>_state</c>, because a setting is an EC/WMI
-    /// write and the lock must never span one (docs/domain-refactoring-plan.md §4). Only the recording takes it,
-    /// which is also what makes "released on throw" free: a refused write throws out of the model's Apply before
-    /// the lock is ever taken, and nothing is recorded. An option this machine does not declare is refused by the
-    /// same call, in the same place, with the same exception — see <c>Settings.Apply</c>.
-    ///
-    /// The refusal is an EXCEPTION rather than a returned pair because the reason it carries is information
-    /// about what happened, not a sentence: this layer knows the setting only by its opaque key and has no name
-    /// to put in a message (docs/domain-refactoring-plan.md §5, wave 9). The UI owns the label.</summary>
+    /// THE ORDER IS THE POINT, and it is stated in Application now — <see cref="ApplyDeclaredSetting"/> decides that
+    /// the hardware write comes first and stands alone, so a refusal records nothing; the three members below are
+    /// only the doing.</summary>
     public void ApplySetting(SettingDeclaration setting, string value)
+        => ApplyDeclaredSetting.Run(setting, value, this);
+
+    /// <summary>The hardware write, OUTSIDE the graph lock — a setting is an EC/WMI write and the lock must never
+    /// span one (docs/domain-refactoring-plan.md §4). That is also what makes "released on throw" free: a refused
+    /// write throws out of the model's Apply before any lock is taken, and nothing is recorded.</summary>
+    void IDeclaredSettingTarget.Write(SettingDeclaration setting, string value)
+        => Settings.Apply(setting, value);
+
+    /// <summary>Record what took, under the option's own key — a write into the shared bag, so this member takes
+    /// the lock itself rather than being handed one.</summary>
+    void IDeclaredSettingTarget.Remember(SettingDeclaration setting, string value)
     {
-        Settings.Apply(setting, value);
         lock (_state) { Settings.Remember(setting, value); }
-        Save();
     }
+
+    /// <summary>Write the graph out. A separate member rather than folded into the record above, because the
+    /// record has always landed under one hold and the file been written under the next.</summary>
+    void IDeclaredSettingTarget.Persist() => Save();
 
     // ---- hardware toggles that are NOT declared settings (each returns the write's outcome AND its reason) ----
 

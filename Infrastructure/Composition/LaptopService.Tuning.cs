@@ -1,4 +1,5 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
@@ -31,19 +32,34 @@ public sealed partial class LaptopService
             return Settings.GpuOcPresets.TryGetValue(CurrentModeKey(cur), out var g) ? g.Snapshot() : new GpuOcPreset();
     }
 
-    /// <summary>Set the GPU core+memory clock offsets (MHz) for the CURRENT mode, persist, and apply now.</summary>
+    /// <summary>Set the GPU core+memory clock offsets (MHz) for the CURRENT mode, persist, and apply now. The rule
+    /// — remembered BEFORE written, and what a missing port reports — is <see cref="ApplyGpuOffsets"/>
+    /// (Application); the graph write and the driver call are the two members below.</summary>
     public (bool ok, string? error) SetGpuOc(int core, int mem)
+        => ApplyGpuOffsets.Run(new GpuAxisState(core, mem), this);
+
+    /// <summary>Remember the offsets as the current mode's, under the graph lock. Nothing else happens here: the
+    /// driver call is <see cref="IGpuOffsetsTarget.Apply"/>, made OUTSIDE this lock, because the pair has to be
+    /// stored before the write can be refused and the lock must never span a hardware call
+    /// (docs/domain-refactoring-plan.md §4).</summary>
+    void IGpuOffsetsTarget.Store(GpuAxisState state)
     {
         lock (_state)
         {
             var g = StoredGpuOc();
-            g.Core = core; g.Mem = mem;
+            g.Core = state.Core; g.Mem = state.Mem;
             Save();
         }
+    }
+
+    /// <summary>Write the offsets to the driver. A machine with no GPU-overclock port reports the same
+    /// <c>(false, null)</c> the UI has always read for it — the store above has already happened by then, which is
+    /// the asymmetry LaptopServicePresetTests pins ("a write with no port still persists the preset").</summary>
+    (bool ok, string? error) IGpuOffsetsTarget.Apply(GpuAxisState state)
+    {
         var oc = device.GpuOverclock;
         if (oc == null) return (false, null);
-        return Attempt(() => oc.Set(core, mem), () => oc.LastError);
-
+        return Attempt(() => oc.Set(state.Core, state.Mem), () => oc.LastError);
     }
 
     /// <summary>Apply the current mode's GPU offsets to the hardware. Defaults to stock (0/0) when the mode has
@@ -79,18 +95,30 @@ public sealed partial class LaptopService
         return device.CpuPower?.Current();
     }
 
-    /// <summary>Set the CPU power-mode overlay for the CURRENT mode, persist, and apply now.</summary>
+    /// <summary>Set the CPU power-mode overlay for the CURRENT mode, persist, and apply now. The rule — remembered
+    /// before written — is <see cref="ApplyCpuPowerOverlay"/> (Application); the graph write and the OS call are
+    /// the two members below.</summary>
     public (bool ok, string? error) SetCpuPower(string id)
+        => ApplyCpuPowerOverlay.Run(id, this);
+
+    /// <summary>Remember the overlay id as the current mode's, under the graph lock.</summary>
+    void ICpuPowerOverlayTarget.Store(string id)
     {
         lock (_state)
         {
             Settings.CpuPowerModes[CurrentModeKey()] = id;
             Save();
         }
+    }
+
+    /// <summary>Write the overlay to the OS. No port reports the same <c>(false, null)</c> the UI has always read;
+    /// <see cref="ApplyModeCpuPower"/> is the one that reads a live overlay back instead of writing one, and that
+    /// is the RE-APPLY's rule rather than this path's.</summary>
+    (bool ok, string? error) ICpuPowerOverlayTarget.Apply(string id)
+    {
         var cp = device.CpuPower;
         if (cp == null) return (false, null);
         return Attempt(() => cp.Set(id), () => cp.LastError);
-
     }
 
     /// <summary>Apply the current mode's CPU power overlay IF the user configured one for this profile; a mode
@@ -131,25 +159,102 @@ public sealed partial class LaptopService
 
     /// <summary>Set the all-core Curve-Optimizer offset (AVFS counts, negative = undervolt) for the CURRENT mode,
     /// persist, and apply now. Call this OFF the UI thread: the SMU transaction waits on a machine-wide PCI lock
-    /// that other tuning tools also take, so it can block for seconds.</summary>
+    /// that other tuning tools also take, so it can block for seconds.
+    ///
+    /// The all-core half of the axis, kept beside <see cref="SetCoDomains"/> because they are the two shapes this
+    /// CPU can be given and each refuses on its own terms — this one stores even with no port (there is no range
+    /// to clamp against, and that behaviour is pinned by LaptopServiceCoTests), while the per-rail one cannot know
+    /// whether it has a right to store until it has the port's domain list.</summary>
     public (bool ok, string? error) SetCo(int allCore)
+        => WriteAllCore(RememberAllCore(allCore));
+
+    /// <summary>Set the per-domain Curve-Optimizer offsets (index-aligned with the port's domains) for the CURRENT
+    /// mode, persist, and apply now. Call this OFF the UI thread — it is one SMU transaction per core slot.</summary>
+    public (bool ok, string? error) SetCoDomains(IReadOnlyList<int> counts)
+        => RememberRails(counts) is { } clamped ? WriteRails(clamped) : (false, null);
+
+    /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
+    /// all-core value — so the UI has a single entry point. Call OFF the UI thread. The fork itself is the DOMAIN's
+    /// rule (Domain/CoAxis.cs, <c>UsesRails</c>), asked by the members below rather than restated here, so the same
+    /// fork decides what a mode change sends and two sites cannot come to disagree.</summary>
+    public (bool ok, string? error) SetCoValues(IReadOnlyList<int> counts)
+        => ApplyUndervolt.Run(counts, this);
+
+    // ---- the undervolt edit contract (Application/Undervolt.cs) ----
+
+    /// <summary>Remember the offsets and hand back what was remembered, so the write sends exactly the numbers the
+    /// graph holds. The clamp and the routing are <c>CoAxis</c>'s and stay on this side of the boundary — they are
+    /// the two rules this axis's use case cannot state (see <see cref="IUndervoltTarget"/>'s docstring, and
+    /// docs/device-and-application.md §2.3's third wall).
+    ///
+    /// The empty check is a PRECONDITION GUARD, not the rule: <see cref="ApplyUndervolt"/> refuses an empty edit
+    /// before this is reached, which is where that rule is stated. It is repeated here because the all-core branch
+    /// reads <c>counts[0]</c>, and a contract member that throws on a caller's empty list would be a landmine
+    /// rather than a refusal.</summary>
+    IReadOnlyList<int>? IUndervoltTarget.Store(IReadOnlyList<int> counts)
     {
         var co = device.CurveOptimizer;
-        // Clamp against the port's own range BEFORE persisting. The port clamps what it sends to the SMU anyway, so
-        // storing an out-of-range value would only make the app report an undervolt the hardware never got.
-        // OffsetCounts also makes an OVERVOLT unrepresentable, which the port's interface declares but nothing
-        // enforced: see Domain/Values.cs. The guard stays — with no port there is no range to clamp against, and
-        // that behaviour is pinned by LaptopServiceCoTests.
-        if (co != null) allCore = new CoAxis(co.Domains, co.Range).ClampAllCore(allCore);
+        if (co == null || counts.Count == 0) return null;
+        return new CoAxis(co.Domains, co.Range).UsesRails ? RememberRails(counts) : [RememberAllCore(counts[0])];
+    }
+
+    /// <summary>Write offsets to the SMU, in the shape this CPU takes. The values are the ones
+    /// <see cref="IUndervoltTarget.Store"/> handed back, so nothing is clamped a second time on the way out —
+    /// what the graph holds is what the mailbox is given.</summary>
+    (bool ok, string? error) IUndervoltTarget.Apply(IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null) return (false, null);
+        return new CoAxis(co.Domains, co.Range).UsesRails ? WriteRails(counts) : WriteAllCore(counts[0]);
+    }
+
+    /// <summary>Remember one all-core offset for the current mode, clamped against the port's own range BEFORE
+    /// persisting, and hand back what was stored. The port clamps what it sends to the SMU anyway, so storing an
+    /// out-of-range value would only make the app report an undervolt the hardware never got; with no port there
+    /// is no range to clamp against, and the value is stored verbatim — the recorded asymmetry.</summary>
+    private int RememberAllCore(int requested)
+    {
+        var co = device.CurveOptimizer;
+        if (co != null) requested = new CoAxis(co.Domains, co.Range).ClampAllCore(requested);
         lock (_state)
         {
-            var c = StoredCo();
-            c.AllCore = allCore;
+            StoredCo().AllCore = requested;
             Save();
         }
-        if (co == null) return (false, null);
-        return Attempt(() => co.Set(allCore), () => co.LastError);
+        return requested;
+    }
 
+    /// <summary>Remember the per-rail offsets, clamped PER RAIL — the rails are different silicon with different
+    /// bounds, so one shared range would widen or narrow one of them — and hand back the clamped array. Null means
+    /// nothing was remembered and nothing may be written: no port, or a count that does not match this CPU's rail
+    /// list, which has no correct reading (which rail would a spare number belong to?).</summary>
+    private int[]? RememberRails(IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null || co.Domains.Count != counts.Count) return null;
+        var axis = new CoAxis(co.Domains, co.Range);
+        var clamped = axis.ClampEach(counts);
+        lock (_state)
+        {
+            axis.File(StoredCo(), clamped);
+            Save();
+        }
+        return clamped;
+    }
+
+    /// <summary>Push one all-core offset. A machine with no Curve-Optimizer port reports the same
+    /// <c>(false, null)</c> every caller of this axis has always received.</summary>
+    private (bool ok, string? error) WriteAllCore(int counts)
+    {
+        var co = device.CurveOptimizer;
+        return co == null ? (false, null) : Attempt(() => co.Set(counts), () => co.LastError);
+    }
+
+    /// <summary>Push the per-rail offsets, one SMU transaction per slot.</summary>
+    private (bool ok, string? error) WriteRails(IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        return co == null ? (false, null) : Attempt(() => co.SetDomains(counts), () => co.LastError);
     }
 
     /// <summary>The current mode's Curve-Optimizer offsets, index-aligned with the port's voltage domains — or a single
@@ -184,41 +289,6 @@ public sealed partial class LaptopService
         if (co == null) return [];
         lock (_state)
             return new CoAxis(co.Domains, co.Range).Rows(CurrentCo(cur));
-    }
-
-    /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
-    /// all-core value — so the UI has a single entry point. Call OFF the UI thread.</summary>
-    public (bool ok, string? error) SetCoValues(IReadOnlyList<int> counts)
-    {
-        var co = device.CurveOptimizer;
-        if (co == null || counts.Count == 0) return (false, null);
-        // Which of the two writes this CPU takes is the domain's rule (Domain/CoAxis.cs, UsesRails), asked here
-        // rather than restated: the same fork decides what a mode change sends below, and two sites deciding it
-        // separately is how they come to disagree.
-        return new CoAxis(co.Domains, co.Range).UsesRails ? SetCoDomains(counts) : SetCo(counts[0]);
-    }
-
-    /// <summary>Set the per-domain Curve-Optimizer offsets (index-aligned with the port's domains) for the CURRENT mode,
-    /// persist, and apply now. Call this OFF the UI thread — it is one SMU transaction per core slot.</summary>
-    public (bool ok, string? error) SetCoDomains(IReadOnlyList<int> counts)
-    {
-        var co = device.CurveOptimizer;
-        if (co == null || co.Domains.Count != counts.Count) return (false, null);
-
-        // Per RAIL, not per port: the domains are different rails with different bounds (the iGPU carries its
-        // own), so clamping them all against the port-wide range would silently widen or narrow one of them. The
-        // upper bound is 0 either way — an overvolt is not representable (Domain/Values.cs).
-        var axis = new CoAxis(co.Domains, co.Range);
-        var clamped = axis.ClampEach(counts);
-
-        lock (_state)
-        {
-            var c = StoredCo();
-            axis.File(c, clamped);
-            Save();
-        }
-        return Attempt(() => co.SetDomains(clamped), () => co.LastError);
-
     }
 
     /// <summary>Apply the current mode's Curve-Optimizer offset to the hardware. Defaults to stock (0) when the mode

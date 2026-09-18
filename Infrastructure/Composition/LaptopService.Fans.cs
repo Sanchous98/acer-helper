@@ -1,4 +1,5 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
@@ -71,32 +72,84 @@ public sealed partial class LaptopService
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
     /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
-    /// fixed speed set here (see <see cref="ApplyCustom"/>).</summary>
+    /// fixed speed set here (see <see cref="ApplyCustom"/>).
+    ///
+    /// WHAT IS STATED HERE AND WHAT MOVED. Which fans a selection touches, and that it must not clobber the curves
+    /// — the rule — is <see cref="ApplyFanSelection"/> (Application), and the state it edits crosses as
+    /// <see cref="FanAxisState"/>. What stays is the graph write, the deadband and the EC, reached through
+    /// <see cref="IFanAxisTarget.ReplaceSelection"/>, which is the member below.</summary>
     public void SetFan(FanMode mode, byte cpu, byte gpu)
+        => ApplyFanSelection.Run(mode, cpu, gpu, this);
+
+    /// <summary>Turn one fan's curve on/off and store its points, for the CURRENT mode, then apply now. The rule
+    /// — which fan's half an edit names, and that the other half and the mode survive it — is
+    /// <see cref="ApplyFanCurve"/> (Application); the write is <see cref="IFanAxisTarget.ReplaceCurve"/>.</summary>
+    public void SetFanCurve(bool gpu, bool use, int[] points)
+        => ApplyFanCurve.Run(gpu, use, points, this);
+
+    // ---- the fan edit contract (Application/FanAxis.cs) ----
+
+    /// <summary>The current mode's preset in the domain's vocabulary, creating it if the user has never
+    /// configured this mode — which is what both edit paths mean by reading it. NOT a snapshot, and deliberately:
+    /// the two use cases hand the whole state straight back, so a copy would re-point the preset's curve arrays at
+    /// the copy on every edit, including the edit that changed no array (<see cref="IFanAxisTarget.Stored"/>).</summary>
+    FanAxisState IFanAxisTarget.Stored()
     {
-        lock (_state)
-        {
-            var f = StoredFan();
-            f.Mode = (int)mode; f.Cpu = cpu; f.Gpu = gpu;
-            _fanCurve.Reset();
-            Save();
-            if (mode == FanMode.Custom) ApplyCustom(ReadSensors());
-            else ApplyFan(mode, cpu, gpu);
-        }
+        lock (_state) return AxisStateOf(StoredFan());
     }
 
-    /// <summary>Turn one fan's curve on/off and store its points, for the CURRENT mode, then apply now.</summary>
-    public void SetFanCurve(bool gpu, bool use, int[] points)
+    /// <summary>The curve edit: store, clear the deadband, save, and drive the curves — all in one hold, which is
+    /// the shape both edit paths have always had and one of the three deliberate holds
+    /// (docs/open-decisions.md §3: a background <c>ApplyCustom</c> must not be able to land between its
+    /// <c>Step</c> and its <c>Commit</c>, and a deadband cleared outside this hold could be re-armed by one).
+    ///
+    /// NOTHING REACHES THE EC WHEN THE MODE IS NOT CUSTOM, and that is not a shortcut: <see cref="ApplyCustom"/>'s
+    /// own guard returns before it touches the port, so a curve edited in Auto or Max produces no EC traffic at
+    /// all — and pushing the mode here instead would be a write this path has never made.</summary>
+    void IFanAxisTarget.ReplaceCurve(FanAxisState state)
     {
         lock (_state)
         {
-            var f = StoredFan();
-            if (gpu) { f.GpuUseCurve = use; f.GpuCurve = points; }
-            else     { f.CpuUseCurve = use; f.CpuCurve = points; }
+            FileFan(state);
             _fanCurve.Reset();
             Save();
             ApplyCustom(ReadSensors());
         }
+    }
+
+    /// <summary>The selection edit: the same store, deadband clear and save, then the EC is asked for the mode —
+    /// or, when the new selection IS Custom, driven from the curves instead, because the EC honours a manual speed
+    /// only once the fans are already in Custom behaviour and would silently ignore the speeds otherwise.</summary>
+    void IFanAxisTarget.ReplaceSelection(FanAxisState state)
+    {
+        lock (_state)
+        {
+            FileFan(state);
+            _fanCurve.Reset();
+            Save();
+            if (state.Mode == FanMode.Custom) ApplyCustom(ReadSensors());
+            else ApplyFan(state.Mode, (byte)state.Cpu.FixedDuty, (byte)state.Gpu.FixedDuty);
+        }
+    }
+
+    /// <summary>Write a whole <see cref="FanAxisState"/> into the stored preset, keeping the stored INSTANCE —
+    /// a second write must re-use the preset rather than replace it, so a preset the model already holds a copy of
+    /// in its dictionary is not swapped for a new object (LaptopServicePresetTests' "A SECOND WRITE re-uses the
+    /// stored preset").
+    ///
+    /// The fixed speeds are written WITHOUT the byte cast the port takes: the stored field is an <c>int</c>
+    /// (settings.json is hand-editable) and a value read back out of it must survive an edit that did not name it.
+    /// The cast belongs where the EC is asked, which is the two call sites above.
+    ///
+    /// The arrays are assigned by reference, which is what both edit paths have always done — the curve array is
+    /// the UI's, passed through verbatim, and nothing between there and here validates its length.</summary>
+    private void FileFan(FanAxisState state)
+    {
+        var f = StoredFan();
+        f.Mode = (int)state.Mode;
+        f.Cpu = state.Cpu.FixedDuty; f.Gpu = state.Gpu.FixedDuty;
+        f.CpuUseCurve = state.Cpu.UseCurve; f.GpuUseCurve = state.Gpu.UseCurve;
+        f.CpuCurve = state.Cpu.Curve; f.GpuCurve = state.Gpu.Curve;
     }
 
     /// <summary>The fan preset for the current mode, or defaults if none is saved yet (not stored). A SNAPSHOT:

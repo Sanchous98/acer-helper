@@ -36,8 +36,18 @@ namespace AcerHelper.Infrastructure.Composition;
 /// The names are suffixed <c>.Profiles.cs</c> rather than split on the class per feature because
 /// the build already selects files by suffix (<c>*.Windows.cs</c>/<c>*.Linux.cs</c> in
 /// AcerHelper.csproj) — none of these collide with that, and none may ever be renamed into it.
+///
+/// WHAT IT IMPLEMENTS. Five of Application's contracts, one per thing the owner's model applies
+/// (Application/FanAxis.cs, GpuOffsets.cs, CpuPowerOverlay.cs, Undervolt.cs, DeclaredSetting.cs), plus the
+/// re-apply's (<see cref="HardwareReconciler"/>, which is this class's own executor). All five are implemented
+/// EXPLICITLY, so not one member is added to this class's public surface — the surface that
+/// docs/device-and-application.md §1.2 already measured as too wide — and a caller reaches them only by naming the
+/// use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
+/// is remembered before it is written); this class owns the graph and the ports, which is why the rules could move
+/// and the graph could not.
 /// </summary>
-public sealed partial class LaptopService : IDisposable
+public sealed partial class LaptopService : IDisposable,
+    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget
 {
     // Explicit fields instead of a primary constructor. A primary constructor's parameters are in scope only in
     // the part that declares them, so while one was in use this class could not be split across partial files
