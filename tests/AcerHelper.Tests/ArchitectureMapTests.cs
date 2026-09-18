@@ -165,7 +165,7 @@ public class ArchitectureMapTests
     /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
     /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
-    /// already reads the preset. Application is NINE files today — the four this docstring used to name, plus the
+    /// already reads the preset. Application is TEN files today — the four this docstring used to name, plus the
     /// family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
     /// Undervolt, DeclaredSetting, DynamicLightingSwitch, each one contract plus its use cases) — and the rule is
     /// the reason for every boundary in each of them, not an accident of the moves.

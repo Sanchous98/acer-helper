@@ -573,12 +573,13 @@ GUID ОС, непрозрачный для всех слоёв выше порт
 
 ### 8.4. Что `Application/` содержит теперь
 
-Девять файлов: `AppArgs`, `DynamicLighting` (`IDynamicLighting`, `IDynamicLightingFactory`),
+Десять файлов: `AppArgs`, `DynamicLighting` (`IDynamicLighting`, `IDynamicLightingFactory`),
 `ReapplyPlan` (`ReapplyTrigger`, `Schedule`, `RunsOffTheCallersThread`, `Reflects`),
 `ReapplySettings` (`IReapplyTarget`, `ReapplyOutcome`, `ReapplySettings.Run`), `FanAxis`
 (`IFanAxisTarget`, `ApplyFanCurve`, `ApplyFanSelection`), `GpuOffsets`, `CpuPowerOverlay`,
-`Undervolt`, `DeclaredSetting`, `DynamicLightingSwitch`. Use case-ов: шесть (плюс
-`ReapplySettings`, который был). `Application` называет `Application` и `Domain` и ничего больше.
+`Undervolt`, `DeclaredSetting`, `DynamicLightingSwitch`. Use case-ов: семь (плюс
+`ReapplySettings`, который был) — шесть вещей применяется, и у вентиляторов их две правки.
+`Application` называет `Application` и `Domain` и ничего больше.
 
 ### 8.5. Шестой случай «утверждения, которое не могло упасть» — и седьмой
 
