@@ -16,7 +16,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// overlay GUID and touches no Windows power scheme), so setting it per profile does not fight the EC.
 /// Cross-vendor + Windows-only; <see cref="TryCreate"/> returns null on an OS without the overlay API so the UI
 /// hides the CPU section. No elevation needed for the overlay (the app runs elevated anyway for the EC/WMI
-/// controls). Named to avoid colliding with the <c>IDevice.CpuPower</c> port property.
+/// controls). Named to avoid colliding with the machine's <c>CpuPower</c> port property.
 /// See docs/power-an18-61.md.
 /// </summary>
 internal sealed partial class OverlayCpuPower : ICpuPower
