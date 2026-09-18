@@ -31,8 +31,11 @@ public class AppliedEditUseCasesTests
 {
     // ------------------------------------------------------------------ fans: the curve edit
 
-    private static readonly int[] CpuCurve = [10, 20, 30];
-    private static readonly int[] GpuCurve = [40, 50, 60];
+    // A real curve is exactly one duty% per anchor (Domain/Fan.cs enforces it at construction), so these are
+    // five entries and not three: a shorter array is not a curve the model admits, and a test fixture that used
+    // one would be asserting a state that cannot exist.
+    private static readonly int[] CpuCurve = [10, 20, 30, 40, 50];
+    private static readonly int[] GpuCurve = [40, 50, 60, 70, 80];
 
     /// <summary>A fan axis that hands back one arranged state and records every edit it is asked to make. The two
     /// edit kinds are recorded SEPARATELY, so "this edit reached the axis as a curve edit" is an assertion rather
@@ -51,8 +54,8 @@ public class AppliedEditUseCasesTests
     /// different fixed speeds — so an assertion that a half survived cannot pass because the two halves happened
     /// to be equal.</summary>
     private static StubFanAxis ArrangedAxis() => new(new FanAxisState(FanMode.Max,
-        new FanSettings(UseCurve: true, Curve: CpuCurve, FixedDuty: 42),
-        new FanSettings(UseCurve: false, Curve: GpuCurve, FixedDuty: 84)));
+        new FanSettings(useCurve: true, curve: CpuCurve, fixedDuty: 42),
+        new FanSettings(useCurve: false, curve: GpuCurve, fixedDuty: 84)));
 
     /// <summary>A curve edit names ONE fan: the GPU half takes the new curve and switch, and the CPU half — its
     /// curve, its switch and its fixed speed — is the stored one, field for field. The mode is carried too, because
@@ -65,17 +68,17 @@ public class AppliedEditUseCasesTests
     public void ACurveEdit_NamesOneFanAndCarriesTheRestOfTheModeOver()
     {
         var axis = ArrangedAxis();
-        var points = new[] { 70, 80, 90 };
+        var points = new[] { 70, 80, 90, 95, 100 };
 
         ApplyFanCurve.Run(gpu: true, use: true, points, axis);
 
         var edited = Assert.Single(axis.CurveEdits);
         Assert.Equal(FanMode.Max, edited.Mode);
         Assert.True(edited.Gpu.UseCurve);
-        Assert.Equal([70, 80, 90], edited.Gpu.Curve);
+        Assert.Equal([70, 80, 90, 95, 100], edited.Gpu.Curve);
         Assert.Equal(84, edited.Gpu.FixedDuty);              // a curve edit does not touch a speed
         Assert.True(edited.Cpu.UseCurve);                    // ...and the other fan is untouched entirely
-        Assert.Equal([10, 20, 30], edited.Cpu.Curve);
+        Assert.Equal([10, 20, 30, 40, 50], edited.Cpu.Curve);
         Assert.Equal(42, edited.Cpu.FixedDuty);
     }
 
@@ -89,13 +92,13 @@ public class AppliedEditUseCasesTests
     {
         var axis = ArrangedAxis();
 
-        ApplyFanCurve.Run(gpu: false, use: false, [1, 2, 3], axis);
+        ApplyFanCurve.Run(gpu: false, use: false, [1, 2, 3, 4, 5], axis);
 
         var edited = Assert.Single(axis.CurveEdits);
         Assert.False(edited.Cpu.UseCurve);
-        Assert.Equal([1, 2, 3], edited.Cpu.Curve);
+        Assert.Equal([1, 2, 3, 4, 5], edited.Cpu.Curve);
         Assert.True(edited.Gpu.UseCurve is false);
-        Assert.Equal([40, 50, 60], edited.Gpu.Curve);
+        Assert.Equal([40, 50, 60, 70, 80], edited.Gpu.Curve);
         Assert.Equal(84, edited.Gpu.FixedDuty);
     }
 
@@ -111,29 +114,37 @@ public class AppliedEditUseCasesTests
         var curveAxis = ArrangedAxis();
         var selectionAxis = ArrangedAxis();
 
-        ApplyFanCurve.Run(gpu: true, use: true, [1], curveAxis);
+        ApplyFanCurve.Run(gpu: true, use: true, [1, 2, 3, 4, 5], curveAxis);
         ApplyFanSelection.Run(FanMode.Auto, 1, 2, selectionAxis);
 
         Assert.Empty(curveAxis.SelectionEdits);
         Assert.Empty(selectionAxis.CurveEdits);
     }
 
-    /// <summary>The curve array is passed through VERBATIM — the same instance the caller handed over, not a copy.
-    /// Nothing between the UI and the stored graph has ever validated its length or its contents, and the fan model
-    /// is the thing that tolerates a null, short or over-long one, so a copy here would be a rule nobody asked for
-    /// — and would quietly change the array the preset holds.
+    /// <summary>REWRITTEN — this asserted the OPPOSITE until the curve's rule moved into the model, and the two
+    /// cannot both hold. It used to be "the curve array is passed through VERBATIM: <c>Assert.Same(points, …)</c>",
+    /// which pinned the aliasing as a feature: the state the use case hands the axis held the CALLER's array, and
+    /// (because <c>Stored</c> read the preset directly) the array the preset held as well. What replaces it is the
+    /// rule that made that unrepresentable: <see cref="FanSettings"/> copies the curve it is given, so the value
+    /// that leaves this use case shares no array with the caller, with the stored state it was read from, or with
+    /// the stored state it is written to. The values are of course unchanged — a copy is a copy.
     ///
-    /// MUTATION THAT REDDENS IT: <c>Curve = [.. points]</c> instead of <c>Curve = points</c>.</summary>
+    /// MUTATION THAT REDDENS IT: handing the array through instead of through the constructor —
+    /// <c>stored.Gpu with { Curve = points }</c> as the use case used to read — which makes <c>NotSame</c> below
+    /// fail on the array AND on the stored half.</summary>
     [Fact]
-    public void ACurveEdit_HandsTheCallersArrayOver_NotACopy()
+    public void ACurveEdit_HandsTheModelACopy_NotTheCallersArray()
     {
         var axis = ArrangedAxis();
-        var points = new[] { 70, 80, 90 };
+        var points = new[] { 70, 80, 90, 95, 100 };
 
         ApplyFanCurve.Run(gpu: true, use: true, points, axis);
 
-        Assert.Same(points, Assert.Single(axis.CurveEdits).Gpu.Curve);
-        Assert.Same(CpuCurve, Assert.Single(axis.CurveEdits).Cpu.Curve);
+        var edited = Assert.Single(axis.CurveEdits);
+        Assert.Equal(points, edited.Gpu.Curve);
+        Assert.NotSame(points, edited.Gpu.Curve);
+        Assert.Equal(CpuCurve, edited.Cpu.Curve);
+        Assert.NotSame(CpuCurve, edited.Cpu.Curve);   // the untouched half too: it was copied out of the read
     }
 
     // ------------------------------------------------------------------ fans: the selection edit
@@ -160,8 +171,12 @@ public class AppliedEditUseCasesTests
         Assert.Equal(66, edited.Gpu.FixedDuty);
         Assert.True(edited.Cpu.UseCurve);
         Assert.False(edited.Gpu.UseCurve);
-        Assert.Same(CpuCurve, edited.Cpu.Curve);
-        Assert.Same(GpuCurve, edited.Gpu.Curve);
+        Assert.Equal(CpuCurve, edited.Cpu.Curve);
+        Assert.Equal(GpuCurve, edited.Gpu.Curve);
+        // Carried over as VALUES, not as the caller's instances: the fixed speeds are the only fields this edit
+        // means to change, and the arrays are copies the same way a curve edit's are.
+        Assert.NotSame(CpuCurve, edited.Cpu.Curve);
+        Assert.NotSame(GpuCurve, edited.Gpu.Curve);
     }
 
     /// <summary>The stored state is READ and not assumed: a selection on a mode that was never configured must start

@@ -5,6 +5,44 @@ using AcerHelper.Tests.Fakes;
 namespace AcerHelper.Tests;
 
 /// <summary>
+/// The persisted <c>int</c> a fan preset's <c>Mode</c> is → the enum, which is the ONE conversion the whole tree
+/// uses (<see cref="FanModes.FromStored"/>). It is a function rather than a cast because a cast is total: every
+/// <c>int</c> converts, including the values no <see cref="FanMode"/> names, and the difference is not academic
+/// — the Windows backend shifts the result into the WMI argument the EC reads as its behaviour byte, and the
+/// Linux backend's switch maps every unlisted value to "Custom, write nothing". Both are what a cast does rather
+/// than what anyone decided.
+///
+/// The 256/300 rows are the ones that pin the check to the INT: <see cref="FanMode"/>'s underlying type is
+/// <c>byte</c>, so a check performed after the cast would be asked about 0 and 44 respectively.
+/// </summary>
+public class FanModeStoredFormTests
+{
+    [Theory]
+    [InlineData(1, FanMode.Auto)]
+    [InlineData(2, FanMode.Max)]
+    [InlineData(3, FanMode.Custom)]
+    public void FromStored_ReadsTheThreeModesTheSchemaDefines(int stored, FanMode expected)
+    {
+        Assert.Equal(expected, FanModes.FromStored(stored));
+        Assert.Equal(stored, (int)expected);   // the numbers are the persisted ones, not a renumbering
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    [InlineData(7)]
+    [InlineData(44)]
+    [InlineData(255)]
+    [InlineData(256)]
+    [InlineData(300)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void FromStored_AnswersNoneForEveryValueThatNamesNoMode(int stored) =>
+        Assert.Null(FanModes.FromStored(stored));
+}
+
+/// <summary>
 /// The fan curve as the MODEL it now belongs to (<see cref="Fan"/>), driven DIRECTLY — one fan at a time, the
 /// data that fan was given and a temperature in, the duty% it should be at out, plus the memory of what was
 /// applied to it. Before the curve moved there was nothing to ask one fan about: the interpolation was a static
@@ -48,8 +86,10 @@ public class FanTests
     private static Fan GpuFan(FanPreset p) => new(FansOf(p).gpu);
 
     /// <summary>A fan built only to watch its memory: the rules below never ask it for a duty, so its data is
-    /// arbitrary.</summary>
-    private static Fan AFan() => new(new FanSettings(false, [], 0));
+    /// arbitrary — but not malformed, because a fan's data CANNOT be malformed: a curve is one duty% per anchor
+    /// or the type refuses to exist (<see cref="FanSettings"/>), so the "arbitrary" data here is the real default
+    /// ramp rather than an empty array standing in for one.</summary>
+    private static Fan AFan() => new(new FanSettings(false, Fan.DefaultDuties(), 0));
 
     // ---- rule: a fan answers from the data it was handed, curve or fixed speed ----
 

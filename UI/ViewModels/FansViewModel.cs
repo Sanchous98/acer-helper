@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Domain;
@@ -16,9 +17,12 @@ namespace AcerHelper.UI.ViewModels;
 public sealed partial class FansViewModel : SectionViewModel
 {
     // Anchors + default ramp come from the one owner (the fan model), so the graph and the curve that drives
-    // the fans can't drift apart.
-    private static readonly int[] Anchors      = Fan.Anchors;
-    private static readonly int[] DefaultCurve = Fan.DefaultCurve;
+    // the fans can't drift apart. Held as the domain's immutable arrays rather than copied into local ones: a
+    // copy would be a second array that could drift, and the previous `int[]` fields aliased the model's own
+    // arrays — which made `Fan.Anchors[i] = …` from this side, or from anywhere else, move the graph the user
+    // drags and the anchors the controller interpolates at the same time.
+    private static readonly ImmutableArray<int> Anchors      = Fan.Anchors;
+    private static readonly ImmutableArray<int> DefaultCurve = Fan.DefaultCurve;
 
     private readonly Action<FanMode, byte, byte> _setFan;
     private readonly Action<bool, bool, int[]> _setFanCurve;                 // (gpu, use, points)
@@ -171,6 +175,12 @@ public sealed partial class FansViewModel : SectionViewModel
     private void PersistCurve(bool gpu)
         => _setFanCurve(gpu, gpu ? GpuUseCurve : CpuUseCurve, Duties(gpu ? GpuCurve : CpuCurve));
 
+    /// <summary>The array handed to the service, and the UI's half of the curve's rule: it is one duty% per
+    /// anchor, always, because the collection it reads was built with one point per <see cref="Fan.Anchors"/>
+    /// entry (the constructor above) and never has points added or removed — and every point is clamped into
+    /// 0..100 by <see cref="CurvePointViewModel"/>, whose own value is a slider. So no drag and no mode switch can
+    /// produce a curve the domain would refuse; the refusal exists for what a hand-edited settings file can hold
+    /// and for a future caller, not for this editor.</summary>
     private static int[] Duties(ObservableCollection<CurvePointViewModel> pts) => pts.Select(p => (int)p.Percent).ToArray();
 }
 

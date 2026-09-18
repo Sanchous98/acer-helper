@@ -82,6 +82,40 @@ public class StartupLockScopeTests
 }
 
 /// <summary>
+/// <see cref="LaptopService.Dispose"/> — the other end of the service's life, and the one no test looked at.
+///
+/// WHY IT NEEDED ONE. <see cref="FakeDevice.Disposed"/> recorded the teardown and nothing read it, so deleting
+/// <c>device.Dispose()</c> from the service left the whole suite green: "the service releases the machine" was
+/// a claim with no assertion under it. A teardown that stops reaching the machine is a resource leak, and the
+/// services it reaches are real handles — the LampArray bridge stops a worker thread and removes a PnP node,
+/// and the vendor backends own EC/WMI sessions — so the failure would be a device left open for the process's
+/// life, discovered only by a user whose keyboard stays owned by a window they closed.
+///
+/// WHAT IT DOES NOT PROVE, stated rather than implied: that anything is actually RELEASED. The fakes own no
+/// handles; what is pinned is the CALL, which is the part the service is responsible for. The order between
+/// the two things it disposes is a real rule too (the LampArray must go down before the device, or Windows
+/// keeps offering a lighting node this process no longer backs), but both targets here are reachable only
+/// through the same single line, so the order is asserted where the bridge lives
+/// (<c>LampArrayLifecycleTests</c>) rather than duplicated from a fake that cannot see it.
+/// </summary>
+public class LaptopServiceTeardownTests
+{
+    /// <summary>MUTATION THAT REDDENS IT: deleting <c>device.Dispose()</c> from <c>LaptopService.Dispose</c> —
+    /// measured, this is the only assertion in the suite that fails, which is the whole reason it exists.</summary>
+    [Fact]
+    public void DisposingTheService_ReleasesTheMachine()
+    {
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
+
+        Assert.False(f.Device.Disposed);   // control: nothing has disposed it yet
+
+        f.Service.Dispose();
+
+        Assert.True(f.Device.Disposed);
+    }
+}
+
+/// <summary>
 /// An <see cref="IClamshell"/> and an <see cref="IDisplayTint"/> at once — the only two ports
 /// <c>ApplyStartupState</c> re-homed, and both are two-member interfaces, so one wrapper covers them; the test
 /// says which row it means by the recorded call name. It records <see cref="LaptopService.StateHeld"/> at the

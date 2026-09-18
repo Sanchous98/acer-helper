@@ -104,8 +104,14 @@ public class LaptopServicePresetReadTests
 
     // ---- the readers: a Current* accessor on a mode with no preset creates NOTHING ----
 
-    /// <summary>The returned preset is the type's own default (<c>FanPreset</c>: Auto, 70/70), and the
-    /// graph is untouched — no entry, no Save.</summary>
+    /// <summary>The returned preset is the type's own default (<c>FanPreset</c>: Auto, 70/70, the built-in
+    /// ramp in each half), and the graph is untouched — no entry, no Save.
+    ///
+    /// THE CURVES ARE THE RAMP AND NOT EMPTY, which is the value this asserts that changed: an empty curve was
+    /// the stored spelling of "use the built-in ramp", and it is a shape the model cannot hold
+    /// (<see cref="FanSettings"/>), so a default preset carries the ramp itself. The user-visible behaviour is
+    /// identical — the fans follow the same five duties either way — and the assertion is tightened rather than
+    /// loosened.</summary>
     [Fact]
     public void CurrentFan_OnAnUnconfiguredMode_CreatesNoPreset()
     {
@@ -116,8 +122,8 @@ public class LaptopServicePresetReadTests
         Assert.Equal((int)FanMode.Auto, fan.Mode);
         Assert.Equal(70, fan.Cpu);
         Assert.Equal(70, fan.Gpu);
-        Assert.Empty(fan.CpuCurve);
-        Assert.Empty(fan.GpuCurve);
+        Assert.Equal(Fan.DefaultDuties(), fan.CpuCurve);
+        Assert.Equal(Fan.DefaultDuties(), fan.GpuCurve);
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
     }
@@ -223,14 +229,16 @@ public class LaptopServicePresetReadTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);   // no fan port needed
 
-        f.Service.SetFanCurve(gpu: false, use: true, points: [10, 20, 30]);
+        f.Service.SetFanCurve(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
 
         var stored = Assert.Single(f.Store.Settings.FanPresets);
         Assert.Equal("balanced", stored.Key);
         Assert.True(stored.Value.CpuUseCurve);
         Assert.False(stored.Value.GpuUseCurve);
-        Assert.Equal([10, 20, 30], stored.Value.CpuCurve);
-        Assert.Empty(stored.Value.GpuCurve);
+        Assert.Equal([10, 20, 30, 40, 50], stored.Value.CpuCurve);
+        // The untouched half keeps its OWN curve — the ramp a fresh preset starts with — rather than becoming
+        // empty: a curve is one duty% per anchor, and the half this edit did not name must survive it as a curve.
+        Assert.Equal(Fan.DefaultDuties(), stored.Value.GpuCurve);
         Assert.Equal(70, stored.Value.Cpu);                      // the fixed speeds survive untouched
         Assert.Equal(70, stored.Value.Gpu);
         Assert.Equal(1, f.Store.SaveCount);
@@ -480,6 +488,100 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Empty(fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);
         Assert.Equal(0, f.Store.SaveCount);
+    }
+
+    /// <summary>A STORED <c>Mode</c> THAT NAMES NO <see cref="FanMode"/> IS READ AS AUTO, and the port is asked
+    /// for a mode the enum names. The value is an <c>int</c> in the file, so 0, 7 and 300 are all writable by
+    /// hand — and the cast this replaced was legal for every one of them, which is how a stored 7 became the
+    /// behaviour byte the WMI argument carries into the EC (<c>AcerDevice.Windows.cs</c> <c>SetFanMode</c>) while
+    /// the Linux backend's switch quietly treated it as Custom and wrote nothing. Neither was a decision.
+    ///
+    /// 300 is the row that proves the check is on the INT and not on the widened byte: <see cref="FanMode"/>'s
+    /// underlying type is <c>byte</c>, so <c>(FanMode)300</c> wraps to 44 and a check performed after the cast
+    /// would be asked about a different number than the file holds.
+    ///
+    /// MUTATION THAT REDDENS IT: replacing <c>FanModeOf</c> with <c>(FanMode)f.Mode</c> — the port then records
+    /// a mode the enum does not name (and <c>AxisStateOf</c> returns one).</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    [InlineData(255)]
+    [InlineData(256)]
+    [InlineData(300)]
+    [InlineData(-1)]
+    public void AStoredModeThatNamesNoFanMode_IsReadAsAuto_AtEveryDoor(int stored)
+    {
+        var settings = new Settings();
+        settings.FanPresets["balanced"] = new FanPreset { Mode = stored, Cpu = 40, Gpu = 50 };
+        var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
+        var fan = new FakeFanControl();
+        f.Device.FanControl = fan;
+
+        // the read the whole UI goes through, and the one the re-apply outcome is built from
+        Assert.Equal(FanMode.Auto, LaptopService.AxisStateOf(f.Store.Settings.FanPresets["balanced"]).Mode);
+
+        // ...and the mode switch, which is where the EC is asked
+        f.Service.ApplyModeFan();
+
+        Assert.Equal([FanMode.Auto], fan.ModeCalls);
+        Assert.Empty(fan.SpeedCalls);          // Auto is a behaviour, not a manual speed
+    }
+
+    /// <summary>An undefined stored mode is NOT Custom, so the sensor loop leaves the fans alone — the other
+    /// half of the same rule, and the one whose failure would be invisible: a value that fell into the Custom
+    /// branch would start driving the fans from the curves for a mode the user never configured.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    [InlineData(300)]
+    public void AStoredModeThatNamesNoFanMode_DoesNotStartDrivingTheCurves(int stored)
+    {
+        var settings = new Settings();
+        settings.FanPresets["balanced"] = new FanPreset
+        {
+            Mode = stored, Cpu = 40, Gpu = 50, CpuUseCurve = true, GpuUseCurve = true,
+        };
+        var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
+        var fan = new FakeFanControl();
+        f.Device.FanControl = fan;
+
+        f.Service.ApplyCustom(new SensorSnapshot { CpuTempC = 70, GpuTempC = 70 });
+
+        Assert.Empty(fan.ModeCalls);
+        Assert.Empty(fan.SpeedCalls);
+    }
+
+    /// <summary>A FIXED SPEED OUTSIDE THE DUTY RANGE COMES BACK INSIDE IT when the preset is written, because
+    /// the state the write is built from was constructed by <see cref="FanSettings"/>, which clamps. The file is
+    /// hand-editable, so 300 is what a user can put there; what they must not be able to do is leave a value in
+    /// the graph that only some of its readers clamp.
+    ///
+    /// WHERE THIS IS AND IS NOT OBSERVABLE, measured rather than assumed: the <c>(byte)</c> cast in
+    /// <c>IFanAxisTarget.ReplaceSelection</c> and its sibling in <c>ApplyModeFan</c> feed
+    /// <c>ApplyFan</c>, which DISCARDS the two speeds unless the mode is Custom — and the Custom case goes
+    /// through <c>ApplyCustom</c>, whose <c>Fan.Duty</c> clamps independently. So this value never reached the EC
+    /// out of range even before the fix: the defect was a bypass that the clamp happened to cover one call
+    /// further down, and what changes here is that the FILE now agrees with the hardware instead of holding a
+    /// number nothing can act on.
+    ///
+    /// MUTATION THAT REDDENS IT: removing the <c>Math.Clamp</c> from <c>FanSettings</c>'s constructor — the
+    /// stored preset then keeps 300 and -5.</summary>
+    [Fact]
+    public void AFixedSpeedOutsideTheDutyRange_IsBroughtInsideIt_WhenThePresetIsWritten()
+    {
+        var settings = new Settings();
+        settings.FanPresets["balanced"] = new FanPreset
+        {
+            Mode = (int)FanMode.Max, Cpu = 300, Gpu = -5,
+        };
+        var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
+        f.Device.FanControl = new FakeFanControl();
+
+        f.Service.SetFanCurve(gpu: false, use: false, points: [10, 20, 30, 40, 50]);
+
+        var stored = f.Store.Settings.FanPresets["balanced"];
+        Assert.Equal(100, stored.Cpu);   // 300 as a byte would be 44; as a duty% it is the ceiling
+        Assert.Equal(0, stored.Gpu);
     }
 
     /// <summary>The DEPTH of the snapshot, which is the part that is easy to get wrong and the reason

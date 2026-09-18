@@ -221,8 +221,18 @@ public sealed class ProfileMemory
 /// When <see cref="Curve"/> is on, the app ignores the fixed speeds and instead drives Custom speeds from a
 /// duty% curve at fixed temperature anchors (Acer has no native fan curves — this emulates them via the
 /// sensor loop; the anchors and the default ramp live in <see cref="Fan"/>). <see cref="CpuCurve"/>/<see cref="GpuCurve"/> hold one duty%
-/// per anchor; empty = use the built-in default ramp. The preset is the STORED shape and holds BOTH fans;
-/// <see cref="Fan"/> is the model that reads one half of it.</summary>
+/// per anchor. The preset is the STORED shape and holds BOTH fans; <see cref="Fan"/> is the model that reads one
+/// half of it.
+///
+/// AN EMPTY CURVE USED TO MEAN "the built-in default ramp" AND NO LONGER DOES. That spelling was a second way to
+/// say what the five default duties say, and the model cannot hold it: <c>FanSettings</c> requires a curve of
+/// exactly one duty% per anchor, so the default below is the ramp ITSELF rather than an empty array, and the
+/// load-time sanitiser rewrites an empty or otherwise malformed curve in an existing file the same way
+/// (Infrastructure/Composition/JsonSettingsStore.cs). The user's curve is then the ramp, spelled out —
+/// indistinguishable in behaviour and readable in the file.
+///
+/// <see cref="Mode"/> STAYS AN <c>int</c> and is read through <c>FanModes.FromStored</c> rather than cast, so a
+/// value naming no <see cref="FanMode"/> cannot become one (Domain/Models.cs).</summary>
 public sealed class FanPreset
 {
     public int Mode { get; set; } = 1;
@@ -231,10 +241,13 @@ public sealed class FanPreset
 
     // Per-fan curve (only meaningful in Custom mode): when UseCurve is on for a fan, the app drives that
     // fan's Custom speed from its curve (duty% per temperature anchor) instead of the fixed speed above.
+    // The default is the ramp ITSELF rather than an empty array, so a preset that has never been configured is
+    // already a curve the model admits — a fresh preset is written into the dictionary by the first edit of a
+    // mode and read straight back by it, with no store round-trip to sanitise it in between.
     public bool  CpuUseCurve { get; set; }
     public bool  GpuUseCurve { get; set; }
-    public int[] CpuCurve    { get; set; } = [];
-    public int[] GpuCurve    { get; set; } = [];
+    public int[] CpuCurve    { get; set; } = Fan.DefaultDuties();
+    public int[] GpuCurve    { get; set; } = Fan.DefaultDuties();
 
     /// <summary>A copy that shares NOTHING mutable with the stored instance — the two arrays are duplicated,
     /// not aliased. This is what a reader gets instead of the stored object, so a caller that keeps or edits

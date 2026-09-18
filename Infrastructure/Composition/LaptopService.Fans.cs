@@ -49,12 +49,31 @@ public sealed partial class LaptopService
     /// this one; it was the seam that let the stored container move to Infrastructure without touching Domain,
     /// and it is what keeps Domain naming no stored shape now that the container sits beside this file.
     ///
-    /// The curve array is passed through verbatim: SetFanCurve stores whatever the UI hands it, with no length
-    /// validation, and Fan is the thing that tolerates a null, short or over-long one. Caller holds _state or
-    /// passes a snapshot it owns.</summary>
+    /// WHAT CROSSES IS THE MODEL'S OWN TYPE, and constructing it is what brings the stored values inside the
+    /// domain's rules: <see cref="FanSettings"/> refuses a curve that is not one duty% per anchor and clamps the
+    /// fixed speed into the duty range, so neither a curve nor a speed a hand-edited file can hold reaches the
+    /// EC by passing through here. The array this hands over is a COPY — the stored preset's array is not
+    /// aliased into the model, which is the other half of the same rule (and the reason
+    /// <see cref="IFanAxisTarget.Stored"/> no longer hands the model's array back to a caller). Caller holds
+    /// _state or passes a snapshot it owns.</summary>
     private static (FanSettings cpu, FanSettings gpu) FanSettingsOf(FanPreset f)
         => (new FanSettings(f.CpuUseCurve, f.CpuCurve, f.Cpu),
             new FanSettings(f.GpuUseCurve, f.GpuCurve, f.Gpu));
+
+    /// <summary>The behaviour a stored preset is in — THE ONE READING of the persisted <c>int</c>, so no other
+    /// member of this class casts it.
+    ///
+    /// AN UNDEFINED STORED VALUE IS READ AS <see cref="FanMode.Auto"/>, and that is a decision rather than a
+    /// fallback. A stored <c>int</c> that names no <see cref="FanMode"/> (a hand-edited file, or one written by
+    /// an older build that knew a value this one does not) describes no behaviour the app configured, so what it
+    /// must NOT do is travel on: the Windows port shifts the behaviour into the WMI argument it sends the EC, so
+    /// a stored 7 was written to the hardware as byte 7. Auto is the answer because it is the one mode
+    /// <see cref="FanCapability"/> guarantees exists (<c>Auto is always implied</c>), because it is the
+    /// behaviour the firmware is in when the app has configured nothing — which is exactly the state an
+    /// unrecognised stored value describes — and because every port maps it. Refusing the write instead would
+    /// have to report a mode to the UI anyway, since <see cref="FanAxisState.Mode"/> has no "unknown", and would
+    /// leave a preset the user CAN see in the file with no behaviour at all.</summary>
+    private static FanMode FanModeOf(FanPreset f) => FanModes.FromStored(f.Mode) ?? FanMode.Auto;
 
     /// <summary>The same reading as <see cref="FanSettingsOf"/>, for a whole preset: the axis's state in the
     /// DOMAIN's vocabulary (<see cref="FanAxisState"/>, Domain/AxisState.cs), which is what a use case in
@@ -67,7 +86,7 @@ public sealed partial class LaptopService
     internal static FanAxisState AxisStateOf(FanPreset f)
     {
         var (cpu, gpu) = FanSettingsOf(f);
-        return new FanAxisState((FanMode)f.Mode, cpu, gpu);
+        return new FanAxisState(FanModeOf(f), cpu, gpu);
     }
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
@@ -119,7 +138,20 @@ public sealed partial class LaptopService
 
     /// <summary>The selection edit: the same store, deadband clear and save, then the EC is asked for the mode —
     /// or, when the new selection IS Custom, driven from the curves instead, because the EC honours a manual speed
-    /// only once the fans are already in Custom behaviour and would silently ignore the speeds otherwise.</summary>
+    /// only once the fans are already in Custom behaviour and would silently ignore the speeds otherwise.
+    ///
+    /// THE <c>(byte)</c> CASTS ARE TOTAL, which is what changed here. They are casts of the state's own
+    /// <see cref="FanSettings.FixedDuty"/>, and that field is clamped at construction, so no
+    /// <see cref="FanAxisState"/> can carry a fixed duty outside 0..100 — where they used to be legal casts of
+    /// ANY <c>int</c> the file happened to hold. The clamp sits with the invariant rather than at this call site
+    /// so that no caller of this member has anything to remember to do.
+    ///
+    /// WHAT IS AND IS NOT OBSERVABLE HERE, measured rather than assumed: <c>ApplyFan</c> discards the two speeds
+    /// unless the mode is Custom, and the Custom arm above goes through the curve evaluation instead, so these
+    /// bytes never reached the wire out of range even before the fix. The defect was a bypass that a clamp one
+    /// call further down happened to cover; what the fix makes observable is the stored preset, which no longer
+    /// keeps a 300 nothing can act on (pinned by
+    /// <c>LaptopServiceApplyModeGraphTests.AFixedSpeedOutsideTheDutyRange_IsBroughtInsideIt_WhenThePresetIsWritten</c>).</summary>
     void IFanAxisTarget.ReplaceSelection(FanAxisState state)
     {
         lock (_state)
@@ -139,10 +171,15 @@ public sealed partial class LaptopService
     ///
     /// The fixed speeds are written WITHOUT the byte cast the port takes: the stored field is an <c>int</c>
     /// (settings.json is hand-editable) and a value read back out of it must survive an edit that did not name it.
-    /// The cast belongs where the EC is asked, which is the two call sites above.
+    /// The cast belongs where the EC is asked, which is the two call sites above — and both of those are total
+    /// because the state they cast was built by <see cref="FanSettings"/>, which clamps.
     ///
-    /// The arrays are assigned by reference, which is what both edit paths have always done — the curve array is
-    /// the UI's, passed through verbatim, and nothing between there and here validates its length.</summary>
+    /// The arrays are assigned BY REFERENCE FROM THE STATE, which is still a reference assignment and is no
+    /// longer an alias of anything the caller can reach: the state's curve was copied by
+    /// <see cref="FanSettings"/>'s constructor, so what lands in the preset is a fresh array that belongs to the
+    /// preset. The stored curve is therefore never the UI's array and never the model's — a later edit to one of
+    /// them cannot rewrite the user's file, and the file's own array cannot be rewritten by a caller that held
+    /// the state it was read from.</summary>
     private void FileFan(FanAxisState state)
     {
         var f = StoredFan();
@@ -184,7 +221,15 @@ public sealed partial class LaptopService
         {
             if (!Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f)) return null;
             _fanCurve.Reset();
-            if ((FanMode)f.Mode != FanMode.Custom) ApplyFan((FanMode)f.Mode, (byte)f.Cpu, (byte)f.Gpu);
+            var mode = FanModeOf(f);
+            if (mode != FanMode.Custom)
+            {
+                // The SPEEDS come from the model's reading of the preset and not from the stored ints, for the
+                // reason the mode does: a stored 300 cast to a byte is 44. FanSettingsOf is what clamps, and it
+                // is asked here rather than the raw fields read, so this path cannot be the one that forgets.
+                var (cpu, gpu) = FanSettingsOf(f);
+                ApplyFan(mode, (byte)cpu.FixedDuty, (byte)gpu.FixedDuty);
+            }
             return f.Snapshot();
         }
     }
@@ -197,7 +242,7 @@ public sealed partial class LaptopService
         lock (_state)
         {
             if (device.FanControl == null ||
-                !Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) || (FanMode)f.Mode != FanMode.Custom)
+                !Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) || FanModeOf(f) != FanMode.Custom)
             { _fanCurve.Reset(); return; }
 
             if (_fanCurve.Step(FanSettingsOf(f), s) is not { } duty) return;        // within deadband

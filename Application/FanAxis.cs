@@ -42,11 +42,14 @@ public interface IFanAxisTarget
     /// this axis's read and has been since the per-mode graph was introduced: both edits mean "the user is
     /// configuring this mode", so the first edit of a mode must start from the defaults rather than be refused.
     ///
-    /// The arrays it carries are the STORED ones, not copies. That is deliberate: the use cases hand the whole
-    /// state straight back, so copying would silently re-point the preset's arrays on every edit — including the
-    /// edit that changed no array at all. The snapshot rule exists for readers that KEEP a value
-    /// (<c>LaptopService.CurrentFan</c>); this read is inside an edit and leaves the graph within the same call
-    /// sequence.</summary>
+    /// The arrays it carries are copies of the stored ones, because <see cref="FanSettings"/> copies the curve it
+    /// is given — and that is the rule rather than a cost: a state that leaves an edit is a value, and a value
+    /// that shares its array with the settings graph is one a caller could rewrite the user's file through. What
+    /// the copying changes on the write side is only WHICH array the preset ends up holding: the edit hands back a
+    /// state built from this one, and the preset's field is re-pointed at the copy. Its CONTENTS are unchanged,
+    /// and the array it replaces was read by this same call, so nothing that could still be looking at it exists.
+    /// The snapshot rule (<c>LaptopService.CurrentFan</c>) is still a separate, stronger rule for readers that
+    /// KEEP a value — it duplicates the whole preset, arrays included.</summary>
     FanAxisState Stored();
 
     /// <summary>Make <paramref name="state"/> the current mode's stored fan state, clear the deadband and drive
@@ -70,16 +73,21 @@ public interface IFanAxisTarget
 /// set), so "this is the GPU fan's curve" is decided here and nowhere else, and a swap of the two halves is what a
 /// stub test for this use case is for.
 ///
-/// The curve array is passed through verbatim, exactly as the UI handed it over: nothing between here and the
-/// stored graph validates its length, and the fan is the model that tolerates a null, short or over-long one.</summary>
+/// THE CURVE ARRAY CROSSES THE DOMAIN'S DOOR, which is where its shape is settled: the state is rebuilt through
+/// <see cref="FanSettings"/>'s constructor rather than by assigning the array onto a copy of the stored data, so
+/// a curve that is not one duty% per anchor — or one carrying a duty outside 0..100 — is REFUSED here, and the
+/// array the model ends up holding is a copy the caller cannot write through. That is deliberately not
+/// validation in this use case: the rule is the domain's, the UI's own editor cannot produce a violating curve
+/// (FansViewModel builds exactly one clamped point per anchor), and this is only the call that happens to reach
+/// the constructor first.</summary>
 public static class ApplyFanCurve
 {
     public static void Run(bool gpu, bool use, int[] points, IFanAxisTarget target)
     {
         var stored = target.Stored();
         target.ReplaceCurve(gpu
-            ? stored with { Gpu = stored.Gpu with { UseCurve = use, Curve = points } }
-            : stored with { Cpu = stored.Cpu with { UseCurve = use, Curve = points } });
+            ? stored with { Gpu = new FanSettings(use, points, stored.Gpu.FixedDuty) }
+            : stored with { Cpu = new FanSettings(use, points, stored.Cpu.FixedDuty) });
     }
 }
 
@@ -87,10 +95,11 @@ public static class ApplyFanCurve
 /// now. The sibling of <see cref="ApplyFanCurve"/> over the same contract and for the same axis — a fan is
 /// configured one of these two ways and never both at once.
 ///
-/// WHAT IT DECIDES: that a selection names the mode and the two speeds and nothing else — each fan's curve
-/// settings are carried over from the stored state, which is why the two <c>with</c> expressions below name only
-/// <see cref="FanSettings.FixedDuty"/>. The stored speeds are read from the graph rather than defaulted, so a
-/// selection on a mode that was never configured starts from the preset's own defaults instead of from zero.
+/// WHAT IT DECIDES: that a selection names the mode and the two speeds and nothing else — each fan's curve and
+/// its curve switch are carried over from the stored state, which is why the two fans below are rebuilt with the
+/// stored <c>UseCurve</c> and the stored <c>Curve</c> and only their speed replaced. The stored speeds are read
+/// from the graph rather than defaulted, so a selection on a mode that was never configured starts from the
+/// preset's own defaults instead of from zero.
 ///
 /// WHAT IT DOES NOT DECIDE: how the selection reaches the EC. That a Custom selection is driven from the curves
 /// rather than pushed as a speed is <see cref="IFanAxisTarget.ReplaceSelection"/>'s doing, and it is the EC's own
@@ -103,8 +112,11 @@ public static class ApplyFanSelection
         target.ReplaceSelection(stored with
         {
             Mode = mode,
-            Cpu = stored.Cpu with { FixedDuty = cpu },
-            Gpu = stored.Gpu with { FixedDuty = gpu },
+            // Rebuilt through the constructor rather than written onto a copy: FanSettings' members are get-only
+            // precisely so the two rules it enforces — a real curve and a speed that is a duty% — cannot be
+            // stepped around by the `with` expression that used to sit here.
+            Cpu = new FanSettings(stored.Cpu.UseCurve, stored.Cpu.Curve, cpu),
+            Gpu = new FanSettings(stored.Gpu.UseCurve, stored.Gpu.Curve, gpu),
         });
     }
 }

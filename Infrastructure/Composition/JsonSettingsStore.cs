@@ -33,14 +33,19 @@ public sealed class JsonSettingsStore : ISettingsStore
     /// the set is a parameter here rather than a property of the store — the store holds no part of the model.
     ///
     /// The file itself is read through <see cref="Settings"/>'s parameterless constructor, which is the shape the
-    /// file has: settings.json says what the user chose, never what the machine has.</summary>
+    /// file has: settings.json says what the user chose, never what the machine has.
+    ///
+    /// A MALFORMED FAN CURVE IS REPAIRED HERE, BEFORE THE MODEL SEES IT — see <see cref="SanitiseCurves"/>.</summary>
     public Settings Load(IReadOnlyList<SettingDeclaration> declaredSettings)
     {
         try
         {
             if (File.Exists(filePath))
-                return new Settings(declaredSettings,
-                                    JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.Settings));
+            {
+                var persisted = JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.Settings);
+                if (SanitiseCurves(persisted)) Save(persisted!);
+                return new Settings(declaredSettings, persisted);
+            }
         }
         catch (JsonException)
         {
@@ -51,6 +56,35 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
         catch { /* locked/unreadable — fall back to defaults */ }
         return new Settings(declaredSettings);
+    }
+
+    /// <summary>Replace every stored fan curve that is not a curve — null, short, over-long, or carrying a duty
+    /// outside 0..100 — with the built-in default ramp, and say whether anything was replaced so the caller can
+    /// write the file back.
+    ///
+    /// WHY THE FILE IS REWRITTEN RATHER THAN JUST READ AROUND, and why it is written at LOAD. A curve is the one
+    /// persisted value a hand edit can put outside the domain's rules, and the domain REFUSES such a value rather
+    /// than tolerating it (<see cref="FanSettings"/>), so a file left in that state would make every later load
+    /// refuse too — and the refusal would arrive as an exception out of the sensor loop rather than as a readable
+    /// message. Rewriting at load makes the stored state valid ONCE, so nothing downstream has to be defensive
+    /// about it: the user loses the one curve that was malformed and keeps every other setting in the file, which
+    /// is the whole point of repairing rather than discarding the file the way a corrupt-JSON read does.
+    ///
+    /// The rule it asks is the DOMAIN's (<see cref="Fan.IsValidCurve"/>) rather than a second statement of it
+    /// here: what a curve is belongs where the curve's type is, and this method's whole job is the file.
+    /// Best-effort like every other write in this class — a file that cannot be rewritten is still loaded, with
+    /// the repaired curves in memory.</summary>
+    private static bool SanitiseCurves(Settings? persisted)
+    {
+        if (persisted is null) return false;
+
+        var replaced = false;
+        foreach (var preset in persisted.FanPresets.Values)
+        {
+            if (!Fan.IsValidCurve(preset.CpuCurve)) { preset.CpuCurve = Fan.DefaultDuties(); replaced = true; }
+            if (!Fan.IsValidCurve(preset.GpuCurve)) { preset.GpuCurve = Fan.DefaultDuties(); replaced = true; }
+        }
+        return replaced;
     }
 
     public void Save(Settings settings)

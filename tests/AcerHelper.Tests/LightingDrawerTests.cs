@@ -212,9 +212,12 @@ public class LightingDrawerTests
         var d = new FakeDevice();
         return new MainViewModel(d, new UiActions(
             new ProfileActions(_ => { }, TurboToggles: false, _ => { }),
-            // The same values the absent presets stand for: Auto at the schema's default 70/70, no curves, and
-            // stock 0/0 offsets. This file is about the lighting section; these two are fillers either way.
-            new FanSection(new FanAxisState(FanMode.Auto, new FanSettings(false, [], 70), new FanSettings(false, [], 70)),
+            // The same values the absent presets stand for: Auto at the schema's default 70/70, the default ramp
+            // in each fan's unused curve field, and stock 0/0 offsets. This file is about the lighting section;
+            // these two are fillers either way. (An EMPTY curve would not do as the filler: a FanSettings is one
+            // duty% per anchor or it is not a FanSettings — Domain/Fan.cs.)
+            new FanSection(new FanAxisState(FanMode.Auto, new FanSettings(false, Fan.DefaultDuties(), 70),
+                                                         new FanSettings(false, Fan.DefaultDuties(), 70)),
                            (_, _, _) => { }, (_, _, _) => { }, _ => Task.CompletedTask),
             new GpuSection(new GpuAxisState(0, 0), (_, _) => { }),
             new CpuSection([], null, _ => { }),

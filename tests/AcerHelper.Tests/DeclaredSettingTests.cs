@@ -63,6 +63,58 @@ public class DeclaredSettingTests
         Assert.Equal([true, false], port.SetCalls);
     }
 
+    /// <summary>A FLAG ADMITS TWO VALUES AND REFUSES EVERY OTHER STRING, and the refusal happens before the
+    /// transport is touched. The hole this closes was not pedantry: <see cref="FlagSetting.Write"/> reads its
+    /// value as <c>value == "1"</c>, so "true", "on", "0 " and every other spelling silently meant OFF — a write
+    /// to the hardware nobody asked for, reported as a success by a port that took the <c>false</c> it was
+    /// handed. Nothing in the tree produces such a string (OptionsAssembler hands
+    /// <see cref="FlagSetting.Value"/>'s own output), which is exactly why the rule belongs to the type rather
+    /// than to the caller's care.
+    ///
+    /// MUTATION THAT REDDENS IT: deleting <c>FlagSetting.Refuse</c>'s override (the base admits everything) —
+    /// then nothing throws and the port records two writes of <c>false</c>.</summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("on")]
+    [InlineData("")]
+    [InlineData("0 ")]
+    [InlineData("01")]
+    public void AValueThatIsNotAFlagValue_IsRefusedBeforeTheTransportIsTouched(string value)
+    {
+        var port = new FakeFlagPort();
+        var setting = new FlagSetting { Key = "FnLock", Port = port };
+
+        var ex = Assert.Throws<SettingNotAppliedException>(() => setting.Apply(value));
+
+        Assert.Equal("FnLock", ex.Key);
+        Assert.NotNull(ex.Reason);          // this layer's own words: the failure must say what it takes
+        Assert.Empty(port.SetCalls);        // ...and the transport was never reached
+    }
+
+    /// <summary>The same rule for the other shape, and the one that could not be stated anywhere else: the KEY
+    /// is guarded by <c>Settings.Apply</c> against the declared set, but the VALUE went straight to the port,
+    /// which only knows its own ids — so an id this machine never offered was written and believed. The legal
+    /// values are the port's OWN list, so no second copy of the ids can go stale.
+    ///
+    /// MUTATION THAT REDDENS IT: deleting <c>ChoiceSetting.Refuse</c>'s override — then nothing throws and the
+    /// port records a write of "nope".</summary>
+    [Theory]
+    [InlineData("nope")]
+    [InlineData("")]
+    [InlineData("5S")]      // the ids are case-sensitive opaque keys, not labels
+    [InlineData("0")]
+    public void AChoiceValueThatIsNotOneOfTheOptions_IsRefusedBeforeTheTransportIsTouched(string value)
+    {
+        var port = new FakeChoicePort("5s", "30s", "1h");
+        var setting = new ChoiceSetting { Key = "stop_timeout", Port = port };
+
+        var ex = Assert.Throws<SettingNotAppliedException>(() => setting.Apply(value));
+
+        Assert.Equal("stop_timeout", ex.Key);
+        Assert.NotNull(ex.Reason);
+        Assert.Empty(port.SetCalls);
+    }
+
     /// <summary>A transport whose write THROWS is a refusal, not a crash — and it carries NO reason, because the
     /// only one available belongs to another call. This is the rule <c>LaptopService.Attempt</c> stated for the
     /// tuple channel, restated on the side of the exception: a throw is a failed write, and the failure it

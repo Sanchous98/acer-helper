@@ -38,20 +38,40 @@ public abstract record SettingDeclaration
 
     /// <summary>Apply <paramref name="value"/> to the hardware, or throw. A refusal is
     /// <see cref="SettingNotAppliedException"/> — information about what happened, and nothing else: the
-    /// sentence the user reads is composed by the UI, which is where setting names live.</summary>
+    /// sentence the user reads is composed by the UI, which is where setting names live.
+    ///
+    /// A VALUE THIS SETTING DOES NOT ADMIT IS REFUSED BEFORE THE TRANSPORT IS TOUCHED, which is why the check is
+    /// here and not inside either <see cref="Write"/>. Each shape knows its own legal values
+    /// (<see cref="Refuse"/>) and neither transport can be asked to enforce them: a flag write reads its value as
+    /// <c>value == "1"</c>, so ANY other string silently means OFF — a write to the hardware that the caller
+    /// never asked for — and a choice write hands the string to a port that only knows its own option ids. The
+    /// guard's absence was a hole in the MODEL, not in the transports, so it is closed in the model.</summary>
     public void Apply(string value)
     {
+        if (Refuse(value) is { } refused) throw new SettingNotAppliedException(Key, refused);
+
         var (ok, error) = Write(value);
         if (!ok) throw new SettingNotAppliedException(Key, error);
     }
 
+    /// <summary>Why <paramref name="value"/> is not a value this setting admits, or null when it is one. The
+    /// reason is this layer's own words, sitting exactly where a transport's words sit when it refuses a write —
+    /// the UI composes "&lt;row label&gt; failed: &lt;reason&gt;" from both (<c>OptionsAssembler.RunSet</c>).
+    ///
+    /// THE DEFAULT ADMITS EVERYTHING, because a declaration that names no legal values has none to enforce; both
+    /// shapes in this file override it. It is a string and not a bool because a refusal has to SAY which value
+    /// was wrong and what the setting takes instead — a bare false would leave the row showing a failure with
+    /// nothing to correct.</summary>
+    protected virtual string? Refuse(string value) => null;
+
     /// <summary>The hardware write behind <see cref="Apply"/>: whether it took, and the transport's own reason
-    /// when it did not.</summary>
+    /// when it did not. Reached only by a value <see cref="Refuse"/> admitted.</summary>
     protected abstract (bool ok, string? error) Write(string value);
 }
 
 /// <summary>An on/off setting. Its values are the strings <c>Settings.DeviceSettings</c> already uses for
-/// a flag — "1" and "0" — so a declared flag needs no second encoding.</summary>
+/// a flag — "1" and "0" — so a declared flag needs no second encoding. THOSE TWO ARE THE ONLY VALUES IT ADMITS:
+/// see <see cref="Refuse"/>.</summary>
 public sealed record FlagSetting : SettingDeclaration
 {
     /// <summary>The transport this setting is read and written through.</summary>
@@ -62,6 +82,16 @@ public sealed record FlagSetting : SettingDeclaration
 
     /// <summary>The stored form of a flag, for callers that hold a bool.</summary>
     public static string Value(bool on) => on ? "1" : "0";
+
+    /// <summary>Anything that is not "1" or "0" is refused, and the reason is not pedantry: the port takes a
+    /// BOOL, and this declaration's own write reads the string as <c>value == "1"</c>, so every other string
+    /// means OFF. A caller that passed "true", "on", "0 " or a stored value read from somewhere else would
+    /// switch the setting OFF while believing it had switched it on — a write to the hardware nobody asked for,
+    /// and the exact shape (<see cref="Write"/>) that cannot report it, since the port's write succeeds. The two
+    /// legal strings are this type's own encoding (<see cref="Value"/>) and are what
+    /// <c>Settings.DeviceSettings</c> persists, so nothing in the tree has a third spelling to lose.</summary>
+    protected override string? Refuse(string value)
+        => value is "1" or "0" ? null : $"\"{value}\" is not one of its values — it is a switch, so it takes \"1\" or \"0\"";
 
     /// <summary>A port that THROWS is a failed write, not a crash — and it reports NO reason, deliberately.
     /// <see cref="IFlagPort.LastError"/> is a field the PORT owns, written by a call that runs to completion, so
@@ -109,6 +139,25 @@ public sealed record ChoiceSetting : SettingDeclaration
             if (Options[i].Id == id)
                 return i;
         return 0;
+    }
+
+    /// <summary>A value that is not one of <see cref="Options"/> is refused, and the check is here because
+    /// nothing else could make it: the KEY is guarded by <c>Settings.Apply</c> against the declared set, but the
+    /// VALUE went straight to the port, which accepts any string it does not recognise as "leave the hardware
+    /// alone" at best and encodes it as a mode byte at worst. A dropdown can only offer what the device
+    /// advertises, so the UI cannot produce one — but a stored value replayed, an id from a different machine's
+    /// list, or a future caller reading the bag has nothing stopping it, and the failure would be silent in
+    /// exactly the way this axis is worst at.
+    ///
+    /// MEMBERSHIP IS THE SET THE DEVICE ADVERTISES (<see cref="Options"/>, which is the port's own list), not a
+    /// second copy of the ids: the ids are the backend's stable keys and this type never learns what they mean,
+    /// so the only honest answer to "may this value be written" is whether the device offered it.</summary>
+    protected override string? Refuse(string value)
+    {
+        foreach (var option in Options)
+            if (option.Id == value)
+                return null;
+        return $"\"{value}\" is not one of its options";
     }
 
     /// <summary>A port that THROWS is a failed write, not a crash, and it reports no reason for the same reason

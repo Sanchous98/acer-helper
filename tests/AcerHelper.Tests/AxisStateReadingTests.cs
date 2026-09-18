@@ -32,8 +32,8 @@ public class AxisStateReadingTests
         var vm = new FansViewModel(
             new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true),
             new FanAxisState(FanMode.Custom,
-                new FanSettings(UseCurve: true, Curve: [11, 22, 33, 44, 55], FixedDuty: 33),
-                new FanSettings(UseCurve: false, Curve: [66, 77, 88, 99, 100], FixedDuty: 77)),
+                new FanSettings(useCurve:true, curve: [11, 22, 33, 44, 55], fixedDuty:33),
+                new FanSettings(useCurve:false, curve: [66, 77, 88, 99, 100], fixedDuty:77)),
             setFan: (_, _, _) => { }, setFanCurve: (_, _, _) => { }, showCurve: _ => Task.CompletedTask);
 
         Assert.Equal(33, vm.Cpu);
@@ -75,13 +75,13 @@ public class AxisStateReadingTests
         var vm = new FansViewModel(
             new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true),
             new FanAxisState(FanMode.Custom,
-                new FanSettings(UseCurve: true, Curve: [11, 22, 33, 44, 55], FixedDuty: 33),
-                new FanSettings(UseCurve: false, Curve: [66, 77, 88, 99, 100], FixedDuty: 77)),
+                new FanSettings(useCurve:true, curve: [11, 22, 33, 44, 55], fixedDuty:33),
+                new FanSettings(useCurve:false, curve: [66, 77, 88, 99, 100], fixedDuty:77)),
             setFan: (_, _, _) => { }, setFanCurve: (_, _, _) => { }, showCurve: _ => Task.CompletedTask);
 
         vm.Load(new FanAxisState(FanMode.Max,
-                new FanSettings(UseCurve: false, Curve: [55, 44, 33, 22, 11], FixedDuty: 12),
-                new FanSettings(UseCurve: true, Curve: [100, 99, 88, 77, 66], FixedDuty: 21)));
+                new FanSettings(useCurve:false, curve: [55, 44, 33, 22, 11], fixedDuty:12),
+                new FanSettings(useCurve:true, curve: [100, 99, 88, 77, 66], fixedDuty:21)));
 
         Assert.Equal(12, vm.Cpu);
         Assert.Equal(21, vm.Gpu);

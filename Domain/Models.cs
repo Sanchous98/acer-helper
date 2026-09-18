@@ -27,6 +27,36 @@ public enum FanMode : byte
     Custom = 3,
 }
 
+/// <summary>The one conversion from the PERSISTED form of <see cref="FanMode"/> — the <c>int</c> a preset holds —
+/// into the enum, and the reason it is a function rather than a cast.
+///
+/// A cast is what the tree used, at three sites in Infrastructure/Composition/LaptopService.Fans.cs, and it is
+/// not a conversion: <c>(FanMode)</c> of an <c>int</c> is legal for EVERY value of that <c>int</c>, including
+/// the ones no <see cref="FanMode"/> names. A stored 7 therefore entered the model as a mode, and what happened
+/// next depended on the platform: the Windows backend shifts it straight into the WMI argument
+/// (<c>AcerDevice.Windows.cs</c>, <c>SetFanMode</c> — the behaviour byte the EC is asked for), while the Linux
+/// backend's switch treats every unlisted value as Custom and writes nothing. Neither is a decision anybody
+/// made; both are what a cast does. <see cref="IsDefined"/> is the door an undefined value cannot come through,
+/// so no caller holds a mode the enum does not name.
+///
+/// IT IS NOT A VALIDATING FACTORY OVER A NEW TYPE, deliberately: the persisted value is an <c>int</c> and stays
+/// one — settings.json's shape is a compatibility surface — so what the domain offers is the reading of it.
+///
+/// A value of 300 is refused by the same test that refuses 7, and that is the point of asking before casting:
+/// <see cref="FanMode"/>'s underlying type is <c>byte</c>, so a cast would wrap 300 to 44 first and the check
+/// would then be asked about a different number than the file holds.</summary>
+public static class FanModes
+{
+    /// <summary>The mode <paramref name="stored"/> names, or null when it names none — a value outside the
+    /// enum's own set, which is what a hand-edited or older settings.json can hold. The caller decides what to
+    /// do with "none"; the reading itself refuses to invent a mode.</summary>
+    public static FanMode? FromStored(int stored)
+        => IsDefined(stored) ? (FanMode)stored : null;
+
+    private static bool IsDefined(int stored)
+        => stored is (int)FanMode.Auto or (int)FanMode.Max or (int)FanMode.Custom;
+}
+
 /// <summary>Which fan controls a backend offers (Auto is always implied).</summary>
 public sealed record FanCapability(bool HasMax, bool HasCustom, bool HasGpuFan);
 

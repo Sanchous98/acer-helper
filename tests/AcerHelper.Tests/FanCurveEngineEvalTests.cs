@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using AcerHelper.Domain;
 
 namespace AcerHelper.Tests;
@@ -17,6 +18,43 @@ public class FanCurveSpecTests
     [Fact]
     public void DefaultCurve_IsTheDocumentedRamp() =>
         Assert.Equal(new[] { 30, 45, 60, 80, 100 }, Fan.DefaultCurve);
+
+    /// <summary>The two arrays are IMMUTABLE to callers, which is what makes the "single source of truth" above
+    /// hold: they used to be <c>public static readonly int[]</c>, so the reference was frozen and the ELEMENTS
+    /// were not — <c>Fan.Anchors[0] = -999</c> compiled and ran, and UI/ViewModels/FansViewModel.cs held these
+    /// very instances, so one write would have moved the graph the user drags and the anchors the controller
+    /// interpolates together. Nothing wrote to them, which is why this is a rule and not a bug report, and why it
+    /// is asserted rather than assumed.
+    ///
+    /// MUTATION THAT REDDENS IT: declaring either field <c>int[]</c> again — this line then does not compile, and
+    /// the mutation a compiler cannot stop (a write through the array) is back.</summary>
+    [Fact]
+    public void TheAnchorsAndTheDefaultRamp_AreImmutableAndIndexable()
+    {
+        Assert.Equal(typeof(ImmutableArray<int>), typeof(Fan).GetField(nameof(Fan.Anchors))!.FieldType);
+        Assert.Equal(typeof(ImmutableArray<int>), typeof(Fan).GetField(nameof(Fan.DefaultCurve))!.FieldType);
+
+        Assert.Equal(50, Fan.Anchors[0]);                    // still indexable by the readers on both sides
+        Assert.Equal(90, Fan.Anchors[Fan.Anchors.Length - 1]);
+        Assert.Equal(Fan.Anchors.Length, Fan.DefaultDuties().Length);
+    }
+
+    /// <summary><see cref="Fan.DefaultDuties"/> hands out a MUTABLE copy, which is what a stored preset and the
+    /// sanitiser need — a preset's curve field is an array a later edit writes into, and it must not be the shared
+    /// ramp. Two calls are two arrays, so one holder cannot write into another's.</summary>
+    [Fact]
+    public void DefaultDuties_IsAFreshMutableCopyEachTime()
+    {
+        var first = Fan.DefaultDuties();
+        var second = Fan.DefaultDuties();
+
+        Assert.Equal(new[] { 30, 45, 60, 80, 100 }, first);
+        Assert.NotSame(first, second);
+
+        first[0] = 7;
+        Assert.Equal(30, second[0]);
+        Assert.Equal(30, Fan.DefaultCurve[0]);   // ...and the ramp itself is untouched
+    }
 
     [Fact]
     public void DefaultCurve_HasOneDutyPerAnchor_AndIsMonotonic()
@@ -46,18 +84,19 @@ public class FanCurveEvalCurveTests
     // back to DefaultCurve fails instead of coincidentally passing.
     private static readonly int[] Ramp = [10, 20, 30, 40, 50];
 
-    // The curve is declared non-nullable (FanSettings.Curve), but Fan itself tolerates null (and a
-    // too-short array), so the tests hand it one through `duties!` rather than pretending it cannot happen —
-    // a deserialised or hand-edited settings file can produce exactly this.
-    //
-    // The commit is what a caller does after a successful write, and the curve reaches the fan the way
-    // LaptopService.SetFanCurve stores it: verbatim, with no length validation, which is what keeps the
-    // over-long cases below reachable. `fallback` is the model's `LastApplied`: a negative one means nothing
-    // was ever committed, so nothing is committed here either — Fan's own sentinel for that state is -1.
-    // The fixed duty is 0 because the curve is on: Fan reads it only when the curve is off.
-    private static int Eval(int[]? duties, int temp, int fallback = -1)
+    // The built-in ramp, as the fan that is not on a custom one actually carries it. Every case below that used
+    // to read `Eval(null, …)` — "a fan with no curve, so the default ramp" — now says so by handing the ramp over:
+    // the array is not optional data, because a FanSettings holds a real curve or it does not exist
+    // (Domain/Fan.cs). The tolerance that used to live in the evaluator is now the load-time sanitiser's, where
+    // a malformed stored curve is replaced and the file rewritten, and it is refused here.
+    private static int[] Default => Fan.DefaultDuties();
+
+    // The commit is what a caller does after a successful write. `fallback` is the model's `LastApplied`: a
+    // negative one means nothing was ever committed, so nothing is committed here either — Fan's own sentinel for
+    // that state is -1. The fixed duty is 0 because the curve is on: Fan reads it only when the curve is off.
+    private static int Eval(int[] duties, int temp, int fallback = -1)
     {
-        var fan = new Fan(new FanSettings(true, duties!, 0));
+        var fan = new Fan(new FanSettings(true, duties, 0));
         if (fallback >= 0) fan.Commit(fallback);
         return fan.Duty(temp);
     }
@@ -71,7 +110,7 @@ public class FanCurveEvalCurveTests
     [InlineData(80, 80)]
     [InlineData(90, 100)]
     public void Anchors_EvaluateToTheDefaultCurveDuty(int temp, int expected) =>
-        Assert.Equal(expected, Eval(null, temp));
+        Assert.Equal(expected, Eval(Default, temp));
 
     [Theory]
     [InlineData(50, 10)]
@@ -104,7 +143,7 @@ public class FanCurveEvalCurveTests
     [InlineData(85, 90)]   // 80 + 20*5/10 = 80 + 10
     [InlineData(89, 98)]   // 80 + 20*9/10 = 80 + 18
     public void InterpolatesLinearlyBetweenAnchors(int temp, int expected) =>
-        Assert.Equal(expected, Eval(null, temp));
+        Assert.Equal(expected, Eval(Default, temp));
 
     [Theory]
     [InlineData(51, 11)]
@@ -139,7 +178,7 @@ public class FanCurveEvalCurveTests
     [InlineData(1000, 100)]
     [InlineData(int.MaxValue, 100)]
     public void FlatBeyondTheEnds_OnTheDefaultCurve(int temp, int expected) =>
-        Assert.Equal(expected, Eval(null, temp));
+        Assert.Equal(expected, Eval(Default, temp));
 
     [Theory]
     [InlineData(49, 10)]
@@ -153,7 +192,7 @@ public class FanCurveEvalCurveTests
 
     [Fact]
     public void NegativeTemperature_WithNoCommittedDuty_FallsBackToTheFirstAnchorDuty() =>
-        Assert.Equal(30, Eval(null, -1, fallback: -1));
+        Assert.Equal(30, Eval(Default, -1, fallback: -1));
 
     [Fact]
     public void NegativeTemperature_OnASuppliedCurve_FallsBackToThatCurvesFirstDuty() =>
@@ -179,28 +218,30 @@ public class FanCurveEvalCurveTests
     public void AnyNegativeTemperature_IsTreatedAsUnknown(int temp) =>
         Assert.Equal(77, Eval(Ramp, temp, fallback: 77));
 
-    // ---- degenerate / malformed curves fall back to the built-in default rather than reading garbage ----
+    // ---- a curve that is not a curve is REFUSED, not tolerated ----
+    //
+    // THIS SECTION REPLACES FOUR CASES AND AN OPEN QUESTION. It used to hold "a null curve falls back to the
+    // default ramp", "a shorter-than-the-anchors curve falls back to the default ramp", and — as the open
+    // question docs/open-decisions.md recorded as item 2 — "an OVER-LONG curve is accepted, and above the last
+    // anchor its LAST ARRAY ENTRY is used as the flat top", which was `duties[^1]` on an array whose length no
+    // longer matched the anchors. All four pinned the evaluator's tolerance, and the tolerance is no longer a
+    // property of the evaluator: a curve is one duty% per anchor, the type refuses anything else at
+    // construction, and a malformed curve ALREADY ON DISK is repaired by the load-time sanitiser
+    // (Infrastructure/Composition/JsonSettingsStore.cs) before the model is built. The over-long case in
+    // particular does not survive as a behaviour at all — its whole subject was a curve the model now cannot
+    // hold — so the assertion that replaced it is the refusal.
 
+    /// <summary>A curve that is null, or is not exactly one duty% per anchor, is refused by the model. This is
+    /// the case that makes <c>EvalCurve</c>'s fallback line unreachable, and it is deliberately the ONLY place
+    /// the old tolerance's subjects appear: the repair that keeps a user's bad file from reaching here is the
+    /// sanitiser's, and it is asserted there, against the file it rewrites.</summary>
     [Fact]
-    public void NullCurve_UsesTheDefaultRamp()
+    public void ACurveThatIsNotOneDutyPerAnchor_IsRefused()
     {
-        Assert.Equal(30, Eval(null, 50));
-        Assert.Equal(37, Eval(null, 55));
-        Assert.Equal(100, Eval(null, 90));
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(3)]
-    [InlineData(4)]
-    public void CurveShorterThanTheAnchors_UsesTheDefaultRamp(int length)
-    {
-        var shortCurve = new int[length];
-        for (var i = 0; i < length; i++) shortCurve[i] = 99;   // must never be read
-        Assert.Equal(30, Eval(shortCurve, 50));
-        Assert.Equal(37, Eval(shortCurve, 55));
-        Assert.Equal(100, Eval(shortCurve, 90));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, null!, 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, new int[4], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [10, 20, 30, 40, 50, 999], 0));
     }
 
     [Fact]
@@ -210,65 +251,16 @@ public class FanCurveEvalCurveTests
         Assert.Equal(50, Eval(Ramp, 90));
     }
 
-    /// <summary>An over-long curve is ACCEPTED — only <c>Length &lt; Anchors.Length</c> falls back to the
-    /// default — so every anchor-indexed read must stay inside the first <c>Anchors.Length</c> entries.
-    /// The interpolation loop and the low-end clamp do. The high-end clamp does not (next test).</summary>
-    [Fact]
-    public void CurveLongerThanTheAnchors_InterpolationStillUsesTheFirstAnchorCountEntries()
-    {
-        Assert.Equal(10, Eval([10, 20, 30, 40, 50, 999], 50));   // temp <= a[0] -> duties[0]
-        Assert.Equal(15, Eval([10, 20, 30, 40, 50, 999], 55));   // loop reads duties[0], duties[1]
-        Assert.Equal(25, Eval([10, 20, 30, 40, 50, 999], 65));
-        Assert.Equal(49, Eval([10, 20, 30, 40, 50, 999], 89));
-    }
-
-    /// <summary>OBSERVED CURRENT behaviour — an open question, NOT a spec and NOT intended behaviour.
-    ///
-    /// What the code does right now (the flat-top branch of <see cref="Fan.Duty"/>'s curve evaluation):
-    ///
-    ///     if (temp &gt;= a[^1]) return Math.Clamp(duties[^1], 0, 100);
-    ///
-    /// Every other anchor-indexed read in that evaluation uses an ANCHOR's index: <c>duties[0]</c> for
-    /// the cold clamp (twice), <c>duties[i - 1]</c>/<c>duties[i]</c> in the loop. The "at or above the
-    /// last anchor" branch instead reads <c>duties[^1]</c> — the last element of the ARRAY. The guard
-    /// <c>duties.Length &lt; Anchors.Length</c> rejects only a SHORT curve, so a curve longer than the five
-    /// anchors takes the flat top of the fan curve from an entry that belongs to no anchor:
-    ///
-    ///   input:   duties = [10,20,30,40,50,999],  temp = 90 °C (exactly the last anchor)
-    ///   current: 100 — clamp(duties[5] = 999)
-    ///   the value every other read in the method implies: 50 — the duty at the last anchor
-    ///
-    /// Invisible for a well-formed five-long curve, because the array index and the anchor index coincide
-    /// there. Reachable only from a hand-edited settings.json: the UI always writes five entries
-    /// (FansViewModel.Duties). A latent trap, not a live defect.
-    ///
-    /// STILL REACHABLE from the public surface, which is why this pin survived <c>EvalCurve</c> becoming
-    /// private: <see cref="FanPreset.CpuCurve"/> is a public settable array with no length validation,
-    /// <c>LaptopService.SetFanCurve</c> stores whatever it is handed, and the mapping from the stored halves
-    /// to the two fans (LaptopService.Fans.FanSettingsOf) passes the array through unchanged — so a six-entry
-    /// curve is a preset's ordinary contents rather than a private call. The case below is unreachable only
-    /// from the UI's own editor, never from the model.
-    ///
-    /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
-    /// "Известные особенности (решение ожидается)", item 2. This case is deliberately left live — not
-    /// skipped, not deleted — so whoever fixes the index, or instead tightens the guard to fall back
-    /// to <see cref="Fan.DefaultCurve"/>, gets an immediate signal here.
-    /// </summary>
-    [Fact]
-    public void CurveLongerThanTheAnchors_AboveTheLastAnchor_CurrentlyUsesTheLastArrayEntry_OpenQuestion()
-    {
-        Assert.Equal(100, Eval([10, 20, 30, 40, 50, 999], 90));
-        Assert.Equal(100, Eval([10, 20, 30, 40, 50, 999], 120));
-        Assert.Equal(100, Eval([10, 20, 30, 40, 50, 999], 1000));
-    }
-
-    /// <summary>The same over-long case for the unknown-temperature fallback, which is unaffected because it
-    /// reads <c>duties[0]</c> and never <c>duties[^1]</c> — included so the asymmetry is on the record.</summary>
-    [Fact]
-    public void CurveLongerThanTheAnchors_UnknownTemperatureUsesTheFirstEntry()
-    {
-        Assert.Equal(10, Eval([10, 20, 30, 40, 50, 999], -1, fallback: -1));
-    }
+    /// <summary>The flat top of a well-formed curve is the duty at the LAST ANCHOR — the property the over-long
+    /// case above used to violate. With the array exactly as long as the anchors there is no index at which the
+    /// "last array entry" and the "duty at the last anchor" can differ, and this states it on a curve whose end
+    /// duty is not the ramp's, so a read of the wrong element cannot coincide.</summary>
+    [Theory]
+    [InlineData(90, 50)]     // exactly the last anchor
+    [InlineData(120, 50)]    // ...and everything above it
+    [InlineData(1000, 50)]
+    public void AboveTheLastAnchor_TheDutyIsTheLastAnchors(int temp, int expected) =>
+        Assert.Equal(expected, Eval(Ramp, temp));
 
     /// <summary>A curve the user flattened to one number everywhere. Every temperature, including the
     /// unknown one with nothing committed, must return that number.</summary>
@@ -309,26 +301,29 @@ public class FanCurveEvalCurveTests
     public void NonMonotonicCurve_InterpolatesEachSegmentIndependently(int temp, int expected) =>
         Assert.Equal(expected, Eval([100, 20, 90, 10, 60], temp));
 
-    // ---- the result is a duty%, so it is always clamped into 0..100 ----
+    // ---- a duty outside 0..100 is not a duty, so it is refused rather than clamped on the way out ----
 
-    [Theory]
-    [InlineData(50, 100)]   // first duty 150 -> 100
-    [InlineData(45, 100)]
-    [InlineData(60, 0)]     // second duty -20 -> 0
-    [InlineData(90, 100)]   // last duty 200 -> 100
-    [InlineData(400, 100)]
-    public void OutOfRangeDuties_AreClampedIntoTheDutyRange(int temp, int expected) =>
-        Assert.Equal(expected, Eval([150, -20, 60, 80, 200], temp));
-
+    /// <summary>REWRITTEN. This used to build the evaluator's input as <c>[150, -20, 60, 80, 200]</c> and assert
+    /// that the duties it produced were clamped into range — a tolerance of values that are not duties. The
+    /// clamp still exists in <see cref="Fan.Duty"/> as a last resort (the EC takes a byte, and that must not
+    /// depend on one guard holding), but the values it used to be handed cannot reach it: the curve is refused,
+    /// so no reader has to clamp what it reads. The clamp itself is asserted on a curve that IS a curve, below.</summary>
     [Fact]
-    public void OutOfRangeFirstDuty_IsClampedOnTheUnknownTemperatureFallbackToo() =>
-        Assert.Equal(100, Eval([150, -20, 60, 80, 200], -1, fallback: -1));
-
-    [Fact]
-    public void EveryResultIsInsideTheDutyRange_AcrossTheWholeTemperatureSweep()
+    public void OutOfRangeDuties_AreNotACurve_TheyAreRefused()
     {
-        int[]?[] curves = [null, [], [50, 53, 0, 0, 0], [150, -20, 60, 80, 200], [0, 0, 0, 0, 0],
-                           [100, 100, 100, 100, 100], [42, 42, 42, 42, 42], Ramp];
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [150, -20, 60, 80, 200], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [30, 45, 60, 80, 101], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [30, 45, 60, 80, -1], 0));
+    }
+
+    /// <summary>The clamp that protects the EC, on the two edges a curve can legitimately have. A curve of all
+    /// zeroes holds the fans still; a curve of all hundreds runs them flat out; neither is out of range, and the
+    /// value written is a byte either way.</summary>
+    [Fact]
+    public void TheDutyWritten_IsAlwaysInsideTheRange_ForEveryCurveACurveCanBe()
+    {
+        int[][] curves = [[50, 53, 0, 0, 0], [0, 0, 0, 0, 0], [100, 100, 100, 100, 100],
+                          [42, 42, 42, 42, 42], Ramp, Default];
         foreach (var curve in curves)
             for (var temp = -10; temp <= 130; temp++)
                 Assert.InRange(Eval(curve, temp), 0, 100);

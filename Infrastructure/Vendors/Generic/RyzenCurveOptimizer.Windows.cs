@@ -400,8 +400,16 @@ internal sealed class RyzenCurveOptimizer : ICurveOptimizer, IDisposable
     // two differ in a way that fails silently: the CPU's 20-bit form of -5 is 0xFFFFB, the GPU's is 0xFFFB, and the
     // mailbox accepts either without complaint while meaning something else entirely.
     // See docs/curve-optimizer-strix-point.md.
+    //
+    // A NON-NEGATIVE INPUT IS COLLAPSED TO 0, exactly as Encode does, and that ceiling is the point of this form
+    // rather than a copy of the sibling's. A positive margin RAISES voltage, which buys nothing on this hardware
+    // and is a thermal and stability risk (the same sentence ICurveOptimizer's range carries), so a request to
+    // raise it must not be representable at the mailbox — previously this function returned such a value
+    // verbatim, so a +5 that reached it went out as a 16-bit +5. It is unreachable from today's call paths: Set
+    // clamps to [MinCounts, 0] at the port, and the service and the view-model clamp before that. The guard is
+    // what makes "unreachable" a property of the encoding rather than a count of the clamps that happen to exist.
     internal static uint GpuMargin(int counts)
-        => (uint)((counts < 0 ? 0x100000 : 0) + counts) & 0xFFFF;
+        => (counts >= 0 ? 0u : (uint)(0x100000 + counts)) & 0xFFFF;
 
     /// <summary>Run one message on <paramref name="mb"/> to completion and return the SMU's response byte, or
     /// <see cref="NoResponse"/> when the interlock or a register access failed (with <see cref="LastError"/> already

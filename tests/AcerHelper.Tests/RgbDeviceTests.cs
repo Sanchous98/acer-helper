@@ -40,10 +40,17 @@ public class RgbDeviceTests
     // ================= RgbZone: sub-zone capability =================
 
     /// <summary>The two inputs varied INDEPENDENTLY, which is the whole point: <see cref="RgbZone.HasSubZones"/>
-    /// is <c>applySubZone != null &amp;&amp; subZones &gt; 1</c>, so a zone advertising four sub-zones with no
+    /// is <c>applySubZone != null &amp;&amp; SubZones &gt; 1</c>, so a zone advertising four sub-zones with no
     /// applier is NOT sub-zoned (its per-sub-zone writes return false and paint nothing — advertising the split
     /// would hand the UI four swatches of which three are dead), and an applier with a single sub-zone is one
-    /// region, not two. A count that cannot describe a split is not one either.</summary>
+    /// region, not two.
+    ///
+    /// THE REPORTED COUNT IS THE ADMITTED ONE, which is what changed here: this used to assert
+    /// <c>Assert.Equal(subZones, zone.SubZones)</c> — "the raw count is still reported as given" — for rows
+    /// feeding 0 and -3, pinning a zone that says it has no addressable regions at all. <see cref="RgbZone"/>
+    /// now corrects that on the way in (its doc's own floor of 1 for "cannot be split"), so the expectation is
+    /// the corrected count; the two rows are kept because a count below one is exactly what a hand-edited model
+    /// descriptor can carry and the truth table must still hold for it.</summary>
     [Theory]
     [InlineData(4, true, true)]
     [InlineData(4, false, false)]    // four sub-zones advertised, no applier
@@ -57,8 +64,23 @@ public class RgbDeviceTests
         var zone = Zone("Keyboard", subZones, withApplier ? (_, _, _) => true : null);
 
         Assert.Equal(expected, zone.HasSubZones);
-        Assert.Equal(subZones, zone.SubZones);   // ...and the raw count is still reported as given
+        Assert.Equal(Math.Max(1, subZones), zone.SubZones);
     }
+
+    /// <summary>A count below one is not a state the zone can be in: <see cref="RgbZone.SubZones"/> is a number
+    /// of individually-addressable regions, and the type's own doc already gives the answer for a zone that
+    /// cannot be split — 1. The value genuinely arrives: the count is read from the user-editable model
+    /// descriptor (Infrastructure/Vendors/Acer/AcerModel.cs <c>Zones</c>), so a hand-written override can carry
+    /// 0, and every consumer compensated for it by asking <c>&gt; 1</c> anyway. The correction is a CLAMP rather
+    /// than a refusal, deliberately: refusing would take the app down at composition over a keyboard layout,
+    /// while 1 is the reading the doc describes and the one the consumers already behaved as if they had.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void ASubZoneCountBelowOne_IsReadAsOne(int subZones) =>
+        Assert.Equal(1, Zone("Keyboard", subZones, (_, _, _) => true).SubZones);
 
     /// <summary>A per-sub-zone write to a zone with no applier is a <c>false</c> no-op, not a throw: the UI and
     /// the lamp-array bridge both address sub-zones by index without consulting <see cref="RgbZone.HasSubZones"/>

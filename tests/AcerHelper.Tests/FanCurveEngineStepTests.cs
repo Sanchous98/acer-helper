@@ -16,13 +16,16 @@ public class FanCurveEngineStepTests
     // Fixed-speed fans, so the expected duty is exactly the number the test supplies and the deadband is
     // the only thing under test. Temps are irrelevant for these fans and are left unset (-1). Each fan is
     // handed its own settings — curve off, its fixed duty — because that is all a fan is given now.
+    //
+    // "Curve off" is still a fan WITH a curve: a FanSettings cannot hold an empty one (Domain/Fan.cs), and the
+    // default ramp is what a real fixed-speed fan carries in its unused half — the field is simply never read.
     private static (FanSettings cpu, FanSettings gpu) Fixed(int cpu, int gpu) =>
-        (new FanSettings(false, [], cpu), new FanSettings(false, [], gpu));
+        (new FanSettings(false, Fan.DefaultDuties(), cpu), new FanSettings(false, Fan.DefaultDuties(), gpu));
 
     private static SensorSnapshot NoTemps { get; } = new();
 
     private static (FanSettings cpu, FanSettings gpu) Curved(int[] cpuCurve, int gpu) =>
-        (new FanSettings(true, cpuCurve, 0), new FanSettings(false, [], gpu));
+        (new FanSettings(true, cpuCurve, 0), new FanSettings(false, Fan.DefaultDuties(), gpu));
 
     // ---- no committed state: the first Step after construction or Reset must always apply ----
 
@@ -211,15 +214,24 @@ public class FanCurveEngineStepTests
         Assert.Equal((15, 30), result);   // 10 + 10*5/10
     }
 
+    /// <summary>REWRITTEN, and the assertion it used to make is gone on purpose. This case was
+    /// "an empty curve falls back to the default ramp rather than to zero" and it drove the engine with
+    /// <c>Curved([], …)</c> — an empty curve, which <see cref="FanSettings"/> now REFUSES. The tolerance it
+    /// pinned was a property of the evaluator, and the evaluator's tolerance is not what the model's rule is:
+    /// a curve is one duty% per anchor, and a fan whose curve has been wiped by hand is repaired before it gets
+    /// here (the load-time sanitiser, Infrastructure/Composition/JsonSettingsStore.cs, which is where an empty
+    /// or malformed stored curve becomes the default ramp and the file is rewritten). So the refusal below is
+    /// the whole of the old case's subject, and the ramp it produced is asserted where it is now decided — in
+    /// the sanitiser's own tests.
+    ///
+    /// MUTATION THAT REDDENS IT: removing the <c>Fan.IsValidCurve</c> guard from <c>FanSettings</c>'s
+    /// constructor, after which nothing throws and every <c>Assert.Throws</c> here fails.</summary>
     [Fact]
-    public void CurveFan_WithAnEmptyCurve_FallsBackToTheDefaultRampRatherThanZero()
+    public void AnEmptyOrNullCurve_IsRefusedByTheModel_NotFallenBackFrom()
     {
-        var engine = new FanCurveEngine();
-        engine.Commit(0, 30);
-
-        var result = engine.Step(Curved([], gpu: 30), new SensorSnapshot { CpuTempC = 70, GpuTempC = 50 });
-
-        Assert.Equal((60, 30), result);   // the default ramp's duty at 70 °C, NOT 0
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, null!, 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [10, 20, 30], 0));
     }
 
     [Fact]
@@ -234,17 +246,24 @@ public class FanCurveEngineStepTests
         Assert.Equal((20, 80), result);
     }
 
-    /// <summary>The returned duty always feeds the EC as a byte, so it must be a duty% even for a curve
-    /// whose stored points are out of range (an old settings file, a bad drag).</summary>
+    /// <summary>REWRITTEN. This used to build a fan from a curve whose points were out of range
+    /// (<c>[150, -20, 60, 80, 200]</c>) and assert that the engine still produced a byte-safe duty — the
+    /// evaluator's clamp, standing in for a rule about the curve. The rule is the type's: a duty is 0..100, so a
+    /// curve carrying 150 is not a curve, and the model refuses to hold one rather than relying on every reader
+    /// of it to clamp. What the reader does is asserted here too, on a curve the model admits, so the clamp is
+    /// not lost with the tolerance.</summary>
     [Fact]
-    public void OutOfRangeCurvePoints_StillProduceAByteSafeDuty()
+    public void OutOfRangeCurvePoints_AreNotACurve_TheModelRefusesThem()
     {
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [150, -20, 60, 80, 200], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [0, 0, 0, 0, 101], 0));
+        Assert.Throws<ArgumentException>(() => new FanSettings(true, [0, 0, 0, 0, -1], 0));
+
+        // ...and the duty the engine hands the EC is still a duty%: the fixed speed is clamped by the same type.
         var engine = new FanCurveEngine();
-        var fans = (cpu: new FanSettings(true, [150, -20, 60, 80, 200], 0),
-                    gpu: new FanSettings(false, [], 0));
+        var fans = (cpu: new FanSettings(true, [100, 100, 100, 100, 100], 0),
+                    gpu: new FanSettings(false, Fan.DefaultDuties(), 300));
 
-        var result = engine.Step(fans, new SensorSnapshot { CpuTempC = 50, GpuTempC = 50 });
-
-        Assert.Equal((100, 0), result);   // clamp(150) = 100
+        Assert.Equal((100, 100), engine.Step(fans, new SensorSnapshot { CpuTempC = 50, GpuTempC = 50 }));
     }
 }

@@ -41,49 +41,48 @@ public class SmuOffsetEncodingTests
         Assert.NotEqual(0x100000u, RyzenCurveOptimizer.Encode(0));
     }
 
-    /// <summary>OBSERVED CURRENT behaviour — an open question, NOT a spec and NOT intended behaviour.
+    /// <summary>THE HARDENING READING WON, and this case is now a spec rather than an open question.
     ///
-    /// What the code does right now (<c>RyzenCurveOptimizer.Encode</c>):
+    /// What the code does (<c>RyzenCurveOptimizer.Encode</c>):
     ///
     ///     =&gt; (counts &gt;= 0 ? 0u : 0x100000u - (uint)(-counts)) &amp; 0xFFFFFu;
     ///
-    /// The non-negative branch is the literal <c>0u</c>, so EVERY non-negative input collapses to the
-    /// stock word: Encode(1), Encode(2), Encode(5) and Encode(100) are all 0. No positive offset can
-    /// reach the mailbox as its own value — a request to RAISE voltage becomes "leave stock", with no
-    /// error, no log line and a REP_MSG_OK from the SMU.
+    /// The non-negative branch is the literal <c>0u</c>, so EVERY non-negative input collapses to the stock
+    /// word: Encode(1), Encode(2), Encode(5) and Encode(100) are all 0. No positive offset can reach the mailbox
+    /// as its own value — a request to RAISE voltage becomes "leave stock", silently, which is the intended
+    /// answer: the app supports undervolt only and a positive offset buys nothing here while being a thermal and
+    /// stability risk (the sentence <c>ICurveOptimizer.Range</c> carries). This used to be recorded as OBSERVED,
+    /// with two readings left open, and the counter-evidence for the second one was the sibling <c>GpuMargin</c>
+    /// genuinely returning 5 for 5. That counter-evidence is gone: <c>GpuMargin</c> now collapses non-negative
+    /// inputs too, so the two helpers agree by rule rather than by accident, and the reading is resolved in
+    /// docs/open-decisions.md's item 1.
     ///
-    /// Two readings are defensible and the code does not disambiguate them:
-    ///   * deliberate hardening — the app supports undervolt only and every caller clamps to
-    ///     [MinCounts, 0], so flattening a positive request to "no offset" is the safe answer; or
-    ///   * an unfinished branch — the sibling <c>GpuMargin</c> genuinely returns 5 for 5
-    ///     (see the passing GpuMargin_PositiveOffsets_AreTheValueItself), and the comment above
-    ///     <c>Encode</c> justifies ONLY the zero case ("0 is sent as a plain 0, NOT as 0x100000") while
-    ///     saying nothing about non-zero positives. That counter-evidence is why this is still open.
-    ///
-    /// Unreachable on today's call paths: <c>Set</c>, <c>SetDomains</c>, <c>Range</c>, <c>CoViewModel</c>'s
-    /// constructor clamp and the clamp in <c>LaptopService.SetCo</c> all clamp to [MinCounts, 0].
-    /// A latent trap, not a live defect — exactly the shape a later widening of the range, or a new
-    /// caller passing an unclamped value, would fall into silently.
-    ///
-    /// The production/test mismatch is an OPEN DECISION recorded in docs/open-decisions.md, section
-    /// "Известные особенности (решение ожидается)", item 1. This case is deliberately left live — not
-    /// skipped, not deleted — so whoever changes <c>Encode</c> gets an immediate signal: if the positive
-    /// branch is ever made to pass a value through, the <c>observed</c> column below becomes the value
-    /// itself and this name loses its "CurrentlyFlattensToZero" qualifier.
-    /// </summary>
+    /// Still unreachable on today's call paths — <c>Set</c>, <c>SetDomains</c>, <c>Range</c>, <c>CoViewModel</c>'s
+    /// constructor clamp and the clamp in <c>LaptopService.SetCo</c> all clamp to [MinCounts, 0] — but the guard
+    /// is now what makes that a property of the encoding instead of a count of the clamps that exist, so a later
+    /// widening of the range cannot silently turn into a voltage increase.</summary>
     [Theory]
     [InlineData(1, 0u)]
     [InlineData(2, 0u)]
     [InlineData(5, 0u)]
     [InlineData(100, 0u)]
-    public void Encode_NonNegative_CurrentlyFlattensToZero_OpenQuestion(int counts, uint observed) =>
+    public void Encode_NonNegative_CollapsesToStock(int counts, uint observed) =>
         Assert.Equal(observed, RyzenCurveOptimizer.Encode(counts));
 
-    [Fact]
-    public void Encode_ZeroIsStock_AndIsTheOnlyNonNegativeValueTheTwoHelpersAgreeOn()
+    /// <summary>Both helpers answer the same for every non-negative input — the two rails' encodings differ in
+    /// WIDTH and in sign representation, never in whether a request to raise voltage is representable. The name
+    /// this test used to carry ("...the only non-negative value the two helpers agree on") was true while
+    /// <c>GpuMargin</c> passed positives through, and is asserted here in its stronger, current form.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(100)]
+    [InlineData(int.MaxValue)]
+    public void BothHelpers_CollapseEveryNonNegativeInputToStock(int counts)
     {
-        Assert.Equal(0u, RyzenCurveOptimizer.Encode(0));
-        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(0));
+        Assert.Equal(0u, RyzenCurveOptimizer.Encode(counts));
+        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(counts));
     }
 
     [Theory]
@@ -156,12 +155,32 @@ public class SmuOffsetEncodingTests
         Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(0));
     }
 
+    /// <summary>REWRITTEN — and this is the one case in this file whose EXPECTATION was deliberately replaced
+    /// rather than corrected. It used to be <c>GpuMargin_PositiveOffsets_AreTheValueItself</c>: 1 → 1, 2 → 2,
+    /// 5 → 5, 65535 → 0xFFFF. That was recorded as OBSERVED, not as a spec — the sibling <c>Encode</c> was
+    /// already collapsing non-negative inputs to <c>0u</c>, and the disagreement between the two helpers was the
+    /// counter-evidence that kept <c>Encode</c>'s flattening documented as an open question in
+    /// docs/open-decisions.md.
+    ///
+    /// The guard settles it, and the policy is the one this file's own source states verbatim: "a positive
+    /// offset RAISES voltage, which buys nothing on this hardware and is a thermal and stability risk" (the
+    /// sentence <c>ICurveOptimizer.Range</c> carries as "Min &lt; 0, Max = 0 — undervolt only"). A margin that
+    /// asks for MORE voltage must not be representable at the mailbox, so every non-negative input now collapses
+    /// to stock — the same answer <c>Encode</c> gives, for the same reason.
+    ///
+    /// The old expectation was unreachable in production either way (Set clamps to [MinCounts, 0] at the port,
+    /// and the service and the view-model clamp before that), which is exactly why it had to be a stated rule
+    /// rather than a property of the clamps: the guard is what makes "unreachable" true of the ENCODING.
+    ///
+    /// MUTATION THAT REDDENS IT: restoring the pass-through branch
+    /// (<c>(uint)((counts &lt; 0 ? 0x100000 : 0) + counts) &amp; 0xFFFF</c>), after which 65535 is 0xFFFF again.</summary>
     [Theory]
-    [InlineData(1, 1u)]
-    [InlineData(2, 2u)]
-    [InlineData(5, 5u)]
-    [InlineData(65535, 0xFFFFu)]
-    public void GpuMargin_PositiveOffsets_AreTheValueItself(int counts, uint expected) =>
+    [InlineData(1, 0u)]
+    [InlineData(2, 0u)]
+    [InlineData(5, 0u)]
+    [InlineData(65535, 0u)]
+    [InlineData(int.MaxValue, 0u)]
+    public void GpuMargin_NonNegativeOffsets_AreCollapsedToStock(int counts, uint expected) =>
         Assert.Equal(expected, RyzenCurveOptimizer.GpuMargin(counts));
 
     [Theory]
@@ -189,15 +208,16 @@ public class SmuOffsetEncodingTests
             $"duplicate encoding at {counts}");
     }
 
-    /// <summary>Width boundary, outside the offered range: the 16-bit mask makes -65536 collide with 0,
-    /// and 65536 collide with 0 too. Both directions of the wrap land on "stock". Unreachable behind
-    /// GpuMinCounts = -50 and the positive-offsets-are-not-offered rule, but this is the exact collision the
-    /// mailbox cannot detect.</summary>
+    /// <summary>Width boundary, outside the offered range: the 16-bit mask makes -65536 collide with 0.
+    /// (65536 lands on 0 as well, and for a different reason — the non-negative ceiling above, not the width —
+    /// which is why the two lines are asserted separately rather than as one symmetric collision.) Unreachable
+    /// behind GpuMinCounts = -50 and the positive-offsets-are-not-offered rule, but this is the exact collision
+    /// the mailbox cannot detect.</summary>
     [Fact]
     public void GpuMargin_AtTheWidthBoundary_WrapsOntoZero_DocumentedCollision()
     {
-        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(-65536));
-        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(65536));
+        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(-65536));   // the width: 0x100000 - 65536, masked
+        Assert.Equal(0u, RyzenCurveOptimizer.GpuMargin(65536));    // the ceiling: it is not negative
         Assert.Equal(RyzenCurveOptimizer.GpuMargin(0), RyzenCurveOptimizer.GpuMargin(-65536));
     }
 

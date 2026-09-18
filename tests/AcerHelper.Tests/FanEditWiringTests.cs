@@ -80,19 +80,21 @@ public class FanEditWiringTests
         Assert.Equal([(77, 88)], fan.SpeedCalls);
     }
 
-    /// <summary>A curve edit FILES THE CALLER'S ARRAY, by reference, and leaves the other half's array alone as
-    /// well. This is not tidiness: the array is the UI's own curve, handed over verbatim by both edit paths and
-    /// never copied on the way in (nothing here validates its length either — the fan model is the thing that
-    /// tolerates a null, short or over-long one), so a read that handed back a snapshot would re-point the stored
-    /// preset's arrays at copies on EVERY edit, including the edit that named no array at all.
+    /// <summary>REWRITTEN, AND IT NOW ASSERTS THE OPPOSITE OF WHAT IT DID. It used to file the caller's array by
+    /// reference and pin that with two <c>Assert.Same</c> calls — the CURVE IS THE UI'S OWN ARRAY, aliased into
+    /// the stored graph, and the stored half read back out is the same instance again. That was the aliasing
+    /// stated as a feature; the model's rule (Domain/Fan.cs) is that a curve is copied on the way in, so the
+    /// value comparison is unchanged and the identity is not. What the test is FOR survives the rewrite: the half
+    /// the edit did NOT name still comes through, as its own curve and not as the edited half's.
     ///
-    /// The untouched half is asserted with <c>Assert.Same</c> too, and that is the half a snapshot would break
-    /// first: a copy of the GPU curve is invisible in any value comparison, because it holds the same numbers.
+    /// The untouched half is asserted by value too, and it is the half an aliasing bug would break first: a copy
+    /// of the GPU curve is invisible in a value comparison, because it holds the same numbers.
     ///
     /// MUTATION THAT REDDENS IT: <c>IFanAxisTarget.Stored</c> returning <c>AxisStateOf(StoredFan().Snapshot())</c>
-    /// (the whole suite stayed green under it before this test).</summary>
+    /// (the whole suite stayed green under it before this test), and — the other direction — a <c>FileFan</c>
+    /// that dropped the arrays, which reddens the GPU assertion.</summary>
     [Fact]
-    public void ACurveEditFilesTheVeryArrayTheCallerPassed_AndLeavesTheOtherHalfsAlone()
+    public void ACurveEditFilesACopyOfTheCallersCurve_AndLeavesTheOtherHalfsAlone()
     {
         var gpuCurve = new[] { 40, 50, 60, 70, 80 };
         var settings = new Settings();
@@ -107,7 +109,9 @@ public class FanEditWiringTests
         f.Service.SetFanCurve(gpu: false, use: true, points);
 
         var stored = f.Store.Settings.FanPresets["balanced"];
-        Assert.Same(points, stored.CpuCurve);
-        Assert.Same(gpuCurve, stored.GpuCurve);
+        Assert.Equal([1, 2, 3, 4, 5], stored.CpuCurve);
+        Assert.NotSame(points, stored.CpuCurve);          // the graph does not hold the UI's array...
+        Assert.Equal([40, 50, 60, 70, 80], stored.GpuCurve);
+        Assert.NotSame(gpuCurve, stored.GpuCurve);        // ...nor the array the arrangement seeded it with
     }
 }

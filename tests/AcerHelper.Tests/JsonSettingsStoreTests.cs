@@ -311,6 +311,136 @@ public class JsonSettingsStoreTests
         Assert.Equal("second corruption", File.ReadAllText(dir.SettingsPath + ".bad"));
     }
 
+    // ---------------------------------------------------------------- the curve sanitiser at load
+
+    /// <summary>A fan curve in the file that is not a curve is REPLACED WITH THE BUILT-IN RAMP, AND THE FILE IS
+    /// REWRITTEN — one curve lost, not the settings file. This is the whole of the repair, and it exists because
+    /// the domain refuses to hold such a value (<see cref="FanSettings"/>): a file left in that state would throw
+    /// out of the sensor loop on every later load, with nothing the user could read to explain it.
+    ///
+    /// Three things are asserted, and they are three different claims: the MODEL that comes back holds a curve
+    /// the domain accepts, the FILE on disk holds it too (so the next load does not have to repair again), and
+    /// the rest of the user's file survived — the curve it replaced was the only casualty.
+    ///
+    /// The input is literal text on purpose, like the other compatibility cases in this file: it is a file a
+    /// hand edit produces, not something this serializer would ever emit, which is exactly why the read path is
+    /// the one under test.
+    ///
+    /// MUTATION THAT REDDENS IT: deleting the <c>SanitiseCurves</c> call from <c>Load</c> — the model then holds
+    /// the three-entry curve and the file is untouched.</summary>
+    [Fact]
+    public void AMalformedFanCurveInTheFileIsRepaired_AndTheFileIsRewritten()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(dir.SettingsPath, """
+            {
+              "Language": 1,
+              "TurboToggles": true,
+              "FanPresets": {
+                "balanced": { "Mode": 3, "Cpu": 44, "Gpu": 45,
+                              "CpuUseCurve": true, "GpuUseCurve": true,
+                              "CpuCurve": [10, 20, 30], "GpuCurve": [] }
+              }
+            }
+            """);
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+
+        // 1. the model: curves the domain accepts, everything else as the file had it
+        var preset = Present(loaded.FanPresets, "balanced");
+        Assert.Equal([30, 45, 60, 80, 100], preset.CpuCurve);
+        Assert.Equal([30, 45, 60, 80, 100], preset.GpuCurve);
+        Assert.Equal(3, preset.Mode);
+        Assert.Equal(44, preset.Cpu);
+        Assert.True(preset.CpuUseCurve);
+        Assert.True(loaded.TurboToggles);
+        Assert.Equal(AppLanguage.English, loaded.Language);
+
+        // 2. the file: reloaded from DISK, by a second store, so this cannot pass on the in-memory object
+        var reread = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        Assert.Equal([30, 45, 60, 80, 100], Present(reread.FanPresets, "balanced").CpuCurve);
+        Assert.Equal([30, 45, 60, 80, 100], Present(reread.FanPresets, "balanced").GpuCurve);
+
+        // 3. ...and it is still a settings file, not a rescue: a repair is not a corruption
+        Assert.False(File.Exists(dir.SettingsPath + ".bad"));
+    }
+
+    /// <summary>A curve that IS a curve is left exactly as it was, and the file is not written to at all. The
+    /// control for the test above, and it needs its own case rather than an assertion inside it: a sanitiser that
+    /// rewrote every file it read, or that replaced curves unconditionally, would pass the test above and corrupt
+    /// every user's file on every start.
+    ///
+    /// The file is compared as TEXT, so a rewrite of any kind reddens it. The input is deliberately a shape this
+    /// serializer does not produce (compact, and with keys in an order it would not choose), so an unnecessary
+    /// <c>Save</c> cannot coincide with the original bytes.
+    ///
+    /// MUTATION THAT REDDENS IT: making <c>SanitiseCurves</c> return true unconditionally — the file is then
+    /// reformatted and this comparison fails.</summary>
+    [Fact]
+    public void ACurveThatIsACurve_IsLeftAlone_AndTheFileIsNotRewritten()
+    {
+        using var dir = new TempDir();
+        const string original = """
+            {"FanPresets":{"balanced":{"Mode":3,"Cpu":44,"Gpu":45,
+            "CpuCurve":[10,20,30,40,50],"GpuCurve":[90,80,70,60,50]}}}
+            """;
+        File.WriteAllText(dir.SettingsPath, original);
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+
+        Assert.Equal([10, 20, 30, 40, 50], Present(loaded.FanPresets, "balanced").CpuCurve);
+        Assert.Equal(original, File.ReadAllText(dir.SettingsPath));
+    }
+
+    /// <summary>The shapes a hand edit actually produces, each repaired to the ramp: a curve that is NULL (a
+    /// JSON <c>null</c> assigned to an <c>int[]</c> property, which no length check alone would catch), the EMPTY
+    /// array (the old persisted spelling of "use the built-in ramp", which the model can no longer hold), an
+    /// OVER-LONG one — the case the old evaluator silently ACCEPTED and then read its last entry as the flat top,
+    /// which is the open question this wave closed — a SHORT one, and one carrying a duty outside 0..100.
+    /// Both halves are arranged malformed in every row, so the expectation is the same for each.</summary>
+    [Theory]
+    [InlineData("null", "null")]
+    [InlineData("[]", "[]")]
+    [InlineData("[10, 20, 30, 40, 50, 999]", "[10, 20, 30]")]
+    [InlineData("[150, -20, 60, 80, 200]", "[30, 45, 60, 80, 101]")]
+    public void EveryShapeOfMalformedStoredCurve_BecomesTheRamp(string cpuCurve, string gpuCurve)
+    {
+        using var dir = new TempDir();
+        // Built by concatenation rather than as an interpolated raw string: the JSON's own braces and the
+        // interpolation's collide, and a literal that has to be read twice is not worth the syntax.
+        File.WriteAllText(dir.SettingsPath,
+            "{\"FanPresets\":{\"balanced\":{\"Mode\":3,\"CpuCurve\":" + cpuCurve
+            + ",\"GpuCurve\":" + gpuCurve + "}}}");
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        var preset = Present(loaded.FanPresets, "balanced");
+
+        Assert.Equal([30, 45, 60, 80, 100], preset.CpuCurve);
+        Assert.Equal([30, 45, 60, 80, 100], preset.GpuCurve);
+        Assert.False(File.Exists(dir.SettingsPath + ".bad"));
+    }
+
+    /// <summary>The other half of "one curve lost, not the settings file": the malformed curve is replaced and
+    /// the OTHER fan's curve is not touched. A sanitiser that replaced both halves whenever either was bad would
+    /// pass every test above and quietly throw away a ramp the user had configured — the same class of loss it
+    /// exists to prevent, one level down.</summary>
+    [Fact]
+    public void OnlyTheMalformedHalfOfAPresetIsReplaced()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(dir.SettingsPath, """
+            {"FanPresets":{"balanced":{"Mode":3,"Cpu":44,
+              "CpuCurve":[10, 20, 30], "GpuCurve":[90, 80, 70, 60, 50]}}}
+            """);
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        var preset = Present(loaded.FanPresets, "balanced");
+
+        Assert.Equal([30, 45, 60, 80, 100], preset.CpuCurve);
+        Assert.Equal([90, 80, 70, 60, 50], preset.GpuCurve);   // the user's own ramp, kept
+        Assert.Equal(44, preset.Cpu);
+    }
+
     /// <summary>The temp file is the one part of the atomic swap observable from outside: if the rename did
     /// not happen, <c>.tmp</c> is still lying there and the real file is not the one that was written.</summary>
     [Fact]
