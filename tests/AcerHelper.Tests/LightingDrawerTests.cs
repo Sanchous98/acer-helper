@@ -15,27 +15,33 @@ namespace AcerHelper.Tests;
 /// these tests drive the REAL command on a real <see cref="MainViewModel"/>, so what is pinned is the path the
 /// button and the tray use rather than a method that merely looks like it.
 ///
-/// TWO THINGS THE OPEN OWES, and they pull in opposite directions, which is why they are pinned together:
+/// THREE THINGS THE OPEN OWES, and they pull in different directions, which is why they are pinned together:
 ///
-///  * it must NOT paint while a host owns the surface. The panels write STRAIGHT to the zones (this path does
-///    not go through <c>LightingCoordinator.Paint</c>, which is where everything else yields), so an ungated
-///    re-apply lands the app's frame on Windows Dynamic Lighting's keyboard — and lands it out of band: the
-///    bridge's dedupe mirror (<c>LampArrayBridge._written</c>) is never told, so the host's own next frame of
-///    the same colours is judged unchanged and skipped, and the app's colour stays on the keyboard. Measured
-///    here as the write COUNT: the build re-applies a configured zone once, and an open must not add a second
-///    write when a host owns the surface. The differential control — the same open with
+///  * it must NOT paint the RGB zones while a host owns the surface. The panels write STRAIGHT to the zones
+///    (this path does not go through <c>LightingCoordinator.Paint</c>, which is where everything else yields),
+///    so an ungated re-apply lands the app's frame on Windows Dynamic Lighting's keyboard — and lands it out of
+///    band: the bridge's dedupe mirror (<c>LampArrayBridge._written</c>) is never told, so the host's own next
+///    frame of the same colours is judged unchanged and skipped, and the app's colour stays on the keyboard.
+///    Measured here as the write COUNT: the build re-applies a configured zone once, and an open must not add a
+///    second write when a host owns the surface. The differential control — the same open with
 ///    <c>HostOwnsLighting</c> false — is the test below it, so neither the gate nor its polarity is assumed.
 ///
-///  * it MUST settle the plain backlight slider. That control exists only where the device has NO RGB panels;
-///    its level can move with no event the app ever sees (another tool, a BIOS hotkey that raises no raw input,
-///    an Fn press made while the drawer was shut); and it is settled by a READ, because it has no stored value
-///    to push (its slider is a deferred placeholder whose write is verified by read-back). Leaving it out left
-///    the slider on its startup value for the whole session.
+///  * it MUST settle the plain backlight slider, host or no host. That control exists only where the device has
+///    NO RGB panels; its level can move with no event the app ever sees (another tool, a BIOS hotkey that raises
+///    no raw input, an Fn press made while the drawer was shut); and it is settled by a READ, because it has no
+///    stored value to push (its slider is a deferred placeholder whose write is verified by read-back). The host
+///    gate above is about the SURFACE a host holds — the LampArray is built from the RGB device, and no host
+///    claims an <see cref="IKeyboardBrightness"/> — so it must not decide the backlight's read.
+///
+///  * a click on the button of the drawer ALREADY SHOWING closes it (<c>OpenDrawer</c>'s toggle) and must not
+///    re-apply on the way out: the re-apply re-writes the panels and queues the backlight's read, and that read
+///    is a device transaction on a serial worker that does not coalesce, so every toggle click would queue one
+///    more of them.
 ///
 /// WHAT THIS FILE DOES NOT COVER, named rather than left implicit: the drawer's INTERACTIVE writes (a drag of a
-/// panel's brightness or colour) still reach the zones while a host owns the surface, which is a recorded
-/// decision (<c>docs/lamparray.md</c>, "the Lighting panel's controls are not disabled while a host owns the
-/// surface"). Only the open is gated.
+/// panel's brightness or colour) still reach the zones while a host owns the surface — the same straight-to-zone
+/// path, ungated, which is a decision the owner has not made yet (<c>docs/lamparray.md</c>, and the record in
+/// <c>docs/domain-refactoring-plan.md</c> §7 that asks for it). Only the open is gated.
 /// </summary>
 public class LightingDrawerTests
 {
@@ -81,13 +87,15 @@ public class LightingDrawerTests
 
     // ---------------------------------------------------------------- the open, on a plain-backlight device
 
-    /// <summary>The other reported regression. A device whose only lighting control is the plain backlight has
-    /// no panels at all, so the drawer-open's panel walk reaches nothing: the level is settled by a read, and
-    /// that read has to happen on the open or an out-of-band change sits unreflected for the whole session.
+    /// <summary>The other reported regression, on the device shape where the backlight is the only control: a
+    /// device with no RGB panels at all, so the drawer-open's panel walk reaches nothing and the level is settled
+    /// by a read that has to happen on the open or an out-of-band change sits unreflected for the whole session.
     ///
-    /// The signal is the slider, not the clock: the settle is enqueued on the backlight's serial worker and
-    /// posts its correction (see <c>VerifiedHwValue</c>), so the poster is injected and waited on. The
-    /// placeholder assertion first is what makes the change observable — the slider really does start at 0.</summary>
+    /// The signal is the POSTER, not the clock: the settle is enqueued on the backlight's serial worker and
+    /// posts its correction (see <c>VerifiedHwValue</c>), so the poster is injected and waited on — and it is
+    /// the delivered post, rather than the slider it moves, that orders the drain below (the post is where a
+    /// correction could queue a write). The placeholder assertion first is what makes the change observable —
+    /// the slider really does start at 0.</summary>
     [Fact]
     public void TheDrawerOpen_SettlesThePlainBacklightSlider()
     {
@@ -102,33 +110,97 @@ public class LightingDrawerTests
         Assert.Equal(0, vm.Backlight!.Level);                     // the deferred placeholder, not a reading
 
         vm.Prime();                                               // startup: the level is read once here
-        Assert.True(Eventually.Until(() => vm.Backlight!.Level == 1), "the startup prime never landed");
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the startup prime never landed");
+        Assert.Equal(1, vm.Backlight!.Level);
 
         port.Level = 2;                                           // out-of-band, with no event of ours to say so
 
         Drawer(vm).OpenLightingCommand.Execute(null);
 
-        Assert.True(Eventually.Until(() => vm.Backlight!.Level == 2), "the drawer never settled the slider");
-        Assert.Empty(port.SetCalls);                              // a settle reads; it must never write
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the drawer never settled the slider");
+        Assert.Equal(2, vm.Backlight!.Level);
+
+        // A settle reads; it must never write — and that is a claim about a NON-event, so it is drained rather
+        // than asserted on the clock: the follow-up read is queued behind whatever the settle queued, and the
+        // worker is FIFO, so a write it had wrongly queued has run by the time that read's post is delivered.
+        // Same signal, same reason, as LightingPrimeTests.ABacklightsPrime_DoesNotWrite_EvenWhenItChangesTheSlider:
+        // "the write has not happened yet" and "no write was ever queued" look identical from this thread.
+        vm.Backlight!.SyncFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 3), "the follow-up read never ran");
+
+        Assert.Empty(port.SetCalls);
     }
 
-    /// <summary>The open still writes nothing on a backlight-only device that a host owns — asserted together
-    /// with the read, because the gate and the settle sit in the same method and an order that read BEFORE the
-    /// gate would be invisible in the tests above (no host is set there at all).</summary>
+    /// <summary>The settle is NOT gated by the host's flag, and the device arranged here is the one where that
+    /// rule costs something: a lightbar the firmware follows (so the drawer really does have an empty panel walk)
+    /// beside a plain backlight, on a machine whose surface a host holds. That is the shape
+    /// <c>AppController.BuildUi</c> describes — it hands the view-model BOTH <c>d.Lighting</c> and
+    /// <c>d.KeyboardBrightness</c>, and a host exists only because <c>d.Lighting</c> does — so it is buildable
+    /// rather than assembled to make the gate fire. The RGB device is not decoration: it is what makes the host
+    /// real, and the follow switch is what empties the panel walk.
+    ///
+    /// NO BACKEND IN TODAY'S TREE EXPOSES BOTH (Acer publishes the RGB device and reads its keyboard brightness
+    /// through the zone; Dell and the generic Linux backend publish the brightness port and have no RGB device),
+    /// so the gate this test pins is LATENT — reachable only when a backend wires a plain backlight beside an RGB
+    /// one. It is pinned because the gate was wrong about WHICH surface it guarded, not because production takes
+    /// it today.
+    ///
+    /// MUTATION that reddens it: widen the gate back over the whole method (the early
+    /// <c>if (_host is { HostOwnsLighting: true }) return;</c> before the settle). The slider then stays on its
+    /// placeholder — 0, the level a failed read gives — for the whole session, which is the failure this read
+    /// exists to close.</summary>
     [Fact]
-    public void TheDrawerOpen_DoesNotEvenReadTheBacklight_WhileAHostOwnsTheSurface()
+    public void TheDrawerOpen_SettlesThePlainBacklight_EvenWhileAHostOwnsTheSurface()
     {
         var port = new FakeKeyboardBrightness { Level = 2 };
         var poster = new Eventually.Poster();
-        var vm = new LightingViewModel(null, new Dictionary<string, LightSettings>(), EnsureZone,
-                                       save: () => { }, followsProfile: false, _ => { },
-                                       backlight: port, applyBacklight: l => port.Set(l), post: poster.Post,
-                                       host: new FakeHostLighting { HostOwnsLighting = true });
+        var vm = BacklightDevice(port, poster, new FakeHostLighting { HostOwnsLighting = true });
+
+        Assert.Empty(vm.Panels);                  // Control: the RGB surface is there, and no panel is built for it
+        Assert.NotNull(vm.Backlight);
+        Assert.Equal(0, vm.Backlight!.Level);     // the deferred placeholder, not a reading
 
         Drawer(vm).OpenLightingCommand.Execute(null);
 
-        Assert.Equal(0, port.GetCount);     // the gate is the FIRST thing Reapply does: not even a read
-        Assert.Equal(0, vm.Backlight!.Level);
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the host's flag gated the backlight settle");
+        Assert.Equal(2, vm.Backlight!.Level);     // the out-of-band level reached the slider
+
+        // ...and the settle reads rather than writes, drained as above: a non-event decided by a signal, with the
+        // read count asserted once that signal is in (the settle's read is the first, this drain's the second).
+        vm.Backlight!.SyncFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the follow-up read never ran");
+
+        Assert.Equal(2, port.GetCount);
+        Assert.Empty(port.SetCalls);
+    }
+
+    // ---------------------------------------------------------------- the click that CLOSES the drawer
+
+    /// <summary>A click on the button of the drawer already showing closes it (the toggle in <c>OpenDrawer</c>),
+    /// and that click must not run the re-apply on the way out. The panel's write is the witness because it is
+    /// synchronous — the count is decided when the command returns — and the drawer's own state is asserted
+    /// first, so "no re-apply" cannot hold for a click that did nothing at all.
+    ///
+    /// MUTATION that reddens it: run the re-apply before the toggle is consulted (the shape this file was fixed
+    /// from: <c>_lighting?.Reapply()</c> unconditionally at the top of <c>OpenLighting</c>) — the closing click
+    /// then writes a third time.</summary>
+    [Fact]
+    public void ReClickingTheOpenDrawer_ClosesIt_WithoutReapplyingThePanels()
+    {
+        var written = new List<byte>();
+        var vm = Lighting(Zone(written), Brightness(40), new FakeHostLighting { HostOwnsLighting = false });
+
+        var main = Drawer(vm);
+        main.OpenLightingCommand.Execute(null);
+
+        Assert.True(main.IsDrawerOpen);         // Control: the first click opened it...
+        Assert.True(main.IsLightingPage);
+        Assert.Equal([40, 40], written);        // ...and re-applied the configured zone
+
+        main.OpenLightingCommand.Execute(null); // the same button, the same section: this one CLOSES
+
+        Assert.False(main.IsDrawerOpen);        // Control: the click was a close, not a no-op
+        Assert.Equal([40, 40], written);        // ...and no re-apply was run for it
     }
 
     // ---------------------------------------------------------------- helpers
@@ -156,6 +228,15 @@ public class LightingDrawerTests
         => new(new RgbDevice(new FakeRgbController { Zones = [zone] }),
                lights, EnsureZone, save: () => { }, followsProfile: false, _ => { }, host: host);
 
+    /// <summary>The same build for the other device shape: an RGB device whose only zone is the firmware's while
+    /// the follow switch is on (so no panel is built and the backlight is), plus that backlight.</summary>
+    private static LightingViewModel BacklightDevice(FakeKeyboardBrightness port, Eventually.Poster poster,
+                                                     IDynamicLighting host)
+        => new(new RgbDevice(new FakeRgbController { Zones = [FollowZone()] }),
+               new Dictionary<string, LightSettings>(), EnsureZone,
+               save: () => { }, followsProfile: true, _ => { },
+               backlight: port, applyBacklight: l => port.Set(l), post: poster.Post, host: host);
+
     /// <summary>A mode's per-zone state for the one zone below, already configured — so the panel's
     /// construction re-apply is the write the host gate has to stop.</summary>
     private static Dictionary<string, LightSettings> Brightness(int brightness)
@@ -167,8 +248,15 @@ public class LightingDrawerTests
         => new(ZoneName, 1, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                (_, brightness, _, _, _) => { written.Add(brightness); return true; });
 
+    /// <summary>A lightbar: the one zone shape the follow switch exists for (<c>canFollowProfile: true</c>), so
+    /// the constructor leaves it to the firmware and the drawer's panel walk is genuinely empty. Writes nothing
+    /// and reads nothing: this file is about the backlight on that shape.</summary>
+    private static RgbZone FollowZone()
+        => new("Lightbar", 1, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
+               (_, _, _, _, _) => true, canFollowProfile: true);
+
     /// <summary>Same contract as <c>LaptopService.EnsureLightZone</c>: the mode's per-zone entry, created on
-    /// first sight under the service's lock. Never reached here — the backlight-only device builds no panels —
+    /// first sight under the service's lock. Never reached by the backlight-only devices — they build no panels —
     /// but it is what the constructor is handed, so the fake matches the real call.</summary>
     private static LightSettings EnsureZone(Dictionary<string, LightSettings> lights, string name)
     {

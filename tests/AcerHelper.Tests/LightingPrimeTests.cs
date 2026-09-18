@@ -93,13 +93,22 @@ public class LightingPrimeTests
     /// The port's own <c>Set</c> is the apply delegate here, which is the shape the app wires it in
     /// (<c>AppController.BuildUi</c> passes <c>lvl =&gt; _svc.SetKeyboardBrightness(lvl).ok</c> — the delegate
     /// IS the device write). With the old <c>_ =&gt; true</c> stand-in, <c>SetCalls</c> was a list nothing
-    /// could ever add to, so "a prime never writes" was a claim no mutation could falsify.</summary>
+    /// could ever add to, so "a prime never writes" was a claim no mutation could falsify.
+    ///
+    /// BOTH halves wait on the counted poster rather than on the clock, and the read count is taken only after
+    /// the SECOND delivery: the follow-up read is queued behind whatever the prime queued, and the worker is
+    /// FIFO, so a write the snap-back had wrongly queued has run by then. Asserting either straight after the
+    /// correction races that worker — measured: this test stayed GREEN against a mutant that makes the
+    /// snap-back write, on a loaded machine, while reddening on an idle one (the extra read-back had not
+    /// landed yet). Same signal and same reason as
+    /// <see cref="ABacklightsPrime_DoesNotWrite_EvenWhenItChangesTheSlider"/>.</summary>
     [Fact]
     public void ABacklightsLevel_IsAPlaceholder_ThePrimeReplaces()
     {
         var port = new FakeKeyboardBrightness { Level = 2 };
+        var poster = new Eventually.Poster();
 
-        var vm = new BacklightViewModel(port, l => port.Set(l), Eventually.Sync);
+        var vm = new BacklightViewModel(port, l => port.Set(l), poster.Post);
 
         Assert.Equal(0, vm.Level);                       // placeholder: what a failed read would give
         Assert.Equal(0, port.GetCount);                  // ...and the build cost no read at all
@@ -107,8 +116,14 @@ public class LightingPrimeTests
 
         vm.SyncFromHardware();                           // the prime
 
-        Assert.True(Eventually.Until(() => vm.Level == 2), "the deferred read never reached the slider");
-        Assert.Equal(1, port.GetCount);
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the deferred read never reached the slider");
+        Assert.Equal(2, vm.Level);
+
+        // Ask for one more read and wait for it: by then the prime's own read, and anything it queued, are done.
+        vm.SyncFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the follow-up read never ran");
+
+        Assert.Equal(2, port.GetCount);                  // the prime's read and the follow-up's — nothing else
         Assert.Empty(port.SetCalls);                     // a prime reads; it must never write
     }
 

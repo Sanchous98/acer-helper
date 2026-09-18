@@ -177,15 +177,29 @@
 > о себе каждый реальный транспорт в дереве.
 >
 > **Видимый текст не изменился ни у одного прежнего теста, и это замер, а не ожидание:**
-> мутация «вернуть чтение `LastError` в `catch`» краснит ровно два новых теста
+> мутация «вернуть чтение `LastError` в `catch`» — в одном месте, о котором говорит этот
+> абзац (`LaptopService.Attempt` по паре) — краснит ровно два новых теста
 > (`AThrowingProfileSet_CarriesNoReasonOfAnEarlierCall` в `OptionsAssemblerTests`,
-> `SetCo_WhenThePortThrows_ReportsNoReasonOfAnEarlierCall` в `LaptopServiceCoTests`) и ни
+> `SetCo_WhenThePortThrows_ReportsNoReasonOfAnEarlierCall` в `LaptopServiceCoTests.cs`) и ни
 > одного прежнего. Причина у прежних нет: все их бросающие фейки
 > (`FakeThrowingPowerProfiles`, `ThrowingGpu`/`ThrowingCo`) `LastError` не выставляют, а
 > все тесты с причиной (`AFailedApply_ReturnsFalse_AndPropagatesTheError` и соседи)
 > пишут её отказом, ВЕРНУВШИМ пару, — эта ветка не тронута, и обратная мутация
 > («причину не возвращать никогда») краснит именно их, а новый тест `SetCo_...` при ней
 > остаётся зелёным.
+>
+> **Уточнено 2026-09-18 (замер по ревизии: прежняя формулировка верна только для ОДНОЙ из
+> мутаций этого класса, и по ней нельзя было судить о двух `Write`).** Та же мутация,
+> применённая к `FlagSetting.Write` и `ChoiceSetting.Write` (`Domain/DeclaredSetting.cs`),
+> красит **три** теста, и один из них **прежний**: `AThrowingTransport_IsARefusal_ThatCarriesNoReasonOfItsOwn`
+> и `AThrowingChoiceTransport_CarriesNoReasonOfItsOwnEither` (`DeclaredSettingTests`) плюс
+> `AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow` (`OptionsAssemblerFailureTests`) —
+> тот самый тест, чей ожидаемый текст эта правка и поменяла (абзац выше). По отдельности
+> замерено: только `FlagSetting.Write` — 2 теста (новый `AThrowingTransport_...` и его
+> ассемблерный двойник `AThrowingPort_...`), только `ChoiceSetting.Write` — 1
+> (`AThrowingChoiceTransport_...`), только `LaptopService.Attempt` — те же 2 новых и ни одного
+> прежнего, все три места сразу — 5. Доккомментарий `AThrowingTransport_...`, обещавший
+> «this test alone», по этому замеру и исправлен.
 >
 > **Правка ЛАТЕНТНАЯ, и это проверено, а не предположено:** ни один транспорт в дереве
 > не бросает из записи. Acer `GmSet`/`UiSet`, `SysfsInvoker.Write`,

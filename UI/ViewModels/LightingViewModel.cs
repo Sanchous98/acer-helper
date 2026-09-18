@@ -144,7 +144,7 @@ public sealed partial class LightingViewModel : ObservableObject
     /// device rather than asking the device what it holds. Re-applying is idempotent and cannot be wrong; reading
     /// can, because the write we just sent may not have landed yet.
     ///
-    /// A HOST OWNS THE SURFACE (Windows Dynamic Lighting / a LampArray app) and nothing is written at all. The
+    /// A HOST OWNS THE SURFACE (Windows Dynamic Lighting / a LampArray app) and the PANELS write nothing. The
     /// panels write STRAIGHT to the zones — this method does not go through <c>LightingCoordinator.Paint</c>,
     /// which is where every other painting path yields to the host — so an ungated re-apply would land the app's
     /// frame on a surface the host owns, and would land it out of band: the bridge's dedupe mirror
@@ -155,6 +155,15 @@ public sealed partial class LightingViewModel : ObservableObject
     /// deliberately NOT re-asserted here — opening a drawer clobbers nothing, and the callers that do need a
     /// re-assertion are the ones <c>Paint</c> already serves.
     ///
+    /// THE GATE IS ABOUT THE PANELS ONLY, because it is about the surface the host holds: the LampArray is built
+    /// FROM the RGB device (<c>LaptopService.LampArray</c>), so a host owns the zones and nothing else. The plain
+    /// backlight (<see cref="IKeyboardBrightness"/>) is separate hardware that no host claims — no LampArray
+    /// carries it, and the only devices that expose it have no RGB device at all in today's tree — so its settle
+    /// sits OUTSIDE the gate. Gating it would be a flag about one surface deciding another's: on a device
+    /// with both (an RGB device whose zones the firmware follows, so no panel is built, beside a plain
+    /// backlight — the shape LightingDrawerTests arranges) the level would keep its startup value for the whole
+    /// session, which is the very symptom this read exists to close.
+    ///
     /// The plain backlight is the one control here settled by a READ, and the only device it exists on is one
     /// with no RGB panels at all: it has no stored value to push (its slider is a deferred placeholder whose
     /// write is verified by read-back), so the drawer can do for it exactly what <see cref="Prime"/> does at
@@ -163,8 +172,8 @@ public sealed partial class LightingViewModel : ObservableObject
     /// startup value for the whole session.</summary>
     public void Reapply()
     {
-        if (_host is { HostOwnsLighting: true }) return;
-        foreach (var panel in Panels) panel.Reapply();
+        if (_host is not { HostOwnsLighting: true })
+            foreach (var panel in Panels) panel.Reapply();
         Backlight?.SyncFromHardware();
     }
 

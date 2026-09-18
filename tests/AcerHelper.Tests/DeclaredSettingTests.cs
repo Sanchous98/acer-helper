@@ -75,8 +75,11 @@ public class DeclaredSettingTests
     /// back wearing the first one's words ("Access Denied"); now the reason is absent.
     ///
     /// MUTATION that reddens it: put the field read back on the throw path (replace the early
-    /// <c>return (false, null)</c> with <c>catch { ok = false; }</c>) — this test alone, since every other test
-    /// here reaches the field through a write that RETURNED.</summary>
+    /// <c>return (false, null)</c> with <c>catch { ok = false; }</c>) — measured, it reddens TWO tests, not this
+    /// one alone: this test and its assembler-side twin
+    /// <c>OptionsAssemblerFailureTests.AThrowingPort_IsReportedAsAFailure_AndDoesNotEscapeTheRow</c>, which
+    /// asserts the sentence the user ends up reading. Nothing else in the suite throws from a flag port — every
+    /// other test here reaches the field through a write that RETURNED.</summary>
     [Fact]
     public void AThrowingTransport_IsARefusal_ThatCarriesNoReasonOfItsOwn()
     {
@@ -99,7 +102,9 @@ public class DeclaredSettingTests
     /// because the two overrides are separate code, and a fix applied to one of them is invisible here.
     ///
     /// MUTATION that reddens it: restore <c>catch { ok = false; }</c> in <c>ChoiceSetting.Write</c> (the field
-    /// read after a throw) — this test alone, since nothing else in the suite throws from a choice port.</summary>
+    /// read after a throw) — measured, this test alone, since nothing else in the suite throws from a choice
+    /// port (the twin above is the one mutation that reaches further, and it does so through
+    /// <c>FlagSetting.Write</c>).</summary>
     [Fact]
     public void AThrowingChoiceTransport_CarriesNoReasonOfItsOwnEither()
     {

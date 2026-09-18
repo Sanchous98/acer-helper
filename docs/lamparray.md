@@ -145,19 +145,30 @@ back.
 | host releases, or the feature is switched off | the app repaints the current mode's lighting immediately, then runs its usual re-apply burst |
 | lid shut in clamshell mode | blanking still wins — a hidden keyboard stays dark whoever owns it |
 
-The Lighting panel's controls are **not** disabled while a host owns the surface (they would need a
-rebuild-time flag); a value changed there is overwritten by the host's next frame — **but only if that frame
-differs from the one before it**. The bridge's dedupe (`LampArrayBridge.Paint`/`Unchanged`, ±5 per channel)
-compares each incoming frame against `_written`, the mirror of what was last written, and a panel's apply goes
-straight to the zone without touching that mirror: so against a STATIC host frame — the common case, a solid
-colour — the host's re-sends look unchanged, are skipped, and the app's value stays on the keyboard. That
-window is a defect, recorded here rather than described as behaviour; it is the same mechanism that made the
-drawer's re-apply on open visible, and the open is now gated on ownership (`LightingViewModel.Reapply`). The
-status line is the signal that a host is in charge.
+The Lighting panel's controls are **not** stopped while a host owns the surface — a decision the owner has not
+made yet, and NOT the rebuild-time constraint this line used to claim (see "what stopping them would take"
+below). A value changed there is overwritten by the host's next frame — **but only if that frame differs from
+the one before it**. The bridge's dedupe (`LampArrayBridge.Paint`/`Unchanged`, ±5 per channel) compares each
+incoming frame against `_written`, the mirror of what was last written, and a panel's apply goes straight to the
+zone without touching that mirror: so against a STATIC host frame — the common case, a solid colour — the host's
+re-sends look unchanged, are skipped, and the app's value stays on the keyboard. That window is a defect,
+recorded here rather than described as behaviour; it is the same mechanism that made the drawer's re-apply on
+open visible, and the open is now gated on ownership (`LightingViewModel.Reapply`). The status line is the
+signal that a host is in charge.
 
 **The open of the Lighting drawer is gated; the controls in it are not.** Opening it re-applies the app's own
-lighting *except* while a host owns the surface, when it writes nothing at all — that path does not go through
-`LightingCoordinator.Paint`, so it has its own check rather than inheriting that one.
+lighting *except* while a host owns the surface, when the panels write nothing at all — that path does not go
+through `LightingCoordinator.Paint`, so it has its own check rather than inheriting that one.
+
+**What stopping the controls would take, and why it is not done.** Stopping a write needs no rebuild-time flag,
+contrary to what this file used to say: every interactive edit goes through ONE choke point — the `applyAll` /
+`applyZone` delegates `LightingViewModel.BuildPanel` hands each `LightViewModel`, which ALSO carry the re-apply a
+panel runs as it is built (the path the follows-flip reaches when it builds one). One ownership check there, or
+one wrapper around those two lambdas, would stop all of those writes at once. It is left alone because gating a
+write DROPS the user's edit silently — the slider moves and the keyboard does not — and the alternative,
+greying the controls out, is the shape that would need state built with the flip (a rebuild-time flag, or a
+rebuild on the ownership change). That is a product decision, so it is recorded for the owner in
+`docs/domain-refactoring-plan.md` §7 rather than taken here.
 
 ## Limitations
 

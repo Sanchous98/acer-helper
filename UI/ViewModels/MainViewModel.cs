@@ -156,7 +156,13 @@ public sealed partial class MainViewModel : ObservableObject
         // The doubt moment at the composite level, and the whole rule lives in the method it calls: re-apply OUR
         // lighting rather than ask the wire what it holds, yield to a host that owns the surface, and settle the
         // plain backlight (the one control here with no stored value to push) by reading it.
-        _lighting?.Reapply();
+        //
+        // Only when this click OPENS the drawer, because re-clicking the button of the drawer on screen CLOSES it
+        // (the toggle in OpenDrawer) and the re-apply would then run for a drawer on its way out: it re-applies
+        // the RGB panels and queues the backlight's read, and that read is a device transaction on a serial
+        // worker that does NOT coalesce — so every toggle click would queue one more of them, unlike the event
+        // path's read, which keeps one in flight plus one pending for exactly this reason (VerifiedHwValue).
+        if (_lighting != null && !IsShowing(_lighting)) _lighting.Reapply();
         OpenDrawer(Loc.T("Lighting"), _lighting);
     }
 
@@ -182,7 +188,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>True while the Lighting drawer is the one actually on screen. Cheap check the input-driven
     /// brightness adoption gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>
-    public bool IsLightingVisible => IsDrawerOpen && ReferenceEquals(DrawerContent, _lighting);
+    public bool IsLightingVisible => IsShowing(_lighting);
+
+    /// <summary>Whether <paramref name="content"/> is the section the open drawer is showing — the toggle rule,
+    /// stated once because two callers need to know its answer before they act: <see cref="OpenDrawer"/> closes
+    /// the drawer when it is true, and <see cref="OpenLighting"/> skips its re-apply when it is true (the click
+    /// is then a close, not an open).</summary>
+    private bool IsShowing(object? content) => IsDrawerOpen && ReferenceEquals(content, DrawerContent);
 
     /// <summary>An out-of-band input event (a special key) while the Lighting drawer is showing: ADOPT the
     /// brightness the hardware now holds as the new intent. The read runs off the UI thread and is the only path
@@ -197,7 +209,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (content == null) return;
         // Re-clicking the open drawer's button closes it (toggle).
-        if (IsDrawerOpen && ReferenceEquals(content, DrawerContent)) { IsDrawerOpen = false; return; }
+        if (IsShowing(content)) { IsDrawerOpen = false; return; }
         DrawerContent = content;
         DrawerTitle = title;
         IsDrawerOpen = true;
