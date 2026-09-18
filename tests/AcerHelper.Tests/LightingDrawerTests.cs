@@ -38,10 +38,13 @@ namespace AcerHelper.Tests;
 ///    is a device transaction on a serial worker that does not coalesce, so every toggle click would queue one
 ///    more of them.
 ///
-/// WHAT THIS FILE DOES NOT COVER, named rather than left implicit: the drawer's INTERACTIVE writes (a drag of a
-/// panel's brightness or colour) still reach the zones while a host owns the surface — the same straight-to-zone
-/// path, ungated, which is a decision the owner has not made yet (<c>docs/lamparray.md</c>, and the record in
-/// <c>docs/domain-refactoring-plan.md</c> §7 that asks for it). Only the open is gated.
+/// WHAT THIS FILE DOES NOT COVER, named rather than left implicit. The drawer's INTERACTIVE writes (a drag of a
+/// panel's brightness or colour) used to reach the zones while a host owned the surface; they no longer can,
+/// because the controls are greyed out on that flag — the owner's decision of 2026-09-18, taken in the shape the
+/// record in <c>docs/domain-refactoring-plan.md</c> §7 asked for. That gating lives in
+/// <c>LightingViewModel.ControlsEnabled</c> / <c>LightViewModel.ControlsEnabled</c> and is pinned by
+/// <see cref="LightingControlGateTests"/>, not here: this file is about the drawer's OPEN, which is the other
+/// half of the same rule (the open yields through <c>Reapply</c>, the controls through the flag).
 /// </summary>
 public class LightingDrawerTests
 {

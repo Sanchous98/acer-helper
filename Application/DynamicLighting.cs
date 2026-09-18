@@ -17,8 +17,10 @@ namespace AcerHelper.Application;
 // thing to write against, not because a rule demands it.
 
 /// <summary>The virtual lighting surface this application publishes so an OS or a third-party app can paint the
-/// machine's backlight (Windows Dynamic Lighting, any LampArray-aware app — see docs/lamparray.md). The LampArray
-/// bridge is the only implementation. It owns a worker thread and the OS channel, so it is
+/// machine's backlight (Windows Dynamic Lighting, any LampArray-aware app — see docs/lamparray.md). A host
+/// reaches the lamps THROUGH this surface: Windows enumerates lighting devices only as HID LampArray
+/// collections, and the app publishes the only one these lamps have, so Dynamic Lighting has no route around
+/// it. The LampArray bridge is the only implementation. It owns a worker thread and the OS channel, so it is
 /// <see cref="IDisposable"/>: disposing it takes the surface down and releases the transport with it.</summary>
 public interface IDynamicLighting : IDisposable
 {
@@ -40,7 +42,13 @@ public interface IDynamicLighting : IDisposable
     void Disable();
 
     /// <summary>True while an external host holds the surface. Every lighting path of the app must yield while
-    /// this is set, or each profile switch, resume and re-apply would stomp a frame the host owns.</summary>
+    /// this is set, or each profile switch, resume and re-apply would stomp a frame the host owns — and the
+    /// lighting panel's controls are greyed out on it too, so the user's own edit cannot either.
+    ///
+    /// It is a statement about THIS surface and nothing wider: a host is visible here only by writing to the
+    /// device this app publishes, which is the only route Windows has to these lamps. A program that drives the
+    /// keyboard's controller directly is not observed and does not raise it (see
+    /// <c>LampArrayBridge.HostOwnsLighting</c>).</summary>
     bool HostOwnsLighting { get; }
 
     /// <summary>Fires when <see cref="HostOwnsLighting"/> flips: true when a host takes the surface, false when

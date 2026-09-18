@@ -139,36 +139,101 @@ back.
 
 | Event | Behaviour |
 |---|---|
-| host takes the surface | `LampArrayBridge.HostOwnsLighting` = true; `LightingCoordinator.Paint` stops painting the app's lighting; status line says so (G HUB likewise blocks its lighting UI while Dynamic Lighting is on) |
+| host takes the surface | `LampArrayBridge.HostOwnsLighting` = true; `LightingCoordinator.Paint` stops painting the app's lighting **and the Lighting panel's controls are greyed out**; status line says so (G HUB likewise blocks its lighting UI while Dynamic Lighting is on) |
 | host frame arrives | translated to zone writes, throttled + collapsed as above |
 | profile switch / resume / lid-open | the host's last frame is re-asserted, ignoring the dedupe |
-| host releases, or the feature is switched off | the app repaints the current mode's lighting immediately, then runs its usual re-apply burst |
+| host releases, or the feature is switched off | the controls come back, and the app repaints the current mode's lighting immediately, then runs its usual re-apply burst |
 | lid shut in clamshell mode | blanking still wins — a hidden keyboard stays dark whoever owns it |
 
-The Lighting panel's controls are **not** stopped while a host owns the surface — a decision the owner has not
-made yet, and NOT the rebuild-time constraint this line used to claim (see "what stopping them would take"
-below). A value changed there is overwritten by the host's next frame — **but only if that frame differs from
-the one before it**. The bridge's dedupe (`LampArrayBridge.Paint`/`Unchanged`, ±5 per channel) compares each
-incoming frame against `_written`, the mirror of what was last written, and a panel's apply goes straight to the
-zone without touching that mirror: so against a STATIC host frame — the common case, a solid colour — the host's
-re-sends look unchanged, are skipped, and the app's value stays on the keyboard. That window is a defect,
-recorded here rather than described as behaviour; it is the same mechanism that made the drawer's re-apply on
-open visible, and the open is now gated on ownership (`LightingViewModel.Reapply`). The status line is the
-signal that a host is in charge.
+A TAKE-over becomes visible a beat after it happens: the driver publishes a hand-BACK at once, but a takeover
+only together with the host's first completed colour frame (`AHLA_REPORT_CONTROL`, because the staged colours
+are still black at that point). So the flag, and everything gated on it, follows the host's first PAINT rather
+than its declaration.
 
-**The open of the Lighting drawer is gated; the controls in it are not.** Opening it re-applies the app's own
+### What that flag can and cannot see — corrected 2026-09-18
+
+This file used to describe the interference as symmetric ("a host owns the surface — Windows Dynamic Lighting /
+a LampArray app"), which invited the reading that Windows Dynamic Lighting is one of several programs that can
+grab the keyboard behind the app's back. **It is not, and the distinction decides what the gate above is worth.**
+
+- **Windows Dynamic Lighting cannot bypass this driver.** Windows enumerates lighting devices *only* as HID
+  LampArray collections and there is no user-mode API to register one, so the virtual device this app publishes
+  is the only route Dynamic Lighting has to these lamps. It therefore arrives as a host **through** the bridge,
+  and `HostOwnsLighting` sees it — which is exactly the case the gate is built for.
+- **The interferer that can bypass it is OpenRGB.** `EneHidController` is the same controller OpenRGB drives
+  (`VID 0x0CF2`, `PID 0x5130`, 11-byte `0xA4` feature reports — [lighting-an18-61.md](lighting-an18-61.md)),
+  and **NitroSense drives the keyboard through OpenRGB under the hood** (it is an OpenRGB fork plus
+  `AcerECKeyboardController.dll`, ibid.). A program writing those feature reports reaches the LEDs without
+  touching the published device.
+- **Nothing in the tree would notice that.** `HostOwnsLighting` is set from one channel only — the lamp frames
+  the driver hands back (`LampArrayBridge.WorkerLoop` ← `ILampArrayTransport.WaitFrame`) — and no code path
+  reads a colour back out of the EC; the only hardware read in the RGB model is `RgbZone.ReadBrightness`, which
+  is the keyboard-brightness register. So an OpenRGB takeover moves no flag, greys nothing, and the app carries
+  on painting over it.
+
+**What it would take to observe it** is a read the hardware does not offer: the EC has no "who wrote last"
+register, so noticing a foreign writer means either (a) reading back what the controller is currently showing
+and comparing it with what we last wrote — a per-zone colour read the ENE protocol has never been shown to
+expose, unlike the brightness register — or (b) an out-of-band signal from the other program, which does not
+exist. Until one of those is measured, **the gate is honest about Dynamic Lighting hosts and blind to OpenRGB**,
+and any UI text promising more than that would be theatre. (A second, narrower limit is on the flag itself: a
+host that clears autonomous and paints nothing is not yet visible — see the table above.)
+
+The Lighting panel's controls **are greyed out while a host owns the surface** — the owner's decision of
+2026-09-18, taken on the mechanism the next paragraphs describe.
+
+> **Superseded 2026-09-18 — kept as the record of what the defect was.** This section used to read:
+>
+> The Lighting panel's controls are **not** stopped while a host owns the surface — a decision the owner has not
+> made yet, and NOT the rebuild-time constraint this line used to claim (see "what stopping them would take"
+> below). A value changed there is overwritten by the host's next frame — **but only if that frame differs from
+> the one before it**. The bridge's dedupe (`LampArrayBridge.Paint`/`Unchanged`, ±5 per channel) compares each
+> incoming frame against `_written`, the mirror of what was last written, and a panel's apply goes straight to
+> the zone without touching that mirror: so against a STATIC host frame — the common case, a solid colour — the
+> host's re-sends look unchanged, are skipped, and the app's value stays on the keyboard. That window is a
+> defect, recorded here rather than described as behaviour; it is the same mechanism that made the drawer's
+> re-apply on open visible, and the open is now gated on ownership (`LightingViewModel.Reapply`). The status
+> line is the signal that a host is in charge.
+>
+> That was accurate for as long as it stood: the panel writes straight to the zone, the mirror is never told,
+> and the app's colour therefore stuck on a static host frame. What changed is the decision, not the mechanism —
+> the mechanism is why the decision mattered.
+
+**The open of the Lighting drawer is gated, and so are the controls in it.** Opening it re-applies the app's own
 lighting *except* while a host owns the surface, when the panels write nothing at all — that path does not go
-through `LightingCoordinator.Paint`, so it has its own check rather than inheriting that one.
+through `LightingCoordinator.Paint`, so it has its own check rather than inheriting that one
+(`LightingViewModel.Reapply`). The controls yield through `LightingViewModel.ControlsEnabled`, an observable
+flag the coordinator sets from ownership and seeds from the surface as the section is built.
 
-**What stopping the controls would take, and why it is not done.** Stopping a write needs no rebuild-time flag,
-contrary to what this file used to say: every interactive edit goes through ONE choke point — the `applyAll` /
-`applyZone` delegates `LightingViewModel.BuildPanel` hands each `LightViewModel`, which ALSO carry the re-apply a
-panel runs as it is built (the path the follows-flip reaches when it builds one). One ownership check there, or
-one wrapper around those two lambdas, would stop all of those writes at once. It is left alone because gating a
-write DROPS the user's edit silently — the slider moves and the keyboard does not — and the alternative,
-greying the controls out, is the shape that would need state built with the flip (a rebuild-time flag, or a
-rebuild on the ownership change). That is a product decision, so it is recorded for the owner in
-`docs/domain-refactoring-plan.md` §7 rather than taken here.
+**Why greying rather than dropping the edit.** The owner's ruling: a refusal the user can see beats a silent
+one. A check that let the drag through and swallowed the write would leave the slider moving over a keyboard
+that does not change — the failure mode this replaces, only quieter. An `IsEnabled`-bound flag needs no
+rebuild-time state, contrary to what this file used to say about it: the flag is observable, so the ownership
+change reaches the live view-models, and a section rebuilt under a host (a language change) seeds itself from
+the surface's own flag as it is constructed. The single interception point is still where the record below says
+it is; it is simply not the shape that was taken.
+
+> **Superseded 2026-09-18 — kept as the record of what stopping the controls would have taken.** This section
+> used to read:
+>
+> **What stopping the controls would take, and why it is not done.** Stopping a write needs no rebuild-time
+> flag, contrary to what this file used to say: every interactive edit goes through ONE choke point — the
+> `applyAll` / `applyZone` delegates `LightingViewModel.BuildPanel` hands each `LightViewModel`, which ALSO
+> carry the re-apply a panel runs as it is built (the path the follows-flip reaches when it builds one). One
+> ownership check there, or one wrapper around those two lambdas, would stop all of those writes at once. It is
+> left alone because gating a write DROPS the user's edit silently — the slider moves and the keyboard does not
+> — and the alternative, greying the controls out, is the shape that would need state built with the flip (a
+> rebuild-time flag, or a rebuild on the ownership change). That is a product decision, so it is recorded for
+> the owner in `docs/domain-refactoring-plan.md` §7 rather than taken here.
+>
+> The choke-point analysis held. The two claims that did not: greying needs no rebuild-time state (above), and
+> the choice between greying and dropping was the owner's to make, and was made.
+
+**What is NOT gated, and the one write that still slips through under a host.** The plain
+`IKeyboardBrightness` slider is deliberately outside the flag, for the reason `LightingViewModel.Reapply`
+records: it is separate hardware that no LampArray carries. And a panel's
+CONSTRUCTION re-apply (`LightViewModel`'s `if (state.Configured) ApplyNow()`) still runs while a host owns the
+surface — that is the startup / language-rebuild write, not a user edit, and it is unchanged here.
 
 ## Limitations
 

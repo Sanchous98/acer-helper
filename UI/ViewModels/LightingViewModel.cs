@@ -46,6 +46,23 @@ public sealed partial class LightingViewModel : ObservableObject
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
     public bool ShowFollowsProfile => _followZones.Count > 0;
 
+    /// <summary>Whether the section's interactive controls take input: false while a host owns the published
+    /// surface, so the effect picker, the colour swatches, the brightness/speed sliders, the direction switch and
+    /// the follows-profile switch are all GREYED rather than accepting an edit that would land on a surface
+    /// somebody else is painting. A refusal the user can see, which is why the controls are disabled instead of
+    /// the writes being dropped — a silently ignored drag is the worse failure. Bound to the root of each panel
+    /// (LightView) and to the follow switch (LightingView).
+    ///
+    /// Seeded from the surface's own flag as this section is BUILT, so a language rebuild under a host comes up
+    /// greyed rather than live; the live flip arrives from <c>LightingCoordinator.OnHostOwnerChanged</c>, which
+    /// is the single subscriber to the surface's event (this section is rebuilt, and a subscription here would
+    /// outlive it — the same reason the coordinator owns the re-apply state machine). No rebuild is needed for
+    /// either: the flag is an observable property, so greying is a live change.
+    ///
+    /// The plain backlight (<see cref="Backlight"/>) is deliberately NOT covered — <see cref="Reapply"/> states
+    /// why: it is separate hardware that no LampArray carries.</summary>
+    [ObservableProperty] private bool _controlsEnabled;
+
     /// <summary>When on (default), follow-capable zones (the lightbar) are left to the firmware — their
     /// per-profile palette colour, flash-free — and get no panel. When off they become normal user-controlled
     /// zones (custom colour/effects), at the cost of a brief palette flash on each profile switch.</summary>
@@ -82,6 +99,10 @@ public sealed partial class LightingViewModel : ObservableObject
         _post = post;
         _host = host;
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
+        // The seeding half of HostOwnershipChanged, called before any panel exists (so the fan-out reaches
+        // none): a section BUILT while a host already holds the surface comes up greyed rather than live, which
+        // is what a language rebuild mid-session is.
+        HostOwnershipChanged(host is { HostOwnsLighting: true });
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
         _followZones = zones.Where(z => z.CanFollowProfile).ToList();
@@ -122,10 +143,16 @@ public sealed partial class LightingViewModel : ObservableObject
     private void BuildPanel(RgbZone zone)
     {
         var state = ZoneFor(zone.Name);
-        Panels.Add(new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
+        var panel = new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
-            state, s => Store(zone.Name, s), zone.ReadBrightness, _post));
+            state, s => Store(zone.Name, s), zone.ReadBrightness, _post);
+        // Seeded from the section, not defaulted: the follow switch BUILDS a panel when it is turned off, so
+        // without this a panel built while a host owns the surface would come up live and its construction
+        // re-apply (LightViewModel's `if (state.Configured) ApplyNow()`) would be a write the grey-out never
+        // had a chance to prevent.
+        panel.ControlsEnabled = ControlsEnabled;
+        Panels.Add(panel);
     }
 
     // Flip the switch live: turning it OFF builds the follow-capable panels (each applies the mode's stored
@@ -141,6 +168,24 @@ public sealed partial class LightingViewModel : ObservableObject
         }
         _saveFollowsProfile(value);
     }
+
+    // One flag, one place it is fanned out to: the panels are what the controls are built from, and a panel built
+    // later (the follow switch) is seeded in BuildPanel. Bound in the view through each panel's own
+    // LightViewModel.ControlsEnabled.
+    partial void OnControlsEnabledChanged(bool value)
+    {
+        foreach (var panel in Panels) panel.ControlsEnabled = value;
+    }
+
+    /// <summary>Who owns the published surface changed: <paramref name="hostOwns"/> true greys this section's
+    /// controls out, false brings them back. The one place the polarity lives — the surface's flag reads
+    /// "a host owns it" and this one reads "the controls take input", and a negation written at each call site
+    /// is how those two quietly stop agreeing; the two callers here are the constructor's seeding and
+    /// <c>LightingCoordinator.OnHostOwnerChanged</c>.
+    ///
+    /// It sets a property rather than rebuilding anything: the controls' availability is observable, so no
+    /// rebuild-time state is needed for a flip that arrives long after the panels were built.</summary>
+    public void HostOwnershipChanged(bool hostOwns) => ControlsEnabled = !hostOwns;
 
     /// <summary>Settle the deferred placeholders after a (re)build. Only the plain backlight needs this: its
     /// slider is built at 0 and takes its real level here (see <see cref="BacklightViewModel"/>). The RGB panels
@@ -273,6 +318,13 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private Color _color;
     [ObservableProperty] private double _brightness;
     [ObservableProperty] private double _speed;
+
+    /// <summary>Whether this panel's controls take input — the property LightView's root binds IsEnabled to, so
+    /// the effect picker, the colour swatches, the brightness/speed sliders and the direction switch grey
+    /// together. Set only by the section (<c>LightingViewModel.ControlsEnabled</c>, which is the surface's
+    /// ownership); default true, because a panel built outside a section — as a test builds one — is not on a
+    /// surface anybody else holds.</summary>
+    [ObservableProperty] private bool _controlsEnabled = true;
 
     /// <param name="state">This zone's stored lighting for the mode being bound, as a value.
     /// <param name="store">Where an edit goes: the section's write for THIS zone, which is the contract call

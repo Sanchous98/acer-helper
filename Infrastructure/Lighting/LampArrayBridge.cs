@@ -6,7 +6,18 @@ namespace AcerHelper.Infrastructure.Lighting;
 /// <summary>
 /// The translation layer proper: takes lamp frames a host (Windows Dynamic Lighting, or any LampArray-aware
 /// app) writes to our virtual HID device and turns them into this device's zone writes — and arbitrates
-/// ownership of the backlight while it does, so the app and the OS don't fight over it.
+/// ownership of the backlight while it does, so the app and the host don't fight over it. It is the ONLY way
+/// Windows can paint this keyboard at all: Windows enumerates lighting devices solely as HID LampArray
+/// collections, and the virtual device below is the only one published for these lamps, so Dynamic Lighting
+/// reaches the hardware THROUGH this bridge rather than around it.
+///
+/// WHAT THIS BRIDGE CANNOT SEE, which is the limit of everything built on <see cref="HostOwnsLighting"/>: it
+/// reads one channel — the lamp frames the driver hands back — so it observes exactly the hosts that write to
+/// this virtual device. A program that writes the ENE controller directly instead (the same
+/// <c>VID 0x0CF2</c>/<c>PID 0x5130</c> feature reports EneHidController sends, which is how OpenRGB drives
+/// these keyboards and how NitroSense drives them under the hood — docs/lighting-an18-61.md) is invisible
+/// here: nothing reads a colour back off the EC, so no flag moves and the app keeps painting over it. That is a
+/// named gap, not a case this gate handles.
 ///
 /// Three problems make this more than a memcpy, all properties of the hardware (docs/lamparray.md):
 ///  1. RATE. A host paints at 30–60 Hz; the ENE controller is on HID-over-I2C and a full keyboard apply is
@@ -62,8 +73,20 @@ public sealed class LampArrayBridge : IDynamicLighting
     /// <summary>True while the virtual device is published and the worker is pumping.</summary>
     public bool Enabled { get; private set; }
 
-    /// <summary>True while a host holds the surface (it took the device out of autonomous mode). The app's own
-    /// lighting paths must yield while this is set — see LightingCoordinator.</summary>
+    /// <summary>True while a host holds the surface (it took the device out of autonomous mode and has sent at
+    /// least one frame). The app's own lighting paths must yield while this is set — see LightingCoordinator,
+    /// which also greys the lighting panel's controls out.
+    ///
+    /// Set and cleared by the worker alone, from the frames the transport hands back:
+    /// <see cref="WorkerLoop"/> sets it on the first frame with <c>AutonomousMode</c> false and clears it on a
+    /// frame with the flag true (the host let go), in <see cref="ReleaseOwnership"/> (a transport that failed on
+    /// its own) and in <see cref="Disable"/>. The driver publishes a hand-BACK immediately but a TAKE-over only
+    /// with the host's first completed colour frame (driver/AcerHelperLampArray/driver.c, AHLA_REPORT_CONTROL),
+    /// so a host that has cleared autonomous without painting yet is not yet visible here.
+    ///
+    /// IT OBSERVES ONE CHANNEL: writes to the device this bridge publishes. A program writing the ENE controller
+    /// directly — OpenRGB, and NitroSense under it — takes the keyboard without moving this flag and without
+    /// anything in the tree noticing; see the class remark.</summary>
     public bool HostOwnsLighting { get; private set; }
 
     /// <summary>Fires when <see cref="HostOwnsLighting"/> flips (on the worker thread). true = a host just took

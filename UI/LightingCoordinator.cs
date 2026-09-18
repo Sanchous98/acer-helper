@@ -82,9 +82,19 @@ internal sealed class LightingCoordinator : IDisposable
     private MainViewModel _vm = null!;
     private LightingViewModel? _lighting;
 
-    public LightingCoordinator(LaptopService svc)
+    // The UI-thread marshaller the surface's ownership event is posted through; defaults to
+    // Dispatcher.UIThread.Post and exists so a test can drive OnHostOwnerChanged synchronously — the same seam,
+    // and the same measured reason, as LightingViewModel's and OptionsViewModel.TryCreate's: the real dispatcher
+    // is thread-affine in a bare xUnit process, so a headless test cannot pump it, and "the controls greyed out"
+    // would then be pinned everywhere except at the one call that greys them. The resume and lid watchers keep
+    // the real dispatcher: they are constructed HERE, out of the test's reach, and no fake can raise their
+    // events anyway.
+    private readonly Action<Action> _post;
+
+    public LightingCoordinator(LaptopService svc, Action<Action>? post = null)
     {
         _svc = svc;
+        _post = post ?? (a => Dispatcher.UIThread.Post(a));
 
         // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
         // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting
@@ -117,10 +127,11 @@ internal sealed class LightingCoordinator : IDisposable
         _lid.Start();
 
         // A host (Windows Dynamic Lighting / a LampArray app) taking or releasing the backlight changes who
-        // paints it — see OnHostOwnerChanged. Fires on the bridge's worker thread, so marshal like the watchers
-        // above; posting (not sending) also means it can't run before Attach has supplied the view-models.
+        // paints it AND whether the lighting panel's controls take input — see OnHostOwnerChanged. Fires on the
+        // bridge's worker thread, so marshal like the watchers above; posting (not sending) also means it can't
+        // run before Attach has supplied the view-models.
         if (_svc.LampArray is { } lamps)
-            lamps.OwnerChanged += hostOwns => Dispatcher.UIThread.Post(() => OnHostOwnerChanged(hostOwns));
+            lamps.OwnerChanged += hostOwns => _post(() => OnHostOwnerChanged(hostOwns));
     }
 
     /// <summary>Point the coordinator at the current view-models. Called after each BuildUi (startup + live
@@ -252,13 +263,20 @@ internal sealed class LightingCoordinator : IDisposable
         else _vm.RepaintLighting();
     }
 
-    /// <summary>A LampArray host took (or released) the backlight. Taking it: nothing to do — the bridge is
-    /// already painting, and <see cref="Paint"/> now yields to it; we only tell the user, because the Lighting
-    /// panel's controls no longer describe what the keyboard is showing (G HUB blocks its own lighting UI in the
-    /// same situation). Releasing it: the surface is frozen on the host's last frame, so repaint the app's own
-    /// lighting for the current mode right away — from the cache, no hardware reads on the UI thread.</summary>
+    /// <summary>A host took (or released) the backlight. Taking it: grey the panel's controls out (they would
+    /// otherwise still write straight to the zones — see <see cref="LightingViewModel.Reapply"/> for that path
+    /// and what it costs) and tell the user, because the controls no longer describe what the keyboard is
+    /// showing (G HUB blocks its own lighting UI in the same situation). Releasing it: the surface is frozen on
+    /// the host's last frame, so bring the controls back and repaint the app's own lighting for the current mode
+    /// right away — from the cache, no hardware reads on the UI thread.
+    ///
+    /// This is the ONLY subscriber to the surface's event, and it is why the section needs no rebuild on a flip:
+    /// the flag it sets is observable, and a section rebuilt later (a language change) seeds itself from the
+    /// surface's own flag as it is constructed. A subscription inside the section would outlive it instead —
+    /// the section is rebuilt, this coordinator is not.</summary>
     private void OnHostOwnerChanged(bool hostOwns)
     {
+        _lighting?.HostOwnershipChanged(hostOwns);
         _vm.Status = Loc.T(hostOwns
             ? "Keyboard lighting is controlled by Windows Dynamic Lighting"
             : "Keyboard lighting is back under app control");
