@@ -97,7 +97,12 @@ typedef struct _AHLA_COLOR
 //
 // IOCTL_AHLA_WAIT_FRAME payload: one COMPLETE frame (the host sets an "update complete" flag on the last
 // report of a batch; partial batches are never handed up, so the app never paints a half-updated keyboard).
-// Sequence lets the app see that frames were dropped — which is normal and fine, it only paints the newest.
+//
+// Sequence is the order frames were published in, and nothing consumes it: the app paints the newest frame
+// it is handed, this driver overwrites a frame the app has not collected, and LampArrayTransport.DecodeFrame
+// carries the value into LampFrame.Sequence and stops there. A dropped frame is therefore invisible by
+// design — deliberately, since the newest state is the only interesting one for lighting — and not reported.
+// (This comment used to say Sequence let the app detect dropped frames. It never did.)
 //
 typedef struct _AHLA_FRAME
 {

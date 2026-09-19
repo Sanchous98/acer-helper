@@ -1,0 +1,15 @@
+# Cargo settings for the Rust driver.
+#
+# The target is named explicitly because this is a cross-build: the host is Linux (the release image), the
+# artefact is x86_64 Windows. Naming it here rather than on every command line means `cargo build` inside the
+# container and `cargo build --release` on a developer's machine do the same thing.
+[build]
+target = "x86_64-pc-windows-msvc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-pc-windows-msvc]
+# lld-link, not link.exe. It speaks the MSVC command line and reads MSVC objects and libraries, so it links
+# Rust's COFF objects against the NuGet WDK's .lib files with no Visual Studio and no Wine involved — the same
+# linker driver/build.sh already uses for the C driver. windows-drivers-rs expects link.exe here, which is the
+# part that would have needed Wine; it turns out not to be needed at all.
+linker = "lld-link"

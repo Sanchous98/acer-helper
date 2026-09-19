@@ -20,7 +20,10 @@ Windows-артефакта нет в образе».
 | `wdk-toolchain` | Debian trixie + clang-cl/lld-link + WDK/SDK, распакованные из NuGet (перенесено из `driver/Dockerfile`) |
 | `driver-image` | `wdk-toolchain` плюс `ENTRYPOINT` и `/src` — то есть образ драйвера, который описывает `driver/README.md` |
 | `driver` | сборщик: драйвер, через неизменённый `driver/build.sh` → `/out` |
-| `artefacts` | экспорт: пустая файловая система, в которой только `/linux`, `/driver`, `/PROVENANCE.txt` |
+| `rust-toolchain` | `wdk-toolchain` плюс Rust (`x86_64-pc-windows-msvc`) и `libclang-dev` для bindgen |
+| `driver-rust-image` | `rust-toolchain` плюс `ENTRYPOINT` — образ Rust-драйвера, парный к `driver-image` |
+| `driver-rust` | сборщик: тот же пакет, собранный на Rust, через `driver/build-rust-driver.sh` → `/out` |
+| `artefacts` | экспорт: пустая файловая система, в которой только `/linux`, `/driver`, `/driver-rust`, `/PROVENANCE.txt` |
 
 Общие стадии (`dotnet-base`, `wdk-toolchain`) существуют не для красоты: `apt-get` — самая дорогая часть
 образа, и вторая стадия, которой понадобится тот же тулчейн, наследует его, а не ставит заново. `wdk-toolchain`
@@ -49,7 +52,8 @@ Docker Desktop он включён по умолчанию.
 |---|---|
 | `dist/linux/` | каталог публикации: `AcerHelper` (нативный бинарник), `libSkiaSharp.so`, `libHarfBuzzSharp.so`, `.dbg` — то, что упаковывается в AppImage |
 | `dist/driver/` | `AcerHelperLampArray.sys` (**неподписанный**), `.pdb`, `driver.obj`, `AcerHelperLampArray.inf` с подставленными вместо `$TOKENS$` значениями |
-| `dist/PROVENANCE.txt` | версии SDK и clang, команда публикации, пин WDK, ревизия исходников (если передана) |
+| `dist/driver-rust/` | тот же пакет, собранный на Rust: `AcerHelperLampArray.sys` (**неподписанный**), `.pdb`, тот же INF. Добавление рядом с C-сборкой, а не замена: поставляется по-прежнему `dist/driver`. См. `rust-driver.md` |
+| `dist/PROVENANCE.txt` | версии SDK и clang, команда публикации, пин WDK, пин Rust-тулчейна, ревизия исходников (если передана) |
 
 Ревизию исходников в провенанс кладут руками: `.git` в контекст не отправляется намеренно, поэтому взять
 её изнутри неоткуда.
@@ -121,6 +125,8 @@ INF — всё это решено в `driver/build.sh`, и вторая коп�
 | База драйвера | `debian:trixie-slim` | сохраняется намеренно: драйвер проверен именно на этом clang, и смена дистрибутива ради экономии слоя `apt-get` меняла бы решённую часть |
 | Компилятор драйвера | `clang` и `lld` из `debian:trixie-slim` | перенесено из `driver/Dockerfile` без изменений, включая отсутствие версии в имени пакета: закреплён тег базового образа, а не мажор LLVM. Так этот тулчейн и был проверен — на нём собран `AcerHelperLampArray.sys`, разобранный в `driver/README.md` |
 | WDK | `ARG WDK_VERSION=10.0.26100.6584` | 26100 — WDK Windows 11 24H2 (линия 28000.x — это Insider SDK). Единственное место, где эта версия записана |
+| Rust-тулчейн | `ARG RUST_VERSION=1.98.1` | версия, которой Rust-драйвер собран и измерен. Ставится `rustup`-ом с `static.rust-lang.org`, поэтому это единственный плавающий вход Rust-стадии, и пин — то, что делает её фиксированной. Отдельный ARG от `WDK_VERSION`: компилятор разбирает заголовки WDK и линкуется с его библиотеками, но релиз компилятора с релизом WDK ничем не связан |
+| Версия KMDF у Rust-драйвера | `driver/AcerHelperLampArrayRust/src/kmdf_version.rs` | у C-драйвера пин живёт в `build.sh`; у Rust он в одном файле, который читают `build.rs`, скрипт сборки и сам драйвер. Второй копии нет — см. `rust-driver.md` §3 |
 | KMDF | `build.sh`, по умолчанию `1.33` | пин не дублируется в Dockerfile: 1.33 — версия, которая есть в Windows 11 22H2 (build 22621), а это пол, объявленный в `AcerHelperLampArray.inf`. Поднимать только вместе с полом INF |
 | Пакеты NuGet | из `AcerHelper.csproj` | образ не добавляет, не заменяет и не переопределяет ни одной версии |
 
@@ -353,3 +359,43 @@ GIT_SHA`; без неё там `not recorded`, что тоже проверен�
 собран, слинкован, `.sys` — настоящий PE x64 с `Subsystem = NATIVE`, INF подставлен. Загружать и исполнять
 его на этой машине нельзя: он неподписанный, для загрузки нужен тестовый режим, а ошибка в драйвере — синий
 экран. Ничего сверх «собирается и пакуется» здесь не утверждается.
+
+### 2026-09-19 — вторая сборка того же пакета: стадии `rust-toolchain`, `driver-rust`, `/driver-rust`
+
+В образ добавлен **второй драйвер**: тот же пакет `AcerHelperLampArray`, собранный на Rust. Причина,
+устройство и цена — отдельный документ, `rust-driver.md`; здесь — что изменилось в самом образе и что
+измерено.
+
+**Что изменилось.** Три стадии (`rust-toolchain`, `driver-rust-image`, `driver-rust`), одна строка в
+экспорте (`/driver-rust`) и один ARG (`RUST_VERSION`). **Стадия `driver-image` не тронута**, `driver/build.sh`
+не тронут, стадия `driver` не тронута, и `dist/driver` — это по-прежнему C-сборка, байт в байт как раньше.
+Rust-сборка ничего не заменяет.
+
+**Экспорт сверен с таблицей выше, файл за файлом.** Строка `dist/driver-rust/` добавлена; расхождений по
+остальным нет:
+
+```
+dist/linux/AcerHelper                        25546368   ELF 64-bit LSB pie executable, x86-64
+dist/linux/AcerHelper.dbg                    54619088
+dist/linux/libHarfBuzzSharp.so                2808040
+dist/linux/libSkiaSharp.so                   11170296
+dist/driver/AcerHelperLampArray.sys             23040   PE32+ (native), x86-64
+dist/driver/AcerHelperLampArray.pdb            491520   MSVC program database 7.00
+dist/driver/driver.obj                          11385   x86-64 COFF
+dist/driver/AcerHelperLampArray.inf              3145   Windows setup INFormation
+dist/driver-rust/AcerHelperLampArray.sys        25600   PE32+ (native), x86-64, импорт WDFLDR.SYS + ntoskrnl.exe
+dist/driver-rust/AcerHelperLampArray.pdb       479232   MSVC program database 7.00
+dist/driver-rust/AcerHelperLampArray.inf         3145   тот же файл, подставлен так же — diff с dist/driver чист
+dist/PROVENANCE.txt                               857   добавлена строка driver-rust и пин Rust
+```
+
+**Чего в образ не добавлено.** Wine, MSVC и `cargo-wdk`. Первые два не нужны: Rust-объекты линкуются тем
+же `lld-link` против того же WDK из NuGet, что и C-сборка. `cargo-wdk` и его крейт `wdk-build` не собираются
+на Linux-хосте вообще — явный `compile_error!` в исходнике; разбор с текстами ошибок — `rust-driver.md` §1.
+
+**Дополнительно измерено, и это касается обеих сборок.** INF доезжает до контейнера с **CRLF**: контекст
+сборки на Windows — это рабочее дерево, а `.gitattributes` нормализует окончания при коммите, а не при
+checkout. То есть и `dist/driver/AcerHelperLampArray.inf`, и `dist/driver-rust/…` в сборке на Windows-машине
+имеют CRLF, а в сборке на Linux-раннере (CI) — LF. На установку это не влияет (CRLF для INF — обычная
+форма), но побайтовой воспроизводимости между машинами у этого файла нет, и раньше это не было записано.
+Проверка в `build-rust-driver.sh` сравнивает значение, сняв `\r`.

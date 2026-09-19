@@ -63,6 +63,36 @@ Details worth knowing about [`build.sh`](build.sh):
 Visual Studio supports a ClangCL toolset for driver projects, so this is the same compiler the IDE would use —
 just driven by hand instead of by MSBuild.
 
+## Build A′ — the same package, in Rust
+
+There is a second build of this driver: [`AcerHelperLampArrayRust/`](AcerHelperLampArrayRust/), a cargo crate
+that produces the same `AcerHelperLampArray.sys` and the same package, using `lld-link` against the same
+NuGet WDK and bindgen against the same headers. It exists beside this one and does not replace it —
+`dist/driver` is still the C build, and nothing in this file changed.
+
+To build it:
+
+```bash
+docker build --target driver-rust-image -t acerhelper-wdk-rust .
+```
+
+```bash
+docker run --rm -v "$PWD/driver/AcerHelperLampArrayRust:/src" \
+                -v "$PWD/driver/AcerHelperLampArray/AcerHelperLampArray.inf:/inf/AcerHelperLampArray.inf" \
+                acerhelper-wdk-rust
+```
+
+Output in `driver/AcerHelperLampArrayRust/out/`: the same three files, and the same unsigned-package caveat.
+The release image builds it as its `driver-rust` stage, exported as `dist/driver-rust`.
+
+**Neither Wine nor MSVC is involved, and neither is `windows-drivers-rs`.** That crate set — `wdk-build`,
+`wdk-sys`, `cargo-wdk` — refuses to compile off Windows with an explicit `compile_error!`, so the Rust driver
+reaches bindgen and the KMDF function table directly instead. The four defects found in this C driver are
+made structurally unrepresentable in it rather than commented around. Why, how, and what is *not* verified:
+[../docs/rust-driver.md](../docs/rust-driver.md). The verification limit is the same for both builds and is
+stated there and at the top of `AcerHelperLampArrayRust/src/lib.rs`: **compiles and packages, and nothing
+about behaviour in the kernel.**
+
 ## Build B — MSBuild + WDK (the classic path)
 
 Needs Visual Studio 2022 (**Desktop development with C++**) and the **WDK** for Windows 11, matching versions:

@@ -8,7 +8,14 @@
 #   wdk-toolchain   Debian + clang-cl/lld-link + the WDK/SDK unpacked from NuGet (driver/Dockerfile, lifted)
 #   driver-image    wdk-toolchain + the entrypoint, i.e. the driver-only image driver/README.md documents
 #   driver          builder -> the kernel driver, built by the unchanged driver/build.sh -> /out
-#   artefacts       the export: an empty filesystem holding /linux, /driver, /PROVENANCE.txt
+#   rust-toolchain  wdk-toolchain + Rust (x86_64-pc-windows-msvc) + libclang for bindgen
+#   driver-rust-image  rust-toolchain + the entrypoint, the Rust driver's counterpart of driver-image
+#   driver-rust     builder -> the same package, built in Rust by driver/build-rust-driver.sh -> /out
+#   artefacts       the export: an empty filesystem with /linux, /driver, /driver-rust, /PROVENANCE.txt
+#
+# Two drivers, and the C one is the one that ships: /driver is what driver/README.md and docs/build-image.md
+# describe, and nothing about it changed to make room for /driver-rust. Why the second exists, what the probe
+# cost and what it is not allowed to claim: docs/rust-driver.md.
 #
 # BuildKit is required — `--mount=type=cache` for the NuGet cache and `--output=type=local` for the export are
 # both BuildKit features. `docker build` on Docker Desktop and `docker buildx build` elsewhere both give it.
@@ -43,6 +50,13 @@ ARG KMDF_VERSION
 # has to be handed in: --build-arg GIT_SHA="$(git rev-parse HEAD)". The default is plain text on purpose — a
 # default containing a command substitution would be pasted into a RUN and executed by the shell there.
 ARG GIT_SHA=not recorded
+
+# The Rust driver's toolchain, pinned by version rather than left to `stable`. rustup installs it from
+# static.rust-lang.org, so this is the only floating input in the Rust stage and the pin is what makes it
+# fixed; 1.98.1 is the version the driver was built and measured with. It is a separate ARG from WDK_VERSION
+# because the two are independent: the Rust compiler parses the WDK headers and links against the WDK
+# libraries, but nothing ties a compiler release to a WDK release. See docs/rust-driver.md.
+ARG RUST_VERSION=1.98.1
 
 # ----------------------------------------------------------------------------------------------------------
 # Stage: dotnet-base — the shared .NET toolchain.
@@ -82,6 +96,8 @@ FROM dotnet-base AS app-linux
 
 ARG WDK_VERSION
 ARG GIT_SHA
+# Recorded in PROVENANCE.txt only; the .NET side does not use Rust at all.
+ARG RUST_VERSION
 
 WORKDIR /src
 COPY . .
@@ -140,6 +156,8 @@ RUN mkdir -p /out/linux \
       "clang:          $(clang-18 --version | head -1)" \
       "publish:        dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishAot=true -p:CppCompilerAndLinker=clang-18" \
       "driver:         built by driver/build.sh as this image ships it; its KMDF resolution is printed in the build log (1.33, the Windows 11 22H2 floor AcerHelperLampArray.inf declares)" \
+      "driver-rust:    the same package built in Rust by driver/build-rust-driver.sh; KMDF pinned in src/kmdf_version.rs and stamped into the INF from there. Unsigned, unloaded, and an addition beside the C driver — see docs/rust-driver.md" \
+      "rust (Rust driver): ${RUST_VERSION}" \
       "WDK:            ${WDK_VERSION}" \
       "source:         ${GIT_SHA}" \
       > /out/PROVENANCE.txt
@@ -235,13 +253,97 @@ COPY driver/AcerHelperLampArray/AcerHelperLampArray.inf /src/AcerHelperLampArray
 RUN OUT=/out KMDF_VERSION=${KMDF_VERSION} /usr/local/bin/build-driver /src
 
 # ----------------------------------------------------------------------------------------------------------
+# Stage: rust-toolchain — the Rust driver's toolchain.
+# ----------------------------------------------------------------------------------------------------------
+# Sits on top of wdk-toolchain and adds exactly two things: Rust, and libclang for bindgen.
+#
+# There is deliberately no Wine here, and no MSVC. The plan this stage was expected to need was msvc-wine —
+# link.exe and the VC libraries, run under Wine — because that is what windows-drivers-rs expects. It turned
+# out not to be needed: the driver's link is the same link driver/build.sh already performs for the C one,
+# `lld-link` against the WDK libraries unpacked from NuGet, and lld-link reads Rust's COFF objects exactly as
+# it reads clang's. The probe that established this is recorded in docs/rust-driver.md; what it also
+# established is that the crate set that would have needed Wine cannot run here at all — `wdk-build` contains
+# an unconditional `compile_error!` off Windows — so the driver uses bindgen and the KMDF function table
+# directly instead. See build.rs and src/ffi.rs.
+FROM wdk-toolchain AS rust-toolchain
+
+ARG RUST_VERSION
+
+# libclang-dev is for bindgen, which dlopens libclang to parse the WDK headers. The `clang` package from
+# wdk-toolchain ships the driver binary and libclang-cpp but not the `libclang.so` that clang-sys looks for.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libclang-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup.sh \
+ && sh /tmp/rustup.sh -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION" \
+ && rm /tmp/rustup.sh \
+ && rustup target add x86_64-pc-windows-msvc \
+ && rustc -vV
+
+# The build script, shipped at the same kind of path as build-driver and called, not reimplemented. It reads
+# the KMDF pin out of src/kmdf_version.rs and stamps the INF with it; see that file.
+COPY driver/build-rust-driver.sh /usr/local/bin/build-rust-driver
+RUN chmod +x /usr/local/bin/build-rust-driver
+
+# ----------------------------------------------------------------------------------------------------------
+# Stage: driver-rust-image — the Rust driver's own image.
+# ----------------------------------------------------------------------------------------------------------
+# The counterpart of driver-image, so the same run-with-sources-mounted flow works for this driver too:
+# build this target, mount the crate over /src, let the entrypoint build it.
+FROM rust-toolchain AS driver-rust-image
+
+WORKDIR /src
+ENTRYPOINT ["/usr/local/bin/build-rust-driver"]
+
+# ----------------------------------------------------------------------------------------------------------
+# Stage: driver-rust — the Rust kernel driver as a release artefact.
+# ----------------------------------------------------------------------------------------------------------
+FROM rust-toolchain AS driver-rust
+
+# Only what the build reads. COPYing the directory instead would drag in target/ — a locally built .sys, its
+# .pdb and the bindgen output — which is precisely what the provenance of a release artefact must not depend
+# on. Cargo.lock is copied and the build runs --locked, so the dependency graph is the committed one.
+COPY driver/AcerHelperLampArrayRust/Cargo.toml /src/Cargo.toml
+COPY driver/AcerHelperLampArrayRust/Cargo.lock /src/Cargo.lock
+COPY driver/AcerHelperLampArrayRust/build.rs /src/build.rs
+COPY driver/AcerHelperLampArrayRust/wrapper.h /src/wrapper.h
+COPY driver/AcerHelperLampArrayRust/.cargo /src/.cargo
+COPY driver/AcerHelperLampArrayRust/src /src/src
+# The same INF the C package uses, stamped by build-rust-driver.sh. It is the package's INF — hardware id,
+# Security, PnpLockdown, LowerFilters, KmdfService and the 22621 floor are all the contract with the app —
+# and the Rust driver does not get its own copy of it.
+COPY driver/AcerHelperLampArray/AcerHelperLampArray.inf /inf/AcerHelperLampArray.inf
+
+# Two cache mounts, both sharing=locked for the reason the NuGet one is (see app-linux): the default
+# sharing=shared lets two concurrent builds write into the same directory, and the failure that produced was a
+# half-deleted package tree that NuGet then refused to install into. The cargo registry is hundreds of MB of
+# bindgen and its dependencies, and the target directory is the compiled bindings; without the mounts every
+# source change re-downloads and re-parses the WDK headers.
+#
+# OUT and CARGO_TARGET_DIR move both outputs off /src, so what is exported is the new package and not a
+# mixture with anything the context might have carried in.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    OUT=/out INF=/inf/AcerHelperLampArray.inf CARGO_TARGET_DIR=/build/target \
+    /usr/local/bin/build-rust-driver /src
+
+# ----------------------------------------------------------------------------------------------------------
 # Stage: artefacts — the export.
 # ----------------------------------------------------------------------------------------------------------
 # An empty filesystem holding only the artefacts, so `--output type=local` never tries to write an SDK image
 # or a WDK tree to the caller's disk.
+#
+# /driver is the C driver and stays the C driver: it is what ships today. /driver-rust is the Rust one, an
+# addition beside it until the owner says otherwise — same package shape, different build.
 FROM scratch AS artefacts
 COPY --from=app-linux /out/linux /linux
 COPY --from=driver /out /driver
+COPY --from=driver-rust /out /driver-rust
 COPY --from=app-linux /out/PROVENANCE.txt /PROVENANCE.txt
 
 # ----------------------------------------------------------------------------------------------------------

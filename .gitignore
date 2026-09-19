@@ -6,6 +6,9 @@ obj
 driver/**/out
 driver/**/x64
 driver/**/tools
+# The Rust driver's cargo target directory: a locally built .sys, its .pdb, and the bindgen output from
+# whatever WDK was on the building machine.
+driver/**/target
 
 # Rider per-user solution settings (machine-local; must never be committed)
 *.DotSettings.user
