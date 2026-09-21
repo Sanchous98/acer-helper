@@ -17,7 +17,6 @@ public sealed partial class AcerHotkeys : IHotkeys
     private const int  RIM_TYPEKEYBOARD = 1;
     private const int  RIM_TYPEHID      = 2;
 
-    private const byte   TURBO_B0 = 0x04, TURBO_B1 = 0x85;
     private const ushort NITRO_MAKECODE = 0x75;
     private const ushort RI_KEY_BREAK   = 0x01;
     private const ushort RI_KEY_E0      = 0x02;
@@ -127,7 +126,12 @@ public sealed partial class AcerHotkeys : IHotkeys
             var dataOff = off + 8;
             var b0 = Marshal.ReadByte(buf, dataOff);
             var b1 = sizeHid > 1 ? Marshal.ReadByte(buf, dataOff + 1) : (byte)0;
-            if (b0 == TURBO_B0 && b1 == TURBO_B1) Pressed?.Invoke(HotkeyAction.TogglePerformance);
+            // The signature and the action it stands for live in AcerHotkeyReports, which the LINUX half reaches
+            // through the very same bytes on hidraw — one place, so the two halves cannot drift apart unnoticed.
+            Span<byte> report = stackalloc byte[2];
+            report[0] = b0;
+            report[1] = b1;
+            if (AcerHotkeyReports.Decode(report) is { } turbo) Pressed?.Invoke(turbo);
         }
         finally { Marshal.FreeHGlobal(buf); }
     }

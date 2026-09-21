@@ -141,8 +141,16 @@ public sealed class FakeDisplayTint(int levels = 5) : IDisplayTint
 
     public bool ApplyResult { get; set; } = true;
 
+    /// <summary>How long this port takes to answer, for the one property a fake is otherwise unable to stand in
+    /// for: that a level change is SLOW — the real KWin link waits out the compositor's 2000 ms quick-adjust walk
+    /// before it can verify a change made while the filter is already on (KwinTint.Linux.cs, <c>Commit</c>), and
+    /// the whole reason the apply left the UI thread is that wait. Zero (the default) keeps every other test
+    /// synchronous.</summary>
+    public TimeSpan ApplyDelay { get; set; }
+
     public bool Apply(int level)
     {
+        if (ApplyDelay > TimeSpan.Zero) Thread.Sleep(ApplyDelay);
         ApplyCalls.Add(level);
         return ApplyResult;
     }

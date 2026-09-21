@@ -53,6 +53,14 @@ public sealed partial class MainViewModel : ObservableObject
     private Action? _grantAccess;
     [ObservableProperty] private bool _needsHardwareAccess;
 
+    /// <summary>The banner's caption. A property rather than a fixed markup string because ONE banner carries two
+    /// messages: the offer to install, and — after an install whose module reload could not take — the order to
+    /// reboot. The second one has nowhere else to live, and this is deliberate: <c>Status</c> is rewritten from
+    /// the device's own status message by every refresh tick (a few seconds), while the banner stays until
+    /// something clears it. Read at construction, like every other string here, so a live language switch works
+    /// by rebuilding the view model (<c>Loc.Use</c> runs before that).</summary>
+    [ObservableProperty] private string _hardwareAccessLabel = Loc.T("Grant hardware access…");
+
     // Side drawer: which page is showing. DrawerContent identifies it; the three pages are hosted SIDE BY SIDE
     // in the view and toggled by the Is*Page flags below, NOT swapped through one shared host — see those flags.
     [ObservableProperty] private object? _drawerContent;
@@ -137,6 +145,26 @@ public sealed partial class MainViewModel : ObservableObject
     public void SetHardwareAccessNeeded(Action grant)
     {
         _grantAccess = grant;
+        HardwareAccessLabel = Loc.T("Grant hardware access…");
+        NeedsHardwareAccess = true;
+    }
+
+    /// <summary>Keep the banner up after an install that could not make the module parameters live, and re-label
+    /// it: what is missing now is a REBOOT, and the banner is the only surface in this window that persists —
+    /// the status line is overwritten by the next refresh tick with the device's own message (never null on the
+    /// Linux backend), so a reboot instruction put there is on screen for a few seconds and then replaced by
+    /// text that does not mention rebooting at all. Deliberately does NOT clear <see cref="NeedsHardwareAccess"/>:
+    /// clearing it would take the instruction off the screen entirely and leave the user at a dead end, because
+    /// the installer is idempotent — once the files are in /etc it never offers itself again, however useless the
+    /// install turned out to be.
+    ///
+    /// The grant command stays wired, so clicking retries the install — genuinely useful in the worse variant,
+    /// where the unload succeeded but the load failed and the driver is gone for the session (a retry loads it
+    /// back). The caption does not promise that a retry will work, because while the module is held open it
+    /// cannot.</summary>
+    public void SetHardwareAccessRebootPending()
+    {
+        HardwareAccessLabel = Loc.T("Restart your computer to finish enabling the unlocked controls (click to retry).");
         NeedsHardwareAccess = true;
     }
 

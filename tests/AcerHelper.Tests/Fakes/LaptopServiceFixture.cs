@@ -1,6 +1,7 @@
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Tests.Fakes;
 
@@ -34,11 +35,23 @@ public sealed class LaptopServiceFixture
     /// <param name="declare">The fake backend's probe: whatever this does to the device happens BEFORE the
     /// service — and so before the settings model — is built. This is where <see cref="FakeDevice.Declare"/>
     /// calls belong.</param>
-    public LaptopServiceFixture(Settings? settings = null, Action<FakeDevice>? declare = null)
+    /// <param name="cardwireGpuAccess">The machine's cardwire capability, when a test needs one that is not this
+    /// host's. The service builds the real port from the OS host otherwise (<c>CardwireGpuAccessHost.Create</c>),
+    /// and on this build that port's facts say "not Linux" — which is the truth about the Windows TFM the suite
+    /// compiles, and useless for a test about what happens when there IS something to ask for. So the port is
+    /// handed in, exactly as <c>LampArray</c>'s factory is (see <c>DynamicLightingSeamTests</c>): a test writes
+    /// its own four facts and its own busctl recorder, and the row, the call and the refusal are all reachable
+    /// without a daemon, a GPU or a filesystem.</param>
+    /// <remarks><c>internal</c> rather than public because <paramref name="cardwireGpuAccess"/> is an internal
+    /// port type: the capability's plumbing stays off the app's public surface (it is a signpost, like
+    /// <c>Settings</c>), and a test fake does not need a wider door than the suite that uses it.</remarks>
+    internal LaptopServiceFixture(Settings? settings = null, Action<FakeDevice>? declare = null,
+                                  CardwireGpuAccessPort? cardwireGpuAccess = null)
     {
         declare?.Invoke(Device);
         Store = new FakeSettingsStore(settings);
         Service = new LaptopService(Device, Store);
+        if (cardwireGpuAccess != null) Service.CardwireGpuAccess = cardwireGpuAccess;
     }
 
     /// <summary>Attach a <see cref="FakePowerProfiles"/> and return it, for arranging and asserting.</summary>

@@ -183,8 +183,10 @@ internal sealed class HwmonSensors : ISensors
 
     public SensorSnapshot Read()
     {
-        // EC sensor drivers can register after we probe (linuwu_sense's hwmon appeared a second after app
-        // start on the AN18-61) — while we have no fan source, keep re-scanning; the tree is tiny.
+        // EC sensor drivers can register after we probe — on the AN18-61 the acer chip comes up with acer_wmi,
+        // which the installer RELOADS, so an app that autostarted can be looking at a tree the chip has not
+        // joined yet (and a chip registering a second after app start was measured on this machine) — while we
+        // have no fan source, keep re-scanning; the tree is tiny.
         if (_fanDir == null) ReprobeFans();
 
         var fans = new List<FanReading>(_fanIdx.Length);
@@ -205,7 +207,21 @@ internal sealed class HwmonSensors : ISensors
 /// <summary>Best-effort fan control via hwmon PWM. Exists only when the kernel exposes a
 /// <c>pwmN_enable</c>+<c>pwmN</c> pair this user can actually write — which most laptops do NOT
 /// (the files are usually root-owned), so on a typical machine fans stay read-only. Where it is
-/// available it controls one fan (Auto hands control back to the firmware; Max/Custom set speed).</summary>
+/// available it controls one fan (Auto hands control back to the firmware; Max/Custom set speed).
+///
+/// AN ACER IS NOT THIS CLASS'S JOB, and the reason is the MEANING of the node rather than whether
+/// the file exists — worth stating because the tempting summary ("acer-wmi has no bare pwmN, so this
+/// can never bind there") is false in this build: with the module parameters this repo installs, the
+/// acer chip exposes pwmN + pwmN_enable too, so this class CAN bind to it. What it would then do is
+/// the problem: it drives ONE channel of the machine's two fans (<c>HasGpuFan: false</c>) and encodes
+/// the generic hwmon contract — Max = enable 1 (manual) + duty 100 — while the acer node's own 0/1/2
+/// are TURBO/CUSTOM/AUTO, so its Max would latch the CPU fan in CUSTOM and leave the GPU fan where it
+/// was. Acer fan control is therefore a separate port (AcerFanPort, kept in an UN-SUFFIXED file so
+/// the suite can compile its encoding — this file cannot be compiled by it), and AcerDevice.Linux
+/// REPLACES this port with that one whenever both channels are writable. What keeps it in the tree is
+/// everything else: every non-Acer vendor, and the Acer case where that port cannot be built (the
+/// chip has only one channel, or the nodes are not writable) — a single-channel fallback beats an
+/// Acer-typed port that would fail every write.</summary>
 internal sealed class HwmonFanControl : IFanControl, IDisposable
 {
     private const int ManualMode = 1;   // pwmN_enable = 1 -> speed driven by pwmN

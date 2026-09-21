@@ -230,9 +230,13 @@ jobs:
 
       # AppImage: bundle the whole AOT output the image exported (native AcerHelper + libSkiaSharp.so /
       # libHarfBuzzSharp.so — not single-file, like the Windows AOT publish; drop the .dbg/.pdb) plus the udev
-      # rules (installed on first run via the in-app pkexec). dist/linux is the publish folder the `artefacts`
-      # stage lays out, so this step no longer knows where a publish happened. appimagetool with
-      # --appimage-extract-and-run, as it ran in the container this step used to be in: no FUSE dependency.
+      # rules (installed on first run via the in-app pkexec). The three permission/options files are ALREADY in
+      # dist/linux: the csproj carries them as Linux-only Content items with CopyToPublishDirectory, so every
+      # publish — this one, a local one, the RPM — brings them without anyone copying them in. The cp below
+      # therefore re-copies the same bytes; it is kept because the AppDir layout is this step's business and an
+      # AppImage missing them loses the whole "Grant hardware access" offer silently. dist/linux is the publish
+      # folder the `artefacts` stage lays out, so this step no longer knows where a publish happened. appimagetool
+      # with --appimage-extract-and-run, as it ran in the container this step used to be in: no FUSE dependency.
       # appimagetool also REQUIRES `file` to inspect the AppDir (it aborts with "file command is missing but
       # required" — the minimal fedora image had to be given it); the ubuntu runner image carries it as a
       # default-installed package, and that is the one thing here resting on the image rather than a step.
@@ -246,7 +250,7 @@ jobs:
           install -m0755 packaging/AppRun "$AD/AppRun"
           cp packaging/acer-helper.desktop "$AD/"
           cp packaging/acer-helper.png "$AD/"
-          cp packaging/60-acer-helper.rules packaging/acer-helper.conf "$AD/"
+          cp packaging/60-acer-helper.rules packaging/acer-helper.conf packaging/acer-helper-smu-perms.service packaging/acer-helper-modprobe.conf "$AD/"
           # Reuse the cached appimagetool if the cache restored it; otherwise fetch it.
           [ -x appimagetool ] || curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x appimagetool

@@ -45,6 +45,30 @@
     <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
   </ItemGroup>
 
+  <!-- The Linux installer's input, carried INTO the build output. HardwareAccess reads these from
+       AppContext.BaseDirectory and installs them into /etc for the AppImage case, so a publish that does not
+       carry them is a publish whose "Grant hardware access" offer silently never appears (RulesNeeded() finds
+       nothing to compare and returns false) — the whole access feature disappears with no error anywhere. That
+       is why this is an ItemGroup with a reason rather than the flat "copy packaging/* in the AppImage step"
+       that used to be the only path: the Dockerfile's publish, a local publish and any future RPM all get the
+       files from here.
+       The Link= is the BARE file name on purpose: the four land side by side in one flat folder next to the
+       binary (that is what HardwareAccess looks for), so the packaging/ prefix must not survive the copy.
+       GATED ON !windows: the Windows publish feeds the WiX MSI, which harvests publish\** wholesale — udev,
+       tmpfiles.d, systemd and modprobe.d files have no business inside an MSI, and a Linux-only feature's inputs must
+       not become Windows install payload. (Same "not windows" spelling as the Compile filter above: the
+       portable TFM is "net10.0" and does NOT contain "linux".) -->
+  <ItemGroup Condition="!$(TargetFramework.Contains('windows'))">
+    <Content Include="packaging\60-acer-helper.rules" Link="60-acer-helper.rules"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="packaging\acer-helper.conf" Link="acer-helper.conf"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="packaging\acer-helper-smu-perms.service" Link="acer-helper-smu-perms.service"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="packaging\acer-helper-modprobe.conf" Link="acer-helper-modprobe.conf"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The tests live in their own project under tests/, but the SDK's implicit **/*.cs glob would otherwise
        compile every test source INTO the shipped app (and its Avalonia/Native-AOT closure). Excluded here so
        the test tree is invisible to both TFMs of this project. -->
@@ -94,12 +118,25 @@
        NOTE: do NOT pin Tmds.DBus.Protocol explicitly. It is Avalonia's Linux D-Bus transport
        (tray/StatusNotifierItem, X11 IME), and Avalonia.Desktop must control its version — an
        independent pin (e.g. 0.94.2) loads a Tmds where Avalonia's expected types moved, crashing
-       at X11 init with "Could not load type 'Tmds.DBus.Protocol.Connection'". Let it flow transitively. -->
+       at X11 init with "Could not load type 'Tmds.DBus.Protocol.Connection'". Let it flow transitively.
+
+       X11 REMAINS THE LINUX TARGET: no Wayland backend is referenced, and Bootstrap/Program.cs calls
+       plain UsePlatformDetect(). A short Wayland trial was run and abandoned — its findings, kept so
+       the question does not get re-opened from scratch:
+         * the compositor, not the client, decides where a toplevel goes, so the corner-anchored flyout
+           cannot position itself under Wayland the way it does under X11;
+         * Avalonia offers no layer-shell surface, so the panel-style alternative is not available
+           either — those two together are disqualifying, not a matter of polish;
+         * Avalonia.Desktop holds no Wayland strings at all, so UsePlatformDetect() can never select a
+           Wayland backend on its own; one has to be named explicitly.
+       What the trial left behind is the version bump only: the Wayland backend has no release below
+       12.1.0, so the four pins below sit on 12.1.x rather than 12.0.5. They stay there deliberately —
+       that line is the current stable one and the owner keeps it ("раз уж avalonia обновился"). -->
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.0.5" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
-    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.0.5" />
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.1.2" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
@@ -110,7 +147,7 @@
        HidSharp only serves the Windows RGB transport — Linux talks to hidraw directly
        (EneHidController.Linux.cs), because HidSharp's Linux enumeration misses HID-over-I2C devices. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 

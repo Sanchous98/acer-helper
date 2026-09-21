@@ -16,3 +16,15 @@ driver/**/target
 # Test-run output: `dotnet test --logger trx` writes tests/**/TestResults/, one folder per run. Never commit it —
 # and note it is NOT covered by `bin`/`obj`, so a run that forgets to clean up shows up as untracked.
 **/TestResults
+
+# The Linux run directory, as documented in README and docs/build-image.md: a plain `dotnet publish` output, or
+# an AppImage build with `--output type=local,dest=dist`. It is a build tree of tens of megabytes with a 25 MB
+# AOT binary in it, and it is NOT covered by `bin`/`obj` — so without this line a `git add -A` on a machine that
+# has ever built for Linux stages the whole thing.
+dist
+
+# The OTHER name the same output takes: the publish command in docs/build-image.md writes `-o publish-linux`,
+# and that directory is what gets copied into `dist` afterwards. It is the same 92 MB of build tree as `dist`
+# and it was untracked-but-unignored until a `git add -A` in this repo put it in front of a commit: `dist` was
+# listed here and this name was not, which is exactly the kind of near-miss a second entry prevents.
+publish-linux

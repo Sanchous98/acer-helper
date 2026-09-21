@@ -55,11 +55,20 @@
 | намерение пользователя | какой режим выбрал человек; несёт `PerformanceProfile` | Domain |
 | индикатор прошивки | **значение** байта misc-setting 0x0B, `0x00`–`0x06`. Само `0x0B` — **индекс**, а не значение | `Infrastructure/Vendors/Acer/AcerProfiles.cs` |
 | EC usage mode | то, что реально двигает конверт мощности. Достигается только по HID и ходит **противоположно** индикатору: Turbo — это байт 0x05, но usage mode 0 | `EneHidController`, `AcerEcHidController.ModeFor` |
-| platform_profile | токен ядра/PPD на Linux: `balanced`, `low-power` | `Infrastructure/Vendors/Generic/PowerProfiles.Linux.cs` |
+| platform_profile | токен ядра/PPD на Linux: `low-power`, `quiet`, `balanced`, `balanced-performance`, `performance`. У Acer это **второй словарь тех же пяти режимов**: соответствие «токен ↔ байт EC» живёт в колонке `Choice` файла `AcerProfiles`, и там же ловушка — `performance` у Acer означает **Turbo** (`0x05`, 108 Вт), а Performance — это `balanced-performance` | `Infrastructure/Vendors/Generic/PowerProfiles.Linux.cs`, `Infrastructure/Vendors/Acer/AcerProfiles.cs` |
 | power overlay | GUID слайдера ОС (Best efficiency / Balanced / Best performance) | `Infrastructure/Vendors/Generic/OverlayCpuPower.Windows.cs` |
 
 **Запрещено** говорить «профиль» о чём-либо, кроме первого и четвёртого. Про каналы 2, 3 и 5 говорить
 «индикатор», «EC usage mode» и «power overlay».
+
+Четвёртый канал — единственный, у которого **две несовпадающие системы имён**, и это самое
+опасное столкновение слов в проекте: пять режимов Acer называются по-разному на уровне железа
+(байт EC) и на уровне ядра (токен). Перевод написан **один раз** — `AcerProfiles.ToChoiceName` /
+`FromChoiceName`, двери между словарями, — и ни один вызывающий не имеет права сопоставлять эти
+слова сам. Очевидный поиск по имени неверен в обе стороны: прочитать `performance` как
+Performance — показать не тот режим и отправить в EC не тот конверт (93 Вт вместо 108), а записать
+Performance, отправив токен `performance`, — попросить у ядра Turbo. Полная таблица, замеры и
+причина, по которой у токенов не бывает id, — `docs/acer-linux.md`.
 
 ## 3. Слова без типа
 

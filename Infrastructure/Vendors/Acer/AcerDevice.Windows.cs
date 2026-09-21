@@ -51,10 +51,20 @@ public sealed partial class AcerDevice
         Sensors       = new SensorsPort(ReadSensors);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         // The three settings this backend owns, DECLARED rather than parked in a slot of their own. Their keys
-        // are the names the Acer backend already knows them by — the Linuwu-Sense node names the Linux half of
-        // this backend binds the same three knobs through — so both OSes declare the same key for the same
-        // setting and a settings.json written on one reads on the other. Windows talks WMI and has no node of
-        // that name; the key is the backend's name for the setting, not a path.
+        // are the names the backend has always known them by — they were the Linuwu-Sense node names, which is
+        // why they read like paths — so both OSes declare the same key for the same setting and a settings.json
+        // written on one reads on the other. Windows talks WMI and has no node of that name; the key is the
+        // backend's name for the setting, not a path.
+        //
+        // ONLY THIS HALF DECLARES THEM ANY MORE, and that is parity rather than a gap waiting to be filled:
+        // mainline acer-wmi gives Linux the profiles, the fan/temperature telemetry, fan control and the Turbo
+        // key (via the installer's module parameters), but it has NO interface for LCD overdrive, the
+        // keyboard-backlight timeout or USB charging in any configuration — so there is nothing on that side to
+        // bind these three rows to, and the Linux backend says exactly that in one status line instead of
+        // probing for a module. The keys stay HERE because they are the cross-OS settings.json contract: the bag
+        // is persisted whole, so a settings.json written on Windows still carries them on Linux, where the rows
+        // simply do not appear — and a Linux build that invented its own name for one of these settings would
+        // break the pair. See docs/acer-linux.md.
         //
         // LCD overdrive is the one setting with no readback: its write (SetGamingProfile) returns a status byte,
         // so a row already knows whether it took, and reading the setting back would be a second EC transaction

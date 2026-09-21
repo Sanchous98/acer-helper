@@ -19,9 +19,14 @@ namespace AcerHelper.Infrastructure.Composition;
 /// <paramref name="post"/> is a parameter rather than a direct <c>Dispatcher.UIThread.Post</c> call so this
 /// file — the one that would have kept the layer it used to live in Avalonia-bound — needs no toolkit at all.
 /// It also makes <see cref="RunSet"/>'s failure path testable: its only observable effect is what it hands
-/// to that delegate, which a test can capture without a UI thread.</summary>
+/// to that delegate, which a test can capture without a UI thread.
+///
+/// <paramref name="confirmGpuAccess"/> is here for the same reason and by the same rule: the cardwire row's
+/// confirmation is a modal dialog, which needs the toolkit this file must not name (the two delegates take the
+/// place of an Avalonia call, exactly as <paramref name="post"/> does of <c>Dispatcher.UIThread.Post</c>), and
+/// passing it in is what lets a test click that row and hold the answers it produces.</summary>
 internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration,
-                                       Action<Action> post)
+                                       Action<Action> post, Func<Task<bool>> confirmGpuAccess)
 {
     /// <summary>Builds the toggle rows. <c>Initial</c> here is a PLACEHOLDER, not a reading: it is the value a
     /// failed read would produce (a flag port answers false when the EC won't answer), and the row fills in the
@@ -59,6 +64,32 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
                 Read: () => lamps.Enabled));
         }
 
+        // The app's own request to USE the machine's discrete GPU, which a third-party daemon (cardwire) is
+        // hiding from programs it has not allowed — see docs/cardwire-gpu-access.md. Also NOT a declared setting,
+        // and for a stronger version of the same reason: a declaration is something THIS MACHINE's firmware owns,
+        // while this is an ask the app makes of a daemon on the user's behalf. So its state lives in Settings
+        // (Settings.CardwireGpuAccess) rather than in DeviceSettings, and the row carries a CONFIRM because the
+        // grant cannot be revoked while the app runs (CardwireGpuAccessConsent says so in the user's words).
+        //
+        // THE ROW'S EXISTENCE IS THE GATE, AND THE GATE IS ONE RULE (CardwireGpuAccess.RowBelongs): somewhere
+        // there is something to ask for, or the user has already asked. The second half is what keeps a choice
+        // made while the GPU was hidden reachable — with the offer alone, a machine whose cardwire moved to
+        // Hybrid would drop the row and leave the preference with no switch. The OFFER itself (the prompt and
+        // the call) follows ShouldOffer alone, so a GPU that is already visible is never asked for.
+        //
+        // THE GATE COSTS ONE PROBE — a busctl status call and two file walks (CardwireGpuAccess.Linux.cs) — and
+        // it runs here, while the UI is being built, which is the same place PpdPowerProfiles asks the bus for
+        // the profile list at startup. It is read once per UI build (a live language switch rebuilds the UI) and
+        // never from the refresh loop, so it cannot become traffic.
+        if (svc.CardwireGpuAccess.RowBelongs(svc.CardwireGpuAccessEnabled))
+        {
+            var label = Loc.T("Use the discrete GPU");
+            list.Add(new OptionToggle(label, true, svc.CardwireGpuAccessEnabled,
+                v => RunSet(() => svc.SetCardwireGpuAccess(v), label),
+                Read: () => svc.CardwireGpuAccessEnabled,
+                ConfirmAsync: confirmGpuAccess));
+        }
+
         return list;
     }
 
@@ -82,13 +113,22 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         // Keyboard-backlight brightness is a LIGHTING control -> it lives in the Lighting window
         // (LightingViewModel.Backlight), not here. See AppController.
 
+        // The blue-light row is the one row whose write is NOT `RunSet`'s, because its write cannot be called and
+        // waited for: a level change is verified against what the compositor did, which for a change made while
+        // the filter is ALREADY ON takes as long as KWin's 2000 ms quick-adjust walk. So the write is handed to the
+        // service's serialized schedule, and with it the failure report — `Fail` below is the SAME call every other
+        // row's failure goes through, only reached from the schedule's thread instead of this one, which is exactly
+        // what it is shaped for (it `post`s the message rather than building it here). The row therefore behaves as
+        // before while the pick no longer holds the UI thread: nothing is posted for a level that took (a working
+        // row stays silent), and a superseded one reports nothing at all (TintApplyPolicy's third rule).
         if (svc.Device.DisplayTint is { } tint && tint.Levels > 0)
         {
             string[] all = ["Off", "Low", "Medium", "High", "Long-use"];
             var names = all.Take(tint.Levels).Select(n => Loc.T(n)).ToList();
             int idx = Math.Clamp(svc.Bluelight, 0, names.Count - 1);
-            list.Add(new OptionChoice(Loc.T("Blue-light filter:"), true, names, idx,
-                i => svc.SetBlueLight(i)));
+            var label = Loc.T("Blue-light filter:");
+            list.Add(new OptionChoice(label, true, names, idx,
+                i => svc.SetBlueLight(i, ok => { if (!ok) Fail(label, null); })));
         }
 
         return list;

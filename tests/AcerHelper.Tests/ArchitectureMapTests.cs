@@ -177,12 +177,14 @@ public class ArchitectureMapTests
     /// an exception: an axis's state crosses as the Domain value it already had
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>), so the container is never named and the rule the use case
     /// states — what an edit must not clobber, what is remembered before it is written — is stated without it.
-    /// What could NOT get in that way is measured in docs/device-and-application.md §8: the profile switch (a
+    /// What could NOT get in that way is measured in the retired analysis — the measurements it carried are kept
+    /// in docs/open-decisions.md's note on its retirement: the profile switch (a
     /// lock held across the port call). The per-mode lighting was named there too, and is NOT any more: it was
     /// stopped by a contract-shaped reason (the door handed the UI a live reference it edited in place, so
     /// hiding the graph would have broken it by construction), the owner overruled that reason, and the axis
     /// landed on the same terms as the others — one Domain type for one axis (<c>LightZoneState</c>), one
-    /// contract (<c>ILightZoneMode</c>), two use cases (docs/device-and-application.md §9).
+    /// contract (<c>ILightZoneMode</c>), two use cases (<c>Application/LightZone.cs</c>: <c>ReadLightZone</c>
+    /// and <c>ApplyLightZone</c>).
     ///
     /// Today Application imports Domain and nothing else: Localization is still permitted for the same reason
     /// <see cref="DomainPointsAtNothingButItselfAndLocalization"/> permits it, but the <c>AppLanguage</c> the

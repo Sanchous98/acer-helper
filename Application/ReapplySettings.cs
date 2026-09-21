@@ -62,8 +62,9 @@ public sealed class ReapplyOutcome
 /// <see cref="ReapplyPlan"/> states, over the contract above. It is the one member of the operation that could
 /// move here WHOLE, and what made that possible is worth stating: it needs no stored container, no vendor port
 /// and no <c>CoAxis</c> by name — only a schedule, the axes that schedule names, and a target that knows how to
-/// write them. Everything the other use cases of this layer would need is on the far side of a wall
-/// (docs/domain-layering-map.md §2), and this one is on the near side of it.
+/// write them. Everything the other use cases of this layer would need is on the far side of a wall — the walls
+/// that hold it there are listed in docs/open-decisions.md's note on the retired analysis — and this one is on
+/// the near side of it.
 ///
 /// WHAT IT DECIDES, and each of the three was made by hand at four separate sites before they were gathered
 /// here (the sites now name only the MOMENT they are, a <see cref="ReapplyTrigger"/>):

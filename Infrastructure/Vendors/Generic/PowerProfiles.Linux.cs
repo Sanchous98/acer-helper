@@ -93,34 +93,69 @@ internal static class Busctl
 /// Fallback generic Linux profiles via the ACPI <c>platform_profile</c> sysfs interface. Reading
 /// works as the user; writing usually needs root/udev (and conflicts with a running power daemon),
 /// so this is only used when no power-profiles-daemon D-Bus interface is available.
+///
+/// A vendor whose profile vocabulary is its own can bind this port to ITS OWN handler by passing a
+/// <c>handlerToken</c> to the constructor — see its remarks for the third selection mode that adds. Passing
+/// nothing (the generic and Dell backends) keeps the best-effort choice below, untouched.
 /// </summary>
 public sealed class SysfsPowerProfiles : IPowerProfiles
 {
     // Two kernel interfaces expose platform profiles: the ACPI alias (all kernels; a write fans out to
     // every registered handler) and per-handler class nodes (6.14+). The alias is frequently left
-    // root-only — it appears only when a handler registers, which for EC modules like Linuwu-Sense is
-    // after the boot-time tmpfiles pass — while the class nodes trigger a udev event on registration, so
-    // a udev rule can grant group access reliably; the vendor handler also carries the firmware's full
-    // profile list. Hence: prefer whichever source this process can actually write.
+    // root-only — it appears only when a handler registers, which for EC modules is after the boot-time
+    // tmpfiles pass — while the class nodes trigger a udev event on registration, so a udev rule can grant
+    // group access reliably; the vendor handler also carries the firmware's full profile list. Hence:
+    // prefer whichever source this process can actually write.
     private const string LegacyProfile = "/sys/firmware/acpi/platform_profile";
     private const string LegacyChoices = "/sys/firmware/acpi/platform_profile_choices";
     private const string ClassRoot     = "/sys/class/platform-profile";
 
-    private readonly string _profilePath;
+    private readonly string? _profilePath;
 
-    public SysfsPowerProfiles()
+    /// <param name="handlerToken">The handler to bind to, as it appears in a class node's RESOLVED path (e.g.
+    /// "acer-wmi" for the acer-wmi handler's <c>platform-profile-1</c>). Null — the default, and what the
+    /// generic and Dell backends pass — keeps the best-effort choice documented above. A token switches on the
+    /// vendor mode described on <see cref="PickSource(string?)"/>, which deliberately never considers the legacy
+    /// alias.</param>
+    public SysfsPowerProfiles(string? handlerToken = null)
     {
-        (_profilePath, var choicesPath) = PickSource();
+        (_profilePath, var choicesPath) = PickSource(handlerToken);
         var choices = Read(choicesPath);
         All = choices == null
             ? []
             : choices.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                      .Select(ToProfile).ToList();
         Available = All.Count > 0;
-        Writable = Available && CanWrite(_profilePath);
+        Writable = Available && _profilePath != null && CanWrite(_profilePath);
     }
 
-    private static (string Profile, string Choices) PickSource()
+    /// <summary>Which node this port chose — the class node when there is one, the legacy alias otherwise. It
+    /// is exposed because the acceptance check for the vendor mode is "did it bind to MY handler's node, and
+    /// not to the alias": the answer is a path, and the alternative is reading the driver's state by hand.</summary>
+    public string? ProfilePath => _profilePath;
+
+    /// <summary>THREE source-selection modes, and the token picks the third.
+    ///
+    /// WITHOUT one, the generic best-effort choice between TWO sources — the legacy ACPI alias when it is
+    /// writable, else the writable class node with the richest <c>choices</c>, else the alias for reading. That
+    /// is the path Dell and the generic backend take, hardware-verified, and it does not change.
+    ///
+    /// WITH one: the vendor's own handler and NOTHING else. Every class node is resolved to its real path and
+    /// only entries under a path containing the token are considered; of those, the one with the richest
+    /// <c>choices</c> that this process may write. The legacy alias is excluded ENTIRELY, and that exclusion is
+    /// the mode's whole point — the alias has two measured defects. It is a FAN-OUT: a write to it goes to every
+    /// registered handler (on the AN18-61 that is AMD's handler as well as acer-wmi, so one profile click moves
+    /// two unrelated profile sources). And it cannot report state: it reads back as <c>custom</c> once a vendor
+    /// handler has written, so it names no profile at all — which is why <c>AcerProfiles.FromChoiceName</c>
+    /// answers null for <c>custom</c>, and why a vendor that needs its vocabulary exact (Acer's five names, which
+    /// the AMD node does not offer) has to address its own node.
+    ///
+    /// Nothing matching leaves the pair null: <c>Available</c> is then false and the caller keeps the port it
+    /// already had (PPD, or the generic sysfs one) instead of being handed an empty profile list.</summary>
+    private static (string? Profile, string? Choices) PickSource(string? handlerToken)
+        => handlerToken == null ? PickGenericSource() : PickHandlerSource(handlerToken);
+
+    private static (string Profile, string Choices) PickGenericSource()
     {
         if (CanWrite(LegacyProfile)) return (LegacyProfile, LegacyChoices);
         (string, string)? best = null;
@@ -140,6 +175,33 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
         }
         catch { /* class absent (pre-6.14 kernel) */ }
         return best ?? (LegacyProfile, LegacyChoices);
+    }
+
+    private static (string?, string?) PickHandlerSource(string handlerToken)
+    {
+        (string? Profile, string? Choices)? best = null;
+        var bestCount = 0;
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(ClassRoot))   // one dir per handler
+            {
+                // The class entry is a symlink into /sys/devices and the DEVICE path is what names the driver
+                // (.../acer-wmi/platform-profile/platform-profile-1), while the class path says only
+                // "platform-profile-1". Hence the token is matched against the resolved path — resolved by
+                // SysfsLink rather than by the BCL, whose ResolveLinkTarget answers a lexically-joined path that
+                // is measurably wrong under /sys/class (see that type).
+                if (SysfsLink.RealPath(dir) is not { } real || !real.Contains(handlerToken, StringComparison.Ordinal))
+                    continue;
+                var profile = Path.Combine(dir, "profile");
+                var choices = Path.Combine(dir, "choices");
+                if (!CanWrite(profile)) continue;
+                // One handler can register more than one node; the richest choice list is the one worth showing.
+                var count = Read(choices)?.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+                if (count > bestCount) (best, bestCount) = ((profile, choices), count);
+            }
+        }
+        catch { /* class absent (pre-6.14 kernel) */ }
+        return best ?? (null, null);
     }
 
     public bool Available { get; }
@@ -168,6 +230,9 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
 
     public bool Set(PerformanceProfile profile)
     {
+        // No node (the token matched nothing, or there is no interface at all) -> there is nothing to write to,
+        // and that is a refusal rather than a silent success. Available is false in exactly that case.
+        if (_profilePath == null) { LastError = "no platform_profile node"; return false; }
         try { File.WriteAllText(_profilePath, profile.Id); return true; }
         catch (Exception ex) { LastError = ex.Message; return false; }
     }
@@ -187,9 +252,9 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
         return new PerformanceProfile(choice, name, kind, accent);
     }
 
-    private static string? Read(string path)
+    private static string? Read(string? path)
     {
-        try { return File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
+        try { return path != null && File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
         catch { return null; }
     }
 }

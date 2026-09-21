@@ -29,7 +29,13 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // ignored), the wire format, the measurement methodology and every dead end: see docs/power-an18-61.md.
 internal sealed partial class AcerEcHidController : IDisposable
 {
-    private const int VID = 0x1025, PID = 0x174B, FeatureLen = 65;
+    /// <summary>The Acer HID device both transports look for: this controller finds it for the power envelope's
+    /// feature reports, and <c>AcerHotkeys.Linux.cs</c> opens the SAME node to read the Turbo key's input reports
+    /// (<c>AcerEcHidController.IsAcerNode</c> is the shared test). Internal rather than private so the two ends
+    /// cannot disagree about which device is ours.</summary>
+    internal const int VID = 0x1025, PID = 0x174B;
+
+    private const int FeatureLen = 65;
 
     // Frame bytes 0 and 2 are both 0xA0 (report id + command marker); byte 1 is reserved. Then the 16-bit
     // little-endian feature id, the command id, and the parameters. FeatureUsageMode is 0x0001, so its high

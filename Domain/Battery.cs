@@ -9,8 +9,10 @@ namespace AcerHelper.Domain;
 ///
 /// COMPOSED INCREMENTALLY, which is why the members are settable rather than constructor arguments: the base
 /// device has only telemetry to offer (<c>GenericDevice</c>), and every vendor then adds the properties its
-/// own probe found — a WMI capability bitmask (Acer/Windows), a Linuwu-Sense node (Acer/Linux), a BIOS
-/// attribute (Dell/Windows), parsed <c>charge_types</c> (Dell/Linux). The ops-as-delegates shape is the one
+/// own probe found — a WMI capability bitmask (Acer/Windows; on Linux this vendor's battery properties have no
+/// transport at all, only the generic sysfs charge-threshold path the base device wires, because mainline
+/// exposes no Acer battery control), a BIOS attribute (Dell/Windows), parsed <c>charge_types</c> (Dell/Linux,
+/// from the firmware-attribute nodes). The ops-as-delegates shape is the one
 /// <c>DelegatePorts.cs</c> already uses for the same reason: the transport and its encoding are the only thing
 /// that differs by vendor, so a property is a read op and a write op rather than a class per vendor.
 ///

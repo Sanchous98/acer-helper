@@ -25,9 +25,10 @@ namespace AcerHelper.Application;
 /// implementation, and the reason is a layer decision rather than a size one: WHICH of the two writes this CPU
 /// takes (one offset per rail, or one for all cores) and WHERE the offsets are clamped are both the domain's, and
 /// the type that holds them (<c>CoAxis</c>, with <c>OffsetCounts</c> under it) is Infrastructure by the owner's
-/// ruling — the third wall of docs/device-and-application.md §2.3. This contract therefore cannot answer either
-/// question, and the use case does not pretend to: it states the empty edit and the order, and nothing about the
-/// rails. A wave that moves <c>CoAxis</c> would be the one that could move the rest.</summary>
+/// ruling — the third of the three walls listed in docs/open-decisions.md's note on the retired analysis, and the
+/// only one still standing. This contract therefore cannot answer either question, and the use case does not
+/// pretend to: it states the empty edit and the order, and nothing about the rails. A wave that moves
+/// <c>CoAxis</c> would be the one that could move the rest.</summary>
 public interface IUndervoltTarget
 {
     /// <summary>Remember the offsets as the CURRENT mode's, under the graph lock, and persist them — brought

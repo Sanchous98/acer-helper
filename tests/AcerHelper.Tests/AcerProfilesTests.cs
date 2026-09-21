@@ -5,7 +5,8 @@ namespace AcerHelper.Tests;
 
 /// <summary>
 /// The EC byte ↔ performance-profile table: which byte the EC accepts, which name/kind/accent the UI shows
-/// for it, and which profile each bit of the EC's supported-mask selects.
+/// for it, which kernel <c>platform_profile</c> choice name stands for it, and which profile each bit of the
+/// EC's supported-mask selects.
 ///
 /// A wrong entry here is not a crash, it is the WRONG PROFILE: <c>AcerDevice.SetProfile</c> shifts
 /// <see cref="AcerProfiles.ToByte"/>'s result straight into the <c>SetGamingMiscSetting</c> call, so a
@@ -15,6 +16,11 @@ namespace AcerHelper.Tests;
 /// The mask rule is the non-obvious half and the reason this file is worth having: the bit position is the
 /// EC BYTE VALUE, not the profile's index or display order, so Quiet — byte <c>0x00</c> — is bit 0 while Eco
 /// — the first profile displayed — is bit 6.
+///
+/// The choice-name half has the opposite shape: it is a second vocabulary for the same five modes, and the two
+/// most dangerous words in it are the ones that LOOK like the table's own. "performance" is Turbo, not
+/// Performance, and "balanced-performance" is Performance — see the trap case below, which is the one test
+/// here whose failure would show the user a correct-looking list of the wrong modes.
 /// </summary>
 public class AcerProfilesTests
 {
@@ -136,5 +142,124 @@ public class AcerProfilesTests
     public void TheMaskBitForAProfileIsItsEcByte(int mask, string expected)
     {
         Assert.Equal(expected, string.Join(",", AcerProfiles.FromMask((byte)mask).Select(p => p.DisplayName)));
+    }
+
+    /// <summary>Every byte↔token pairing, one profile per case. This is the map between the two vocabularies for
+    /// the same five modes — the EC byte (what the app writes and persists) and the kernel's
+    /// <c>platform_profile</c> token (what <c>platform-profile-1/profile</c> reads and writes) — so a wrong row
+    /// here does not fail anywhere: it selects a different power/thermal envelope, or reports the active one as
+    /// some other mode. Both directions are asserted per row, because the port uses both (read = FromChoiceName,
+    /// write = ToChoiceName) and a table that agreed in only one direction would look fine from either side
+    /// alone.</summary>
+    [Theory]
+    [InlineData(0x06, "low-power")]              // Eco
+    [InlineData(0x00, "quiet")]                  // Quiet
+    [InlineData(0x01, "balanced")]               // Balanced
+    [InlineData(0x04, "balanced-performance")]   // Performance (93 W)
+    [InlineData(0x05, "performance")]            // Turbo (108 W) — see the trap below
+    public void EachProfileCarriesItsKernelChoiceName(int b, string choice)
+    {
+        var profile = AcerProfiles.ToDomain((byte)b);
+
+        Assert.Equal(choice, AcerProfiles.ToChoiceName(profile));
+
+        var fromToken = AcerProfiles.FromChoiceName(choice);
+        Assert.NotNull(fromToken);
+        Assert.Equal(b.ToString(), fromToken.Id);            // the Acer id is the byte, in decimal
+        Assert.Equal(profile.DisplayName, fromToken.DisplayName);
+        Assert.Equal(profile.Kind, fromToken.Kind);
+        Assert.Equal(profile.Accent, fromToken.Accent);
+        Assert.Equal(profile.FlashColor, fromToken.FlashColor);
+    }
+
+    /// <summary>THE TRAP, stated as the one assertion that would catch it: the kernel's <c>"performance"</c> is
+    /// Acer TURBO (byte <c>0x05</c>, the 108 W envelope), and Acer's Performance — the 93 W mode the UI shows as
+    /// "Performance" — is the kernel's <c>"balanced-performance"</c>.
+    ///
+    /// Both halves are asserted because both were live: <c>SysfsPowerProfiles</c>'s own token table classifies
+    /// <c>"performance"</c> as <see cref="ProfileKind.Performance"/>, and the app's EC envelope is driven from
+    /// the kind, so a port that let the source's classification through sent mode 1 (93 W) where the hardware
+    /// wanted mode 0. A name-keyed shortcut anywhere — <c>p.DisplayName.ToLower()</c> most of all — reproduces it
+    /// silently, which is why the translation goes through this table instead.</summary>
+    [Fact]
+    public void TheKernelSpellsTurboPerformanceAndPerformanceBalancedPerformance()
+    {
+        var turbo = AcerProfiles.FromChoiceName("performance");
+
+        Assert.NotNull(turbo);
+        Assert.Equal("5", turbo.Id);                       // 0x05, the EC's Turbo byte
+        Assert.Equal("Turbo", turbo.DisplayName);
+        Assert.Equal(ProfileKind.Turbo, turbo.Kind);       // NOT ProfileKind.Performance
+
+        var performance = AcerProfiles.FromChoiceName("balanced-performance");
+
+        Assert.NotNull(performance);
+        Assert.Equal("4", performance.Id);                 // 0x04
+        Assert.Equal("Performance", performance.DisplayName);
+        Assert.Equal(ProfileKind.Performance, performance.Kind);
+    }
+
+    /// <summary>Round trip through the choice name for every profile in the table, in both directions. The
+    /// profile must come back WHOLE — id, display name, kind and both colours — because <c>AcerMappedProfiles</c>
+    /// hands the result of one of these calls straight to the UI and to the envelope: a translation that lost the
+    /// kind would re-apply another mode's presets, and one that lost the flash colour would repaint the
+    /// operating-mode indicator amber (the firmware's response to a colour it does not accept).
+    ///
+    /// The token side is checked too, since a duplicated or misspelled token in the table would make the port
+    /// offer two profiles that resolve to the same kernel mode — a list where clicking the second one never
+    /// changes anything.</summary>
+    [Fact]
+    public void TheChoiceNameRoundTripsForEveryProfile()
+    {
+        foreach (var p in AcerProfiles.All)
+        {
+            var token = AcerProfiles.ToChoiceName(p);
+            Assert.NotNull(token);
+            Assert.Equal(p, AcerProfiles.FromChoiceName(token));
+            Assert.Equal(token, AcerProfiles.ToChoiceName(AcerProfiles.FromChoiceName(token)!));
+        }
+    }
+
+    /// <summary>Anything the kernel can report that this table does not name is null, never a nearby profile:
+    /// <c>"custom"</c> is what the LEGACY ACPI alias reads back after a vendor handler writes (the alias fans a
+    /// write out to every handler and reports the least specific answer), and <c>"cool"</c> is a fourth name
+    /// generic sysfs handlers genuinely expose. The two that would be tempting to "fix" are here on purpose:
+    /// <c>"PERFORMANCE"</c> (never a sysfs token, but a plausible typo to fold with a case-insensitive compare)
+    /// and the empty string.
+    ///
+    /// Null is the contract the mapped port's <c>Current()</c> rests on — "the app cannot name this mode" — so a
+    /// fallback returning Balanced here would show a machine sitting in a mode of its own as Balanced and then
+    /// overwrite the EC usage mode with Balanced's envelope.</summary>
+    [Theory]
+    [InlineData("custom")]               // the legacy alias after a vendor write
+    [InlineData("cool")]                 // a real generic-sysfs token, no Acer byte
+    [InlineData("PERFORMANCE")]          // wrong case is not a match
+    [InlineData("balanced performance")] // ...and neither is a space for the dash
+    [InlineData("junk")]
+    [InlineData("")]
+    public void AnUnnameableTokenIsNull(string token)
+    {
+        Assert.Null(AcerProfiles.FromChoiceName(token));
+    }
+
+    /// <summary>The other direction's unknown cases: a profile that is not one of ours has no kernel token.
+    /// <c>0x1F</c> is a byte the EC could report but the table does not know, and <c>power-saver</c> is another
+    /// backend's id (PPD's), which <see cref="AcerProfiles.ToByte"/> would refuse with a throw —
+    /// <see cref="AcerProfiles.ToChoiceName"/> must not, because it is a query on a profile the app may be
+    /// holding while the machine reports something the table cannot name.</summary>
+    [Theory]
+    [InlineData(0x1F)] [InlineData(0x07)] [InlineData(0xFF)]
+    public void AProfileOutsideTheTableHasNoChoiceName(int b)
+    {
+        Assert.Null(AcerProfiles.ToChoiceName(AcerProfiles.ToDomain((byte)b)));
+    }
+
+    /// <summary>The foreign-id half of the case above, spelled as its own test so a failure says which input was
+    /// not handled: an id that is not a decimal byte at all must yield null rather than an exception.</summary>
+    [Fact]
+    public void AForeignProfileIdHasNoChoiceName()
+    {
+        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("power-saver", "Power saver", ProfileKind.Eco)));
+        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("", "Empty", ProfileKind.Other)));
     }
 }

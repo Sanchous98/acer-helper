@@ -25,13 +25,23 @@ ACTION=="add|change", SUBSYSTEM=="leds", KERNEL=="*kbd_backlight", \
 ACTION=="add|change", SUBSYSTEM=="platform-profile", \
   RUN+="/bin/sh -c 'chgrp wheel /sys%p/profile 2>/dev/null && chmod g+w /sys%p/profile 2>/dev/null; chgrp wheel /sys/firmware/acpi/platform_profile 2>/dev/null && chmod g+w /sys/firmware/acpi/platform_profile 2>/dev/null'"
 
-# Acer Linuwu-Sense control nodes (fan_speed, battery_limiter/calibration, lcd_override, usb_charging,
-# backlight_timeout). They exist only while the module is loaded — often well after boot — so udev, not
-# tmpfiles; "bind" fires when the driver attaches, "change" lets `udevadm trigger` apply this live on
-# install. Some module builds already grant their own group here (e.g. root:linuwu_sense); this just adds
-# wheel-based access for the rest.
-ACTION=="add|bind|change", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
-  RUN+="/bin/sh -c 'chgrp -R wheel /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null; chmod -R g+rw /sys/devices/platform/acer-wmi/nitro_sense /sys/devices/platform/acer-wmi/predator_sense 2>/dev/null'"
+# Acer fan PWM attributes (the acer-wmi driver's own hwmon chip). This needs a rule of its own rather than
+# riding any rule above, and the reason is the shape of the thing: the chip is a hwmon CLASS DEVICE whose
+# pwm* entries are sysfs ATTRIBUTE FILES, not a device node — udev's MODE/GROUP only ever reach nodes, so
+# without the RUN below the files stay 0644 root:root and fan write is impossible even when the driver exposes
+# it (nothing else in this file, nor tmpfiles.d, grants hwmon access). The chip appears on MODULE LOAD, often
+# well after boot, so udev rather than tmpfiles; "add" is the event it gets when acer_wmi loads, and "change"
+# lets `udevadm trigger --subsystem-match=hwmon` apply this live on install.
+#
+# Matched on DEVPATH (the chip's place under the acer-wmi platform device; `*` also spans "/" here, as in
+# systemd's own 78-sound-card.rules) and NOT on the chip's "name" attribute: "name" is read-only, so it can
+# never be written to and ATTR{} on it cannot be used for this either. The file names are GLOBBED, not named:
+# the channel count and the exact names depend on the driver build — the measured set on this machine (with the
+# parameters this repo installs) is pwm1, pwm1_enable, pwm2 and pwm2_enable, the duty living in pwmN and there
+# being no pwmN_input — so the one glob covers whichever of pwmN / pwmN_enable / pwmN_input a build exposes,
+# and naming them one by one would silently miss the rest.
+ACTION=="add|change", SUBSYSTEM=="hwmon", DEVPATH=="*/acer-wmi/hwmon/hwmon*", \
+  RUN+="/bin/sh -c 'for f in /sys%p/pwm*; do chgrp wheel $$f 2>/dev/null && chmod g+w $$f 2>/dev/null; done'"
 
 # Acer HID interfaces: the ENE RGB controller (keyboard + lightbar) and the EC controller that carries the
 # performance envelope. Both are plain HID devices the app opens READ-WRITE — on recent models on HID-over-I2C
@@ -53,3 +63,39 @@ SUBSYSTEM=="hidraw", KERNELS=="*:1025:174B.*", TAG+="uaccess"
 # Note this lets session apps read this keyboard's events; scoped to Acer machines via DMI.
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="AT Translated Set 2 keyboard", \
   ATTR{[dmi/id]sys_vendor}=="Acer*", TAG+="uaccess"
+
+# AMD Curve Optimizer (CPU undervolt): the SMU mailbox nodes the ryzen_smu driver exposes. The app reaches the
+# mailbox through "smn" (the driver's command nodes cannot report a refusal — see docs/curve-optimizer-linux.md);
+# the other three writable attributes are granted with it because they are the driver's whole writable surface,
+# and a half-granted driver is a worse outcome than a whole one for the other tools that share it.
+#
+# IT IS MATCHED ON THE PCI DEVICE'S BIND EVENT, and that is forced by the shape of what is being granted. The
+# driver's own sysfs tree (/sys/kernel/ryzen_smu_drv) is a BARE KOBJECT: it is not a device, it registers no
+# uevent, and udev's MODE/GROUP — which only ever reach device NODES — cannot touch its attribute files at all.
+# What DOES emit an event is the PCI device the driver binds to (00:00.0, the host bridge whose config space
+# carries the SMU mailbox), so the rule hangs off that and reaches the attribute files by absolute path in RUN
+# rather than through %p. The paths therefore must not be rewritten as a substitution: %p there is the PCI
+# device's directory, not the driver's kobject.
+#
+# ACTION=="bind" is the event that carries the driver name, and it fires on module load and on a reload — which is
+# exactly "the nodes have just been (re)created with root-only permissions". It does NOT fire for an already-bound
+# driver, which is the state a user is in when they grant access from the running app, and on a machine whose
+# ryzen_smu is inserted from the INITRAMFS it does not reach this rule at all (see the two paragraphs below).
+# "add|change" would not replace it — a bind is a different uevent, and `udevadm trigger` replays change events,
+# not bind ones.
+#
+# THE RUN WAITS FOR THE FILES, because the bind event does not promise they exist yet: the driver's attribute
+# files are created by a different step of the module's load than the one that emits the bind, and when the event
+# reaches this rule first, every group change below fails into 2>/dev/null — silently, which is how a rule that
+# looks installed can grant nothing. The loop polls /sys/kernel/ryzen_smu_drv/smn (the one node the app gates on) for up
+# to ~5 s in 0.1 s steps and then grants whether or not it arrived: a bounded wait cannot hang udev for long, and
+# the cold case still ends the same way it used to.
+#
+# THIS RULE IS NOT THE BOOT GRANT, and treating it as one is the measured failure this file was just corrected
+# for. It only ever runs where udev sees a bind — and on this machine ryzen_smu is inserted from the initramfs
+# (journal: "systemd-modules-load[335]: Inserted module 'ryzen_smu'" during dracut's run), so the bind uevent is
+# emitted before the real systemd-udevd exists, and systemd-udev-trigger's coldplug replays add/change, never a
+# bind. The deterministic every-boot grant is packaging/acer-helper-smu-perms.service; this rule is what covers a
+# MANUAL module reload, where udev is already up and the files appear at once.
+ACTION=="bind", SUBSYSTEM=="pci", DRIVER=="ryzen_smu", \
+  RUN+="/bin/sh -c 'i=0; while [ ! -e /sys/kernel/ryzen_smu_drv/smn ] && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i+1)); done; for f in smu_args mp1_smu_cmd rsmu_cmd smn; do chgrp wheel /sys/kernel/ryzen_smu_drv/$$f 2>/dev/null && chmod g+w /sys/kernel/ryzen_smu_drv/$$f 2>/dev/null; done'"

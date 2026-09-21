@@ -11,13 +11,19 @@ namespace AcerHelper.Tests;
 /// They are covered here rather than left to the hardware because they were moved out of
 /// <c>AcerDevice.Linux.cs</c> for exactly this reason: the test project targets <c>net10.0-windows</c> while the
 /// app excludes <c>**/*.Linux.cs</c> from that TFM, so policy left in the Linux file is unreachable by the suite
-/// at all. What stayed behind there is the part that needs a Linux box — the <c>/sys/class/power_supply</c> walk
-/// and the hidraw controller — and both now arrive here as delegates.
+/// at all. What stayed behind there is the part that needs a Linux box — the hidraw controller — and it arrives
+/// here as a delegate.
 ///
 /// <see cref="EcSyncedProfiles"/> is the one that matters most: it is what makes a profile switch move the power
 /// envelope on an EC-HID model. Before it wrapped the generic port too, that wiring sat behind the Linuwu-Sense
 /// module gate, so a machine with mainline <c>acer-wmi</c> and no module opened the EC controller and then never
 /// consulted it — the envelope stayed put through every profile change.
+///
+/// <see cref="AcerMappedProfiles"/> is the other half of the same job and the reason this file is worth having at
+/// all on a mainline-only machine: the port underneath speaks the KERNEL's vocabulary (low-power / quiet /
+/// balanced / balanced-performance / performance) while everything above it — presets, the tray, the lightbar
+/// palette, <c>settings.json</c> — keys off the Acer EC byte. The decorator is where those two meet, so every
+/// case below is about the translation being exact rather than about I/O.
 /// </summary>
 public class AcerProfilePortsTests
 {
@@ -110,71 +116,256 @@ public class AcerProfilePortsTests
         Assert.Equal("boom", port.LastError);
     }
 
-    // ---- BatteryGatedProfiles: what the EC refuses on battery is greyed out ----
+    // ---- AcerMappedProfiles: the kernel's profile vocabulary translated to Acer's ----
 
-    /// <summary>On battery the EC rejects everything but balanced/low-power (EOPNOTSUPP from the driver), so the
-    /// selectable list drops the rest. Only <c>balanced</c> survives here because <see cref="TestProfiles"/> — the
-    /// set the real Acer port uses — has no <c>low-power</c> entry; the filter is by id, so that list is what
-    /// decides.</summary>
-    [Fact]
-    public void OnBattery_TheSelectableListKeepsOnlyTheBatterySafeIds()
+    /// <summary>What the inner port offers on this hardware: the KERNEL's tokens as <c>Id</c>, described the way
+    /// <c>SysfsPowerProfiles</c> describes them — including its classification of <c>"performance"</c> as
+    /// <see cref="ProfileKind.Performance"/>, which is the source's own reading of a word that means Turbo to us.
+    /// The decorator has to override that reading, so a test that used the Acer table on both sides would prove
+    /// nothing.</summary>
+    private static class Kernel
     {
-        var port = new BatteryGatedProfiles(new FakePowerProfiles(TestProfiles.All), () => false);
+        public static PerformanceProfile LowPower            => new("low-power",            "Low power",            ProfileKind.Eco);
+        public static PerformanceProfile Quiet               => new("quiet",                "Quiet",                ProfileKind.Quiet);
+        public static PerformanceProfile Balanced            => new("balanced",             "Balanced",             ProfileKind.Balanced);
+        public static PerformanceProfile BalancedPerformance => new("balanced-performance", "Balanced performance", ProfileKind.Performance);
+        public static PerformanceProfile Performance         => new("performance",          "Performance",          ProfileKind.Performance);
 
-        Assert.Equal(["balanced"], port.Selectable().Select(p => p.Id));
+        /// <summary>The full set the Acer handler offers under <c>predator_v4=1</c>: all five.</summary>
+        public static PerformanceProfile[] All => [LowPower, Quiet, Balanced, BalancedPerformance, Performance];
     }
 
-    /// <summary>Unplugged is not the normal case: on AC nothing is filtered.</summary>
+    /// <summary>The list the UI and the hotkey cycle see: the Acer table's own five profiles, in Acer display
+    /// order, carrying the Acer ids — NOT the source's profiles, whose ids are <c>"low-power"</c> and friends.
+    ///
+    /// The ids are the load-bearing part: they are what <c>LaptopService</c> persists as <c>ProfileMemory.BaseId</c>
+    /// and what <c>AcerProfiles.ToByte</c> parses for the EC write, so a port that passed the source's profiles
+    /// through would put <c>"balanced-performance"</c> into <c>settings.json</c> — a value the Windows half has
+    /// never seen — and would hand the envelope a <see cref="ProfileKind"/> chosen by the kernel's name rather
+    /// than by the byte (Turbo arriving as Performance, the live 93 W/108 W bug).</summary>
     [Fact]
-    public void OnAc_TheSelectableListIsUnfiltered()
+    public void TheMappedSetIsTheAcerTableInDisplayOrder()
     {
-        var port = new BatteryGatedProfiles(new FakePowerProfiles(TestProfiles.All), () => true);
+        var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All));
 
-        Assert.Equal(["quiet", "eco", "balanced", "performance", "turbo"], port.Selectable().Select(p => p.Id));
+        Assert.Equal(["6", "0", "1", "4", "5"], port.All.Select(p => p.Id));
+        Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"], port.All.Select(p => p.DisplayName));
+        Assert.Equal([ProfileKind.Eco, ProfileKind.Quiet, ProfileKind.Balanced, ProfileKind.Performance, ProfileKind.Turbo],
+                     port.All.Select(p => p.Kind));
+
+        Assert.Equal(port.All.Select(p => p.Id), port.Selectable().Select(p => p.Id));
     }
 
-    /// <summary>The filter is limited to <c>Selectable</c>, and that matters in one specific situation: the
-    /// machine can be sitting on Turbo while unplugged. <c>All</c> still has to describe every profile the
-    /// hardware exposes (the UI lists them) and <c>Current</c> still has to report Turbo, or the app would show
-    /// the wrong active mode — the state the user needs to see most.</summary>
+    /// <summary>The ORDER comes from the table, not from the source. sysfs lists the same five names in whatever
+    /// order it likes — the kernel's channel array order is not the app's — and this order is not decoration: it
+    /// is the performance hotkey's cycle, so a port that echoed the source's order would change what the key does
+    /// from one boot to the next.</summary>
     [Fact]
-    public void OnlySelectableIsFiltered_AllAndCurrentStayWhole()
+    public void TheSourcesOrderDoesNotBecomeTheDisplayOrder()
     {
-        var inner = new FakePowerProfiles(TestProfiles.All, current: TestProfiles.Turbo);
-        var port = new BatteryGatedProfiles(inner, () => false);
+        var reversed = Kernel.All.Reverse().ToList();
+        var port = new AcerMappedProfiles(new FakePowerProfiles(reversed));
 
-        Assert.Equal(TestProfiles.All.Select(p => p.Id), port.All.Select(p => p.Id));
-        Assert.Equal("turbo", port.Current()!.Id);
-        Assert.Equal(["balanced"], port.Selectable().Select(p => p.Id));
+        Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"], port.All.Select(p => p.DisplayName));
     }
 
-    /// <summary>The gate is on the list, not on the write — this decorator shapes what the UI offers, it is not
-    /// an enforcement point. Pinned deliberately: the tempting change is to reject writes here, which would move
-    /// the refusal away from the hardware that actually decides it and turn a greyed-out entry into a failed
-    /// click for the paths that don't consult <c>Selectable</c> first.</summary>
+    /// <summary>A source offering only some of the five yields exactly its Acer subset — the subset is a hardware
+    /// fact (the class node's <c>choices</c> file, or the EC supported-mask on Windows), not a policy filter, and
+    /// it is the one thing that legitimately shortens this list. The subset is handed to the fake in a scrambled
+    /// order on purpose: the result must still be Acer-ordered.</summary>
     [Fact]
-    public void SetIsNotGated_OnlyTheSelectableListIs()
+    public void AReducedSourceYieldsOnlyItsAcerSubset()
     {
-        var inner = new FakePowerProfiles(TestProfiles.All);
-        var port = new BatteryGatedProfiles(inner, () => false);
+        var port = new AcerMappedProfiles(new FakePowerProfiles([Kernel.Performance, Kernel.Quiet, Kernel.Balanced]));
 
-        Assert.True(port.Set(TestProfiles.Turbo));
-        Assert.Equal(["turbo"], inner.SetCallIds);
+        Assert.Equal(["0", "1", "5"], port.All.Select(p => p.Id));            // Quiet, Balanced, Turbo
+        Assert.Equal(["Quiet", "Balanced", "Turbo"], port.All.Select(p => p.DisplayName));
     }
 
-    /// <summary>The AC probe is asked again on every call rather than cached at construction — the machine can be
-    /// plugged and unplugged while the app runs, and a cached answer would leave the profile list frozen in
-    /// whichever state it started in.</summary>
+    /// <summary>A token the table cannot name is dropped from the list rather than guessed at. <c>"cool"</c> is a
+    /// real token generic sysfs handlers expose (the Acer one does not, today) and it must NOT become the nearest
+    /// Acer mode: the list is what the user clicks, and a row that silently means something else is worse than a
+    /// missing row. The second case is the one that matters most — a source offering ONLY unknown tokens reduces
+    /// to nothing, not to all five, because "we did not recognise this machine" has to hide the section rather
+    /// than offer five modes that cannot be set.</summary>
     [Fact]
-    public void TheAcProbeIsConsultedOnEveryCall()
+    public void AnUnknownTokenTheSourceOffersIsDropped()
     {
-        var onAc = true;
-        var port = new BatteryGatedProfiles(new FakePowerProfiles(TestProfiles.All), () => onAc);
+        var cool = new PerformanceProfile("cool", "Cool", ProfileKind.Quiet);
 
+        var mixed = new AcerMappedProfiles(new FakePowerProfiles([Kernel.Quiet, cool]));
+        Assert.Equal(["Quiet"], mixed.All.Select(p => p.DisplayName));
+
+        var only = new AcerMappedProfiles(new FakePowerProfiles([cool]));
+        Assert.Empty(only.All);
+        Assert.Empty(only.Selectable());
+    }
+
+    /// <summary>Reading the active profile goes through the table, so <c>"performance"</c> is reported as Turbo —
+    /// id <c>"5"</c>, kind <see cref="ProfileKind.Turbo"/>, the Acer display name — and not as the source's own
+    /// "Performance" profile. That difference is not cosmetic: the kind is what selects the per-mode presets and
+    /// drives the EC envelope, so the wrong one applies another mode's fan curve and 93 W where the hardware is
+    /// running 108 W.
+    ///
+    /// The whole table is exercised rather than the one risky row, because a table with a single transposed pair
+    /// would pass a single-case test.</summary>
+    [Theory]
+    [InlineData("low-power", "6", "Eco")]
+    [InlineData("quiet", "0", "Quiet")]
+    [InlineData("balanced", "1", "Balanced")]
+    [InlineData("balanced-performance", "4", "Performance")]
+    [InlineData("performance", "5", "Turbo")]
+    public void CurrentIsTheAcerProfileTheSourcesTokenStandsFor(string token, string id, string name)
+    {
+        var inner = new FakePowerProfiles(Kernel.All, current: new PerformanceProfile(token, token, ProfileKind.Other));
+        var port = new AcerMappedProfiles(inner);
+
+        Assert.Equal(id, port.Current()!.Id);
+        Assert.Equal(name, port.Current()!.DisplayName);
+    }
+
+    /// <summary>A current token the table cannot name — <c>"custom"</c> is the one this machine actually reports,
+    /// and only through the legacy ACPI alias, which reads back <c>custom</c> after any vendor handler writes —
+    /// gives null, which is "the app cannot name the mode the hardware is in".
+    ///
+    /// The tempting repair is a fallback (<c>?? AcerProfiles.All[2]</c>, or the first entry), and it is worse than
+    /// the null in exactly the way the null prevents: on every startup and every hotkey-driven profile change the
+    /// app would decide the machine is Balanced, apply Balanced's presets and write Balanced's EC usage mode — on
+    /// a machine that is in a mode of its own, and without the user having asked for anything. Null shows an
+    /// unnamed mode and leaves the hardware alone.</summary>
+    [Fact]
+    public void AnUnknownCurrentTokenIsNull_NotANearbyProfile()
+    {
+        var custom = new PerformanceProfile("custom", "custom", ProfileKind.Other);
+        var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All, current: custom));
+
+        Assert.Null(port.Current());
+
+        var unreadable = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All, current: null));
+        Assert.Null(unreadable.Current());
+    }
+
+    /// <summary>The write reaches the inner port with the KERNEL's token, not the Acer id: the inner port writes
+    /// <c>profile.Id</c> verbatim into the class node, so handing it the Acer profile would write <c>"5"</c> — a
+    /// string no handler accepts, and one the driver would reject rather than ignore.
+    ///
+    /// <c>Assert.Same</c> rather than an id comparison is the point: what must be handed over is the inner port's
+    /// OWN object, the one it built from the class node's <c>choices</c>. The decorator must not construct a
+    /// lookalike, and the reason is not style — the source's profile is what the port recognises, and building a
+    /// second identity for a mode that already has one is how a port ends up being "fixed" later to accept both.
+    /// The trap row is explicit: Turbo is written as <c>"performance"</c>.</summary>
+    [Theory]
+    [InlineData("Eco", "low-power")]
+    [InlineData("Quiet", "quiet")]
+    [InlineData("Balanced", "balanced")]
+    [InlineData("Performance", "balanced-performance")]
+    [InlineData("Turbo", "performance")]
+    public void SetHandsTheInnerPortItsOwnObjectForThatToken(string acerName, string token)
+    {
+        var inner = new FakePowerProfiles(Kernel.All);
+        var port = new AcerMappedProfiles(inner);
+        var clicked = AcerProfiles.All.Single(p => p.DisplayName == acerName);
+
+        Assert.True(port.Set(clicked));
+
+        Assert.Equal([token], inner.SetCallIds);
+        Assert.Same(inner.All.Single(p => p.Id == token), inner.SetCalls[0]);
+    }
+
+    /// <summary>Clicking Turbo writes <c>"performance"</c> and clicking Performance writes
+    /// <c>"balanced-performance"</c> — the pairing that a name-keyed shortcut gets backwards, asserted together
+    /// and in both directions because each direction alone can look right by accident. If this test fails, the app
+    /// has asked the kernel for the other mode: the user clicked the 93 W profile and the machine went to 108 W,
+    /// or the reverse, and nothing in the UI would say so.</summary>
+    [Fact]
+    public void TheWritePathSpellsTurboPerformanceAndPerformanceBalancedPerformance()
+    {
+        var turboInner = new FakePowerProfiles(Kernel.All);
+        new AcerMappedProfiles(turboInner).Set(AcerProfiles.All.Single(p => p.Kind == ProfileKind.Turbo));
+        Assert.Equal(["performance"], turboInner.SetCallIds);
+
+        var perfInner = new FakePowerProfiles(Kernel.All);
+        new AcerMappedProfiles(perfInner).Set(AcerProfiles.All.Single(p => p.Kind == ProfileKind.Performance));
+        Assert.Equal(["balanced-performance"], perfInner.SetCallIds);
+    }
+
+    /// <summary>A profile the source does not offer is REFUSED, and the refusal says which token was missing —
+    /// nothing is written, so the hardware keeps its current mode rather than being moved to a nearby one.
+    ///
+    /// The alternative shape, sending the closest token the source does offer, is the shape this port exists to
+    /// prevent: the tokens are not ordered (Turbo is "performance" and Performance is "balanced-performance"), so
+    /// there is no "closest" to pick, and every guess is a mode the user did not ask for. The message is asserted
+    /// by content rather than verbatim, because what the caller needs from it is the token; the exact wording is
+    /// not a contract. It is also read through <c>LaptopService</c>'s <c>Attempt(() =&gt; pp.Set(p), () =&gt;
+    /// pp.LastError)</c>, so a refusal with no message would leave the UI showing nothing at all.</summary>
+    [Fact]
+    public void SetRefusesAProfileTheSourceDoesNotOffer()
+    {
+        var inner = new FakePowerProfiles([Kernel.Quiet, Kernel.Balanced]);
+        var port = new AcerMappedProfiles(inner);
+
+        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Turbo")));
+
+        Assert.Empty(inner.SetCallIds);
+        Assert.Contains("\"performance\"", port.LastError);
+
+        // A refusal is not sticky: the next successful write must not report the earlier one's reason.
+        Assert.True(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Balanced")));
+        Assert.Null(port.LastError);
+    }
+
+    /// <summary>The inner port's own answer is the one that counts — the decorator is a translator, not a judge of
+    /// the hardware. A false from the inner port is forwarded as a false, the inner port was still reached with
+    /// the right token, and no local message is invented for it: the decorator has nothing to say about a refusal
+    /// the hardware made, and overwriting the port's <c>LastError</c> here would replace the driver's reason with
+    /// a made-up one.</summary>
+    [Fact]
+    public void ARefusedInnerWriteIsForwardedAsARefusal()
+    {
+        var inner = new FakePowerProfiles(Kernel.All) { SetResult = false };
+        var port = new AcerMappedProfiles(inner);
+
+        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Turbo")));
+
+        Assert.Equal(["performance"], inner.SetCallIds);
+        Assert.Null(port.LastError);
+    }
+
+    /// <summary>When the decorator has no refusal of its own, <c>LastError</c> is the inner port's — the driver's
+    /// message reaches the UI unwrapped, which is the only place it exists.</summary>
+    [Fact]
+    public void LastErrorIsForwardedFromTheInnerPort()
+    {
+        var inner = new FakePowerProfiles(Kernel.All) { LastError = "boom" };
+        var port = new AcerMappedProfiles(inner);
+
+        Assert.Equal("boom", port.LastError);
+    }
+
+    /// <summary>The deliberate pin that keeps the removal of <c>BatteryGatedProfiles</c> a decision rather than an
+    /// accident. That decorator greyed out everything but balanced and low-power while unplugged, and BOTH halves
+    /// of its justification turned out to be wrong on this hardware: its stated reason — the driver returning
+    /// EOPNOTSUPP for profile writes on battery — was measured against the AMD handler on
+    /// <c>platform-profile-0</c>, which is a different handler on a different node, while all five profiles were
+    /// written on battery through the Acer handler on <c>platform-profile-1</c> on 2026-09-20; and the gate had no
+    /// Windows analogue at all, since Windows gets its available set from the EC supported-mask and has no
+    /// power-source input anywhere on the profile path. Windows parity is this port's whole purpose, so a gate
+    /// here would be the one place Linux offers less for no reason the hardware gives.
+    ///
+    /// The last assertion is the structural half, and it is why this cannot be quietly reverted: the port takes no
+    /// power-source input, so re-introducing the gate means ADDING one — the five deleted tests cannot simply be
+    /// pasted back, and whoever does it has to delete this test to make the build pass. The behavioural half alone
+    /// (five profiles, no gate visible) would still pass if a gate were added with a default of "on AC".</summary>
+    [Fact]
+    public void TheMappedPortDoesNotGateOnPowerSource()
+    {
+        var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All));
+
+        Assert.Equal(5, port.All.Count);
         Assert.Equal(5, port.Selectable().Count);
+        Assert.Equal(port.All.Select(p => p.Id), port.Selectable().Select(p => p.Id));
 
-        onAc = false;
-
-        Assert.Equal(["balanced"], port.Selectable().Select(p => p.Id));
+        var ctor = Assert.Single(typeof(AcerMappedProfiles).GetConstructors());
+        Assert.Equal(typeof(IPowerProfiles), Assert.Single(ctor.GetParameters()).ParameterType);
     }
 }

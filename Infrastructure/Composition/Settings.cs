@@ -53,6 +53,15 @@ public sealed class Settings
     // and on mode switch.
     public Dictionary<string, LightPreset> LightPresets { get; set; } = new();
 
+    // The user's consent to let THIS app use the machine's discrete GPU, which a third-party daemon (cardwire)
+    // is hiding from programs that have not been allowed to use it — see docs/cardwire-gpu-access.md. Off by
+    // default, and asked for at runtime only: consenting to it writes no file and changes nothing about the
+    // machine, so unlike every other member here this one is not a piece of device state being restored — it is
+    // a permission the app re-asks for on each start (a grant belongs to one process and dies with it, and
+    // cardwire has no way to revoke it early). The row that sets it exists only where there is something to ask
+    // for; the value itself is a plain preference and is kept everywhere.
+    public bool CardwireGpuAccess { get; set; }
+
     // GPU clock offsets remembered PER performance mode (same key scheme as FanPresets/LightPresets). Switching
     // mode re-applies that mode's offsets. Unlike fans, an unconfigured mode is stock (0/0), NOT "leave
     // untouched": the GPU driver zeroes clock offsets on every boot/driver-reload, so the app is the source of
@@ -141,6 +150,7 @@ public sealed class Settings
         FanPresets      = persisted.FanPresets;
         Bluelight       = persisted.Bluelight;
         DynamicLighting = persisted.DynamicLighting;
+        CardwireGpuAccess = persisted.CardwireGpuAccess;
         LightPresets    = persisted.LightPresets;
         GpuOcPresets    = persisted.GpuOcPresets;
         CoPresets       = persisted.CoPresets;

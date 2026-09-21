@@ -24,7 +24,7 @@ internal sealed partial class AcerEcHidController
         {
             foreach (var dir in Directory.EnumerateDirectories("/sys/class/hidraw"))
             {
-                if (!IsAcerEc(Path.Combine(dir, "device/uevent"))) continue;
+                if (!IsAcerNode(Path.Combine(dir, "device/uevent"))) continue;
                 try
                 {
                     _dev = File.Open($"/dev/{Path.GetFileName(dir)}", FileMode.Open, FileAccess.ReadWrite);
@@ -38,7 +38,9 @@ internal sealed partial class AcerEcHidController
     }
 
     // uevent of the parent hid device carries HID_ID=<bus>:<vendor>:<product> (8 hex digits each).
-    private static bool IsAcerEc(string ueventPath)
+    // SHARED, because the Turbo key arrives on this very device and AcerHotkeys.Linux.cs has to find the same
+    // node: two copies of the vendor/product test is exactly how the two ends of a device identity drift apart.
+    internal static bool IsAcerNode(string ueventPath)
     {
         try
         {

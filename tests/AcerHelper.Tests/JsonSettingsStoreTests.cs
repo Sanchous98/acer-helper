@@ -40,6 +40,7 @@ public class JsonSettingsStoreTests
         Clamshell = true,
         Bluelight = 4,
         DynamicLighting = true,
+        CardwireGpuAccess = true,
         OnAc = new ProfileMemory { BaseId = "balanced", Turbo = true },
         OnBattery = new ProfileMemory { BaseId = "power-saver" },
         FanPresets =
@@ -99,6 +100,12 @@ public class JsonSettingsStoreTests
         var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
 
         AssertNothingWasLost(loaded);
+
+        // The consent to use the discrete GPU is asserted HERE rather than inside AssertNothingWasLost, because
+        // that helper is shared with the test that loads a REAL settings file written by a shipped version — and
+        // such a file cannot carry a key that did not exist when it was written. A member that must survive is
+        // asserted where the file is known to be complete.
+        Assert.True(loaded.CardwireGpuAccess);
 
         // And the WHOLE instance, not the hand-written list above: Load builds the model through Settings'
         // constructor, which takes the persisted half over member by member, so a member added to Settings and
@@ -500,6 +507,7 @@ public class JsonSettingsStoreTests
         // A property the file does not mention keeps its default rather than throwing. This is the other half
         // of compatibility, and the reason a partial file is not mistaken for a corrupt one.
         Assert.False(loaded.DynamicLighting);
+        Assert.False(loaded.CardwireGpuAccess);
         Assert.Empty(loaded.CpuPowerModes);
         Assert.False(File.Exists(dir.SettingsPath + ".bad"));
     }

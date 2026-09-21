@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
@@ -454,10 +455,24 @@ public class OptionsAssemblerPresenceTests
         Assert.Equal(options, row?.Options.Count ?? 0);
     }
 
-    /// <summary>The blue-light row is the ONE Options row that does not funnel through <c>RunSet</c>:
-    /// <c>SetBlueLight</c> applies and persists inline and returns nothing (`LaptopService.Toggles.cs` `SetBlueLight`),
-    /// so a tint that fails to apply is silent — there is no message and no post for this row by construction,
-    /// and no failure test for it can exist. Pinned so that stays a decision rather than an oversight.</summary>
+    /// <summary>
+    /// The blue-light row is still the ONE Options row that does not funnel its write through <c>RunSet</c>, and
+    /// still silent when the apply takes — a pick applies, persists, and posts nothing.
+    ///
+    /// WHAT CHANGED, and it is the point of the row's shape: the write is no longer MADE on the caller's thread.
+    /// <c>SetBlueLight</c> records the level and hands the hardware half to a serialized schedule
+    /// (<c>Infrastructure/Vendors/Generic/TintApplyPolicy.cs</c>), because a level change is verified against what
+    /// the compositor DID, and a change made while the filter is already on cannot be verified until KWin's
+    /// 2000 ms quick-adjust walk has finished — measured on this machine, and the ~2 s freeze the owner reported
+    /// when the pick was applied inline here. So the two assertions below WAIT for the apply through the service's
+    /// own seam instead of finding it already done, and the recording of the level stays synchronous
+    /// (the schedule must not delay what the app remembers).
+    ///
+    /// The row cannot go through <c>RunSet</c>'s shape — a call that is waited for — for exactly that reason; what
+    /// it does instead is hand <c>RunSet</c>'s failure path the outcome, from the schedule's thread. Both halves
+    /// are pinned: <see cref="ABlueLightPick_ThatFails_PostsTheRowsFailure"/> and
+    /// <see cref="ABlueLightPick_ReturnsBeforeASlowApplyHasFinished"/>.
+    /// </summary>
     [Fact]
     public void ABlueLightPick_AppliesAndPersists_AndPostsNothing()
     {
@@ -467,10 +482,69 @@ public class OptionsAssemblerPresenceTests
 
         AssemblerRows.Change(h, "Blue-light filter:");      // picks the second entry
 
-        Assert.Equal([1], tint.ApplyCalls);
         Assert.Equal(1, h.F.Store.Settings.Bluelight);
         Assert.Equal(1, h.F.Store.SaveCount);
-        Assert.Empty(h.Posted);
+
+        Assert.True(h.F.Service.TintApplies.Drain(TimeSpan.FromSeconds(10)), "the apply never finished");
+
+        Assert.Equal([1], tint.ApplyCalls);
+        Assert.Empty(h.Posted);                             // a level that took says nothing, as before
+    }
+
+    /// <summary>
+    /// A pick whose tint FAILS reaches the user, through the SAME report every other row's failure goes through:
+    /// <c>RunSet</c>'s <c>Fail</c>, which builds "{row} failed" and posts it because the message belongs on the UI
+    /// thread. What is different is only who calls it — the schedule's thread, not this one — and that is precisely
+    /// what <c>Fail</c>'s post makes safe.
+    ///
+    /// BEFORE THE APPLY MOVED OFF THE UI THREAD THIS COULD NOT BE: <c>SetBlueLight</c> dropped the port's answer on
+    /// the floor, so a tint that did not take left the dropdown showing a level the screen was not on, with nothing
+    /// said. That silence was pinned by the test above as a decision; it is a defect (the row lies), and it is now
+    /// overtaken — the level that is reported is whichever one the user is actually on.
+    /// </summary>
+    [Fact]
+    public void ABlueLightPick_ThatFails_PostsTheRowsFailure()
+    {
+        var h = new OptionsAssemblerHarness();
+        var tint = new FakeDisplayTint(5) { ApplyResult = false };
+        h.F.Device.DisplayTint = tint;
+
+        AssemblerRows.Change(h, "Blue-light filter:");
+
+        Assert.True(h.F.Service.TintApplies.Drain(TimeSpan.FromSeconds(10)), "the apply never finished");
+
+        Assert.Equal([1], tint.ApplyCalls);
+        Assert.Equal([Loc.T("{0} failed", Loc.T("Blue-light filter:"))], h.RunPosted());
+    }
+
+    /// <summary>
+    /// THE FIX ITSELF, measured at the call path the owner clicks: a pick that reaches a SLOW tint returns to the
+    /// UI at once. The fake stands in for the compositor's quick-adjust walk (KWin walks a changed night
+    /// temperature to its target over 2000 ms, and the link waits that out before it can verify a change made while
+    /// the filter is already on), so before this change the elapsed time below was the apply's duration by
+    /// construction.
+    ///
+    /// The bound is deliberately loose — two orders of magnitude over what the pick now costs (a lock, a settings
+    /// write and one continuations append) — because what is being asserted is not a duration but a shape: the call
+    /// must not scale with the hardware. Anything that reintroduced the wait would blow past it by 2×.
+    /// </summary>
+    [Fact]
+    public void ABlueLightPick_ReturnsBeforeASlowApplyHasFinished()
+    {
+        var h = new OptionsAssemblerHarness();
+        var tint = new FakeDisplayTint(5) { ApplyDelay = TimeSpan.FromMilliseconds(400) };
+        h.F.Device.DisplayTint = tint;
+
+        var clock = Stopwatch.StartNew();
+        AssemblerRows.Change(h, "Blue-light filter:");
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(200),
+            $"the pick held the caller for {clock.ElapsedMilliseconds} ms — the apply is on the caller's thread");
+
+        // ...and the apply did happen, off it — the schedule is not a way of dropping the write.
+        Assert.True(h.F.Service.TintApplies.Drain(TimeSpan.FromSeconds(10)), "the apply never finished");
+        Assert.Equal([1], tint.ApplyCalls);
     }
 
     /// <summary>A device with no profile port, or one that advertises no profiles, has no per-source rows:
@@ -573,12 +647,13 @@ internal sealed class OptionsAssemblerHarness
     /// is built — the only order there is now, and the same one a vendor backend has. Omitted with a
     /// <paramref name="fixture"/>, which was built with its own.</param>
     public OptionsAssemblerHarness(LaptopServiceFixture? fixture = null, Func<Task<bool>>? confirmCalibration = null,
-                                   Action<FakeDevice>? declare = null)
+                                   Action<FakeDevice>? declare = null, Func<Task<bool>>? confirmGpuAccess = null)
     {
         F = fixture ?? new LaptopServiceFixture(declare: declare);
         Assembler = new OptionsAssembler(F.Service, Notices.Add,
                                          confirmCalibration ?? (() => Task.FromResult(true)),
-                                         Posted.Add);
+                                         Posted.Add,
+                                         confirmGpuAccess ?? (() => Task.FromResult(true)));
     }
 
     /// <summary>Play the posted actions, as the UI thread would, and return the messages they produced.</summary>
@@ -687,10 +762,13 @@ internal static class AssemblerRows
 
 /// <summary>
 /// The keys the fakes declare their settings under. A key is the BACKEND's own name for a setting and the UI
-/// never invents one, so these are the names the shipped backends use: Acer's three are the Linuwu-Sense node
-/// names its Linux half binds the same knobs through (AcerDevice.Linux.cs), declared by its Windows half too; of
-/// Dell's, two are the BIOS-attribute names dell-wmi-sysman exposes on both OSes and the third is the LED node
-/// the timeout lives on.
+/// never invents one, so these are the names the shipped backends use: Acer's three are the names that backend
+/// has always known those settings by — they were the Linuwu-Sense node names, which is why they read like
+/// paths — and they are declared by its WINDOWS half alone, because the Linux half no longer binds them at all
+/// (the tier is deleted, and mainline has no interface for those controls); they stay so that a settings.json
+/// written on one OS reads on the other, and a Linux half would declare them again only if a transport for them
+/// is ever found (docs/acer-linux.md); of Dell's, two are the BIOS-attribute names dell-wmi-sysman exposes on
+/// both OSes and the third is the LED node the timeout lives on.
 ///
 /// THEY ARE NOT CHECKED AGAINST THE BACKENDS, and that is a named gap rather than an oversight: no test
 /// constructs <c>AcerDevice</c>/<c>DellDevice</c> (their probes need WMI and real firmware — see the wave-4b

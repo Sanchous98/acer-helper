@@ -30,7 +30,30 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        Closing += (_, e) => { if (_destroying) return; e.Cancel = true; CloseFlyout(); };   // hide, never destroy (unless torn down for a rebuild)
+        // Hide, never destroy (unless torn down for a rebuild) — but never refuse the SESSION either: a close the
+        // desktop initiated means it is going away, and cancelling that is what made KDE report "session end
+        // cancelled by an application" and refuse to switch the machine off until the app was quit by hand.
+        // Which reasons hide and which must go through is FlyoutClosePolicy's single decision.
+        // The flyout is a tray panel: it must NOT take a taskbar entry. ShowInTaskbar/Topmost from the XAML do not
+        // reach a live X11 window (measured — see WindowFlags), and without this the owner could minimise the flyout
+        // from the taskbar and never get it back.
+        Opened += (_, _) => WindowFlags.Apply(this);
+
+        Closing += (_, e) =>
+        {
+            if (FlyoutClosePolicy.HideInsteadOfClose(_destroying, e.CloseReason))
+            {
+                e.Cancel = true;             // the tray rule: a window close hides the flyout, the app stays up
+                CloseFlyout();
+                return;
+            }
+            if (_destroying) return;         // our own teardown (a UI rebuild): this close is exactly the intent
+
+            // Posted rather than invoked here: this handler runs inside the window's own close, and the teardown
+            // it leads to (AppController.ExitApp -> desktop.Shutdown) closes the windows again. Letting this close
+            // finish first keeps the two apart.
+            Dispatcher.UIThread.Post(() => SessionEnding?.Invoke());
+        };
 
         // The window is SizeToContent, so switching to a taller page (e.g. the fan Curve editor) grows it.
         // It's anchored by its top-left, so growth would push the bottom off-screen — re-anchor on every size
@@ -47,6 +70,14 @@ public partial class MainWindow : Window
 
     /// <summary>Raised when the user clicks the transparent margin around the card (outside the flyout).</summary>
     public event Action? BackgroundClicked;
+
+    /// <summary>Raised when the DESKTOP is ending the session and this window is being closed for good (KDE's
+    /// logout, Windows' session end) — never for a close that only hides the flyout.
+    ///
+    /// The app has to exit on it, and nothing else will do that for us: the lifetime is OnExplicitShutdown and the
+    /// tray keeps the process alive with no window at all, so an app that merely stops showing a window stays
+    /// running — which the session manager reports as the application refusing to quit.</summary>
+    public event Action? SessionEnding;
 
     public void MarkDismissed() => LastDismissedUtc = DateTime.UtcNow;
 
@@ -87,17 +118,31 @@ public partial class MainWindow : Window
     {
         var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
         if (screen == null) return;
-        var wa = screen.WorkingArea;
         var s = screen.Scaling;
         var w = (int)(Bounds.Width * s);
         var h = (int)(Bounds.Height * s);
         var gap = (int)(20 * s);   // 20 DIP visual gap from the screen corner (card is no longer margined)
-        // Anchor near the working-area bottom-right with the gap, never spilling past it. If it spills
-        // (right/bottom edge beyond the working area) KWin clamps it back and the two fight = jitter /
-        // "creeping onto the next monitor".
-        Position = new PixelPoint(
-            Math.Max(wa.X, wa.X + wa.Width - w - gap),
-            Math.Max(wa.Y, wa.Y + wa.Height - h - gap));
+        // WHICH SPACE THE WORKING AREA ARRIVES IN IS MEASURED, NOT ASSUMED — because it is not a property of the
+        // display, it is a property of what the toolkit happens to report.
+        //
+        // This used to hard-code the factor. The first measurement said WorkingArea.Width comes back as 2752 on
+        // a 3440-wide output, i.e. LOGICAL units, so the area was multiplied by the scale; the unconverted
+        // arithmetic had put the flyout at x=2142 instead of 2830, a quarter of the screen short of the corner,
+        // which read as "the window sits near the middle". Then the SAME session reported the same area as 3440
+        // — DEVICE pixels — and that multiplication asked for x=3690: past the right edge, and the flyout came
+        // up off the screen. Nothing about the display, the scale or the layout had changed; only what the
+        // toolkit reported. So the space is now OBSERVED: PopupPlacement.SpaceOf compares the area against the
+        // output's own rectangle (Screen.Bounds, the one report that is the same in both spaces), and
+        // PopupPlacement.Settle places the window there, reads its position back, and falls back to the other
+        // space if the compositor moved it. A 1.0-scale session is unaffected either way (both candidates are
+        // the same corner there), and on the Windows TFM none of this differs from before.
+        //
+        // (THE SAME DISAGREEMENT IS NOT ONLY HERE: popups and the two CenterOwner modals are placed by the
+        // toolkit and land wrong on this session for the same reason — the correction for those, and the
+        // measurement it comes from, is in PopupPlacement.cs, which is the sibling of this method.)
+        Position = PopupPlacement.Settle(
+            screen.WorkingArea, screen.Bounds, new PixelSize(w, h), gap, s,
+            place: ask => { Position = ask; return Position; }).Position;
     }
 
     private void ForceForeground()

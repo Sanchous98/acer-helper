@@ -30,6 +30,8 @@ namespace AcerHelper.Infrastructure.Composition;
 /// <item><c>LaptopService.Fans.cs</c> — the fan presets and the fan-curve engine.</item>
 /// <item><c>LaptopService.Tuning.cs</c> — GPU overclock, CPU power mode, Curve Optimizer.</item>
 /// <item><c>LaptopService.Toggles.cs</c> — one-shot hardware toggles, device flags, language.</item>
+/// <item><c>LaptopService.Cardwire.cs</c> — the app's own GPU access through cardwire, the one capability here
+/// that is not a device this machine's firmware owns.</item>
 /// </list>
 /// The split is a MOVE, not a reorganisation: no method body changed and the lock instance and
 /// its coverage are the same object they were, so the concurrency contract below is unchanged.
@@ -40,9 +42,9 @@ namespace AcerHelper.Infrastructure.Composition;
 /// WHAT IT IMPLEMENTS. Five of Application's contracts, one per thing the owner's model applies
 /// (Application/FanAxis.cs, GpuOffsets.cs, CpuPowerOverlay.cs, Undervolt.cs, DeclaredSetting.cs), plus the
 /// re-apply's (<see cref="HardwareReconciler"/>, which is this class's own executor). All five are implemented
-/// EXPLICITLY, so not one member is added to this class's public surface — the surface that
-/// docs/device-and-application.md §1.2 already measured as too wide — and a caller reaches them only by naming the
-/// use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
+/// EXPLICITLY, so not one member is added to this class's public surface — the surface the retired analysis
+/// measured as too wide, 62 members plus a constructor, a count kept in docs/open-decisions.md's note on that
+/// retirement — and a caller reaches them only by naming the use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
 /// is remembered before it is written); this class owns the graph and the ports, which is why the rules could move
 /// and the graph could not.
 ///
@@ -253,6 +255,16 @@ public sealed partial class LaptopService : IDisposable,
 
     public void Dispose()
     {
+        // Let an in-flight blue-light apply finish before the machine is torn down. The apply writes the
+        // compositor's own configuration, and the tint link's teardown — its IDisposable, reached through
+        // device.Dispose() below — restores the user's values out of that same configuration and verifies the
+        // release against the compositor. Left to interleave, a roll-back could land after the restore and leave
+        // the markers gone with a tint still applied, which is the one thing the link promises never to leave
+        // behind. Until the apply moved off the UI thread this could not happen — both ran on the thread that is
+        // now exiting — so the wait is what keeps the new schedule from opening the hole. Bounded, and a timeout
+        // is not an error here: teardown goes on either way.
+        try { _tintApplies.Drain(TintDrainTimeout); } catch { /* best-effort teardown */ }
+
         // Tear the virtual LampArray down BEFORE the device: it stops its worker and removes the PnP node, so
         // Windows doesn't keep offering a lighting device this process no longer backs.
         try { _lampArray?.Dispose(); } catch { /* best-effort teardown */ }

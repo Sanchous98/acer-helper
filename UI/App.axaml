@@ -236,5 +236,26 @@
       <Setter Property="Padding" Value="8,3" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+
+    <!-- THE DROP-DOWN IS THE WIDTH OF ITS BOX, FLUSH WITH ITS LEFT EDGE. The Fluent ComboBox template's
+         Popup (PART_Popup) carries only a MinWidth bound to the control's own width and NO Placement at all, so
+         it inherits Popup's default — PlacementMode.Bottom, which centres the popup on its target — and any item
+         longer than the control grows the popup in both directions. Measured on the owner's machine: an open
+         drop-down 226 device px wide under a field whose own MinWidth is 110 DIP, centred on it. Win32/WinUI
+         drop-downs are the width of their box and flush with it, and that is what the owner asked for ("the
+         element and the drop-down list must be the same width"); the two setters below are the whole of it.
+
+         App-level rather than four local ones: it reaches every ComboBox in every view, including the choice-row
+         template above and the ones in LightView/BatteryView/CpuView, and any added later.
+
+         The Width binding is the idiom the Fluent template already uses one line above the popup's own content
+         (a TemplatedParent binding on this very Popup), so it resolves against the ComboBox the popup is
+         templated into and needs no name or code-behind. `Placement` is set as well as the width: it states the
+         alignment the owner asked for directly, so a drop-down is flush with its field even before the width
+         binding has settled on the first layout pass. -->
+    <Style Selector="ComboBox /template/ Popup#PART_Popup">
+      <Setter Property="Placement" Value="BottomEdgeAlignedLeft" />
+      <Setter Property="Width" Value="{Binding Bounds.Width, RelativeSource={RelativeSource TemplatedParent}}" />
+    </Style>
   </Application.Styles>
 </Application>

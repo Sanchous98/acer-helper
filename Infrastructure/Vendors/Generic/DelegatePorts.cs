@@ -6,9 +6,10 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // "read a value / write a value via a transport" — the transport + encoding is the ONLY thing that differs
 // by vendor and platform, so instead of a class per feature these thin holders implement the port
 // interfaces and take the platform operation as delegates. Each vendor's InitVendor supplies method-group
-// references (Acer: WMI/Linuwu-sysfs encodings; Dell: power_supply/firmware-attributes sysfs on Linux,
-// BIOS-attribute WMI on Windows). Writes return (ok, error) so the holder can surface LastError; reads
-// return the value directly (errors degrade to a default).
+// references (Acer: WMI on Windows, and on Linux the mainline acer-wmi sysfs nodes — its hwmon chip and its
+// own platform-profile class node — plus hidraw for RGB and the EC envelope; Dell: power_supply/
+// firmware-attributes sysfs on Linux, BIOS-attribute WMI on Windows). Writes return (ok, error) so the holder
+// can surface LastError; reads return the value directly (errors degrade to a default).
 
 /// <summary>A boolean toggle. Every on/off setting a backend declares is this one class, instantiated with
 /// different ops and handed over as a <see cref="FlagSetting"/> alongside the backend's own key for it

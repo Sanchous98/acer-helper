@@ -184,8 +184,9 @@ public sealed partial class LaptopService
 
     /// <summary>Remember the offsets and hand back what was remembered, so the write sends exactly the numbers the
     /// graph holds. The clamp and the routing are <c>CoAxis</c>'s and stay on this side of the boundary — they are
-    /// the two rules this axis's use case cannot state (see <see cref="IUndervoltTarget"/>'s docstring, and
-    /// docs/device-and-application.md §2.3's third wall).
+    /// the two rules this axis's use case cannot state (see <see cref="IUndervoltTarget"/>'s docstring, which names
+    /// both; the wall that keeps them here is the third of the three listed in docs/open-decisions.md's note on the
+    /// retired analysis).
     ///
     /// The empty check is a PRECONDITION GUARD, not the rule: <see cref="ApplyUndervolt"/> refuses an empty edit
     /// before this is reached, which is where that rule is stated. It is repeated here because the all-core branch

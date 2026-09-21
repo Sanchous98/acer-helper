@@ -1,0 +1,44 @@
+# AcerHelper — hand the "wheel" group write access to the ryzen_smu driver's SMU mailbox attributes, ONCE PER
+# BOOT, after the module is up. Installed by the app's "Grant hardware access" action to
+# /etc/systemd/system/acer-helper-smu-perms.service (Infrastructure/HardwareAccess.cs).
+#
+# WHY THIS UNIT EXISTS — it is the deterministic half of a grant that had only a racy one. The udev rule that used
+# to be the whole of it (packaging/60-acer-helper.rules, the ACTION=="bind" ryzen_smu block) CANNOT FIRE AT BOOT
+# on a machine that loads this driver from the INITRAMFS, and that is measured on the machine this app was built
+# for: dracut's systemd-modules-load inserts the module before the real systemd-udevd exists (journal:
+# "systemd-modules-load[335]: Inserted module 'ryzen_smu'" during the initramfs run), so the bind uevent is
+# emitted onto a bus nobody is listening to, and systemd-udev-trigger.service's coldplug replays add/change
+# events — never a bind. The four attributes are absent from /etc/tmpfiles.d/acer-helper.conf for the same kind
+# of reason (they do not exist yet at the tmpfiles pass), so NOTHING re-applied the grant and it was simply LOST
+# at the next boot: the nodes came up -rw-r--r-- root root, the app's undervolt port gates on writing them
+# (Infrastructure/Vendors/Generic/RyzenCurveOptimizer.Linux.cs), and the owner's Tuning tab disappeared with them.
+# This unit runs after the module, on every boot, unconditionally — which is what the udev rule could not promise.
+#
+# WHAT WOULD MAKE IT DELETABLE: a distribution packaging of ryzen_smu that ships its own udev rule for these
+# attribute files, or a kernel that applies a group to them itself — or an /etc/tmpfiles.d line that systemd
+# guarantees to run after systemd-modules-load.service (today's acer-helper.conf entry runs in the tmpfiles pass,
+# which is exactly the ordering that failed). Until one of those exists, deleting this file leaves the grant
+# depending on a MANUAL module reload.
+#
+# THE FOUR NAMES ARE THE DRIVER'S WHOLE WRITABLE SURFACE, granted together for the reason the udev rule gives: the
+# app drives "smn" alone (the command nodes cannot report a refusal), but a half-granted driver is a worse outcome
+# for the other tools that share it. The paths are absolute because the driver's tree /sys/kernel/ryzen_smu_drv is
+# a BARE KOBJECT — not a device, no uevent — so nothing can reach it by matching.
+#
+# THE DOUBLED DOLLAR SIGN IS NOT A TYPO: systemd expands $VAR in ExecStart from the service's own environment, and
+# an undefined name becomes EMPTY — a bare "$f" would silently chgrp the directory instead of the four files. "$$"
+# is systemd's escape for a literal "$", so the shell receives the loop variable it needs, exactly as "$$f" is what
+# udev needs in the rule for the same reason.
+
+[Unit]
+Description=Grant the wheel group write access to the ryzen_smu SMU mailbox attributes
+After=systemd-modules-load.service
+ConditionPathExists=/sys/kernel/ryzen_smu_drv
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for f in smu_args mp1_smu_cmd rsmu_cmd smn; do chgrp wheel /sys/kernel/ryzen_smu_drv/$$f 2>/dev/null && chmod g+w /sys/kernel/ryzen_smu_drv/$$f 2>/dev/null; done'
+
+[Install]
+WantedBy=multi-user.target

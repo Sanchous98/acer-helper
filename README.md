@@ -13,8 +13,15 @@ Switch the platform performance profile from a tray icon and a compact window:
 
 - **Quiet · Balanced · Performance · Turbo · Eco**
 - Reads the current profile and the supported-profiles mask from the EC
-  (misc-setting `0x0B` / `0x0A`), so unavailable profiles (e.g. Turbo on
-  battery) are greyed out automatically.
+  (misc-setting `0x0B` / `0x0A`), and offers exactly what the source reports —
+  nothing is gated by power source. On Linux all five profiles stay selectable
+  and writable on battery (each was written and read back on battery), so no
+  choice is greyed out for being on battery. What a profile moves here is
+  measurable only as CPU-package watts — RAPL reports 49.12 / 59.27 / 73.47 /
+  83.35 W for low-power / balanced / balanced-performance / performance — not as
+  the ~108 W dGPU envelope of the Windows measurements, which this box cannot
+  reproduce: the Linux side sees no discrete GPU at all
+  ([docs/acer-linux.md](docs/acer-linux.md)).
 - Tray icon shows the active profile; right-click to switch; window auto-refreshes.
 
 ### How it works
@@ -80,8 +87,10 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   `IDynamicLighting`/`IDynamicLightingFactory` are the virtual-lighting surface the bridge implements,
   and `AppArgs` the CLI constant. It names no Infrastructure type — see the arrow above, and note what
   that still forbids: a use case needing the stored settings container or a vendor port by name cannot
-  live here yet, which is why the per-mode lighting and the profile switch did not move
-  (docs/device-and-application.md §8 measures each).
+  live here yet, which is why the profile switch did not move — it holds the graph lock across the port
+  call, and that measurement is kept in `docs/open-decisions.md`'s note on the retired analysis. The
+  per-mode lighting was on that list too and is not any more: it had to cross by contract rather than
+  by live reference, and now does (`Application/LightZone.cs`).
 - **`Infrastructure/`** (`AcerHelper.Infrastructure`) — everything that touches the machine:
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
   `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.
@@ -232,21 +241,49 @@ The `build` workflow produces a Native-AOT **AppImage** (`AcerHelper-x86_64.AppI
 executable, run. It lives in your home dir — so on **immutable Fedora** (Silverblue/Kinoite/uBlue) it needs
 no rpm-ostree layering or reboot — and it **self-updates**: the in-app update check downloads the new
 AppImage and replaces it in place. On first run it offers a one-click **"Grant hardware access"** (a single
-pkexec/polkit password prompt) that installs the udev/tmpfiles rules so the root-only controls become
-writable — a portable binary can't ship system files itself, so this is the one privileged step.
+pkexec/polkit password prompt) that installs the udev rules and the tmpfiles.d entry, which make the root-only
+controls writable — keyboard backlight, battery charge thresholds, the platform profile and, where the driver
+exposes it, the fan PWM attributes. **On an Acer** (the machine is read from
+`/sys/devices/virtual/dmi/id/sys_vendor`) the same prompt additionally installs a modprobe.d options line
+(`options acer_wmi predator_v4=1 force_caps=7200`, with its provenance, its mask derivation, the measured value
+that this one is not, and the rule to re-derive it in `packaging/acer-helper-modprobe.conf`), which is what makes the mainline `acer-wmi`
+Predator/Nitro features exist on a model its DMI quirk table does not list: the five platform profiles, the
+fan/temperature telemetry **and fan control** (the hwmon `pwm*` nodes, which is what the udev rule above grants
+write access to — `force_caps` is a whole-mask replacement and its value is machine-specific, which is why the
+file records how it was derived rather than just the number); a Dell or generic machine is never asked to
+install parameters for a module it does not load, and it keeps the other two files. The prompt reloads udev, and
+on an Acer the module last, so the parameters apply immediately; **restart the app afterwards** — it caches its
+sysfs paths at construction. A portable binary can't ship system files itself, so this is the one privileged
+step.
 
 ```
 chmod +x AcerHelper-x86_64.AppImage && ./AcerHelper-x86_64.AppImage
 ```
 
 Build the AppImage locally: `dotnet publish … -p:PublishAot=true -o publish-linux` (above), assemble an
-AppDir (the publish output + `packaging/{AppRun,acer-helper.desktop,acer-helper.png,60-acer-helper.rules,acer-helper.conf}`),
-then `appimagetool AcerHelper.AppDir AcerHelper-x86_64.AppImage`.
+AppDir (the publish output + `packaging/{AppRun,acer-helper.desktop,acer-helper.png}`), then
+`appimagetool AcerHelper.AppDir AcerHelper-x86_64.AppImage`. The three permission/options files need no listing
+here: the csproj carries them as **Linux-only `Content` items** (`CopyToPublishDirectory`), so the publish output
+already contains `60-acer-helper.rules`, `acer-helper.conf` and `acer-helper-modprobe.conf` flat next to the
+binary — which is exactly where `HardwareAccess` looks for them. A local AppDir therefore needs no hand copy of
+them (the release workflow re-copies the same bytes into the AppDir anyway, deliberately, because an AppImage
+that lost them loses the access offer with no error anywhere).
+
+The Linux backend's own reference is [docs/acer-linux.md](docs/acer-linux.md): what each module parameter turns
+on and how to re-derive its value (including the `force_caps` procedure and its measured result), the
+`platform_profile` name ↔ EC byte table with the "`performance` means Turbo" trap, the fan and sensor channel
+maps, the EC HID reconnaissance and why that route is closed, and the list of capabilities that stay absent on
+Linux.
 
 ## Roadmap
 
 - Linux hardware backend — Acer probe-first: hidraw for RGB and the EC power envelope, `platform_profile`
-  for the firmware profile set, Linuwu-Sense optional for the node-backed controls; evdev hotkeys, X/Wayland
-  gamma, logind clamshell
+  for the firmware profile set, evdev hotkeys, X/Wayland gamma. The Linux backend is **module-free by
+  construction** — the Linuwu-Sense tier is deleted, so its node-backed controls (LCD overdrive, battery
+  limiter/calibration, backlight timeout, USB charging, backlight read) are declared ABSENT rather than
+  optional, and the module parameters above are the only kernel-side dependency left. Clamshell is
+  Windows-only: on Linux `Clamshell.Linux` reports unsupported, because the desktop's own power manager holds
+  the lid switch (KDE PowerDevil blocks `handle-lid-switch` and suspends by its own config, so a third-party
+  logind inhibitor is redundant and does not stop it).
 - Additional vendors behind the same Domain ports
 - Per-key RGB; fan curves

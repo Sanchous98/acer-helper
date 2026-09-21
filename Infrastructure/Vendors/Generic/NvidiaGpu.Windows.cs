@@ -35,12 +35,12 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
     private const uint CLOCK_MEMORY   = 4;
     private const uint PSTATE_P0      = 0;   // NVAPI_GPU_PERF_PSTATE_P0 (the only editable/meaningful state)
 
-    // Safety caps on the exposed offset range (MHz), applied even if the driver reports more headroom — a
-    // single slider drag to an extreme offset can hang or corrupt the GPU (NVIDIA XID 62). The memory value is
-    // the RAW memory-clock offset, matching G-Helper's convention (it writes the number as-is, no GDDR6
-    // doubling); an Afterburner "effective" figure is ~2× this. See docs/nvidia-gpu-oc.md.
-    private const int CoreCap = 300;
-    private const int MemCap  = 1500;
+    // The safety caps on the exposed offset range (MHz) — and the raw-vs-effective memory convention that goes
+    // with them — live in NvidiaGpuPolicy (CoreCap / MemCap), NOT here: they are a safety rule, the Linux port
+    // needs the identical rule, and a safety rule kept in two OS-local copies is one that drifts while both look
+    // correct. The Windows half keeps only what is genuinely NvAPI's: the reading of the P0 frequency deltas,
+    // which are kHz there and have to be divided down, and the struct layout they arrive in.
+    // See docs/nvidia-gpu-oc.md (this port) and docs/nvidia-gpu-oc-linux.md (the NVML one).
 
     // nvapi64.dll's single export. Blittable (uint -> nint), so the source-generated marshalling is AOT-safe.
     [LibraryImport("nvapi64.dll", EntryPoint = "nvapi_QueryInterface")]
@@ -89,8 +89,8 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
 
             var gpu = handles[0];
             var name = ReadName(gpu);
-            var (core, mem) = ReadRanges(gpu);
-            return new NvidiaGpu(gpu, name, core, mem);
+            var ranges = ReadRanges(gpu);
+            return new NvidiaGpu(gpu, name, ranges.Core, ranges.Mem);
         }
         catch { return null; }   // DllNotFound (no NVIDIA driver), bad entry point, etc. -> feature hidden
     }
@@ -103,8 +103,8 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
         LastError = null;
         if (_setPstates == null) { LastError = "NvAPI unavailable"; return false; }
 
-        coreMhz = Math.Clamp(coreMhz, CoreRange.Min, CoreRange.Max);
-        memMhz = Math.Clamp(memMhz, MemRange.Min, MemRange.Max);
+        coreMhz = NvidiaGpuPolicy.ClampOffset(coreMhz, CoreRange);
+        memMhz = NvidiaGpuPolicy.ClampOffset(memMhz, MemRange);
 
         NV_GPU_PERF_PSTATES20_INFO_V1 set = default;
         set.version = Ver1;
@@ -163,17 +163,11 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
         return string.IsNullOrWhiteSpace(s) ? "NVIDIA GPU" : s!;
     }
 
-    private static ((int, int) core, (int, int) mem) ReadRanges(nint gpu)
+    private static NvidiaGpuPolicy.OffsetRanges ReadRanges(nint gpu)
     {
         var (cMin, cMax, mMin, mMax) = ReadDeltaRange(gpu);
-        return (Cap(cMin, cMax, CoreCap), Cap(mMin, mMax, MemCap));
+        return NvidiaGpuPolicy.RangesFor(cMin, cMax, mMin, mMax);
     }
-
-    // Intersect the driver-reported range with our safety cap. A degenerate read (0..0 — e.g. the dGPU was
-    // powered off / D3-cold at probe time, common on Optimus laptops) falls back to the full ±cap envelope so
-    // the feature still appears with sane bounds instead of a dead 0..0 slider.
-    private static (int Min, int Max) Cap(int dmin, int dmax, int cap)
-        => dmax <= 0 && dmin >= 0 ? (-cap, cap) : (Math.Max(dmin, -cap), Math.Min(dmax, cap));
 
     private static (int cMin, int cMax, int mMin, int mMax) ReadDeltaRange(nint gpu)
     {

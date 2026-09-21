@@ -1,6 +1,7 @@
 using System.Threading;
 using AcerHelper.Application;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 
 namespace AcerHelper.Infrastructure.Composition;
@@ -68,10 +69,49 @@ public sealed partial class LaptopService
 
     public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 
-    public void SetBlueLight(int level)
+    /// <summary>
+    /// The blue-light applies, one at a time and OFF THE CALLER'S THREAD. One instance for the service's life, so
+    /// the rules in <c>Vendors/Generic/TintApplyPolicy.cs</c> hold across a UI rebuild as well as across two
+    /// clicks: a level change is a slow, verified write (KWin walks to the new temperature before the link's
+    /// read-back can confirm it) and it used to be made inline on the UI thread, because the row has no read-back
+    /// and <c>ChoiceRowViewModel</c> applies such a pick inline — a click could freeze the window for ~2 s.
+    /// </summary>
+    private readonly TintApplyPolicy _tintApplies = new();
+
+    /// <summary>
+    /// How long teardown waits for an in-flight tint apply (<see cref="LaptopService.Dispose"/>).
+    ///
+    /// Sized over the TRANSPORT's own wait rather than picked: the slow half of an apply is the link's commit poll,
+    /// whose ceiling is 2500 ms, and everything else in one is a handful of ~6 ms process spawns. This is the
+    /// outer bound only — it exists so a wedged apply cannot hold the app open, not to be reached.
+    /// </summary>
+    private static readonly TimeSpan TintDrainTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>Test seam: the blue-light apply schedule, so a test can WAIT for work that is deliberately on no
+    /// caller's thread (<c>TintApplyPolicy.Drain</c>). Exists for the same reason as <see cref="LaptopService.StateHeld"/>:
+    /// "the apply is not on the caller's thread" is not observable from a port fake, which sees the call and never
+    /// the thread it arrived on.</summary>
+    internal TintApplyPolicy TintApplies => _tintApplies;
+
+    /// <summary>
+    /// Set the blue-light level: RECORD it here, then hand the hardware write to the schedule above.
+    ///
+    /// THE TWO HALVES ARE IN THAT ORDER, and it is the one that keeps the app honest about a level it did not get
+    /// to finish: the recorded value is what <see cref="ApplyStartupState"/> re-applies on the next run, so a
+    /// level the user picked is remembered even if the process dies between the click and the write landing. The
+    /// hardware write is deliberately NOT under <c>_state</c> (design doc D17, and the rule every port call in this
+    /// class follows) — it is now not on this thread at all.
+    ///
+    /// <paramref name="onApplied"/> is answered ONLY for the newest level asked for; a superseded one reports
+    /// nothing, because its outcome is about a level the user has already left. It is called on the schedule's
+    /// thread, so a caller that touches a control must marshal (the Options row does: <c>OptionsAssembler.Fail</c>
+    /// posts). No port at all answers success — there is nothing to report, and the row is not built without one —
+    /// and a throwing port is a failed one, as for every other port in this class (<see cref="Attempt(Func{bool}, Func{string?})"/>).
+    /// </summary>
+    public void SetBlueLight(int level, Action<bool>? onApplied = null)
     {
-        device.DisplayTint?.Apply(level);
         lock (_state) { Settings.Bluelight = level; Save(); }
+        _tintApplies.Submit(() => device.DisplayTint is { } tint ? tint.Apply(level) : true, onApplied);
     }
 
     public void SetClamshell(bool on)

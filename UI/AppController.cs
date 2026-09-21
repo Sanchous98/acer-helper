@@ -44,6 +44,9 @@ internal sealed class AppController
     private int _busy;                         // 0/1 single-flight guard for the refresh background pass (Interlocked)
     private int _rerun;                        // set when a Refresh() arrives mid-pass -> run exactly once more (coalesced)
     private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
+    // Set when an install could not make the module parameters live, so the banner's reboot instruction survives
+    // a UI rebuild (see ApplyHardwareAccessBanner). Same lifetime as the condition it describes: the session.
+    private bool _accessRebootPending;
     private bool _updating;   // a self-update download/install is in flight — both the banner and the tray item
                               // stay clickable, so without this a second click starts a second download and a
                               // second msiexec (which then trips over the Windows Installer mutex mid-upgrade)
@@ -144,6 +147,7 @@ internal sealed class AppController
 
         _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
         _ = OfferDriverAsync(d, startMinimized);   // one-time consent prompt for the driver a feature needs
+        _ = AskCardwireGpuAccessAsync();           // the remembered GPU-access consent, re-asked every start
     }
 
     // ---- third-party driver offer ----
@@ -208,8 +212,11 @@ internal sealed class AppController
                                     host: _svc.LampArray)
             : null;
         // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
-        // layer now, which must not reference a UI toolkit.
-        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a));
+        // layer now, which must not reference a UI toolkit. ConfirmGpuAccessAsync is supplied for the same
+        // reason: the cardwire row's consent is a modal dialog, so the assembler is handed the answer rather
+        // than reaching for a window.
+        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a),
+                                        ConfirmGpuAccessAsync);
         // The three per-mode preset builds below are keyed by the CURRENT mode, and the key is derived from the
         // live profile — a PowerProfiles read, i.e. a WMI transaction on Windows. `cur` is that profile, read
         // once by the caller (the constructor and RebuildForLanguage hoist it), so all three pass it in: BuildUi
@@ -245,6 +252,11 @@ internal sealed class AppController
             lighting);
 
         var windows = new FlyoutCoordinator(vm);
+        // The desktop is going away (KDE's logout asks through XSMP, Windows through WM_QUERYENDSESSION): tear the
+        // app down and exit. Nothing else would — the lifetime is OnExplicitShutdown and the tray keeps the process
+        // alive with no window at all, so a process that stays behind is a process the session manager has to
+        // report as refusing to quit.
+        windows.SessionEnding += ExitApp;
         var tray = new TrayController(d, ApplyProfile, windows.ToggleMain, windows.OpenMain, windows.ShowLighting, ExitApp);
         return (vm, windows, tray, lighting);
     }
@@ -302,8 +314,13 @@ internal sealed class AppController
 
     private void ApplyHardwareAccessBanner()
     {
-        if (HardwareAccess.RulesNeeded())
-            _vm.SetHardwareAccessNeeded(() => _ = GrantHardwareAccessAsync());
+        // A pending reboot outranks the offer, and it has to outlive a UI rebuild: this runs again whenever the
+        // language changes, and by then RulesNeeded() is false (the files are installed — that is exactly why the
+        // install could not make them live), so a banner derived from the rules alone would drop the reboot
+        // instruction and leave the user with no explanation at all for the controls that never appeared. The flag
+        // is remembered for the session, which is the same lifetime as the condition.
+        if (_accessRebootPending) _vm.SetHardwareAccessRebootPending();
+        else if (HardwareAccess.RulesNeeded()) _vm.SetHardwareAccessNeeded(() => _ = GrantHardwareAccessAsync());
     }
 
     // ---- update check + apply ----
@@ -364,11 +381,55 @@ internal sealed class AppController
 
     private async Task GrantHardwareAccessAsync()
     {
-        var (ok, err) = await Task.Run(() => { var r = HardwareAccess.Install(out var e); return (r, e); });
+        // THE PROMPT COMES FIRST, and it is not a formality to click through: the install asks for the
+        // administrator password, replaces files in /etc and, on an Acer, writes an options line that changes how
+        // the acer-wmi driver behaves at LOAD — a consequence the banner's "Grant hardware access…" caption does
+        // not state and that a user cannot be read as having agreed to. The prompt lists exactly what the
+        // install will place, from the installer's own table (see HardwareAccessConsent), so what is agreed to
+        // cannot drift from what runs.
+        //
+        // Declining returns HERE, with nothing installed and no state touched: the files are untouched, the
+        // banner stays where it was, and the offer can be taken later. That is the whole of "cancel" — the
+        // privileged mechanism below is exactly what it was, reached one answer later.
+        //
+        // Called before the first await, so it is on the UI thread (the banner command's) where the dialog must
+        // be shown.
+        if (!await _windows.ConfirmHardwareAccessAsync()) return;
+
+        var (outcome, err) = await Task.Run(() => { var r = HardwareAccess.Install(out var e); return (r, e); });
         Dispatcher.UIThread.Post(() =>
         {
-            if (ok) { _vm.NeedsHardwareAccess = false; Notify(Loc.T("Hardware access granted — restart to use the unlocked controls.")); }
-            else Notify(Loc.T("Grant access failed") + Err(err));
+            switch (outcome)
+            {
+                // The files are in /etc and the module parameters are live: the controls exist now, and the app
+                // has to restart to see the sysfs paths it cached at construction.
+                case HardwareAccess.AccessInstall.Applied:
+                    _accessRebootPending = false;   // a retry that took clears the reboot state for good
+                    _vm.NeedsHardwareAccess = false;
+                    Notify(Loc.T("Hardware access granted — restart to use the unlocked controls."));
+                    break;
+                // The files are in /etc but the parameters are not live: acer_wmi could not be reloaded (in use,
+                // or — worse — unloaded and then not loaded back, which leaves profiles, fans and temperatures
+                // gone for the session; "could not be reloaded" is the honest wording for both, and the device's
+                // own status line reports the missing driver). Restarting the APP cannot load a module, so the
+                // "restart to use the unlocked controls" text would be a promise this case cannot keep.
+                //
+                // TWO places are told, each for what it is good at. The status line gives the immediate feedback
+                // and is gone in seconds — the refresh timer overwrites Status from the device on every tick, and
+                // on this backend that message is never empty, so an instruction that must survive has no home
+                // there. The BANNER is the persistent surface, so it stays visible with the reboot wording
+                // (NeedsHardwareAccess deliberately NOT cleared: the install is idempotent, so once the files are
+                // in /etc the offer never comes back, and clearing it would leave the user at a dead end until
+                // the next boot).
+                case HardwareAccess.AccessInstall.PendingReboot:
+                    _accessRebootPending = true;   // remembered so a language rebuild re-shows the banner
+                    _vm.SetHardwareAccessRebootPending();
+                    Notify(Loc.T("Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot."));
+                    break;
+                default:
+                    Notify(Loc.T("Grant access failed") + Err(err));
+                    break;
+            }
         });
     }
 
@@ -465,6 +526,32 @@ internal sealed class AppController
     private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
 
     private Task<bool> ConfirmCalibrationAsync() => _windows.ConfirmCalibrationAsync();
+
+    // The cardwire row's consent, shown where the consent belongs (FlyoutCoordinator), with the words that belong
+    // to the consent (CardwireGpuAccessConsent) — the same split as the calibration and install prompts.
+    private Task<bool> ConfirmGpuAccessAsync() => _windows.ConfirmCardwireGpuAccessAsync();
+
+    // ---- the remembered GPU-access consent (cardwire) ----
+
+    // The user turned "Use the discrete GPU" on while a third-party daemon was hiding it from us. The CONSENT is
+    // remembered (Settings.CardwireGpuAccess); the GRANT is not — it belongs to one running process and cardwire
+    // has no revoke — so every start asks again, which is exactly what the consent prompt promised.
+    //
+    // OFF THE UI THREAD, because the ask is one busctl round trip (the same shape SetCo uses for the SMU mailbox,
+    // and for the same kind of reason: a slow call must not freeze the window that is opening). A FAILURE IS
+    // REPORTED AND NEVER RETRIED: the next attempt is the next start, or the user's own click on the row.
+    //
+    // WHAT IS SAID, AND WHAT IS NOT — both halves are the port's policy (CardwireGpuAccess.DutyFor), not this
+    // method's: a machine whose GPU is already visible has nothing to ask for and is told nothing (that is the
+    // ordinary state of a cardwire in Hybrid mode, not a problem), while a machine whose daemon is gone is told,
+    // because a permission the user granted themselves has stopped being honoured. The message is this app's
+    // usual failure line, which the refresh pass replaces in a few seconds — the same lifetime every other
+    // failure report in this class has.
+    private Task AskCardwireGpuAccessAsync() => Task.Run(() =>
+    {
+        var (ok, error) = _svc.ApplyCardwireGpuAccess();
+        if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("GPU access failed") + Err(error)));
+    });
 
     // ---- hotkeys ----
 
@@ -662,8 +749,16 @@ internal sealed class AppController
         _tray.Update(t.Current, t.Selectable);
     }
 
+    /// <summary>Set by the first <see cref="ExitApp"/>: it is reachable from the tray's Exit item and from a
+    /// session end, and those can arrive together (the tray exit while the desktop is logging out). The teardown
+    /// below disposes the service, the tray and the lighting coordinator — running it twice is not something to
+    /// find out about at logout.</summary>
+    private bool _exiting;
+
     private void ExitApp()
     {
+        if (_exiting) return;
+        _exiting = true;
         _timer.Stop();
         GateStatsLog.Write();   // inline, not queued: a task started here might never get to run
         _lightingCoord.Dispose();

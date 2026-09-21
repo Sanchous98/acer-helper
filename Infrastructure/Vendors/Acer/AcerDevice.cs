@@ -23,9 +23,12 @@ public sealed partial class AcerDevice : GenericDevice
         InitVendor();
     }
 
-    /// <summary>Per-OS: create the Acer transports and wire the proprietary ports (WMI on Windows; hidraw for
-    /// RGB and the EC envelope, platform_profile for the profile set, and Linuwu-Sense where present on Linux).
-    /// See AcerDevice.Windows.cs / AcerDevice.Linux.cs.</summary>
+    /// <summary>Per-OS: create the Acer transports and wire the proprietary ports. Windows talks WMI; Linux
+    /// uses hidraw for RGB and the EC envelope, and the mainline acer-wmi interfaces for everything else — the
+    /// vendor handler's OWN platform-profile class node for the profile set (addressed by vendor token, never
+    /// the legacy ACPI alias, which fans out to every handler and has no readable state) and its hwmon chip for
+    /// fans and temperatures. Both come up from the module parameters the installer writes, so there is no
+    /// out-of-tree module anywhere in this backend. See AcerDevice.Windows.cs / AcerDevice.Linux.cs.</summary>
     partial void InitVendor();
 
     // USB-charging levels (ids = battery-threshold percentages, "0" = off). OS-agnostic — the same choices
