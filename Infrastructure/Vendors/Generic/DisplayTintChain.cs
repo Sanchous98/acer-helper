@@ -39,8 +39,16 @@ internal readonly record struct TintLink(string Name, Func<IDisplayTint?> Probe)
 /// The resolved chain: the first link whose probe answered, and nothing else. Constructed through
 /// <see cref="TryCreate"/>, which returns null when every link declined so the composition root can leave the
 /// port unset and the UI can hide the row.
+///
+/// IT IS ALSO THE PORT THE DEVICE RELEASES, and that is not decoration. Two of the links — KWin's and GNOME's —
+/// work by writing the user's OWN configuration and putting it back on the way out (KwinConfigTint.Dispose →
+/// Release, GnomeConfigTint the same), because a tint implemented as a configuration write survives the process
+/// that wrote it. The device releases what it owns (<c>Device.Own</c> takes an IDisposable), and what it is
+/// handed is THIS object, so a chain that cannot be disposed is a release that never reaches those two links:
+/// <c>kwinrc</c> keeps <c>Active=true</c> at this app's temperature after the user quits, and KWin goes on
+/// tinting a screen the app is no longer running behind — the exact opposite of the rule the links state.
 /// </summary>
-internal sealed class DisplayTintChain(string activeName, IDisplayTint active) : IDisplayTint
+internal sealed class DisplayTintChain(string activeName, IDisplayTint active) : IDisplayTint, IDisposable
 {
     /// <summary>Which link serves this session. Kept because "which mechanism is the user actually on" is the
     /// first question a bug report about the filter raises, and it is not answerable from the UI.</summary>
@@ -52,6 +60,16 @@ internal sealed class DisplayTintChain(string activeName, IDisplayTint active) :
     public int Levels => active.Levels;
 
     public bool Apply(int level) => active.Apply(level);
+
+    /// <summary>Release the chosen link, if it has anything to release. Forwarded rather than absorbed, for the
+    /// reason the class comment gives: the settings-writing links put the user's configuration back here and
+    /// nowhere else. A link that is not disposable holds nothing to give back — the X11 gamma ramp is the
+    /// process's own X connection and the server drops its ramp with the client — so it is skipped rather than
+    /// required to implement a no-op.</summary>
+    public void Dispose()
+    {
+        if (active is IDisposable owned) owned.Dispose();
+    }
 
     /// <summary>The first link that answers wins; null when none does. The order of <paramref name="links"/> IS
     /// the fall-through order, so it is the one thing the tests pin here.</summary>

@@ -180,6 +180,34 @@ public class GnomeTintTests
         Assert.False(gnome.Port.IsWritten);
     }
 
+    /// <summary>
+    /// AND THE SAME RULE APPLIES WHEN THE APP QUITS, which is where it was missing. The release used to write the
+    /// two keys unconditionally: <c>night-light-enabled=false</c> — on the reasoning that the app only ever
+    /// applied while it was off — and the temperature it had recalled from before the app started. Both are the
+    /// user's own keys, and GNOME's panel writes them live, so with the filter on and the user having just changed
+    /// the night temperature, quitting wrote the OLD value back over theirs; had they switched the night light off
+    /// instead, it was switched back on. The quit path now asks the same question an apply asks ("do the settings
+    /// still hold what this run wrote?", StillOurs) and, when the answer is no, forgets the tint and writes
+    /// NOTHING: what they are left with is their own night light at their own temperature.
+    ///
+    /// MUTATION that reddens it: remove the <c>!StillOurs()</c> guard from <c>Release</c> — the recalled 2700 is
+    /// then written back over their 3300.
+    /// </summary>
+    [Fact]
+    public void AUserChangeWhileTintingSurvivesTheAppQuitting()
+    {
+        var gnome = new FakeGnome();
+        gnome.Config[GnomeConfig.TemperatureKey] = "uint32 2700";
+        gnome.Port.Apply(2);                                  // ours: 4000 and enabled=true
+
+        gnome.Config[GnomeConfig.TemperatureKey] = "uint32 3300";   // their edit in GNOME's panel
+
+        gnome.Port.Dispose();                                 // ...and the user quits
+
+        Assert.Equal(3300, gnome.Kelvin(GnomeConfig.TemperatureKey));
+        Assert.False(gnome.Port.IsWritten);
+    }
+
     // ---- the write is verified, not trusted ----
 
     /// <summary>The settings daemon does not act on the write. The apply reports failure and rolls back.</summary>

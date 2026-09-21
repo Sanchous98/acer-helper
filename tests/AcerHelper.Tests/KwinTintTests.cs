@@ -397,6 +397,50 @@ public class KwinTintTests
         Assert.False(kwin.Port.IsWritten);
     }
 
+    /// <summary>
+    /// AND THE SAME RULE APPLIES WHEN THE APP QUITS, which is where it was missing. The filter is on, the user
+    /// changes the night temperature in System Settings, and then closes the app: the release used to write the
+    /// values it had recorded — the ones from BEFORE the app started — straight over the choice they had just
+    /// made, and, if what they had done was switch the night light off, it switched it back on. The quit path
+    /// asks the same question an apply asks ("does the configuration still hold what this run wrote?", StillOurs),
+    /// and when the answer is no it drops its markers and writes NOTHING: what the user is left with is their own
+    /// night light at their own temperature, and no trace of the app in the file.
+    ///
+    /// MUTATION that reddens it: remove the <c>_written &amp;&amp; !StillOurs()</c> guard from <c>Release</c> — the
+    /// recorded 2700 is then written back over their 3300.
+    /// </summary>
+    [Fact]
+    public void AUserChangeWhileTintingSurvivesTheAppQuitting()
+    {
+        var kwin = new FakeKwin();
+        kwin.Config[KwinConfig.TemperatureKey] = "2700";
+        kwin.Port.Apply(2);                              // ours: 4000, Mode=0, Active=true
+
+        kwin.Config[KwinConfig.TemperatureKey] = "3300"; // their edit in System Settings, filter still on
+
+        kwin.Port.Dispose();                             // ...and the user quits
+
+        Assert.Equal("3300", kwin.Config[KwinConfig.TemperatureKey]);
+        Assert.All(KwinConfig.Markers, m => Assert.DoesNotContain(m, kwin.Config.Keys));
+    }
+
+    /// <summary>The other shape of the same quit: they switched the night light OFF while the filter was on, so
+    /// quitting must not switch it back on — the release used to restore the recorded <c>Active</c>, which is
+    /// exactly the resurrection of a setting the user turned off.</summary>
+    [Fact]
+    public void AUserWhoSwitchesTheNightLightOffIsNotOverriddenByTheAppQuitting()
+    {
+        var kwin = new FakeKwin();
+        kwin.Port.Apply(2);                              // ours: Mode=0, Active=true, Temp=4000
+
+        kwin.Config[KwinConfig.ActiveKey] = "false";     // their edit in System Settings
+
+        kwin.Port.Dispose();
+
+        Assert.Equal("false", kwin.Config[KwinConfig.ActiveKey]);
+        Assert.All(KwinConfig.Markers, m => Assert.DoesNotContain(m, kwin.Config.Keys));
+    }
+
     // ---- the write is verified, not trusted ----
 
     /// <summary>
@@ -425,6 +469,43 @@ public class KwinTintTests
     {
         Assert.True(new FakeKwin().Port.Apply(2));
         Assert.False(new FakeKwin { CompositorHonoursConfig = false }.Port.Apply(2));
+    }
+
+    /// <summary>
+    /// THE USER CAN ALSO CHANGE IT WHILE AN APPLY IS IN FLIGHT, and the rollback has to leave their change alone.
+    /// An apply writes its three keys and THEN waits for the compositor to act — <c>KwinConfigFile.Commit</c>
+    /// polls for up to 2500 ms, because KWin walks to a new night temperature (50 K per step over a 2000 ms
+    /// quick-adjust) — so there is a real window in which the user can edit System Settings. When the compositor
+    /// then refuses the write (it did not take, or KWin is inhibited), the apply rolls back; and a rollback that
+    /// wrote the recorded priors back blindly would land the same overwrite the quit path was just fixed for, one
+    /// step earlier and with the user having even less reason to expect it.
+    ///
+    /// This is also what the two "remembered what this run wrote" assignments in <c>Apply</c> are placed BEFORE the
+    /// read-back for: the rollback happens after a verification that FAILED, and it can only recognise its own
+    /// writes — and so tell them from the user's — because what it wrote is remembered from the moment it was
+    /// written rather than from the moment it was confirmed.
+    ///
+    /// MUTATION that reddens it: move those two assignments back into the success branch, so the rollback has
+    /// nothing to compare the file against and restores the recorded 2700 over their 3300.
+    /// </summary>
+    [Fact]
+    public void AUserChangeMadeWhileAnApplyIsInFlightSurvivesTheRollback()
+    {
+        var kwin = new FakeKwin { CompositorHonoursConfig = false };    // the apply will fail and roll back
+        kwin.Config[KwinConfig.TemperatureKey] = "2700";
+        var edited = false;
+        kwin.AfterWrite = (key, _) =>
+        {
+            // After our LAST write and before the read-back — the commit window, spelled as tightly as a fake can.
+            if (edited || key != KwinConfig.ActiveKey) return;
+            edited = true;
+            kwin.Config[KwinConfig.TemperatureKey] = "3300";            // their edit, in System Settings
+        };
+
+        Assert.False(kwin.Port.Apply(2));
+
+        Assert.Equal("3300", kwin.Config[KwinConfig.TemperatureKey]);
+        Assert.All(KwinConfig.Markers, m => Assert.DoesNotContain(m, kwin.Config.Keys));
     }
 
     // ---- the flag that makes the whole route work ----
@@ -534,6 +615,12 @@ public class KwinTintTests
         /// copy, tint included. The release is supposed to NOTICE this and say so.</summary>
         public bool CompositorKeepsItsInMemoryCopy { get; set; }
 
+        /// <summary>Runs after each write, for the one interleaving a fake otherwise cannot express: the user
+        /// editing System Settings WHILE an apply is in flight — an apply writes its three keys and then waits for
+        /// the compositor (KwinConfigFile.Commit polls up to 2500 ms, because KWin walks to a new temperature), so
+        /// there is a real window in which the file changes under it.</summary>
+        public Action<string, string>? AfterWrite { get; set; }
+
         public FakeKwin() => Port = new KwinConfigTint(Read, Write, Delete, Commit, State_);
 
         /// <summary>ONE port for the whole test: the adapter keeps "have I written yet?" in itself, so a fresh
@@ -546,6 +633,7 @@ public class KwinTintTests
         {
             Writes.Add((key, value));
             Config[key] = value;
+            AfterWrite?.Invoke(key, value);
         }
 
         private void Delete(string key)

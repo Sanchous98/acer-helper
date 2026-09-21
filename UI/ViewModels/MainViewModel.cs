@@ -158,12 +158,19 @@ public sealed partial class MainViewModel : ObservableObject
     /// the installer is idempotent — once the files are in /etc it never offers itself again, however useless the
     /// install turned out to be.
     ///
-    /// The grant command stays wired, so clicking retries the install — genuinely useful in the worse variant,
-    /// where the unload succeeded but the load failed and the driver is gone for the session (a retry loads it
-    /// back). The caption does not promise that a retry will work, because while the module is held open it
-    /// cannot.</summary>
-    public void SetHardwareAccessRebootPending()
+    /// THE GRANT CALLBACK COMES IN AS A PARAMETER, for the same reason it does in <see cref="SetHardwareAccessNeeded"/>,
+    /// and that is the whole of a defect this method carried: a language switch rebuilds the window and re-shows
+    /// this banner on a FRESH view model (AppController.ApplyHardwareAccessBanner), which had never been handed a
+    /// callback — so the caption promised "click to retry" while the click did nothing at all and said nothing,
+    /// in the one state where retrying is the only recovery short of a reboot. A banner whose text promises an
+    /// action has to carry that action with it, whoever raises it.
+    ///
+    /// The retry itself is genuinely useful in the worse variant of the failure, where the unload succeeded but
+    /// the load failed and the driver is gone for the session (a retry loads it back). The caption does not
+    /// promise that a retry will work, because while the module is held open it cannot.</summary>
+    public void SetHardwareAccessRebootPending(Action grant)
     {
+        _grantAccess = grant;
         HardwareAccessLabel = Loc.T("Restart your computer to finish enabling the unlocked controls (click to retry).");
         NeedsHardwareAccess = true;
     }

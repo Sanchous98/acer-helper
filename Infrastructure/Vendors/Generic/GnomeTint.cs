@@ -64,7 +64,9 @@ internal static class GnomeConfig
 ///
 /// The discipline is <see cref="KwinConfigTint"/>'s: refuse to touch the user's own night light, remember what was
 /// there, verify what the compositor did, and put the user's values back when the filter is turned off, when the
-/// app exits, or when an apply fails. What differs is only what the platform allows:
+/// app exits, or when an apply fails — unless the user has changed those same keys in the meantime, in which case
+/// their setting wins and the app writes nothing back at all (see <see cref="Release"/>). What differs is only what
+/// the platform allows:
 ///
 ///   * There are NO crash-recovery markers here, and that is a real gap rather than a simplification.
 ///     <c>gsettings</c> refuses to write a key its schema does not define, so unlike KWin's <c>kwinrc</c> — where
@@ -138,11 +140,37 @@ internal sealed class GnomeConfigTint(Func<string, string?> read, Action<string,
         return false;
     }
 
-    /// <summary>Put the user's settings back. Nothing to do — and NOTHING TOUCHED — on a port that never applied
-    /// anything, so "Off" cannot switch off a night light the app never switched on.</summary>
+    /// <summary>
+    /// Put the user's settings back. Nothing to do — and NOTHING TOUCHED — on a port that never applied
+    /// anything, so "Off" cannot switch off a night light the app never switched on.
+    ///
+    /// AND IT ASKS WHETHER THE SETTINGS ARE STILL OURS, which is <see cref="Apply"/>'s rule applied on the way out.
+    /// GNOME's own panel writes the same two keys live, so the user can change the night temperature — or switch
+    /// the night light off — while the filter is on, and both of the writes below would then undo the choice they
+    /// have just made: the first switches their night light off, and the second puts the value recorded before the
+    /// app started back over theirs. Their setting wins here exactly as it wins in an apply: the app forgets the
+    /// tint and writes nothing (<see cref="Forfeit"/>), leaving their night light as they left it.
+    ///
+    /// WHEN THE ANSWER IS NO, NOTHING OF THIS RUN'S IS WRITTEN BACK — including on the rollback of an apply the
+    /// daemon refused, which is a state this link can only reach by having failed <c>Holds</c> a line earlier:
+    /// <c>Holds(t)</c> and <c>StillOurs()</c> are the same predicate here (both read the same two keys and compare
+    /// the temperature against what this run wrote), so a failed verification IS "the settings do not hold what
+    /// this run wrote", and a blind restore there would be the overwrite this guard exists to prevent. The gap
+    /// that leaves, stated rather than hidden: the two keys are two separate <c>gsettings</c> calls, so if the
+    /// temperature landed and the switch did not, this link leaves its own temperature behind rather than
+    /// restoring over a value it can no longer tell its own from the user's. <c>gsettings</c> gives it nowhere to
+    /// record what it wrote — the markers KWin's link has are impossible on a schema it does not own — so that
+    /// value is not cleaned up later either.
+    /// </summary>
     internal bool Release()
     {
         if (_priors is not { } priors) return true;
+
+        if (!StillOurs())
+        {
+            Forfeit();
+            return true;
+        }
 
         write(GnomeConfig.EnabledKey, "false");        // we only ever applied while it was off
         foreach (var p in priors) write(p.Key, p.Value ?? string.Empty);
@@ -158,8 +186,8 @@ internal sealed class GnomeConfigTint(Func<string, string?> read, Action<string,
         => GnomeConfig.IsOn(read(GnomeConfig.EnabledKey))
            && GnomeConfig.ParseKelvin(read(GnomeConfig.TemperatureKey)) == _writtenTemperature;
 
-    /// <summary>Stop claiming settings the user has taken over: forget the tint and the recalled value, and write
-    /// nothing — see the call site.</summary>
+    /// <summary>Stop claiming settings the user has taken over: forget the tint and the recalled value (so this run
+    /// can write nothing of the user's back — see the call sites), and write nothing now.</summary>
     private void Forfeit()
     {
         _priors = null;

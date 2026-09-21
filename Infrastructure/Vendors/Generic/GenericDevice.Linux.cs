@@ -53,8 +53,13 @@ public partial class GenericDevice
         // X11 gamma ramp, then KWin's own night light by configuration, then GNOME's, then wlr-gamma-control. Null
         // when this session offers none, so the section hides; the note is set only when the reason is the user's
         // own KDE night light, which the app must not override (see Infrastructure/Vendors/Generic/TintChain.Linux.cs).
+        //
+        // Owned, and that is load-bearing rather than tidiness: the chosen link may be KWin's or GNOME's night
+        // light driven by writing the user's own settings, and those links put them back in their Dispose. What
+        // the device is handed is the CHAIN (LinuxTint.Create returns the concrete type for exactly this reason),
+        // so owning it is what carries the release through to the link that holds them.
         var (tint, tintNote) = LinuxTint.Create();
-        if (tint != null) { DisplayTint = tint; if (tint is IDisposable owned) Own(owned); }   // release on exit
+        if (tint != null) { DisplayTint = tint; Own(tint); }   // release on exit
         else if (tintNote != null && StatusMessage == null) StatusMessage = tintNote;
 
         // No clamshell on Linux: the DE's power manager owns the lid (e.g. KDE PowerDevil holds a block

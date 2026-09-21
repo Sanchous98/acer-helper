@@ -82,6 +82,54 @@ public class DisplayTintChainTests
         Assert.Equal(new[] { 3 }, winner.ApplyCalls);
     }
 
+    // ---- the release travels through the chain ----
+
+    /// <summary>
+    /// THE CHAIN MUST BE RELEASABLE, AND THE RELEASE MUST REACH THE LINK. Two of the five links implement the
+    /// filter by writing the user's OWN configuration and putting it back when the app exits — KWin's night light
+    /// (<c>KwinConfigTint.Dispose</c> → <c>Release</c>) and GNOME's (<c>GnomeConfigTint</c> the same) — because a
+    /// tint that lives in a configuration file outlives the process that wrote it. What the device owns and
+    /// releases is THIS object (<c>Device.Own</c>), so a chain that is not itself disposable is a release that
+    /// never arrives: the user quits, <c>kwinrc</c> keeps <c>Active=true</c> at this app's temperature, and KWin
+    /// goes on tinting a screen the app is no longer running behind. That is not hypothetical — the composition
+    /// root used to hand the device an <c>IDisplayTint</c>-typed value and test it with a pattern match
+    /// (<c>if (tint is IDisposable owned) Own(owned)</c>) which, the chain not being disposable, was always false.
+    ///
+    /// MUTATION that reddens it: give the chain an empty <c>Dispose</c>, or forward to nothing — <c>Disposed</c>
+    /// stays false.
+    /// </summary>
+    [Fact]
+    public void DisposingTheChainReleasesTheLinkThatHoldsTheUsersSettings()
+    {
+        var winner = new DisposableDisplayTint();
+        var chain = DisplayTintChain.TryCreate(new[] { new TintLink("only", () => winner) })!;
+
+        chain.Dispose();
+
+        Assert.True(winner.Disposed);
+    }
+
+    /// <summary>A link with nothing to release must not make the chain's own release fail: the X11 gamma ramp
+    /// holds no configuration and needs no teardown (the server drops its ramp with the client), so it is not
+    /// disposable, and the chain has to tolerate that rather than require every link to implement a no-op.</summary>
+    [Fact]
+    public void ALinkWithNothingToReleaseIsNotAProblem()
+    {
+        var chain = DisplayTintChain.TryCreate(new[] { new TintLink("ramp", () => new FakeDisplayTint()) })!;
+
+        Assert.Null(Record.Exception(chain.Dispose));
+    }
+
+    /// <summary>An <see cref="IDisplayTint"/> that can be released, standing in for the two links that write the
+    /// user's own settings — the shape a fake has to have for the chain's forwarding to be observable at all.</summary>
+    private sealed class DisposableDisplayTint : IDisplayTint, IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public int Levels => 5;
+        public bool Apply(int level) => true;
+        public void Dispose() => Disposed = true;
+    }
+
     // ---- the three decisions ----
 
     /// <summary>

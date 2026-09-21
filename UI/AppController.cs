@@ -319,9 +319,20 @@ internal sealed class AppController
         // install could not make them live), so a banner derived from the rules alone would drop the reboot
         // instruction and leave the user with no explanation at all for the controls that never appeared. The flag
         // is remembered for the session, which is the same lifetime as the condition.
-        if (_accessRebootPending) _vm.SetHardwareAccessRebootPending();
-        else if (HardwareAccess.RulesNeeded()) _vm.SetHardwareAccessNeeded(() => _ = GrantHardwareAccessAsync());
+        //
+        // BOTH BRANCHES HAND OVER THE RETRY, and the reboot one has to: this is a FRESH view model after a rebuild
+        // (see RebuildForLanguage), so a caption reading "(click to retry)" raised without a callback is a click
+        // that does nothing and says nothing — in the one state where a retry is the only recovery short of a
+        // reboot, and with no other way to reach the installer again (RulesNeeded() is false, so the offer itself
+        // never comes back).
+        if (_accessRebootPending) _vm.SetHardwareAccessRebootPending(RequestHardwareAccess);
+        else if (HardwareAccess.RulesNeeded()) _vm.SetHardwareAccessNeeded(RequestHardwareAccess);
     }
+
+    /// <summary>What the banner's click does, named once so the offer and the pending-reboot retry cannot come to
+    /// mean different things. Fire-and-forget on purpose: the install reports through the banner and the status
+    /// line, and the click handler may not be awaited.</summary>
+    private void RequestHardwareAccess() => _ = GrantHardwareAccessAsync();
 
     // ---- update check + apply ----
 
@@ -423,7 +434,7 @@ internal sealed class AppController
                 // the next boot).
                 case HardwareAccess.AccessInstall.PendingReboot:
                     _accessRebootPending = true;   // remembered so a language rebuild re-shows the banner
-                    _vm.SetHardwareAccessRebootPending();
+                    _vm.SetHardwareAccessRebootPending(RequestHardwareAccess);   // and the retry travels with it
                     Notify(Loc.T("Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot."));
                     break;
                 default:

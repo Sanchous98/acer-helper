@@ -11,8 +11,14 @@ internal static class LinuxTint
     /// The port for this session, or null so the Options row hides. <paramref name="Note"/> is set only when the
     /// reason is one the user can act on — KDE's own night light having taken the colour pipeline — and is null for
     /// the ordinary "this desktop offers nothing to write to" case, which is not worth a status line.
+    ///
+    /// THE TYPE IS THE CHAIN, not the interface, and that is what makes the release work: the links that write the
+    /// user's own configuration put it back in their Dispose, the device releases what it is handed, and handing it
+    /// an <c>IDisplayTint</c> would leave the ownership registration in <c>GenericDevice.InitPlatform</c> a pattern
+    /// match that can never succeed — silently, since a failed match is not an error. Naming the concrete type makes
+    /// that a compile-time fact rather than a runtime one.
     /// </summary>
-    internal static (IDisplayTint? Port, string? Note) Create()
+    internal static (DisplayTintChain? Port, string? Note) Create()
     {
         var links = new List<TintLink>
         {

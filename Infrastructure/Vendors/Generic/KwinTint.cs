@@ -22,7 +22,10 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 //
 //   1. IT IS REVERSIBLE. The app remembers what the user's own settings were — in the config itself, see the
 //      markers below — and puts them back when the filter is turned off, when the app exits, and when an apply
-//      fails part-way. Turning the filter off must leave no trace: not a changed key, not a stray `Mode`.
+//      fails part-way. Turning the filter off must leave no trace: not a changed key, not a stray `Mode`. The one
+//      exception is the user changing those same keys from System Settings while the filter is on: their setting
+//      then wins and the app writes nothing back, because restoring would undo the choice they have just made
+//      (see Release and Forfeit).
 //   2. IT DOES NOT FIGHT KDE. If the user's own night light is enabled — with a schedule, or at a constant
 //      temperature — the app does not take the colour pipeline over. The chain falls through instead, and the
 //      device status line says why rather than the row silently overriding the user's setting. That check is made
@@ -256,9 +259,11 @@ internal sealed class KwinConfigTint(Func<string, string?> read, Action<string, 
     /// <summary>Five levels, Off first — the shared UI vocabulary.</summary>
     public int Levels => NightTintLevels.Count;
 
-    /// <summary>Whether THIS app run has a tint in the config. In memory rather than read back from the markers,
-    /// because that is the question the guards below ask: a marker set may equally belong to a previous run that
-    /// died, and that one MUST be torn down before anything is written.</summary>
+    /// <summary>Whether THIS app run has a tint in the config — true from the moment its three keys are written,
+    /// which is BEFORE the read-back that decides whether KWin acted on them, because it is the file's contents
+    /// that the guards ask about. In memory rather than read back from the markers, because that is the question
+    /// they ask: a marker set may equally belong to a previous run that died, and that one MUST be torn down
+    /// before anything is written.</summary>
     private bool _written;
 
     /// <summary>The temperature this run last wrote, so "is the configuration still ours?" can be asked exactly.
@@ -318,14 +323,18 @@ internal sealed class KwinConfigTint(Func<string, string?> read, Action<string, 
         write(KwinConfig.TemperatureKey, temperature.ToString(CultureInfo.InvariantCulture));
         write(KwinConfig.ModeKey, KwinConfig.Constant);
         write(KwinConfig.ActiveKey, "true");
+
+        // Remembered HERE, before the verification rather than after it, because these three keys are in the file
+        // either way — the read-back decides whether KWin ACTED on them, not whether they were written. A release
+        // asks "does the configuration still hold what this run wrote?" (see StillOurs), so a verification that
+        // fails must not leave that question unanswerable: the rollback below has to recognise its own writes to
+        // put the user's values back, and after a failed apply the file holds ours until it does.
+        _written = true;
+        _writtenTemperature = temperature;
+
         commit(temperature);
 
-        if (state().Holds(temperature))
-        {
-            _written = true;
-            _writtenTemperature = temperature;
-            return true;
-        }
+        if (state().Holds(temperature)) return true;
 
         Release();                                      // roll back: leave nothing of ours behind
         return false;
@@ -340,7 +349,7 @@ internal sealed class KwinConfigTint(Func<string, string?> read, Action<string, 
            && read(KwinConfig.TemperatureKey) == _writtenTemperature.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Stop claiming a configuration the user has taken over: drop the markers and forget the tint.
-    /// Nothing is written back — see the call site — and KWin needs no nudge, because deleting markers of ours
+    /// Nothing is written back — see the call sites — and KWin needs no nudge, because deleting markers of ours
     /// changes nothing it reads.</summary>
     private void Forfeit()
     {
@@ -360,11 +369,30 @@ internal sealed class KwinConfigTint(Func<string, string?> read, Action<string, 
     /// same code path as a release after a click. The returned flag is what the compositor reports, not what the
     /// file looks like: restoring the file is not enough, because KWin keeps using its in-memory copy until it is
     /// notified — which is the failure this return value exists to catch.
+    ///
+    /// AND IT ASKS WHETHER THE CONFIGURATION IS STILL OURS, which is <see cref="Apply"/>'s rule applied on the way
+    /// out, and the reason this guard exists at all: the user can change the night light from System Settings
+    /// while the filter is on, and if the app then restored what it recorded it would write the values they had
+    /// BEFORE the app started over the choice they have just made — and, in the case where they switched the night
+    /// light off, it would switch it back on. Their setting wins here exactly as it wins in an apply: the app
+    /// stops claiming the configuration and drops its markers (see <see cref="Forfeit"/>), and the screen keeps
+    /// whatever the user chose. What they are left with is THEIR night light — at their temperature, on their
+    /// schedule, or off — and no trace of this app in the file.
     /// </summary>
     internal bool Release()
     {
         var priors = ReadMarkers();
         if (priors is null) return true;               // the config is not ours — hands off
+
+        // Only while this run has a tint there to claim: with no writes of ours in the file, the markers are a
+        // dead run's (Recover's business) and there is no "what this run wrote" to compare against. So a release
+        // after a crash still restores, which is what those markers are for.
+        if (_written && !StillOurs())
+        {
+            Forfeit();
+            return state().IsReleased;
+        }
+
         Restore(priors);
         _written = false;
         return state().IsReleased;
