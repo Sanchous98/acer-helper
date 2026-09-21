@@ -56,12 +56,24 @@ public class WindowFlagsTests
 
     /// <summary>The helper must set BOTH flags — the taskbar entry is what the owner reported, and staying above
     /// other windows is the same XAML declaration's other half. Dropping either makes the guard above vacuous:
-    /// the call would still be there while the flag it exists for is gone.</summary>
+    /// the call would still be there while the flag it exists for is gone.
+    ///
+    /// THE TWO OS HALVES ARE PINNED TOGETHER BUT NOT TO THE SAME MECHANISM, because they must NOT use the same
+    /// one: on X11 the Avalonia setters were measured to unmap the window (see WindowFlags), so the Linux half
+    /// has to ask the window manager with the EWMH message, and the row for it therefore asserts BOTH that the
+    /// two atoms are named AND that the Avalonia properties are not touched — the second half is the regression
+    /// this pins.</summary>
     [Fact]
-    public void TheHelperSetsBothFlags()
+    public void TheLinuxHalfAsksTheWindowManagerAndTheWindowsHalfReassertsTheProperties()
     {
-        var source = File.ReadAllText(Path.Combine(Root(), "UI", "WindowFlags.cs"));
-        Assert.Contains("ShowInTaskbar = false", source, StringComparison.Ordinal);
-        Assert.Contains("Topmost = true", source, StringComparison.Ordinal);
+        var linux = File.ReadAllText(Path.Combine(Root(), "UI", "WindowFlags.Linux.cs"));
+        Assert.Contains("_NET_WM_STATE_SKIP_TASKBAR", linux, StringComparison.Ordinal);
+        Assert.Contains("_NET_WM_STATE_ABOVE", linux, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowInTaskbar =", linux, StringComparison.Ordinal);
+        Assert.DoesNotContain("Topmost =", linux, StringComparison.Ordinal);
+
+        var windows = File.ReadAllText(Path.Combine(Root(), "UI", "WindowFlags.Windows.cs"));
+        Assert.Contains("ShowInTaskbar = false", windows, StringComparison.Ordinal);
+        Assert.Contains("Topmost = true", windows, StringComparison.Ordinal);
     }
 }

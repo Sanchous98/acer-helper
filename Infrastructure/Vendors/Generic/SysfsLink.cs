@@ -5,6 +5,16 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // top of AcerProfilePorts.cs — and this resolver is subtle enough that leaving it unreachable by the suite would
 // be the wrong trade. It uses nothing platform-specific (FileSystemInfo.LinkTarget exists on both TFMs), so both
 // can compile it; only the Linux backends call it.
+//
+// COMPILING FOR THE SUITE IS NOT THE SAME AS BEING REACHABLE BY IT, which is what the probes below are for. Both
+// callers are removed from the test TFM by their *.Linux.cs suffix, and the walk cannot be handed a real tree
+// either, because its own spelling is POSIX: rooted at "/" and split on '/'. Measured on the owner's machine, a
+// directory named "AMDI0103:00" — one of the two handler nodes the token rule must tell apart — cannot exist on
+// Windows at all (Directory.CreateDirectory answers IOException "Неверно задано имя папки."), and %TEMP% is
+// spelled "C:\...", which a "/"-rooted path cannot name. So the two questions the walk asks of the filesystem
+// arrive as delegates — the shape DelegatePorts.cs and AcerProfilePorts.cs already use to make Linux-only policy
+// testable on the machine this suite runs on — and SysfsLinkTests drives the walk with a map of the real /sys
+// tree rather than with a tree.
 
 /// <summary>
 /// The kernel's path resolution for a sysfs class entry, because the BCL's is not.
@@ -29,10 +39,19 @@ internal static class SysfsLink
     /// <summary>A chain deeper than anything sysfs builds, and the loop guard for a link that points at itself.</summary>
     private const int MaxHops = 64;
 
-    /// <summary>The real path of <paramref name="path"/>, or null when it cannot be resolved (a component that
-    /// does not exist, a link loop, or a host that refuses to read links). Callers treat null as "not this
-    /// device", which is the safe answer: a node whose driver cannot be named is not one to bind a control to.</summary>
-    internal static string? RealPath(string path)
+    /// <summary>The real path of <paramref name="path"/> on the running kernel's filesystem: <see cref="Walk"/>
+    /// with the filesystem's own two answers behind it.</summary>
+    internal static string? RealPath(string path) => Walk(path, LinkTargetOf, Names);
+
+    /// <summary>The walk <see cref="RealPath"/> is, with the two questions it asks of the filesystem injected —
+    /// <paramref name="linkTargetOf"/> answers "is there a link at this path, and to what" once per component,
+    /// <paramref name="names"/> answers "does this path name anything" once at the end — so that the walk's own
+    /// arithmetic is what a test drives, rather than the filesystem's answer to it.
+    ///
+    /// Null means it could not be resolved (a component that does not exist, a link loop, or nothing at the end).
+    /// Callers treat null as "not this device", which is the safe answer: a node whose driver cannot be named is
+    /// not one to bind a control to.</summary>
+    internal static string? Walk(string path, Func<string, string?> linkTargetOf, Func<string, bool> names)
     {
         try
         {
@@ -54,7 +73,7 @@ internal static class SysfsLink
                 }
 
                 resolved.Add(part);
-                if (LinkTargetOf("/" + string.Join('/', resolved)) is not { } link) continue;
+                if (linkTargetOf("/" + string.Join('/', resolved)) is not { } link) continue;
 
                 // A link is not a path component of the result: it stands for its target, and the target is
                 // relative to the link's CONTAINING directory — which is `resolved` without this last part, and
@@ -71,10 +90,14 @@ internal static class SysfsLink
             // A path that does not NAME anything is not a resolution: null is the callers' "not this device",
             // and answering with a well-formed path to nothing would send a control probe looking at a device
             // that is not there.
-            return Directory.Exists(result) || File.Exists(result) ? result : null;
+            return names(result) ? result : null;
         }
         catch { return null; }
     }
+
+    /// <summary>Whether the path names anything at all. Directory first and file second for the same reason
+    /// <see cref="LinkTargetOf"/> tries both: a sysfs class tree holds links to either.</summary>
+    private static bool Names(string path) => Directory.Exists(path) || File.Exists(path);
 
     /// <summary>The target of a symlink, or null when the path is not one (or does not exist). Tried as a
     /// directory first and as a file second, because <c>DirectoryInfo.Exists</c> is false for a link pointing at a

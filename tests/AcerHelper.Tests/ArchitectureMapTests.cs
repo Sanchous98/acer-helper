@@ -102,21 +102,35 @@ public class ArchitectureMapTests
             + string.Join("\n  ", offenders));
     }
 
-    /// <summary>The OS split is a BACKEND concern, and it is the one boundary the build already enforces — the
-    /// suffix decides which files exist in which TFM (<c>AcerHelper.csproj</c> <c>&lt;Compile Remove&gt;</c>), so a
-    /// platform file above <c>Infrastructure/</c> would be compiled away in one target and not the other, which is
-    /// exactly the kind of failure nobody sees until a release. Today: 45 files, all under Infrastructure.</summary>
+    /// <summary>THE OS SPLIT IS A FILE-NAME CONVENTION AND IT WORKS AT ANY DEPTH — which is why this rule changed
+    /// on 2026-09-22. It used to read "must live under Infrastructure/", on the reasoning that the split was a
+    /// backend concern; that stopped covering the tree when <c>UI/WindowFlags</c> needed a platform half, and the
+    /// type cannot move down to satisfy the rule — it takes an <c>Avalonia.Controls.Window</c>, and Avalonia is
+    /// forbidden below UI (see the rule above). The failure the old wording named — "compiled away in one target
+    /// and not the other" — is what the split is FOR, and <c>AcerHelper.csproj</c>'s <c>&lt;Compile Remove&gt;</c>
+    /// globs name no directory, so the suffix selects at any depth.
+    ///
+    /// What is still wrong, and what this checks: a platform file in a layer where a platform half means nothing —
+    /// <c>Domain/</c>, <c>Application/</c>, <c>Bootstrap/</c>, <c>Localization/</c>. Today: the 45 Infrastructure
+    /// halves, and the two under <c>UI/WindowFlags</c>.
+    ///
+    /// A COUNTERPART IS NOT REQUIRED, and a first version of this change got that wrong: demanding a pair for
+    /// every half, and a shared file of the same stem, listed 39 legitimate files. Most halves are the only
+    /// implementation of their capability on that OS — <c>WmiSession.Windows.cs</c> has no Linux twin because WMI
+    /// is Windows', <c>Hwmon.Linux.cs</c> has no Windows twin because hwmon is Linux' — so the requirement would
+    /// forbid the established shape rather than catch a defect.</summary>
     [Fact]
-    public void EveryOsSplitFileLivesUnderInfrastructure()
+    public void EveryOsSplitFileLivesInALayerWhereAPlatformHalfMeansSomething()
     {
-        var offenders = Layers.Where(l => l != "Infrastructure")
+        string[] allowed = ["Infrastructure", "UI"];
+        var offenders = Layers.Where(l => !allowed.Contains(l))
                               .SelectMany(SourcesIn)
                               .Where(p => p.EndsWith(".Windows.cs") || p.EndsWith(".Linux.cs"))
                               .Select(Relative)
                               .ToArray();
 
         Assert.True(offenders.Length == 0,
-            "these platform files are selected by file-name suffix and must live under Infrastructure/:\n  "
+            "these platform files are selected by file-name suffix and must live under Infrastructure/ or UI/:\n  "
             + string.Join("\n  ", offenders));
     }
 

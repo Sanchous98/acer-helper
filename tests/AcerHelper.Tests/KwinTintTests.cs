@@ -480,8 +480,8 @@ public class KwinTintTests
     [Fact]
     public void TheModeValuesAreTheEnumIntegers()
     {
-        Assert.Equal(KwinConfig.ConstantMode.ToString(), KwinConfig.Constant);
-        Assert.Equal(KwinConfig.DarkLightMode.ToString(), KwinConfig.DarkLight);
+        Assert.Equal(KwinConfig.Constant, KwinConfig.ConstantMode.ToString());
+        Assert.Equal(KwinConfig.DarkLight, KwinConfig.DarkLightMode.ToString());
         Assert.Equal(0, KwinConfig.ConstantMode);
         Assert.Equal(1, KwinConfig.DarkLightMode);
     }

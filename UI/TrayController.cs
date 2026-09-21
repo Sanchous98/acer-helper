@@ -109,7 +109,10 @@ internal sealed class TrayController : IDisposable
             ctx.DrawText(a, new Point((sz - a.Width) / 2, (sz - a.Height) / 2));
         }
         using var ms = new MemoryStream();
-        rtb.Save(ms);
+        // PngBitmapEncoderOptions rather than the quality overload: that one is obsolete in Avalonia 12.1.2 (and
+        // its "quality" never applied to PNG anyway — the overload is documented as saving in PNG format), so the
+        // options object is the same encoding with the same default compression, stated instead of implied.
+        rtb.Save(ms, PngBitmapEncoderOptions.Default);
         ms.Position = 0;
         return new WindowIcon(ms);
     }

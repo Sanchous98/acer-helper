@@ -55,6 +55,7 @@ internal sealed class AcerHotkeys : IHotkeys
     {
         var kbd = TryOpenKeyboard();
         var hid = TryOpenAcerHid();
+        Console.Error.WriteLine($"[hotkeys] keyboard={(kbd is null ? "none" : "open")} turbo={(hid is null ? "none" : "open")}");
         if (kbd is null && hid is null) return null;   // neither source: no hotkey port at all
         return new AcerHotkeys(kbd, hid);
     }
@@ -82,12 +83,28 @@ internal sealed class AcerHotkeys : IHotkeys
         {
             foreach (var dir in Directory.EnumerateDirectories("/sys/class/hidraw"))
             {
+                var name = Path.GetFileName(dir);
                 if (!AcerEcHidController.IsAcerNode(Path.Combine(dir, "device/uevent"))) continue;
-                try { return File.Open($"/dev/{Path.GetFileName(dir)}", FileMode.Open, FileAccess.Read); }
-                catch { /* no permission on this node — try the next match */ }
+                // TWO ATTEMPTS ON PURPOSE: the EC power-envelope controller holds this same node, and
+                // File.Open's implicit FileShare.None conflicts with it — the reader was silently getting
+                // nothing (measured: "[hotkeys] keyboard=open turbo=none" while the envelope writes worked).
+                // Sharing the node is what hidraw allows; the exclusive share is not something this file needs.
+                foreach (var share in new[] { FileShare.None, FileShare.ReadWrite })
+                {
+                    try
+                    {
+                        var stream = new FileStream($"/dev/{name}", FileMode.Open, FileAccess.Read, share);
+                        Console.Error.WriteLine($"[hotkeys] turbo node {name} opened with FileShare.{share}");
+                        return stream;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[hotkeys] {name} FileShare.{share} failed: {ex.GetType().Name} {ex.Message}");
+                    }
+                }
             }
         }
-        catch { /* no hidraw class -> no Turbo source */ }
+        catch (Exception ex) { Console.Error.WriteLine($"[hotkeys] hidraw enumeration failed: {ex.GetType().Name}"); }
         return null;
     }
 
@@ -133,16 +150,25 @@ internal sealed class AcerHotkeys : IHotkeys
     private void TurboLoop()
     {
         var buf = new byte[ReportBufferSize];
+        var logged = 0;
+        Console.Error.WriteLine("[hotkeys] turbo loop started");
         while (!_closing)
         {
             int read;
             try { read = _hid!.Read(buf, 0, buf.Length); }
-            catch { return; }   // device closed/gone -> the port goes quiet
+            catch (Exception ex) { Console.Error.WriteLine($"[hotkeys] turbo read failed: {ex.GetType().Name}"); return; }
             if (read <= 0) continue;
+
+            if (logged < 20)
+            {
+                Console.Error.WriteLine($"[hotkeys] report {read} bytes: {Convert.ToHexString(buf.AsSpan(0, Math.Min(read, 6)))}");
+                logged++;
+            }
 
             if (AcerHotkeyReports.Decode(buf.AsSpan(0, read)) is not { } action) continue;
             if (!Debounce(ref _lastTurbo)) continue;
 
+            Console.Error.WriteLine($"[hotkeys] decoded {action}");
             try { Pressed?.Invoke(action); }
             catch { /* handler bug — swallow, keep listening */ }
         }
