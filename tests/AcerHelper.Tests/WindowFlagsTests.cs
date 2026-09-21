@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 namespace AcerHelper.Tests;
 
@@ -52,6 +53,33 @@ public class WindowFlagsTests
         // An empty scan would pass for the wrong reason: the flyout and both dialogs declare it today.
         Assert.True(checkedFiles >= 3, $"expected at least 3 windows opting out of the taskbar, found {checkedFiles}");
         Assert.Empty(offenders);
+    }
+
+    /// <summary>THE NON-EWMH GUARD IS ONLY REACHABLE IF THE ATOMS ARE ASKED FOR, NOT CREATED. The Linux half
+    /// documents a machine without these atoms as a case it must survive — "a machine without these atoms (a
+    /// non-EWMH window manager) must still get its window" — and it guards the send with
+    /// <c>if (wmState == IntPtr.Zero || …) return;</c>. <c>XInternAtom</c> with <c>onlyIfExists: false</c> can
+    /// never answer <c>None</c>: it CREATES the name in the server's atom table and answers the new id, so that
+    /// guard was dead code a reader could only find by knowing the Xlib contract — while the atoms it created
+    /// stayed on the server for the rest of its life, put there by a client that only ever reads them. The EWMH
+    /// names are interned by the window manager and the desktop shell on any session that implements EWMH, so
+    /// asking for them to already exist is what a client that only SENDS can honestly do.
+    ///
+    /// WHAT THIS ROW IS WORTH, stated plainly: it pins the SOURCE, not the round trip — libX11 is not reachable
+    /// from this suite (net10.0-windows), so "the guard can now fire" is a fact about the Xlib contract and the
+    /// call sites, and this is the half of it that can be checked here. The COMMENTS are stripped first, because
+    /// the file's own prose names the old spelling to explain why it was wrong, and an assertion that read the
+    /// prose would forbid the explanation.
+    ///
+    /// MUTATION that reddens it: put <c>onlyIfExists: false</c> back on any of the three calls.</summary>
+    [Fact]
+    public void TheLinuxHalfAsksOnlyForAtomsThatAlreadyExist()
+    {
+        var linux = string.Join("\n", File.ReadAllLines(Path.Combine(Root(), "UI", "WindowFlags.Linux.cs"))
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+        Assert.DoesNotContain("onlyIfExists: false", linux, StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(linux, @"XInternAtom\([^)]*onlyIfExists: true\)").Count);
     }
 
     /// <summary>The helper must set BOTH flags — the taskbar entry is what the owner reported, and staying above

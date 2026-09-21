@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Tests;
@@ -32,9 +33,10 @@ namespace AcerHelper.Tests;
 /// handler's real name with its colon, and it needs no symlink privilege — the rows that used to return early on
 /// a host without one now run everywhere.
 ///
-/// What the map does NOT exercise is the two filesystem answers themselves (see <see cref="SysfsLink.Walk"/>:
-/// <c>LinkTargetOf</c> and <c>Names</c>, five lines of FileSystemInfo over the real /sys). That was already the
-/// case for the rows that returned early, and neither is path arithmetic.
+/// What the map cannot exercise is the two filesystem answers themselves (<see cref="SysfsLink.Walk"/>'s
+/// <c>LinkTargetOf</c> and <c>Names</c>), which is why they have a row of their own — on the real filesystem and
+/// in the host's own spelling, since what they have to get right is <c>FileSystemInfo</c>'s behaviour and not the
+/// walk's arithmetic. See <see cref="TheProbesAnswerTheRealFilesystem"/>.
 /// </summary>
 public class SysfsLinkTests
 {
@@ -115,6 +117,88 @@ public class SysfsLinkTests
         Assert.Equal("/sys/devices/platform/acer-wmi",
                      SysfsLink.Walk("/sys/devices/platform/acer-wmi", tree.LinkTargetOf, tree.Names));
         Assert.Null(SysfsLink.Walk("/sys/class/hwmon/hwmon99/device", tree.LinkTargetOf, tree.Names));
+    }
+
+    /// <summary>
+    /// THE TWO PROBES THEMSELVES, on the real filesystem — the half of this file that the map above cannot reach,
+    /// because they are the only place that asks the HOST and a host-native answer is exactly what a map replaces.
+    /// Leaving them uncovered is not a gap on paper: a mutation of either one keeps every row above green while
+    /// breaking a real machine, which is why this row exists.
+    ///
+    /// WHAT IT DRIVES, and why each half is here:
+    ///   * a real FILE, because <c>Directory.Exists</c> is false for one — the <c>File.Exists</c> half of
+    ///     <c>Names</c> is the only thing that can answer true, and dropping it makes every file-naming path
+    ///     resolve to null (a control that silently disappears);
+    ///   * a real DIRECTORY LINK, because that is what a sysfs class entry is
+    ///     (<c>/sys/class/hwmon/hwmon10</c> → <c>…/devices/platform/acer-wmi/hwmon/hwmon10</c>), and
+    ///     <c>LinkTargetOf</c> has to answer for it from the DIRECTORY half — <c>FileInfo</c> answers false and
+    ///     null for a link to a directory, so a single-attempt rewrite resolves the class entry to nothing,
+    ///     <c>AcerHwmonChip.Matches</c> never matches, <c>AcerFanPort</c> is never built and the fan rows vanish.
+    ///
+    /// THE LINK IS A JUNCTION (<c>mklink /J</c>), not a symlink, because a junction is the one directory reparse
+    /// point Windows grants without the symlink privilege — and <c>DirectoryInfo.LinkTarget</c> answers its target
+    /// the same way. A host that refuses to make one fails this row on its own assertion rather than passing
+    /// quietly, since a probe that is never exercised is the thing the row removes.
+    ///
+    /// MUTATIONS that redden it, both run: gate <c>LinkTargetOf</c> on the file side
+    /// (<c>new FileInfo(path).Exists ? new FileInfo(path).LinkTarget : null</c> — what a rewrite that forgets the
+    /// directory case looks like), or drop the <c>File.Exists</c> half of <c>Names</c>. Measured here while
+    /// writing it, and worth knowing before trusting a "simplification" of that method: the BARE
+    /// <c>new FileInfo(path).LinkTarget</c> does NOT redden this row, because <c>LinkTarget</c> reads the reparse
+    /// point whether or not <c>FileInfo.Exists</c> — which is false for a directory link — agrees; what breaks a
+    /// real machine is the <c>Exists</c> GATE, not the read.
+    /// </summary>
+    [Fact]
+    public void TheProbesAnswerTheRealFilesystem()
+    {
+        var baseDir = Path.Combine(Path.GetTempPath(), "acer-helper-sysfslink-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(baseDir, "target");
+        var link = Path.Combine(baseDir, "link");
+        var file = Path.Combine(baseDir, "pwm1");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(file, "");
+        try
+        {
+            Assert.True(SysfsLink.Names(file), "a path naming a FILE names something — Directory.Exists alone says it does not");
+            Assert.False(SysfsLink.Names(file + ".absent"));
+
+            Assert.Null(SysfsLink.LinkTargetOf(file));       // a plain file is not a link
+            Assert.Null(SysfsLink.LinkTargetOf(target));     // nor is a plain directory
+
+            Assert.True(TryJunction(link, target),
+                        $"this host could not create a junction at '{link}' — the directory half of LinkTargetOf cannot be exercised without one");
+
+            var reported = SysfsLink.LinkTargetOf(link);
+            Assert.NotNull(reported);
+            Assert.Equal(target.TrimEnd(Path.DirectorySeparatorChar),
+                         reported!.TrimEnd(Path.DirectorySeparatorChar), ignoreCase: true);
+        }
+        finally
+        {
+            // The junction goes FIRST and on its own: a recursive delete of a tree containing one throws
+            // ("the parameter is incorrect" — measured), where deleting the reparse point leaves its target alone.
+            try { if (Directory.Exists(link)) Directory.Delete(link); } catch { /* the temp dir below still goes */ }
+            try { Directory.Delete(baseDir, recursive: true); } catch { /* a leftover temp dir is not a failure */ }
+        }
+    }
+
+    /// <summary>Create a directory junction, which needs no privilege where a symlink does. False when the host
+    /// would not make one (no cmd.exe, a filesystem without reparse points, a policy that forbids it).</summary>
+    private static bool TryJunction(string link, string target)
+    {
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo("cmd.exe", ["/c", "mklink", "/J", link, target])
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            if (p is null) return false;
+            p.WaitForExit(15000);
+            return p.ExitCode == 0 && new DirectoryInfo(link).LinkTarget is not null;
+        }
+        catch { return false; }
     }
 
     /// <summary>A sysfs-shaped tree as DATA, because the walk's spelling is POSIX and this suite's gate is on

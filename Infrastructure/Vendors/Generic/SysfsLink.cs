@@ -96,13 +96,23 @@ internal static class SysfsLink
     }
 
     /// <summary>Whether the path names anything at all. Directory first and file second for the same reason
-    /// <see cref="LinkTargetOf"/> tries both: a sysfs class tree holds links to either.</summary>
-    private static bool Names(string path) => Directory.Exists(path) || File.Exists(path);
+    /// <see cref="LinkTargetOf"/> tries both: the two halves answer two different questions, because
+    /// <c>Directory.Exists</c> is false for a path that names a FILE — so dropping the <c>File.Exists</c> half
+    /// makes every file-naming path resolve to nothing, which the callers read as "not this device".
+    ///
+    /// INTERNAL RATHER THAN PRIVATE so the suite can exercise it directly: the walk's own spelling is POSIX and
+    /// this is the one place that asks the HOST, so no map of the kernel's tree can reach it (see SysfsLinkTests,
+    /// which drives it with paths this machine really has).</summary>
+    internal static bool Names(string path) => Directory.Exists(path) || File.Exists(path);
 
     /// <summary>The target of a symlink, or null when the path is not one (or does not exist). Tried as a
-    /// directory first and as a file second, because <c>DirectoryInfo.Exists</c> is false for a link pointing at a
-    /// file and <c>FileInfo.Exists</c> for one pointing at a directory — and a sysfs class tree has both.</summary>
-    private static string? LinkTargetOf(string path)
+    /// directory first and as a file second — the two <c>Exists</c> properties are mutually exclusive for a link,
+    /// because the one on the matching FileSystemInfo answers false for a link of the other kind, so a single
+    /// attempt would answer null for half the class tree. The ORDER matters for the entries this resolves: a class
+    /// entry is a link to a DIRECTORY, and <c>FileInfo</c> alone answers null for one.
+    ///
+    /// INTERNAL RATHER THAN PRIVATE for the same reason as <see cref="Names"/>.</summary>
+    internal static string? LinkTargetOf(string path)
     {
         var dir = new DirectoryInfo(path);
         if (dir.Exists) return dir.LinkTarget;

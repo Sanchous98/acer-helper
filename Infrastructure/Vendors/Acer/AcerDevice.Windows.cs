@@ -57,8 +57,10 @@ public sealed partial class AcerDevice
         // backend's name for the setting, not a path.
         //
         // ONLY THIS HALF DECLARES THEM ANY MORE, and that is parity rather than a gap waiting to be filled:
-        // mainline acer-wmi gives Linux the profiles, the fan/temperature telemetry, fan control and the Turbo
-        // key (via the installer's module parameters), but it has NO interface for LCD overdrive, the
+        // mainline acer-wmi gives Linux the profiles, the fan/temperature telemetry and fan control (via the
+        // installer's module parameters), and the Turbo key arrives there as a vendor HID report this app decodes
+        // itself rather than as anything acer-wmi's cycle_gaming_thermal_profile handles (measured — see
+        // AcerHotkeys.Linux.cs), but it has NO interface for LCD overdrive, the
         // keyboard-backlight timeout or USB charging in any configuration — so there is nothing on that side to
         // bind these three rows to, and the Linux backend says exactly that in one status line instead of
         // probing for a module. The keys stay HERE because they are the cross-OS settings.json contract: the bag

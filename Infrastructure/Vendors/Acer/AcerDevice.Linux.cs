@@ -118,9 +118,16 @@ public sealed partial class AcerDevice
         var ec = new AcerEcHidController();
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
-        // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden). The Turbo
-        // key is not wired here: mainline acer-wmi owns it now (cycle_gaming_thermal_profile, on by default,
-        // cycles the thermal profiles itself), and the app follows the profile the hardware reports.
+        // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden), and the
+        // Turbo key -> HotkeyAction.TogglePerformance, decoded by THIS port from the vendor HID input report the
+        // firmware puts on the Acer HID device (AcerHotkeys.TurboLoop, the two bytes shared with the Windows
+        // decoder in AcerHotkeyReports). Turbo is NOT mainline acer-wmi's key, and this comment used to say it was
+        // — that mainline owns it through cycle_gaming_thermal_profile and the action is unreachable here — which
+        // is a claim a maintainer would delete working behaviour on. It was MEASURED false with the key pressed on
+        // 2026-09-21: the module parameter is real and defaults to Y, but no evdev key arrives on the AT keyboard,
+        // no acer_wmi line reaches the journal and the ACPI interrupt counters do not move, while every press
+        // arrives as the vendor report 04 85 ff on hidraw. AcerHotkeys.Linux.cs records the same measurement
+        // beside the decode it justifies.
         if (AcerHotkeys.TryCreate() is { } keys) Own(Hotkeys = keys);
 
         WireProfiles();
