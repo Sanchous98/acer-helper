@@ -38,7 +38,7 @@ public sealed partial class AcerDevice
         var ec = new AcerEcHidController();
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
-        // Profiles + sensors: Acer's WMI is the richer/only source on Windows -> override the generic ones.
+        // The profile set: Acer's WMI is the richer source on Windows, so it replaces the generic overlay port.
         PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
 
         // Boot sync, EC-ONLY: the profile byte survives a reboot but the EC usage mode behind it does not, so
@@ -48,7 +48,7 @@ public sealed partial class AcerDevice
         // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
         // WMI write, no palette flash, and it cannot disagree with what the UI shows. See docs/power-an18-61.md.
         if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(cur.Kind);
-        Sensors       = new SensorsPort(ReadSensors);
+        Sensors       = new SensorsPort(new AcerSysInfoSensors(Sensor).Read);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         // The three settings this backend owns, DECLARED rather than parked in a slot of their own. Their keys
         // are the names the backend has always known them by — they were the Linuwu-Sense node names, which is
@@ -122,13 +122,17 @@ public sealed partial class AcerDevice
     }
 
     // ---- sensors ----
-    private SensorSnapshot ReadSensors() => new()
+    // The four channels, read as the EC's own sysinfo ids and assembled by AcerSysInfoSensors — which owns the
+    // rules (the temperature hold, one per channel, and the absent fallback) in an un-suffixed, tested file. THE
+    // FAN ROWS ARE NOT HELD: 0 rpm is a real reading (the fans stop at idle) and the UI must show it, while a 0
+    // on a TEMPERATURE row means the channel is not answering — the owner's "GPU часто показывает 0 градусов".
+    // There is no generic substitute to fall back to on Windows (the generic base wires no sensors at all), so the
+    // row carries -1 until the channel answers. See AcerSysInfoSensors.
+    private int Sensor(ulong id, bool word)
     {
-        CpuTempC = Sensor(_gaming, 0x01, word: false),
-        GpuTempC = Sensor(_gaming, 0x0A, word: false),
-        Fans = [new FanReading("CPU", Sensor(_gaming, 0x02, word: true)),
-                new FanReading("GPU", Sensor(_gaming, 0x06, word: true))],
-    };
+        var o = GmGet(_gaming, "GetGamingSysInfo", 0x0001 | (id << 8));
+        return (o & 0xFF) != 0 ? -1 : (int)((o >> 8) & (word ? 0xFFFFUL : 0xFFUL));
+    }
 
     // ---- fans (GPU uses different ids for behaviour 0x08 vs speed 0x04) ----
     private (bool, string?) SetFanMode(FanMode m)
@@ -198,12 +202,6 @@ public sealed partial class AcerDevice
             return (o & 0xFF) == 0 ? (true, null) : (false, $"{method} status={o & 0xFF}");
         }
         catch (Exception ex) { return (false, ex.Message); }
-    }
-
-    private static int Sensor(WmiInvoker w, ulong id, bool word)
-    {
-        var o = GmGet(w, "GetGamingSysInfo", 0x0001 | (id << 8));
-        return (o & 0xFF) != 0 ? -1 : (int)((o >> 8) & (word ? 0xFFFFUL : 0xFFUL));
     }
 
     private static ulong UiGet(WmiInvoker w, ulong uiInput)

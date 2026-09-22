@@ -2,13 +2,13 @@ using AcerHelper.Domain;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
-// The Acer fan-control port, the channel table it shares with the sensors override, and the encodings the two of
-// them need (mode map, duty scale, chip identity, and the rule that decides what a temperature row carries) — in
-// an UN-SUFFIXED file deliberately, for the reason AcerProfilePorts.cs states at length: the test project targets
-// net10.0-windows while AcerHelper.csproj excludes **/*.Linux.cs from that TFM, so policy left in
-// AcerDevice.Linux.cs cannot be reached by the suite at all. What stays there is the I/O — enumerating
-// /sys/class/hwmon, resolving a class symlink, probing write permission — and it arrives here as already-resolved
-// paths plus one write delegate, the shape DelegatePorts.cs uses.
+// The Acer fan-control port, the channel table it shares with the sensors override, the encodings the two of
+// them need (mode map, duty scale, chip identity, and the rule that decides what a temperature row carries) and
+// the Windows snapshot that rule is applied in — in an UN-SUFFIXED file deliberately, for the reason
+// AcerProfilePorts.cs states at length: the test project targets net10.0-windows while AcerHelper.csproj excludes
+// **/*.Linux.cs from that TFM, so policy left in AcerDevice.Linux.cs cannot be reached by the suite at all. What
+// stays there is the I/O — enumerating /sys/class/hwmon, resolving a class symlink, probing write permission — and
+// it arrives here as already-resolved paths plus one write delegate, the shape DelegatePorts.cs uses.
 //
 // IT DOES NOT EXTEND HwmonFanControl, and that is a decision rather than an oversight. That class drives a bare
 // pwmN of WHATEVER chip it finds, is single-channel, and — the part that settles it — lives in Hwmon.Linux.cs, so
@@ -162,6 +162,65 @@ internal sealed class AcerTemperatureHold
         if (_lastEc > 0) return _lastEc;                         // a zero holds the channel's last real answer
         return fromGeneric > 0 ? fromGeneric : -1;               // nothing remembered -> the substitute, or -1
     }
+}
+
+/// <summary>
+/// The Windows backend's sensor snapshot: the four channels of Acer's gaming-WMI <c>GetGamingSysInfo</c> method,
+/// with the EC's intermittency handled by <see cref="AcerTemperatureHold"/>.
+///
+/// THE SAME EC SENSORS LINUX READS, and the id table is where that is checkable rather than asserted. The sysinfo
+/// ids are the kernel's <c>predator_v4_sensor_id</c>: 0x01/0x0A are the acer hwmon chip's <c>temp1_input</c> /
+/// <c>temp2_input</c>, and 0x02/0x06 are <c>fan1_input</c>/<c>fan2_input</c> (acer-wmi's
+/// <c>fan_channel_to_sensor_id = {2, 6}</c>) — the same pairing <see cref="AcerFanChannels"/> states for the
+/// fans. So the two OSes report the same four things, which is why this row set is the one
+/// <c>AcerDevice.Linux.ReadAcerSensors</c> mirrors.
+///
+/// WHY THE TEMPERATURES GO THROUGH A HOLD AND THE FANS DO NOT. The EC's temperature channel answers 0 when it has
+/// nothing to say — measured on this silicon from the Linux half: the GPU channel (0x0A) sampled eight times 4 s
+/// apart gave 41, 40, 41, 40, 40, 40, 0, 0, and had read 0 for a ≥60 s stretch earlier in the same session. On
+/// Windows that 0 reached the Monitor AS A TEMPERATURE, which is the owner's report ("GPU часто показывает 0
+/// градусов"). A fan's 0 is the opposite case and must not be swallowed by the same rule: the AN18-61's fans STOP
+/// at idle (measured), so 0 rpm is a real reading the UI has to be able to show, and holding it would show a
+/// speed the fan is not running at. The two fan channels are therefore passed through untouched, at whatever the
+/// channel says — including -1.
+///
+/// ONE HOLD PER CHANNEL, for the reason <see cref="AcerTemperatureHold"/> gives: a shared one would let the CPU's
+/// real reading stand in for a GPU channel that has never answered at all.
+///
+/// NO GENERIC SUBSTITUTE EXISTS ON WINDOWS, and passing -1 is that finding rather than a placeholder. On Linux
+/// the generic hwmon port stands in until a channel has ever answered (<c>AcerDevice.Linux.ReadAcerSensors</c>
+/// hands over paths from <c>Hwmon</c>). Windows has no equivalent to hand over: the generic base wires no sensors
+/// AT ALL — <c>GenericDevice.Windows.InitPlatform</c> never touches <c>Sensors</c>, so the slot stays null — and
+/// nothing else in this tree reads a Windows temperature (no hwmon, no thermal-zone WMI; <c>NvidiaGpu</c> is the
+/// clock-overclock port with no thermal surface). So the fallback is -1, the contract's "unavailable"
+/// (<c>Domain/Models.cs</c>), which the UI renders as "—" and hides: for a channel that has never answered and
+/// has no substitute, that is the honest answer, and a 0 is never what comes back instead.
+///
+/// WHY THE READ IS A DELEGATE: <c>WmiInvoker</c> is sealed and opens a real WMI session in its constructor, so the
+/// snapshot could not be driven by any test — the same reason <c>AcerProfilePorts</c> and <c>AcerFanPort</c> take
+/// their I/O as delegates. Production passes the gaming-WMI read (<c>AcerDevice.Windows.Sensor</c>); the suite
+/// passes a fake.
+/// </summary>
+/// <param name="readChannel">One sysinfo read: the EC id, and whether the value is a 16-bit word (the fans are;
+/// the temperatures are bytes).</param>
+internal sealed class AcerSysInfoSensors(Func<ulong, bool, int> readChannel)
+{
+    // The sysinfo ids — the kernel's numbers (see the remark above), named rather than spelled at the call site:
+    // 0x01/0x0A are one transposition apart, and a swapped pair would report the CPU's temperature as the GPU's,
+    // silently, on both rows.
+    private const ulong CpuTemp = 0x01, GpuTemp = 0x0A;
+    private const ulong CpuFan = 0x02, GpuFan = 0x06;
+
+    private readonly AcerTemperatureHold _cpuTemp = new();
+    private readonly AcerTemperatureHold _gpuTemp = new();
+
+    internal SensorSnapshot Read() => new()
+    {
+        CpuTempC = _cpuTemp.Reading(readChannel(CpuTemp, false), -1),
+        GpuTempC = _gpuTemp.Reading(readChannel(GpuTemp, false), -1),
+        Fans = [new FanReading("CPU", readChannel(CpuFan, true)),
+                new FanReading("GPU", readChannel(GpuFan, true))],
+    };
 }
 
 /// <summary>The four sysfs nodes this port writes: one behaviour register and one duty value per fan channel, all
