@@ -271,6 +271,6 @@ public interface IClamshell : IDisposable
 // this file names them as a group.
 //
 // The ports above that DO belong here — `IPowerProfiles`, `IFanControl`, `ISensors`, `IRgbDevice`, and the
-// declared-setting shapes — stay because a Domain type or an Application contract names them and reasons in
-// their vocabulary: `IDynamicLightingFactory` (Application/DynamicLighting.cs) takes an `IRgbDevice`, and the
-// curve models in Domain/Fan.cs are written against `SensorSnapshot`.
+// declared-setting shapes — stay because a Domain type or a layer above that reasons in their vocabulary names
+// them: the lighting UI binds `IRgbDevice.Zones` (Domain/Rgb.cs) and renders one panel per zone, and the curve
+// models in Domain/Fan.cs are written against `SensorSnapshot`.

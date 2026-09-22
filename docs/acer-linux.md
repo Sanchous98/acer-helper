@@ -44,7 +44,7 @@ module-free **по построению**, поэтому машина со шт
 | Nitro-клавиша | RawInput | evdev `KEY_PRESENTATION` (udev `uaccess` на AT-клавиатуру) |
 | Ось питания CPU | overlay `powrprof.dll` | отдельной оси нет **по устройству**, а не как пробел: её роль играет сам platform profile |
 | Подсветка RGB | ENE HID (HidSharp) | тот же кодек через hidraw |
-| LampArray | Windows Dynamic Lighting | **вне охвата** (решение владельца) |
+| LampArray | Windows Dynamic Lighting | **вне охвата** (решение владельца); **с 2026-09-22 функции нет и на Windows** — см. `docs/lamparray.md` |
 | LCD overdrive, лимитер/калибровка батареи, таймаут подсветки, USB-зарядка | WMI `AcerGamingFunction` / `BatteryControl` / `APGeAction` | **пробел** — интерфейса в mainline нет ни в каком виде; module-free маршрут закрыт разведкой EC HID |
 | Чтение яркости подсветки | `GetGamingKBBacklight` (gaming WMI) | **пробел** — ENE write-only, геттера нет ни у ядра, ни у HID-дескриптора |
 | Фильтр синего света | `SetDeviceGammaRamp` (gdi32), шкала синего 1.00/0.85/0.70/0.60/0.50 | Цепочка: гамма-рампа X11 (только не-Wayland) → настройки night light KWin (`kwriteconfig6` + `reconfigure`) → настройки GNOME (`gsettings`) → `wlr-gamma-control` (слот; протокола у KWin нет); температуры 6500/4500/4000/3500/3000 K. Звено конфигурации тихое, обратимое (маркеры) и не трогает включённый у пользователя night light; если не подошло ни одно звено — порта нет и строка прячется |
@@ -688,7 +688,9 @@ EC-режим, что и `balanced-performance`: две строки табли�
 - **`acpi_call` отклонён**: в этом ядре его нет (`modinfo` не находит, `/proc/acpi/call` нет), а
   сборка любого out-of-tree модуля под OGC-ядро на atomic-системе с Secure Boot — отдельный
   проект, более дорогой, чем задача. Разбор — `docs/open-decisions.md` §7.
-- **LampArray** вне охвата (решение владельца): см. `docs/lamparray.md`.
+- **LampArray** вне охвата (решение владельца), и с 2026-09-22 этой функции нет нигде, включая Windows:
+  убрана вместе с драйвером; обоснование и история — в `docs/lamparray.md`. Собственная подсветка
+  клавиатуры (строка «Подсветка RGB» выше) этим не затронута — она и не шла через LampArray.
 - **Замер GPU-ватт на этой машине невозможен** — и это свойство машины, а не пробел бэкенда: её
   Linux-установка не видит дискретной видеокарты вовсе (`lspci` — только iGPU AMD, PCI-устройства
   с vendor `0x10de` нет, `nvidia-smi` — `No devices were found`, модули nvidia при этом

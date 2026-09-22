@@ -6,6 +6,15 @@ rewrites the concurrency model and the project has no behavioural tests.
 
 Everything below is a read of the tree at v0.32.0. Line numbers are as of that revision.
 
+**The LampArray feature was removed on 2026-09-22 by the owner's decision, and this document analyses a tree
+that still had it.** Every reference below to the virtual LampArray device node, `LampArrayBridge`, its
+transport or its gates (G3/G4/G5/G9), to its worker thread, its fields and its risk rows is **historical**: the
+analysis is kept because the reasoning was made of it, not because the code is there. Why it went —
+Windows enumerates lighting devices only as HID LampArray collections, a KMDF driver over the in-box VHF is
+the only route that does not need native firmware, and such a driver needs either test signing or Microsoft's
+attestation signing, both of which the owner declined: [lamparray.md](lamparray.md), [rust-driver.md](rust-driver.md).
+The app's own keyboard lighting is a different path and survives.
+
 **Line numbers here are not maintained (noted 2026-09-14).** They were written against the revision current when
 each passage was written and have already drifted; treat the symbol names as the anchor and re-locate by name.
 The tree has also been reorganised since: `LaptopService` is now six `LaptopService*.cs` partial files, and

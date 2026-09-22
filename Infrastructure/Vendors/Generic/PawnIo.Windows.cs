@@ -29,10 +29,10 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// argument and result counts the function declares. Everything is blittable — plain <c>byte[]</c> written with
 /// <see cref="BitConverter"/>-free span helpers — so there is no marshalling stub and this stays Native-AOT-safe.
 ///
-/// The driver and its module blobs ship SEPARATELY from the app (same arrangement as the LampArray driver, see
-/// <see cref="LampArrayTransport"/>): PawnIO is installed by its own signed installer, and the module is a signed
-/// binary only its author can produce. So this class never installs anything — it probes, and every consumer
-/// treats "absent" as "feature unavailable" rather than as an error. See docs/pawnio.md.
+/// The driver and its module blobs ship SEPARATELY from the app (the same arrangement as the cardwire daemon the
+/// GPU-access row asks, see docs/cardwire-gpu-access.md): PawnIO is installed by its own signed installer, and the
+/// module is a signed binary only its author can produce. So this class never installs anything — it probes, and
+/// every consumer treats "absent" as "feature unavailable" rather than as an error. See docs/pawnio.md.
 /// </summary>
 internal sealed class PawnIo : IDisposable
 {

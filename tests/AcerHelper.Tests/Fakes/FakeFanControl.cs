@@ -88,7 +88,8 @@ public sealed class FakeRgbDevice : IRgbDevice
         return BlankResult;
     }
 
-    /// <summary>A minimal zone, for tests that need a surface to hand to the lamp-array bridge.</summary>
+    /// <summary>A minimal zone: one region, no effects and no brightness read, for tests that need an RGB
+    /// surface without caring what it can render.</summary>
     public static RgbZone Zone(string name, bool canFollowProfile = false) =>
         new(name, 1, [], (_, _, _, _, _) => true, canFollowProfile: canFollowProfile);
 }

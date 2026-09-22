@@ -22,9 +22,8 @@ namespace AcerHelper.Tests;
 /// declared, and each test declares the setting its row reads (<c>FakeDevice.Declare</c>, which is what a
 /// backend's <c>InitVendor</c> does with its own key) — through the harness's <c>declare</c> argument, because
 /// the declaration has to be in place before the fixture builds the service: the settings model copies the
-/// declared set at construction (Infrastructure/Composition/Settings.cs). <c>LampArray</c> is never built — the fixture passes no
-/// transport — so the "Windows Dynamic Lighting" row does not exist in these tests, and it is the one row whose
-/// failure path is NOT covered here.
+/// declared set at construction (Infrastructure/Composition/Settings.cs). Every row built here is a declared
+/// setting or a battery property, so the fixture covers the whole toggle list.
 ///
 /// LOCALIZATION: labels and the failure message are looked up with <c>Loc.T</c>. Rows are found by
 /// <c>Loc.T(englishKey)</c> so the lookups survive a translation table; the MESSAGES are asserted in English
@@ -733,8 +732,7 @@ internal static class AssemblerRows
     /// <summary>The English keys of every row whose write is reported through <c>OptionsAssembler.RunSet</c>:
     /// the declared settings that are flags or choices, both battery rows, and the two pick-one-of-N battery
     /// rows. The blue-light row is absent on purpose — it does not report through <c>RunSet</c> at all
-    /// (<c>OptionsAssembler.Choices</c>) — and so is the LampArray row, which needs a transport this fixture
-    /// does not build.</summary>
+    /// (<c>OptionsAssembler.Choices</c>).</summary>
     public static readonly string[] RunSetRowKeys =
     [
         "LCD overdrive", "Keyboard backlight timeout", "Fn lock",

@@ -5,17 +5,15 @@
 #
 #   dotnet-base     the .NET SDK plus the Native AOT prerequisites (clang, ld.bfd/objcopy, zlib)
 #   app-linux       builder -> the portable app, net10.0, Native AOT, linux-x64        -> /out/linux
-#   wdk-toolchain   Debian + clang-cl/lld-link + the WDK/SDK unpacked from NuGet (driver/Dockerfile, lifted)
-#   driver-image    wdk-toolchain + the entrypoint, i.e. the driver-only image driver/README.md documents
-#   driver          builder -> the kernel driver, built by the unchanged driver/build.sh -> /out
-#   rust-toolchain  wdk-toolchain + Rust (x86_64-pc-windows-msvc) + libclang for bindgen
-#   driver-rust-image  rust-toolchain + the entrypoint, the Rust driver's counterpart of driver-image
-#   driver-rust     builder -> the same package, built in Rust by driver/build-rust-driver.sh -> /out
-#   artefacts       the export: an empty filesystem with /linux, /driver, /driver-rust, /PROVENANCE.txt
+#   artefacts       the export: an empty filesystem with /linux and /PROVENANCE.txt
 #
-# Two drivers, and the C one is the one that ships: /driver is what driver/README.md and docs/build-image.md
-# describe, and nothing about it changed to make room for /driver-rust. Why the second exists, what the probe
-# cost and what it is not allowed to claim: docs/rust-driver.md.
+# There is no driver stage any more, and this file builds no kernel-mode artefact. The HID LampArray driver it
+# used to build (stages wdk-toolchain, driver-image, driver, rust-toolchain, driver-rust-image, driver-rust, and
+# the whole of driver/) was removed on 2026-09-22 by the owner's decision: it would have to be attestation-signed
+# by Microsoft to load, and neither the unsigned package nor the attestation purchase is wanted. VHF has no
+# user-mode API — VhfCreate lives in VhfKm.lib — so there was never a user-mode version of it to keep. The app's
+# own keyboard lighting does not go through the driver and is unaffected. The reasoning is recorded, not erased:
+# docs/build-image.md, the dated entry for 2026-09-22.
 #
 # BuildKit is required — `--mount=type=cache` for the NuGet cache and `--output=type=local` for the export are
 # both BuildKit features. `docker build` on Docker Desktop and `docker buildx build` elsewhere both give it.
@@ -26,37 +24,18 @@
 #
 #   docker buildx build --target artefacts --output type=local,dest=dist .
 #
-# -> dist/linux/… (the publish folder, the AppImage input), dist/driver/… (the .sys package) and
-# dist/PROVENANCE.txt. docs/build-image.md has the `docker create`+`docker cp` fallback for a daemon without
-# BuildKit, and the driver-only image the driver's own documentation builds.
+# -> dist/linux/… (the publish folder, the AppImage input) and dist/PROVENANCE.txt. docs/build-image.md has the
+# `docker create`+`docker cp` fallback for a daemon without BuildKit.
 
 # Global arguments: the pinned inputs, in one block, so a reader sees the whole toolchain before any stage.
 # An ARG declared here is not visible inside a stage — each stage that uses one re-declares it without a
 # value, which inherits the default below rather than restating it.
 #
-# The WDK, pinned on purpose: 26100 is the Windows 11 24H2 WDK (the 28000.x line is the Insider SDK). The
-# driver targets Windows 11 22H2+, which this builds for fine. This ARG is the only place the version appears.
-ARG WDK_VERSION=10.0.26100.6584
-
-# Deliberately without a default: driver/build.sh owns the KMDF pin, and its default is 1.33 — the framework
-# version a driver links against must be present on the target machine, and 1.33 is what Windows 11 22H2
-# (build 22621, the floor AcerHelperLampArray.inf declares) has in-box. Leaving this empty hands the decision
-# to build.sh, so there is one pin rather than two that can disagree; passing --build-arg KMDF_VERSION=1.35
-# overrides it for a driver whose INF floor has been raised.
-ARG KMDF_VERSION
-
 # Recorded in PROVENANCE.txt only; nothing is fetched by it. A release folder that cannot name the commit it
 # came from is not auditable, and .git is deliberately not in the build context (.dockerignore), so the value
 # has to be handed in: --build-arg GIT_SHA="$(git rev-parse HEAD)". The default is plain text on purpose — a
 # default containing a command substitution would be pasted into a RUN and executed by the shell there.
 ARG GIT_SHA=not recorded
-
-# The Rust driver's toolchain, pinned by version rather than left to `stable`. rustup installs it from
-# static.rust-lang.org, so this is the only floating input in the Rust stage and the pin is what makes it
-# fixed; 1.98.1 is the version the driver was built and measured with. It is a separate ARG from WDK_VERSION
-# because the two are independent: the Rust compiler parses the WDK headers and links against the WDK
-# libraries, but nothing ties a compiler release to a WDK release. See docs/rust-driver.md.
-ARG RUST_VERSION=1.98.1
 
 # ----------------------------------------------------------------------------------------------------------
 # Stage: dotnet-base — the shared .NET toolchain.
@@ -94,10 +73,7 @@ RUN apt-get update \
 # ----------------------------------------------------------------------------------------------------------
 FROM dotnet-base AS app-linux
 
-ARG WDK_VERSION
 ARG GIT_SHA
-# Recorded in PROVENANCE.txt only; the .NET side does not use Rust at all.
-ARG RUST_VERSION
 
 WORKDIR /src
 COPY . .
@@ -147,7 +123,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
 
 # Everything the export stage needs, under one path. PROVENANCE.txt is written from values measured in this
 # build (the SDK and clang versions are queried, not asserted) so the exported folder states its own
-# toolchain; the pins that are ARGs are recorded here too, and the source revision only if it was handed in.
+# toolchain; the source revision is recorded only if it was handed in.
 RUN mkdir -p /out/linux \
  && cp -a /src/publish-linux/. /out/linux/ \
  && printf '%s\n' \
@@ -155,195 +131,16 @@ RUN mkdir -p /out/linux \
       "SDK:            $(dotnet --version)" \
       "clang:          $(clang-18 --version | head -1)" \
       "publish:        dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishAot=true -p:CppCompilerAndLinker=clang-18" \
-      "driver:         built by driver/build.sh as this image ships it; its KMDF resolution is printed in the build log (1.33, the Windows 11 22H2 floor AcerHelperLampArray.inf declares)" \
-      "driver-rust:    the same package built in Rust by driver/build-rust-driver.sh; KMDF pinned in src/kmdf_version.rs and stamped into the INF from there. Unsigned, unloaded, and an addition beside the C driver — see docs/rust-driver.md" \
-      "rust (Rust driver): ${RUST_VERSION}" \
-      "WDK:            ${WDK_VERSION}" \
       "source:         ${GIT_SHA}" \
       > /out/PROVENANCE.txt
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: wdk-toolchain — the driver's toolchain.
-# ----------------------------------------------------------------------------------------------------------
-# Lifted without change from driver/Dockerfile, which this stage supersedes: MSVC and the WDK installer are
-# Windows-only, so a real WDK build would need a Windows container (Server Core + VS Build Tools, ~10 GB, and
-# it means switching the Docker daemon out of Linux mode). This stage instead uses clang-cl/lld-link — which
-# speak the MSVC command line and read MSVC object/library formats — against the WDK and SDK shipped as NuGet
-# packages (the officially supported acquisition path since WDK 10.0.26100.1:
-# learn.microsoft.com/windows-hardware/drivers/install-the-wdk-using-nuget). Visual Studio itself supports a
-# ClangCL toolset for driver projects, so this is not an exotic combination; it is the same compiler, driven
-# by hand instead of by MSBuild.
-#
-# Kernel-mode headers in the WDK are all lower-case, so none of the case-sensitivity fixups that plague
-# cross-compiling *user-mode* Windows code are needed here.
-#
-# The base stays debian:trixie-slim rather than joining the .NET side on the SDK image. The two toolchains are
-# different distributions, and this one is the measured one: the driver's build has been verified against this
-# Debian clang, and moving it to another LLVM major to save an apt-get layer would be changing the solved part
-# to tidy the file.
-FROM debian:trixie-slim AS wdk-toolchain
-
-ARG WDK_VERSION
-
-# clang/lld provide clang-cl and lld-link; the rest is just to fetch and unpack nupkgs.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends clang lld curl ca-certificates unzip \
- && rm -rf /var/lib/apt/lists/*
-
-# The SDK package carries the shared/um headers the kernel headers pull in; the .x64 packages carry the libs.
-RUN set -eux; \
-    mkdir -p /opt/wdk; \
-    for pkg in microsoft.windows.sdk.cpp microsoft.windows.sdk.cpp.x64 microsoft.windows.wdk.x64; do \
-        curl -fsSL -o "/tmp/${pkg}.nupkg" \
-            "https://api.nuget.org/v3-flatcontainer/${pkg}/${WDK_VERSION}/${pkg}.${WDK_VERSION}.nupkg"; \
-        unzip -q -o "/tmp/${pkg}.nupkg" -d /opt/wdk; \
-        rm "/tmp/${pkg}.nupkg"; \
-    done
-
-# Linux is case-sensitive; the SDK/WDK headers are not internally consistent about case (kernelspecs.h asks
-# for "DriverSpecs.h", the file on disk is driverspecs.h — 689 headers have mixed-case names). Normalise once,
-# at image build time: lower-case every path, then lower-case every #include spelling inside the headers. This
-# is the same fix the msvc-wine project applies, and it is why no per-header symlink list is needed.
-RUN set -eu; \
-    cd /opt/wdk; \
-    find . -depth -name '*[A-Z]*' | while IFS= read -r p; do \
-        d="$(dirname "$p")"; b="$(basename "$p")"; l="$(printf '%s' "$b" | tr 'A-Z' 'a-z')"; \
-        [ "$b" = "$l" ] || [ -e "$d/$l" ] || mv -T "$d/$b" "$d/$l"; \
-    done; \
-    find /opt/wdk -type f \( -name '*.h' -o -name '*.inl' \) -print0 \
-      | xargs -0 -r -P4 sed -i -E 's@^([[:space:]]*#[[:space:]]*include[[:space:]]*[<"])([^>"]+)@\1\L\2@'
-
-# The driver's build script, called and not reimplemented: the WDK/SDK discovery, the KMDF library selection,
-# the /imsvc include handling and the INF token substitution are all solved there, and a second copy would be
-# a second thing to keep correct. It is shipped at this path in both images below.
-COPY driver/build.sh /usr/local/bin/build-driver
-RUN chmod +x /usr/local/bin/build-driver
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: driver-image — the driver-only image, exactly what driver/Dockerfile used to be.
-# ----------------------------------------------------------------------------------------------------------
-# It exists so that the flow driver/README.md documents keeps working verbatim: build this target, then mount
-# the driver sources over /src and let the entrypoint build them. Nothing else depends on this stage — the
-# release image builds the driver in the `driver` stage below, from the sources it COPYs — so targeting
-# `artefacts` does not pay for it.
-FROM wdk-toolchain AS driver-image
-
-WORKDIR /src
-ENTRYPOINT ["/usr/local/bin/build-driver"]
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: driver — the kernel driver as a release artefact.
-# ----------------------------------------------------------------------------------------------------------
-FROM wdk-toolchain AS driver
-
-ARG KMDF_VERSION
-
-# Only the five files driver/build.sh reads: the source, the three headers it includes, and the INF it stamps.
-# COPYing the directory instead would drag in the locally built .sys/.pdb, which is precisely what the
-# provenance of a release artefact must not depend on.
-COPY driver/AcerHelperLampArray/driver.c /src/driver.c
-COPY driver/AcerHelperLampArray/driver.h /src/driver.h
-COPY driver/AcerHelperLampArray/lamparray.h /src/lamparray.h
-COPY driver/AcerHelperLampArray/public.h /src/public.h
-COPY driver/AcerHelperLampArray/AcerHelperLampArray.inf /src/AcerHelperLampArray.inf
-
-# KMDF_VERSION is empty unless the caller set it, and build.sh reads an empty value as unset — so the pin
-# stays where it is written down (build.sh) and the build log still prints the version that was resolved.
-# OUT moves the output off /src, so what is exported is the new package and not a mixture with any leftovers.
-RUN OUT=/out KMDF_VERSION=${KMDF_VERSION} /usr/local/bin/build-driver /src
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: rust-toolchain — the Rust driver's toolchain.
-# ----------------------------------------------------------------------------------------------------------
-# Sits on top of wdk-toolchain and adds exactly two things: Rust, and libclang for bindgen.
-#
-# There is deliberately no Wine here, and no MSVC. The plan this stage was expected to need was msvc-wine —
-# link.exe and the VC libraries, run under Wine — because that is what windows-drivers-rs expects. It turned
-# out not to be needed: the driver's link is the same link driver/build.sh already performs for the C one,
-# `lld-link` against the WDK libraries unpacked from NuGet, and lld-link reads Rust's COFF objects exactly as
-# it reads clang's. The probe that established this is recorded in docs/rust-driver.md; what it also
-# established is that the crate set that would have needed Wine cannot run here at all — `wdk-build` contains
-# an unconditional `compile_error!` off Windows — so the driver uses bindgen and the KMDF function table
-# directly instead. See build.rs and src/ffi.rs.
-FROM wdk-toolchain AS rust-toolchain
-
-ARG RUST_VERSION
-
-# libclang-dev is for bindgen, which dlopens libclang to parse the WDK headers. The `clang` package from
-# wdk-toolchain ships the driver binary and libclang-cpp but not the `libclang.so` that clang-sys looks for.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libclang-dev \
- && rm -rf /var/lib/apt/lists/*
-
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
-
-RUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup.sh \
- && sh /tmp/rustup.sh -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION" \
- && rm /tmp/rustup.sh \
- && rustup target add x86_64-pc-windows-msvc \
- && rustc -vV
-
-# The build script, shipped at the same kind of path as build-driver and called, not reimplemented. It reads
-# the KMDF pin out of src/kmdf_version.rs and stamps the INF with it; see that file.
-COPY driver/build-rust-driver.sh /usr/local/bin/build-rust-driver
-RUN chmod +x /usr/local/bin/build-rust-driver
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: driver-rust-image — the Rust driver's own image.
-# ----------------------------------------------------------------------------------------------------------
-# The counterpart of driver-image, so the same run-with-sources-mounted flow works for this driver too:
-# build this target, mount the crate over /src, let the entrypoint build it.
-FROM rust-toolchain AS driver-rust-image
-
-WORKDIR /src
-ENTRYPOINT ["/usr/local/bin/build-rust-driver"]
-
-# ----------------------------------------------------------------------------------------------------------
-# Stage: driver-rust — the Rust kernel driver as a release artefact.
-# ----------------------------------------------------------------------------------------------------------
-FROM rust-toolchain AS driver-rust
-
-# Only what the build reads. COPYing the directory instead would drag in target/ — a locally built .sys, its
-# .pdb and the bindgen output — which is precisely what the provenance of a release artefact must not depend
-# on. Cargo.lock is copied and the build runs --locked, so the dependency graph is the committed one.
-COPY driver/AcerHelperLampArrayRust/Cargo.toml /src/Cargo.toml
-COPY driver/AcerHelperLampArrayRust/Cargo.lock /src/Cargo.lock
-COPY driver/AcerHelperLampArrayRust/build.rs /src/build.rs
-COPY driver/AcerHelperLampArrayRust/wrapper.h /src/wrapper.h
-COPY driver/AcerHelperLampArrayRust/.cargo /src/.cargo
-COPY driver/AcerHelperLampArrayRust/src /src/src
-# The same INF the C package uses, stamped by build-rust-driver.sh. It is the package's INF — hardware id,
-# Security, PnpLockdown, LowerFilters, KmdfService and the 22621 floor are all the contract with the app —
-# and the Rust driver does not get its own copy of it.
-COPY driver/AcerHelperLampArray/AcerHelperLampArray.inf /inf/AcerHelperLampArray.inf
-
-# Two cache mounts, both sharing=locked for the reason the NuGet one is (see app-linux): the default
-# sharing=shared lets two concurrent builds write into the same directory, and the failure that produced was a
-# half-deleted package tree that NuGet then refused to install into. The cargo registry is hundreds of MB of
-# bindgen and its dependencies, and the target directory is the compiled bindings; without the mounts every
-# source change re-downloads and re-parses the WDK headers.
-#
-# OUT and CARGO_TARGET_DIR move both outputs off /src, so what is exported is the new package and not a
-# mixture with anything the context might have carried in.
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/build/target,sharing=locked \
-    OUT=/out INF=/inf/AcerHelperLampArray.inf CARGO_TARGET_DIR=/build/target \
-    /usr/local/bin/build-rust-driver /src
 
 # ----------------------------------------------------------------------------------------------------------
 # Stage: artefacts — the export.
 # ----------------------------------------------------------------------------------------------------------
 # An empty filesystem holding only the artefacts, so `--output type=local` never tries to write an SDK image
-# or a WDK tree to the caller's disk.
-#
-# /driver is the C driver and stays the C driver: it is what ships today. /driver-rust is the Rust one, an
-# addition beside it until the owner says otherwise — same package shape, different build.
+# to the caller's disk.
 FROM scratch AS artefacts
 COPY --from=app-linux /out/linux /linux
-COPY --from=driver /out /driver
-COPY --from=driver-rust /out /driver-rust
 COPY --from=app-linux /out/PROVENANCE.txt /PROVENANCE.txt
 
 # ----------------------------------------------------------------------------------------------------------
@@ -361,7 +158,7 @@ COPY --from=app-linux /out/PROVENANCE.txt /PROVENANCE.txt
 #   * Microsoft.NETCore.Native.Windows.targets hard-wires CppLinker to link.exe, runs findvcvarsall.bat (a
 #     batch file, so cmd.exe) to locate the toolchain, and says so when it cannot: "Platform linker not found.
 #     … Desktop Development for C++ workload in Visual Studio."
-#   * The libraries the link needs are not all in the NuGet packages this file fetches. The Windows SDK ones
+#   * The libraries the link needs are not all in the NuGet packages the WDK/SDK are distributed as. The SDK ones
 #     are: the fifteen SdkNativeLibrary entries (kernel32.lib, ole32.lib, …), the /DEFAULTLIB:ucrt.lib that
 #     same file forces, and uuid.lib are all in microsoft.windows.sdk.cpp(.x64). But the runtime pack's own
 #     native libraries carry /DEFAULTLIB:LIBCMT, /DEFAULTLIB:libcpmt and /DEFAULTLIB:OLDNAMES (measured by

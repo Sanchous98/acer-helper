@@ -335,63 +335,6 @@ public class AppliedEditUseCasesTests
         Assert.Equal(["store"], target.Calls);
     }
 
-    // ------------------------------------------------------------------ the lighting switch
-
-    private sealed class StubLightingSwitch : ILightingSwitchTarget
-    {
-        /// <summary>What the publish attempt reports, or null for "this machine has no surface at all".</summary>
-        public (bool ok, string? error)? Outcome { get; set; } = (true, null);
-        public List<string> Calls { get; } = [];
-        public List<bool> Stored { get; } = [];
-
-        public (bool ok, string? error)? Switch(bool on) { Calls.Add("switch"); return Outcome; }
-        public void Store(bool on) { Calls.Add("store"); Stored.Add(on); }
-    }
-
-    /// <summary>What is REMEMBERED is the state the surface is in, not the state the user asked for: a publish
-    /// that did not take is filed as off, so the row corrects itself on its next read instead of claiming a device
-    /// that is not there — and a stored "on" would keep claiming it across every restart.
-    ///
-    /// The three rows are the three outcomes and each would be reachable in production: publishing worked,
-    /// publishing was refused (no driver, or the transport said no), and taking the surface down — which cannot
-    /// fail and therefore always files off.
-    ///
-    /// MUTATION THAT REDDENS IT: <c>target.Store(on)</c> instead of <c>target.Store(on &amp;&amp; outcome.ok)</c> —
-    /// the refused-publish row then remembers ON.</summary>
-    [Theory]
-    [InlineData(true, true, true)]       // asked on, published -> remembered on
-    [InlineData(true, false, false)]     // asked on, refused   -> remembered OFF
-    [InlineData(false, true, false)]     // asked off           -> remembered off
-    public void ALightingSwitch_RemembersTheStateTheSurfaceIsIn_NotTheWish(bool asked, bool published, bool remembered)
-    {
-        var target = new StubLightingSwitch { Outcome = (published, published ? null : "no driver") };
-
-        var r = ApplyDynamicLighting.Run(asked, target);
-
-        Assert.Equal(["switch", "store"], target.Calls);
-        Assert.Equal([remembered], target.Stored);
-        Assert.Equal(published, r.ok);
-        Assert.Equal(published ? null : "no driver", r.error);   // the bridge's own words reach the row
-    }
-
-    /// <summary>A machine with no surface is refused WITHOUT remembering anything. The choice is not filed,
-    /// because there is nothing for it to be a state of — and filing the wish would make the next boot try to
-    /// publish a device this machine cannot have. The caller reads the same <c>(false, null)</c> it has always
-    /// read for it, which is why this is not the same outcome as a refused publish.
-    ///
-    /// MUTATION THAT REDDENS IT: <c>target.Switch(on) ?? (true, null)</c> in <c>ApplyDynamicLighting.Run</c> — the
-    /// stub then records a store and the machine is reported as switched on.</summary>
-    [Fact]
-    public void AMachineWithNoSurface_IsRefused_AndRemembersNothing()
-    {
-        var target = new StubLightingSwitch { Outcome = null };
-
-        var r = ApplyDynamicLighting.Run(true, target);
-
-        Assert.Equal((false, (string?)null), r);
-        Assert.Equal(["switch"], target.Calls);
-    }
-
     // ------------------------------------------------------------------ a declared setting
 
     private sealed class StubDeclaredSetting : IDeclaredSettingTarget

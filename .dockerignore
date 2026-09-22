@@ -20,14 +20,3 @@
 publish
 publish-linux
 dist
-
-# Driver build output. The driver image unpacks its own tools, and the driver stage COPYs the five files
-# build.sh reads and nothing else — so the locally built .sys/.pdb and the extracted signtool.exe are dead
-# weight here. (`driver/**/out` is git-ignored, so it is only ever present on a machine that has built it.)
-driver/**/out
-driver/**/x64
-driver/**/tools
-# The Rust driver's cargo target directory. It holds a locally built .sys, its .pdb and the bindgen output from
-# whatever WDK was on the building machine — hundreds of MB, and exactly the sort of local artefact a release
-# build must not be able to read. The `driver-rust` stage COPYs the crate's sources and nothing else.
-driver/**/target

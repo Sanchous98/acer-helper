@@ -26,8 +26,7 @@ public partial class App : Avalonia.Application
             // declared travelling on it (<c>Device.DeclaredSettings</c>), which the service hands to the settings
             // MODEL at construction because the model is what holds and switches that set.
             var device = DeviceFactory.Create();
-            var service = new LaptopService(device, new JsonSettingsStore(),
-                                            DeviceFactory.CreateDynamicLightingFactory());
+            var service = new LaptopService(device, new JsonSettingsStore());
             // Popups are placed by the toolkit, not by us, and on a scaled XWayland the toolkit places them
             // windowPosition * (1 - 1/scale) up and to the left of their control (measured; see
             // PopupPlacement.cs). Installed once here, before the first window exists, and inert everywhere but

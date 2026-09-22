@@ -46,8 +46,9 @@ public sealed class FakeRgbController : IRgbController
     public static FakeRgbController WithZone(string name) => new() { Zones = [Zone(name)] };
 
     /// <summary>A minimal zone — no sub-zones, one effect, so it is a plain region to concatenate.
-    /// (An effect-less zone is fine here: unlike <c>LampArrayLayout.Build</c>, <c>RgbDevice</c> concatenates
-    /// whatever the controller advertises without inspecting it.)</summary>
+    /// (An effect-less zone is fine for the concatenation itself: <c>RgbDevice</c> takes whatever the controller
+    /// advertises without inspecting it. The lighting SECTION is stricter — <c>LightingViewModel</c> builds a
+    /// panel only for a zone with effects — so a test about panels wants a zone with one.)</summary>
     public static RgbZone Zone(string name, bool canFollowProfile = false) =>
         new(name, 1, [], (_, _, _, _, _) => true, canFollowProfile: canFollowProfile);
 }

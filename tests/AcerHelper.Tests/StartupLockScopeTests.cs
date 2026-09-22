@@ -87,16 +87,12 @@ public class StartupLockScopeTests
 /// WHY IT NEEDED ONE. <see cref="FakeDevice.Disposed"/> recorded the teardown and nothing read it, so deleting
 /// <c>device.Dispose()</c> from the service left the whole suite green: "the service releases the machine" was
 /// a claim with no assertion under it. A teardown that stops reaching the machine is a resource leak, and the
-/// services it reaches are real handles — the LampArray bridge stops a worker thread and removes a PnP node,
-/// and the vendor backends own EC/WMI sessions — so the failure would be a device left open for the process's
-/// life, discovered only by a user whose keyboard stays owned by a window they closed.
+/// services it reaches are real handles — a cardwire session, the vendor backends' EC/WMI sessions — so the
+/// failure would be a device left open for the process's life, discovered only by a user whose machine is still
+/// owned by a window they closed.
 ///
 /// WHAT IT DOES NOT PROVE, stated rather than implied: that anything is actually RELEASED. The fakes own no
-/// handles; what is pinned is the CALL, which is the part the service is responsible for. The order between
-/// the two things it disposes is a real rule too (the LampArray must go down before the device, or Windows
-/// keeps offering a lighting node this process no longer backs), but both targets here are reachable only
-/// through the same single line, so the order is asserted where the bridge lives
-/// (<c>LampArrayLifecycleTests</c>) rather than duplicated from a fake that cannot see it.
+/// handles; what is pinned is the CALL, which is the part the service is responsible for.
 /// </summary>
 public class LaptopServiceTeardownTests
 {

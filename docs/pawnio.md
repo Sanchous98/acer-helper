@@ -49,9 +49,10 @@ argument and result counts the function declares.
 Everything is blittable (plain `byte[]` written with `BitConverter`-free span helpers), so there is no marshalling
 stub and this stays Native-AOT-safe.
 
-The driver and its module blobs **ship separately from the app** (the same arrangement as the LampArray driver —
-see `docs/lamparray.md`): PawnIO is installed by its own signed installer, and the module is a signed binary only
-its author can produce. So this class never installs anything — it **probes**, and every consumer treats "absent"
+The driver and its module blobs **ship separately from the app**: PawnIO is installed by its own signed
+installer, and the module is a signed binary only its author can produce. (The LampArray driver used to be the
+other example of that arrangement — see [lamparray.md](lamparray.md) — until that whole feature was removed on
+2026-09-22.) So this class never installs anything — it **probes**, and every consumer treats "absent"
 as "feature unavailable" rather than as an error.
 
 A PawnIO handle carries **one loaded module** and the modules used here drive a **stateful hardware mailbox**, so

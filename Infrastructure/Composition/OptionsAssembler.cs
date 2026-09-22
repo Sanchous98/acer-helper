@@ -49,21 +49,6 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
                 Prime: flag.ReadbackVerifiesWrite ? null : flag.Read));
         }
 
-        // Publish the keyboard's zones as a virtual HID LampArray, so Windows Dynamic Lighting and
-        // LampArray-aware apps can paint them (Infrastructure/Lighting/LampArrayBridge.cs). The row only exists
-        // where the bridge can exist at all — the OS transport plus the installed driver (see docs/lamparray.md) —
-        // so on a machine without the driver there is nothing to promise the user. NOT a declared setting: it is the
-        // app's own feature rather than a knob the firmware owns, so its state lives in the bridge, not in
-        // Settings.DeviceSettings. `Read` is the bridge's REAL state: publishing can fail (driver removed, PnP
-        // refused), and then the switch snaps back by itself.
-        if (svc.LampArray is { } lamps)
-        {
-            var label = Loc.T("Windows Dynamic Lighting");
-            list.Add(new OptionToggle(label, true, lamps.Enabled,
-                v => RunSet(() => svc.SetDynamicLighting(v), label),
-                Read: () => lamps.Enabled));
-        }
-
         // The app's own request to USE the machine's discrete GPU, which a third-party daemon (cardwire) is
         // hiding from programs it has not allowed — see docs/cardwire-gpu-access.md. Also NOT a declared setting,
         // and for a stronger version of the same reason: a declaration is something THIS MACHINE's firmware owns,

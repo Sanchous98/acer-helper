@@ -2,14 +2,6 @@
 bin
 obj
 
-# Driver build output (container cross-build + MSBuild/WDK), and the tools the signing script extracts.
-driver/**/out
-driver/**/x64
-driver/**/tools
-# The Rust driver's cargo target directory: a locally built .sys, its .pdb, and the bindgen output from
-# whatever WDK was on the building machine.
-driver/**/target
-
 # Rider per-user solution settings (machine-local; must never be committed)
 *.DotSettings.user
 
@@ -28,3 +20,9 @@ dist
 # and it was untracked-but-unignored until a `git add -A` in this repo put it in front of a commit: `dist` was
 # listed here and this name was not, which is exactly the kind of near-miss a second entry prevents.
 publish-linux
+
+# The WINDOWS name for the same output, from README's own publish command (`-o publish`): a ~49 MB single-file
+# exe plus three .pdb files. Same class of near-miss as the entry above, with one extra wrinkle that hid it
+# longer — the Windows publish needs an MSVC linker and a Windows SDK, so on a machine without them the directory
+# stays EMPTY and git never reports it. It appeared the first time a publish actually succeeded here.
+publish

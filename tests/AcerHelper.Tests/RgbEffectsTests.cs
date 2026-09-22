@@ -6,12 +6,12 @@ namespace AcerHelper.Tests;
 /// The ENE lighting effect catalogue: the mode byte each effect is sent as, and the capability flags the UI
 /// builds its controls from.
 ///
-/// Pure static tables — no hardware path — and they matter because three other things branch on them:
+/// Pure static tables — no hardware path — and they matter because two other things branch on them:
 /// <c>EneHidController</c> turns the flags into the wire packet and uses
-/// <see cref="RgbEffects.StaticModeByte"/> for every per-zone colour write, the lighting UI decides whether to
-/// show a colour picker at all, and <c>LampArrayBridge.StaticEffect</c> picks "the arbitrary-colour effect"
-/// with the same rule. A wrong <c>ModeByte</c> selects a different effect on the wire; a wrong
-/// <c>HasColor</c> ships a colour picker that does nothing, or hides a working one. Neither throws.
+/// <see cref="RgbEffects.StaticModeByte"/> for every per-zone colour write, and the lighting UI decides from
+/// the flags whether to show a colour picker at all (<c>LightingViewModel.UpdateColorMode</c>). A wrong
+/// <c>ModeByte</c> selects a different effect on the wire; a wrong <c>HasColor</c> ships a colour picker that
+/// does nothing, or hides a working one. Neither throws.
 ///
 /// The ORDER is a compatibility surface too, not just presentation: the chosen effect is persisted as a
 /// positional <c>LightSettings.EffectIndex</c>, so reordering or inserting into these lists silently repoints
@@ -54,11 +54,12 @@ public class RgbEffectsTests
         }
     }
 
-    /// <summary>The rule both consumers use to mean "the effect that paints an arbitrary colour and holds
-    /// still": <c>HasColor &amp;&amp; !HasSpeed</c> — see <c>LampArrayBridge.StaticEffect</c> and the lighting
-    /// UI's colour-swatch decision. Both take the FIRST match, so a second effect with that flag combination
-    /// would make "the static effect" depend on list order, and the UI and the bridge could disagree about
-    /// which one it is. Exactly one per list, and it is the Static entry.
+    /// <summary>The rule the lighting UI reads to mean "the effect that paints an arbitrary colour and holds
+    /// still": <c>HasColor &amp;&amp; !HasSpeed</c> — see <c>LightingViewModel.UpdateColorMode</c>, which decides
+    /// from exactly this pair whether the selected effect gets per-zone swatches or a single colour swatch, and
+    /// from <c>HasColor</c> alone whether it gets one at all. The test takes the FIRST match, so a second effect
+    /// with that flag combination would make "the static effect" depend on list order. Exactly one per list, and
+    /// it is the Static entry.
     ///
     /// This is the one test here that guards a rule living in ANOTHER file, which is where the risk actually
     /// is: nothing in <c>RgbEffects.cs</c> announces that its flags are load-bearing elsewhere.</summary>

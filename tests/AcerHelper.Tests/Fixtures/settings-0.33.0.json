@@ -22,7 +22,6 @@
     }
   },
   "Bluelight": 4,
-  "DynamicLighting": true,
   "LightPresets": {
     "balanced": {
       "Zones": {

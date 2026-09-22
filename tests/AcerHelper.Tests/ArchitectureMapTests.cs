@@ -165,12 +165,13 @@ public class ArchitectureMapTests
     /// the compiler does not state it: this is one assembly, so an Infrastructure type is perfectly nameable
     /// from Application and the build stays green either way.
     ///
-    /// The case that made the rule concrete is the LampArray surface. <c>LaptopService</c> publishes a virtual
-    /// lighting device whose implementation is Infrastructure's
-    /// (<c>Infrastructure/Lighting/LampArrayBridge.cs</c>), and the direct route — let the service name the
-    /// bridge and the transport under it — would have made Application depend on the layer it orchestrates.
-    /// It names <c>IDynamicLighting</c> and <c>IDynamicLightingFactory</c>
-    /// (<c>Application/DynamicLighting.cs</c>) instead, and composition supplies the implementation.
+    /// The case that keeps the rule concrete is the lighting door. <c>LaptopService</c> owns the settings graph
+    /// and the per-mode light zones; <c>Application/LightZone.cs</c> declares <c>ILightZoneMode</c> beside the
+    /// two use cases that read and write through it (<c>ReadLightZone</c>, <c>ApplyLightZone</c>), and the state
+    /// crosses as <c>LightZoneState</c> — a Domain type. The direct route — let those use cases name the stored
+    /// container they write into — would have made Application depend on the layer it orchestrates. Nothing
+    /// under <c>Application/</c> names it: the implementation lives where naming Infrastructure is the job
+    /// (<c>Infrastructure/Composition/LaptopService.Lighting.cs</c>).
     ///
     /// WHAT IT FORCED, and this is the part worth reading before moving anything else. When the service layer
     /// and the persisted container moved to Infrastructure, this rule is what decided the SHAPE of that move:
@@ -179,9 +180,9 @@ public class ArchitectureMapTests
     /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
     /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
-    /// already reads the preset. Application is TEN files today — the four this docstring used to name, plus the
+    /// already reads the preset. Application is NINE files today — the four this docstring used to name, plus the
     /// family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
-    /// Undervolt, DeclaredSetting, DynamicLightingSwitch, each one contract plus its use cases) — and the rule is
+    /// Undervolt, DeclaredSetting, each one contract plus its use cases) — and the rule is
     /// the reason for every boundary in each of them, not an accident of the moves.
     ///
     /// WHAT IT STILL FORBIDS, so nobody mistakes the above for a relaxation: a use case that needs the STORED
@@ -208,8 +209,8 @@ public class ArchitectureMapTests
     /// Infrastructure (it does, by design; see the file's own docstring); this rule fences Application, which
     /// has no such need.
     ///
-    /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Lighting;</c> added to
-    /// <c>Application/DynamicLighting.cs</c> reddens this test and no other in the file.</summary>
+    /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Composition;</c> added to
+    /// <c>Application/LightZone.cs</c> reddens this test and no other in the file.</summary>
     [Fact]
     public void ApplicationPointsAtDomainNotInfrastructure()
     {

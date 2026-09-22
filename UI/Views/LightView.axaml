@@ -5,12 +5,7 @@
              x:Class="AcerHelper.UI.Views.LightView"
              x:DataType="vm:LightViewModel">
 
-  <!-- The whole panel greys together while a host owns the published surface: every control in here is a write
-       path straight to the zone (the effect picker, the swatches, the brightness/speed sliders, the direction
-       switch), and none of them goes through LightingCoordinator.Paint, which is where the rest of the app
-       yields. One IsEnabled on the root covers all of them, and it is the same rule the tab it sits in follows,
-       because the flag it binds is the section's. -->
-  <StackPanel Spacing="12" Margin="0,8,0,0" IsEnabled="{Binding ControlsEnabled}">
+  <StackPanel Spacing="12" Margin="0,8,0,0">
 
     <!-- Effect picker (always present) -->
     <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding EffectNames}"

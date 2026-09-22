@@ -80,12 +80,11 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   vocabulary (`FanAxisState`, `GpuAxisState`) so that it can cross this boundary at all. Then the
   family of APPLIED EDITS, one use case and one contract per thing the user sets: `FanAxis`
   (`IFanAxisTarget` — a curve edit names one fan and carries the other fan's half over), `GpuOffsets`,
-  `CpuPowerOverlay`, `Undervolt`, `DeclaredSetting`, `DynamicLightingSwitch`. Each states a rule the
+  `CpuPowerOverlay`, `Undervolt`, `DeclaredSetting`. Each states a rule the
   method body it came from only happened to implement — what a fan edit must not clobber, that an
   offset is remembered BEFORE it is written, that a refused declared setting is never remembered — and
   each is pinned through its own contract with a stub, without Infrastructure.
-  `IDynamicLighting`/`IDynamicLightingFactory` are the virtual-lighting surface the bridge implements,
-  and `AppArgs` the CLI constant. It names no Infrastructure type — see the arrow above, and note what
+  `AppArgs` is the CLI constant. None of this names an Infrastructure type — see the arrow above, and note what
   that still forbids: a use case needing the stored settings container or a vendor port by name cannot
   live here yet, which is why the profile switch did not move — it holds the graph lock across the port
   call, and that measurement is kept in `docs/open-decisions.md`'s note on the retired analysis. The
@@ -95,9 +94,11 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   `UpdateChecker`/`WindowsUpdater`/`AppImageUpdater`, `HardwareAccess`, `LidWatcher`,
   `ResumeWatcher`, plus `Composition/`, `Diagnostics/`, `Lighting/` and `Vendors/`.
 - **`Infrastructure/Lighting/`** (`AcerHelper.Infrastructure.Lighting`) — the RGB transport framework
-  (`IRgbController`, `RgbDevice`) and the HID **LampArray** translation layer (`LampArrayLayout`,
-  `LampArrayBridge`): how the app's zones are published as a virtual lighting device, how host frames
-  become zone writes, and who owns the backlight while a host paints it.
+  (`IRgbController`, `RgbDevice`) that the vendor backends and the app's own zone lighting are written
+  against. The HID **LampArray** translation layer that used to sit on top of it (`LampArrayLayout`,
+  `LampArrayBridge` — how the app's zones were published as a virtual lighting device, how host frames became
+  zone writes, and who owned the backlight while a host painted it) went with the Windows Dynamic Lighting
+  feature on 2026-09-22, below.
 - **`Infrastructure/Vendors/Acer/`** (`AcerHelper.Infrastructure.Vendors.Acer`) — Acer feature
   implementations. There is **no
   separate platform layer**: the OS access is folded into the vendor implementation, split per OS
@@ -137,40 +138,40 @@ allowed. Infrastructure implements what Application declares. `ArchitectureMapTe
   mutex, command-line parsing.
 - **`UI/`**, **`Localization/`** — the Avalonia tray + windows (capability-driven; binds to
   `Application` and `Domain`, never to a vendor), and the string tables.
-- **`driver/`** — the one piece that can't be C#: `AcerHelperLampArray.sys`, a KMDF HID *source* driver over the
-  in-box Virtual HID Framework that publishes the keyboard's zones as a **HID LampArray** so Windows Dynamic
-  Lighting can paint them. Windows only enumerates lighting devices as LampArray HID collections, so a driver
-  has to exist; it is kept deliberately dumb (static report descriptor + a lamp table pushed down over three
-  IOCTLs) with all the logic in `Infrastructure/Lighting/LampArrayBridge.cs`. See [docs/lamparray.md](docs/lamparray.md).
+
+**There was a `driver/` until 2026-09-22** — the one piece that could not be C#: `AcerHelperLampArray.sys`, a
+KMDF HID *source* driver over the in-box Virtual HID Framework that published the keyboard's zones as a **HID
+LampArray** so Windows Dynamic Lighting could paint them. The whole tree, both builds of the package and the
+container stages that produced them were removed by the owner's decision; why is below, and in full in
+[docs/lamparray.md](docs/lamparray.md).
 
 OS-specific code is selected by the `*.Windows.cs` / `*.Linux.cs` file-name suffix (MSBuild
 `<Compile Remove>` globs per target framework) — **no preprocessor directives**. Adding a laptop
 vendor = a new set of files under `Infrastructure/Vendors/`; adding an OS = `*.Linux.cs` siblings. The UI never changes.
 
-## Windows Dynamic Lighting (LampArray)
+## Windows Dynamic Lighting (LampArray) — removed 2026-09-22
 
-Optional: expose the keyboard's zones (and the lightbar, when it isn't following the performance profile) as a
-virtual **HID LampArray**, so Windows' own Dynamic Lighting page — and any app or game that drives lighting
-through it — can paint them. This is the same construction as Logitech G HUB's "LampArray translation layer":
-a small signed HID source driver over `vhf.sys`, plus a user-mode translator (here, the app itself).
+This feature is **gone**, by the owner's decision. The app used to expose the keyboard's zones (and the
+lightbar, when it wasn't following the performance profile) as a virtual **HID LampArray**, so Windows' own
+Dynamic Lighting page — and any app or game driving lighting through it — could paint them; the driver tree,
+`LampArrayBridge` and its transport, the Options toggle and the container stages that built the package were
+all removed with it. There is no `driver/` directory in the tree any more and no build that produces one.
 
-The app publishes the device only while the option is on, throttles host frames to 10 Hz (the ENE controller
-sits on a contended HID-over-I2C bus), collapses uniform frames to a single write, and yields its own
-per-mode lighting while a host holds the surface — re-asserting the host's last frame after the events that
-clobber the EC's RGB (profile switch, resume, lid-open).
+**The reason is a signing wall, not a change of mind.** Windows enumerates lighting devices **only** as HID
+LampArray collections, and Microsoft's device guidance lists exactly two compatible routes: native firmware, or
+a **VHF** driver. `VhfCreate` lives in `VhfKm.lib` and its documentation speaks of KMDF only — there is no
+user-mode variant, so the UMDF2 idea (appealing precisely because a self-signed certificate suffices for one,
+where a kernel-mode driver needs Microsoft's) could not carry this capability. A KMDF driver therefore needs
+either test signing (Secure Boot off, with its BitLocker and anti-cheat consequences) or **attestation
+signing** — an EV certificate (~€250–400/year), a Partner Center hardware account, and a returned `.cat`. The
+owner declined both, which is why the feature is dropped instead of shipped.
 
-The toggle appears in **Options** only once the driver package is installed
-(`pnputil /add-driver`, see [driver/README.md](driver/README.md)); it needs a signature Windows will load, so
-it is not shipped in the MSI. Design, wire format and limitations: [docs/lamparray.md](docs/lamparray.md).
+**Your keyboard lighting is not affected by any of this.** The app's own lighting — the per-mode palettes, the
+lighting panel, the lightbar — never went through the driver: it is the `RgbZone`/ENE path and it is still
+there. What is gone is the bridge that made those zones *visible to Windows* as a lighting device.
 
-The driver builds **without Visual Studio or a WDK install** — the repository's `Dockerfile` cross-compiles it
-in a Linux container with clang-cl/lld-link against the WDK/SDK NuGet packages, and the signing tools
-(`signtool`, `inf2cat`) come out of those same packages. The toolchain is the `driver-image` stage there:
-
-```
-docker build --target driver-image -t acerhelper-wdk .
-docker run --rm -v "$PWD/driver/AcerHelperLampArray:/src" acerhelper-wdk
-```
+The design, the wire format, the limitations and the two builds of the package are kept as the historical
+record in [docs/lamparray.md](docs/lamparray.md) and [docs/rust-driver.md](docs/rust-driver.md).
 
 ## Build
 
@@ -187,15 +188,17 @@ dotnet publish AcerHelper.csproj -c Release -f net10.0-windows -r win-x64 --self
 dotnet publish AcerHelper.csproj -c Release -f net10.0 -r linux-x64 --self-contained true -p:PublishAot=true -o publish-linux
 ```
 
-**The two artefacts that can be built on Linux are containerised, in one multi-stage Dockerfile.** One command
-yields them:
+**The one artefact that can be built on Linux is containerised, in the repository's multi-stage Dockerfile.**
+One command yields it:
 
 ```
 docker buildx build --target artefacts --output type=local,dest=dist .
 ```
 
-That is the portable app (Native AOT) and the driver package, in `dist/linux/` and `dist/driver/`. Commands,
-what is pinned, how the artefacts come out, and what could not be verified:
+That is the portable app (Native AOT), in `dist/linux/`, with `dist/PROVENANCE.txt` beside it. **Until
+2026-09-22 the same target exported a second one** — `dist/driver/`, the LampArray driver package; that
+artefact went with the feature (*Windows Dynamic Lighting*, above). Commands,
+what is pinned, how the artefact comes out, and what could not be verified:
 [docs/build-image.md](docs/build-image.md).
 
 **2026-09-18 — the Windows publish above cannot move into that container.** Native AOT refuses to
@@ -203,21 +206,25 @@ cross-compile from Linux to Windows, and the refusals are errors in the toolchai
 (`Microsoft.NETCore.Native.Publish.targets`: "Cross-OS native compilation is not supported.", plus a demanded
 `PackageReference` for the host ILCompiler; `Microsoft.NETCore.Native.Windows.targets` hard-wires `link.exe`
 and runs `findvcvarsall.bat`). The Windows artefact therefore stays on a Windows host — the `windows` CI job —
-and the Linux container builds the other two. The line above saying the Windows publish "must run on Windows"
+and the Linux container builds the other one. The line above saying the Windows publish "must run on Windows"
 was already right; what is new is that the reason is measured, and that it is not an installation problem a
-bigger container could solve.
+bigger container could solve. **Corrected 2026-09-22:** the count in this paragraph is now one instead of
+two — when it was written the container built the portable app *and* the LampArray driver package, and the
+second went with the feature (*Windows Dynamic Lighting*, above).
 
 **2026-09-18 — CI now builds through that image.** The `linux` job of the `build` workflow runs the
 `docker buildx build` command above (with `--cache-from`/`--cache-to type=gha,mode=max` and `--build-arg
-GIT_SHA`), packs the AppImage out of the `dist/linux` it exports, and so builds the driver package on every
-tagged run as well. That job no longer sets up the .NET SDK, installs nothing, and no longer runs in a
-`fedora:41` container: the toolchain it used to install (clang, zlib) is pinned inside the image, and a
-job-level container has no route to the Docker daemon buildx talks to. Two consequences worth knowing: the
-binary inside a released AppImage is now the one this image produces — it used to be built in `fedora:41`
-and so differed in bytes, which is what `docs/build-image.md` recorded until this change; and the driver
-package is built but **not** attached to the release, because it is unsigned and the shipping path is
-attestation signing ([driver/README.md](driver/README.md), *Signing*). The `windows` job is untouched by
-all of this.
+GIT_SHA`) and packs the AppImage out of the `dist/linux` it exports. That job no longer sets up the .NET SDK,
+installs nothing, and no longer runs in a `fedora:41` container: the toolchain it used to install (clang,
+zlib) is pinned inside the image, and a job-level container has no route to the Docker daemon buildx talks to.
+One consequence worth knowing: the binary inside a released AppImage is now the one this image produces — it
+used to be built in `fedora:41` and so differed in bytes, which is what `docs/build-image.md` recorded until
+this change. **2026-09-22 — the driver package is no longer built there at all.** The same job used to build
+the LampArray package on every tagged run and upload it as the `AcerHelperLampArray-driver-package` workflow
+artefact, deliberately **not** attached to the release: an unsigned package is one Windows will not load, and
+the shipping path was attestation signing. Both the package and that upload were removed with the feature
+(*Windows Dynamic Lighting*, above); the job now builds the AppImage and nothing else. The `windows` job is
+untouched by all of this.
 
 ## Install (Windows)
 

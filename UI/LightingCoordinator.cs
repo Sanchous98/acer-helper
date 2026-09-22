@@ -4,7 +4,6 @@ using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
 using AcerHelper.Infrastructure.Composition;
-using AcerHelper.Localization;
 using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
@@ -40,9 +39,9 @@ internal sealed class LightingCoordinator : IDisposable
     private const int ReapplyTicks = 8;
     // Of those ticks, how many also RE-SEND the profile palette flash. The flash is a global write that briefly
     // repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one more
-    // visible blink of keyboard and lightbar. Worth that cost on the RESTORE paths (startup, resume, lid open,
-    // host hand-back), where nothing else re-establishes the palette and the bus may be contended, so those
-    // kicks ask for it. A profile SWITCH does not: the firmware flashes the new palette itself at the moment of
+    // visible blink of keyboard and lightbar. Worth that cost on the RESTORE paths (startup, resume, lid open),
+    // where nothing else re-establishes the palette and the bus may be contended, so those kicks ask for it.
+    // A profile SWITCH does not: the firmware flashes the new palette itself at the moment of
     // the write and we now send ours in the same instant (see OnProfileApplied), so a re-send 400 ms later is
     // simply a second blink cycle. The per-zone KEYBOARD paint (the actual "half green/half orange" self-heal)
     // still runs on EVERY tick, which is silent when already correct. See docs/lighting-an18-61.md.
@@ -82,19 +81,9 @@ internal sealed class LightingCoordinator : IDisposable
     private MainViewModel _vm = null!;
     private LightingViewModel? _lighting;
 
-    // The UI-thread marshaller the surface's ownership event is posted through; defaults to
-    // Dispatcher.UIThread.Post and exists so a test can drive OnHostOwnerChanged synchronously — the same seam,
-    // and the same measured reason, as LightingViewModel's and OptionsViewModel.TryCreate's: the real dispatcher
-    // is thread-affine in a bare xUnit process, so a headless test cannot pump it, and "the controls greyed out"
-    // would then be pinned everywhere except at the one call that greys them. The resume and lid watchers keep
-    // the real dispatcher: they are constructed HERE, out of the test's reach, and no fake can raise their
-    // events anyway.
-    private readonly Action<Action> _post;
-
-    public LightingCoordinator(LaptopService svc, Action<Action>? post = null)
+    public LightingCoordinator(LaptopService svc)
     {
         _svc = svc;
-        _post = post ?? (a => Dispatcher.UIThread.Post(a));
 
         // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
         // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting
@@ -125,13 +114,6 @@ internal sealed class LightingCoordinator : IDisposable
         // resume re-apply above). The watcher fires on its message thread, so marshal to the UI thread here.
         _lid = new LidWatcher(open => Dispatcher.UIThread.Post(() => OnLidChanged(open)));
         _lid.Start();
-
-        // A host (Windows Dynamic Lighting / a LampArray app) taking or releasing the backlight changes who
-        // paints it AND whether the lighting panel's controls take input — see OnHostOwnerChanged. Fires on the
-        // bridge's worker thread, so marshal like the watchers above; posting (not sending) also means it can't
-        // run before Attach has supplied the view-models.
-        if (_svc.LampArray is { } lamps)
-            lamps.OwnerChanged += hostOwns => _post(() => OnHostOwnerChanged(hostOwns));
     }
 
     /// <summary>Point the coordinator at the current view-models. Called after each BuildUi (startup + live
@@ -249,40 +231,10 @@ internal sealed class LightingCoordinator : IDisposable
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
 
-        // A host owns the surface (Dynamic Lighting / a LampArray app): the app must not paint over it — but it
-        // MUST re-assert the host's last frame, because every caller of Paint() is an event that clobbers the
-        // RGB behind everyone's back (the EC forces its amber profile-flash on a profile switch, sleep drops the
-        // state, a lid-open restores from black). Without this the keyboard would sit amber until the host
-        // happened to send its next frame. The profile flash itself is deliberately skipped: it is a global
-        // write that would visibly fight the host's colours.
-        if (_svc.LampArray is { HostOwnsLighting: true } lamps) { lamps.Reassert(); return; }
-
         if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
             _svc.Device.Lighting?.SetProfileFlash(flash);
         if (rebind is { } mode) _vm.ReloadLighting(mode);
         else _vm.RepaintLighting();
-    }
-
-    /// <summary>A host took (or released) the backlight. Taking it: grey the panel's controls out (they would
-    /// otherwise still write straight to the zones — see <see cref="LightingViewModel.Reapply"/> for that path
-    /// and what it costs) and tell the user, because the controls no longer describe what the keyboard is
-    /// showing (G HUB blocks its own lighting UI in the same situation). Releasing it: the surface is frozen on
-    /// the host's last frame, so bring the controls back and repaint the app's own lighting for the current mode
-    /// right away — from the cache, no hardware reads on the UI thread.
-    ///
-    /// This is the ONLY subscriber to the surface's event, and it is why the section needs no rebuild on a flip:
-    /// the flag it sets is observable, and a section rebuilt later (a language change) seeds itself from the
-    /// surface's own flag as it is constructed. A subscription inside the section would outlive it instead —
-    /// the section is rebuilt, this coordinator is not.</summary>
-    private void OnHostOwnerChanged(bool hostOwns)
-    {
-        _lighting?.HostOwnershipChanged(hostOwns);
-        _vm.Status = Loc.T(hostOwns
-            ? "Keyboard lighting is controlled by Windows Dynamic Lighting"
-            : "Keyboard lighting is back under app control");
-        if (hostOwns) return;
-        Paint();
-        KickReapply(withFlash: true);   // the EC may still repaint late after a host hand-back; the burst overrides it
     }
 
     // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE

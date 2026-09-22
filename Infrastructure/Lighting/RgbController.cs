@@ -4,14 +4,15 @@ namespace AcerHelper.Infrastructure.Lighting;
 
 // The transport half of the small OpenRGB-style RGB framework (its model half — RgbZone, IRgbDevice — is
 // Domain/Rgb.cs, because that is what the UI binds to and what the app reasons about):
-//   IRgbController — a hardware transport that produces the zones it can drive (ENE HID, a future LampArray, …).
+//   IRgbController — a hardware transport that produces the zones it can drive (ENE HID, and whatever a backend
+//                    exposes next).
 //   RgbDevice      — an IRgbDevice assembled by concatenating one or more controllers' zones.
 // Both drive hardware and own handles, which is why they live here rather than with the ports they satisfy;
 // Domain names neither of them (only the IRgbDevice they produce).
 
 /// <summary>A hardware RGB transport brick that produces the zones it can drive. One per transport (ENE HID
-/// on both Windows and Linux — hidraw there, no kernel module, a future LampArray, …); a device may aggregate
-/// several. IDisposable for controllers holding a handle (e.g. a HID stream).</summary>
+/// on both Windows and Linux — hidraw there, no kernel module — plus whatever a backend adds later); a device may
+/// aggregate several. IDisposable for controllers holding a handle (e.g. a HID stream).</summary>
 public interface IRgbController : IDisposable
 {
     IReadOnlyList<RgbZone> Zones { get; }

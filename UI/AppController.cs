@@ -205,11 +205,7 @@ internal sealed class AppController
                                     // snaps itself back when the write does not take, so it needs only the
                                     // success flag — the reason has no reader here and is deliberately dropped,
                                     // rather than starting to show a message the app never showed.
-                                    d.KeyboardBrightness, lvl => _svc.SetKeyboardBrightness(lvl).ok,
-                                    // The LampArray surface, for its OWNERSHIP flag only: opening the drawer must
-                                    // not paint over a frame a host owns (LightingViewModel.Reapply). Null on a
-                                    // machine that publishes none, which is every Linux build.
-                                    host: _svc.LampArray)
+                                    d.KeyboardBrightness, lvl => _svc.SetKeyboardBrightness(lvl).ok)
             : null;
         // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
         // layer now, which must not reference a UI toolkit. ConfirmGpuAccessAsync is supplied for the same

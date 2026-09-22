@@ -17,7 +17,9 @@ namespace AcerHelper.Infrastructure.Composition;
 /// the re-apply use case (<c>Application/ReapplyPlan.cs</c>: the plan and, since the outcome stopped being built
 /// out of the container, the loop that walks it), and this class's <see cref="Reconciler"/> implements the
 /// contract that loop drives — it is where the axis writes and the preset translation live. The other contracts
-/// Application declares, and the UI names, live in <c>Application/DynamicLighting.cs</c>.
+/// Application declares live in <c>Application/</c> beside it, one per applied axis plus the lighting door and
+/// the declared-setting shapes (<c>FanAxis.cs</c>, <c>GpuOffsets.cs</c>, <c>CpuPowerOverlay.cs</c>,
+/// <c>Undervolt.cs</c>, <c>DeclaredSetting.cs</c>, <c>LightZone.cs</c>).
 ///
 /// Split across partial files by feature, because one 814-line file was the only place this
 /// layer could be read. This part holds identity and the shared infrastructure every other
@@ -25,7 +27,7 @@ namespace AcerHelper.Infrastructure.Composition;
 /// the scalar accessors the UI is allowed to read, <see cref="ApplyStartupState"/>, the
 /// per-mode preset helper, and teardown. The rest:
 /// <list type="bullet">
-/// <item><c>LaptopService.Lighting.cs</c> — the LampArray bridge and the per-mode light zones.</item>
+/// <item><c>LaptopService.Lighting.cs</c> — the per-mode light zones and the door the UI edits them through.</item>
 /// <item><c>LaptopService.Profiles.cs</c> — performance profiles, Turbo, power source.</item>
 /// <item><c>LaptopService.Fans.cs</c> — the fan presets and the fan-curve engine.</item>
 /// <item><c>LaptopService.Tuning.cs</c> — GPU overclock, CPU power mode, Curve Optimizer.</item>
@@ -55,8 +57,7 @@ namespace AcerHelper.Infrastructure.Composition;
 /// by the UI — is what the owner overruled; see Infrastructure/Composition/LaptopService.Lighting.cs.
 /// </summary>
 public sealed partial class LaptopService : IDisposable,
-    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget,
-    ILightingSwitchTarget
+    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget
 {
     // Explicit fields instead of a primary constructor. A primary constructor's parameters are in scope only in
     // the part that declares them, so while one was in use this class could not be split across partial files
@@ -64,13 +65,11 @@ public sealed partial class LaptopService : IDisposable,
     // parameter names, so not one call site in the file moved.
     private readonly Device device;
     private readonly ISettingsStore store;
-    private readonly IDynamicLightingFactory? dynamicLightingFactory;
 
-    public LaptopService(Device device, ISettingsStore store, IDynamicLightingFactory? dynamicLightingFactory = null)
+    public LaptopService(Device device, ISettingsStore store)
     {
         this.device = device;
         this.store = store;
-        this.dynamicLightingFactory = dynamicLightingFactory;
         Reconciler = new HardwareReconciler(this);
         // Assigned in the body rather than as `Settings { get; } = store.Load(...)`. Field and property initializers
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
@@ -209,16 +208,12 @@ public sealed partial class LaptopService : IDisposable,
         //
         // The ordering these four had relative to each other is preserved: they are still sequential on this
         // thread, and "clamshell takeover before the option rows read it" (its own comment below) still holds.
-        bool clamshell, dynamicLighting;
+        bool clamshell;
         int bluelight;
         lock (_state)
         {
             clamshell = Settings.Clamshell;
             bluelight = Settings.Bluelight;
-            // Read here rather than at its use below, so this is a guarded read of the graph like every other one
-            // in this file. Not a race in practice — this runs before the coordinator, the UI and the 3s pass
-            // exist, so there is no writer yet — but the invariant declared above admits no unguarded access.
-            dynamicLighting = Settings.DynamicLighting;
         }
 
         if (clamshell) device.Clamshell?.SetEnabled(true);
@@ -235,12 +230,6 @@ public sealed partial class LaptopService : IDisposable,
         // constructor. That gap is old — it used to be the same two writes by hand — and it is recorded rather
         // than closed: docs/domain-refactoring-plan.md §7 (see also §5, wave 2).
         Reconciler.Reapply(ReapplyTrigger.Startup);
-
-        // Bring the virtual LampArray back up if the user left it on. Off the caller's (UI) thread on purpose:
-        // publishing it creates a PnP device node and waits for the driver to start — up to a few seconds on a
-        // cold boot. Failure is not surfaced here; the Options row reads the bridge's real state when shown.
-        if (dynamicLighting && LampArray is { } la)
-            _ = Task.Run(() => { try { la.Enable(); } catch { /* stays off */ } });
     }
 
     /// <summary>Look up <paramref name="key"/> in <paramref name="map"/>, creating and inserting a default
@@ -265,9 +254,6 @@ public sealed partial class LaptopService : IDisposable,
         // is not an error here: teardown goes on either way.
         try { _tintApplies.Drain(TintDrainTimeout); } catch { /* best-effort teardown */ }
 
-        // Tear the virtual LampArray down BEFORE the device: it stops its worker and removes the PnP node, so
-        // Windows doesn't keep offering a lighting device this process no longer backs.
-        try { _lampArray?.Dispose(); } catch { /* best-effort teardown */ }
         device.Dispose();
     }
 }

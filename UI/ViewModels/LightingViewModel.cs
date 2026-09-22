@@ -32,9 +32,6 @@ public sealed partial class LightingViewModel : ObservableObject
     private readonly IReadOnlyList<RgbZone> _followZones;
     private readonly Action<bool> _saveFollowsProfile;
     private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
-    // The virtual lighting surface the app publishes for a host (Windows Dynamic Lighting / any LampArray app),
-    // or null where this machine has none. Read only for its ownership flag — see Reapply.
-    private readonly IDynamicLighting? _host;
 
     // THE MODE THIS SECTION IS BOUND TO, and the values of its zones. The mode is FIXED when the door is taken
     // (LaptopService.LightsForCurrentMode), so every edit here lands in the mode the user is looking at — which
@@ -45,23 +42,6 @@ public sealed partial class LightingViewModel : ObservableObject
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
     public bool ShowFollowsProfile => _followZones.Count > 0;
-
-    /// <summary>Whether the section's interactive controls take input: false while a host owns the published
-    /// surface, so the effect picker, the colour swatches, the brightness/speed sliders, the direction switch and
-    /// the follows-profile switch are all GREYED rather than accepting an edit that would land on a surface
-    /// somebody else is painting. A refusal the user can see, which is why the controls are disabled instead of
-    /// the writes being dropped — a silently ignored drag is the worse failure. Bound to the root of each panel
-    /// (LightView) and to the follow switch (LightingView).
-    ///
-    /// Seeded from the surface's own flag as this section is BUILT, so a language rebuild under a host comes up
-    /// greyed rather than live; the live flip arrives from <c>LightingCoordinator.OnHostOwnerChanged</c>, which
-    /// is the single subscriber to the surface's event (this section is rebuilt, and a subscription here would
-    /// outlive it — the same reason the coordinator owns the re-apply state machine). No rebuild is needed for
-    /// either: the flag is an observable property, so greying is a live change.
-    ///
-    /// The plain backlight (<see cref="Backlight"/>) is deliberately NOT covered — <see cref="Reapply"/> states
-    /// why: it is separate hardware that no LampArray carries.</summary>
-    [ObservableProperty] private bool _controlsEnabled;
 
     /// <summary>When on (default), follow-capable zones (the lightbar) are left to the firmware — their
     /// per-profile palette colour, flash-free — and get no panel. When off they become normal user-controlled
@@ -81,28 +61,17 @@ public sealed partial class LightingViewModel : ObservableObject
     /// <c>OptionsViewModel.TryCreate(device, o, post)</c>: the real dispatcher is thread-affine in a bare xUnit
     /// process, so a headless test cannot pump it (see <c>Eventually</c>). Without the seam the wave's rule could
     /// not be tested where the app actually calls it: a read that is not an event must leave state alone, and a
-    /// "nothing changed" assertion against a post that never runs proves nothing.
-    ///
-    /// <paramref name="host"/> is the virtual lighting surface a host may be holding (AppController passes
-    /// <c>LaptopService.LampArray</c>; null where this machine publishes none). This section reads it for its
-    /// ownership flag and never drives it: while a host owns the surface the panels must not paint, and the
-    /// re-assertion of the host's frame belongs to <c>LightingCoordinator</c>, which is the only caller that
-    /// has to hand because something clobbered it.</summary>
+    /// "nothing changed" assertion against a post that never runs proves nothing.</summary>
     public LightingViewModel(IRgbDevice? rgb, ILightZoneMode mode,
                              bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null,
-                             Action<Action>? post = null, IDynamicLighting? host = null)
+                             Action<Action>? post = null)
     {
         _mode = mode;
         foreach (var (name, state) in mode.Stored()) _lights[name] = state;
         _saveFollowsProfile = saveFollowsProfile;
         _post = post;
-        _host = host;
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
-        // The seeding half of HostOwnershipChanged, called before any panel exists (so the fan-out reaches
-        // none): a section BUILT while a host already holds the surface comes up greyed rather than live, which
-        // is what a language rebuild mid-session is.
-        HostOwnershipChanged(host is { HostOwnsLighting: true });
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
         _followZones = zones.Where(z => z.CanFollowProfile).ToList();
@@ -147,11 +116,6 @@ public sealed partial class LightingViewModel : ObservableObject
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
             state, s => Store(zone.Name, s), zone.ReadBrightness, _post);
-        // Seeded from the section, not defaulted: the follow switch BUILDS a panel when it is turned off, so
-        // without this a panel built while a host owns the surface would come up live and its construction
-        // re-apply (LightViewModel's `if (state.Configured) ApplyNow()`) would be a write the grey-out never
-        // had a chance to prevent.
-        panel.ControlsEnabled = ControlsEnabled;
         Panels.Add(panel);
     }
 
@@ -168,24 +132,6 @@ public sealed partial class LightingViewModel : ObservableObject
         }
         _saveFollowsProfile(value);
     }
-
-    // One flag, one place it is fanned out to: the panels are what the controls are built from, and a panel built
-    // later (the follow switch) is seeded in BuildPanel. Bound in the view through each panel's own
-    // LightViewModel.ControlsEnabled.
-    partial void OnControlsEnabledChanged(bool value)
-    {
-        foreach (var panel in Panels) panel.ControlsEnabled = value;
-    }
-
-    /// <summary>Who owns the published surface changed: <paramref name="hostOwns"/> true greys this section's
-    /// controls out, false brings them back. The one place the polarity lives — the surface's flag reads
-    /// "a host owns it" and this one reads "the controls take input", and a negation written at each call site
-    /// is how those two quietly stop agreeing; the two callers here are the constructor's seeding and
-    /// <c>LightingCoordinator.OnHostOwnerChanged</c>.
-    ///
-    /// It sets a property rather than rebuilding anything: the controls' availability is observable, so no
-    /// rebuild-time state is needed for a flip that arrives long after the panels were built.</summary>
-    public void HostOwnershipChanged(bool hostOwns) => ControlsEnabled = !hostOwns;
 
     /// <summary>Settle the deferred placeholders after a (re)build. Only the plain backlight needs this: its
     /// slider is built at 0 and takes its real level here (see <see cref="BacklightViewModel"/>). The RGB panels
@@ -210,25 +156,7 @@ public sealed partial class LightingViewModel : ObservableObject
     /// device rather than asking the device what it holds. Re-applying is idempotent and cannot be wrong; reading
     /// can, because the write we just sent may not have landed yet.
     ///
-    /// A HOST OWNS THE SURFACE (Windows Dynamic Lighting / a LampArray app) and the PANELS write nothing. The
-    /// panels write STRAIGHT to the zones — this method does not go through <c>LightingCoordinator.Paint</c>,
-    /// which is where every other painting path yields to the host — so an ungated re-apply would land the app's
-    /// frame on a surface the host owns, and would land it out of band: the bridge's dedupe mirror
-    /// (<c>LampArrayBridge._written</c>) is not told about it, so the host's next frame of the SAME colours is
-    /// judged unchanged and skipped, and the app's colour stays on the keyboard until the host's frame moves by
-    /// more than its colour epsilon. Nothing is lost by yielding: the stored value is what
-    /// <c>LightingCoordinator.OnHostOwnerChanged</c> paints the moment the host lets go. The host's own frame is
-    /// deliberately NOT re-asserted here — opening a drawer clobbers nothing, and the callers that do need a
-    /// re-assertion are the ones <c>Paint</c> already serves.
-    ///
-    /// THE GATE IS ABOUT THE PANELS ONLY, because it is about the surface the host holds: the LampArray is built
-    /// FROM the RGB device (<c>LaptopService.LampArray</c>), so a host owns the zones and nothing else. The plain
-    /// backlight (<see cref="IKeyboardBrightness"/>) is separate hardware that no host claims — no LampArray
-    /// carries it, and the only devices that expose it have no RGB device at all in today's tree — so its settle
-    /// sits OUTSIDE the gate. Gating it would be a flag about one surface deciding another's: on a device
-    /// with both (an RGB device whose zones the firmware follows, so no panel is built, beside a plain
-    /// backlight — the shape LightingDrawerTests arranges) the level would keep its startup value for the whole
-    /// session, which is the very symptom this read exists to close.
+    /// The panels write STRAIGHT to the zones — this method does not go through <c>LightingCoordinator.Paint</c>.
     ///
     /// The plain backlight is the one control here settled by a READ, and the only device it exists on is one
     /// with no RGB panels at all: it has no stored value to push (its slider is a deferred placeholder whose
@@ -238,8 +166,7 @@ public sealed partial class LightingViewModel : ObservableObject
     /// startup value for the whole session.</summary>
     public void Reapply()
     {
-        if (_host is not { HostOwnsLighting: true })
-            foreach (var panel in Panels) panel.Reapply();
+        foreach (var panel in Panels) panel.Reapply();
         Backlight?.SyncFromHardware();
     }
 
@@ -318,13 +245,6 @@ public sealed partial class LightViewModel : ObservableObject
     [ObservableProperty] private Color _color;
     [ObservableProperty] private double _brightness;
     [ObservableProperty] private double _speed;
-
-    /// <summary>Whether this panel's controls take input — the property LightView's root binds IsEnabled to, so
-    /// the effect picker, the colour swatches, the brightness/speed sliders and the direction switch grey
-    /// together. Set only by the section (<c>LightingViewModel.ControlsEnabled</c>, which is the surface's
-    /// ownership); default true, because a panel built outside a section — as a test builds one — is not on a
-    /// surface anybody else holds.</summary>
-    [ObservableProperty] private bool _controlsEnabled = true;
 
     /// <param name="state">This zone's stored lighting for the mode being bound, as a value.
     /// <param name="store">Where an edit goes: the section's write for THIS zone, which is the contract call

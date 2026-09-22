@@ -39,7 +39,6 @@ public class JsonSettingsStoreTests
         TurboToggles = true,
         Clamshell = true,
         Bluelight = 4,
-        DynamicLighting = true,
         CardwireGpuAccess = true,
         OnAc = new ProfileMemory { BaseId = "balanced", Turbo = true },
         OnBattery = new ProfileMemory { BaseId = "power-saver" },
@@ -111,7 +110,7 @@ public class JsonSettingsStoreTests
         // constructor, which takes the persisted half over member by member, so a member added to Settings and
         // forgotten there comes back as its default — which this comparison sees and the list above only would
         // if someone remembered to extend it. (Mutation: delete one line of that constructor's copy — for
-        // instance the DynamicLighting one — and this assertion reddens.)
+        // instance the Clamshell one — and this assertion reddens.)
         Assert.Equal(JsonSerializer.Serialize(Populated(), SettingsJsonContext.Default.Settings),
                      JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.Settings));
     }
@@ -150,7 +149,6 @@ public class JsonSettingsStoreTests
         Assert.True(loaded.TurboToggles);
         Assert.True(loaded.Clamshell);
         Assert.Equal(4, loaded.Bluelight);
-        Assert.True(loaded.DynamicLighting);
 
         Assert.Equal("balanced", loaded.OnAc.BaseId);
         Assert.True(loaded.OnAc.Turbo);
@@ -197,7 +195,7 @@ public class JsonSettingsStoreTests
     /// Save writes the loss back as though the user had made it.
     ///
     /// WHY A FIXTURE, NOT A LITERAL ARRAY. The obvious guard was written first — a literal array of the shipped
-    /// names, right here — and a mutation killed it: renaming <see cref="Settings.DynamicLighting"/> across the
+    /// names, right here — and a mutation killed it: renaming <see cref="Settings.Clamshell"/> across the
     /// repo (a find-and-replace over <c>*.cs</c>, which is what a rename IS) rewrote the guard's own literal along
     /// with the property, so the guard renamed itself and stayed green. The names therefore have to live where a
     /// rename of the C# type cannot reach them, and a JSON file is that place.
@@ -210,8 +208,8 @@ public class JsonSettingsStoreTests
     /// PASSES. The test this replaced compared the JSON against the type's own property names and went RED on
     /// precisely that fix, which is how the wrong repair (deleting the guard) comes to look like the right one.
     ///
-    /// Verified red by renaming <see cref="Settings.DynamicLighting"/>; verified GREEN by renaming it AND adding
-    /// <c>[JsonPropertyName("DynamicLighting")]</c> — the second mutation is the one that matters.</summary>
+    /// Verified red by renaming <see cref="Settings.Clamshell"/>; verified GREEN by renaming it AND adding
+    /// <c>[JsonPropertyName("Clamshell")]</c> — the second mutation is the one that matters.</summary>
     [Fact]
     public void AFullSettingsFileFromAShippedVersionStillLoads()
     {
@@ -506,7 +504,7 @@ public class JsonSettingsStoreTests
 
         // A property the file does not mention keeps its default rather than throwing. This is the other half
         // of compatibility, and the reason a partial file is not mistaken for a corrupt one.
-        Assert.False(loaded.DynamicLighting);
+        Assert.False(loaded.Clamshell);
         Assert.False(loaded.CardwireGpuAccess);
         Assert.Empty(loaded.CpuPowerModes);
         Assert.False(File.Exists(dir.SettingsPath + ".bad"));

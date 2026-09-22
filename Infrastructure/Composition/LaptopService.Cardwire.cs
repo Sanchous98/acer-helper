@@ -33,10 +33,11 @@ public sealed partial class LaptopService
     /// <summary>
     /// Turn the app's GPU access on or off, and remember the choice. Called by the Options row's toggle.
     ///
-    /// ON ASKS FIRST AND REMEMBERS ONLY WHAT HAPPENED — the same contract as <see cref="SetDynamicLighting"/>, and
-    /// for the same reason: a file that says "this app may use the discrete GPU" while the daemon refused would be
-    /// a preference the app cannot keep, and the row would show it as granted. A refusal leaves the file alone and
-    /// returns the daemon's own words, which the row's own failure path shows.
+    /// ON ASKS FIRST AND REMEMBERS ONLY WHAT HAPPENED — the same contract as applying a declared setting
+    /// (<see cref="AcerHelper.Application.ApplyDeclaredSetting"/>), and for the same reason: a file that says
+    /// "this app may use the discrete GPU" while the daemon refused would be a preference the app cannot keep,
+    /// and the row would show it as granted. A refusal leaves the file alone and returns the daemon's own words,
+    /// which the row's own failure path shows.
     ///
     /// OFF FORGETS THE CHOICE AND CANNOT TAKE THE GRANT BACK. That asymmetry is cardwire's, not this app's: there
     /// is no revoke method, so the grant stays in force until this process exits. The consent prompt says so before

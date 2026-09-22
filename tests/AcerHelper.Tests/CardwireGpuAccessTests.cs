@@ -219,9 +219,9 @@ public class CardwireGpuAccessTests
     // ---- what is remembered ------------------------------------------------------------------------------
 
     /// <summary>ON ASKS FIRST AND REMEMBERS WHAT HAPPENED: the grant is made, the one call is made, and only then
-    /// does the preference reach settings.json — the same contract as the LampArray toggle, and for the same
-    /// reason (a file that says a permission exists while the daemon refused is a preference the app cannot
-    /// keep).</summary>
+    /// does the preference reach settings.json — the same contract as applying a declared setting
+    /// (<c>Application/DeclaredSetting.cs</c>), and for the same reason (a file that says a permission exists
+    /// while the daemon refused is a preference the app cannot keep).</summary>
     [Fact]
     public void TurningItOnAsksFirstAndRemembersWhatHappened()
     {

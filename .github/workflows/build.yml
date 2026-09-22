@@ -2,25 +2,23 @@ name: build
 
 # One workflow, two jobs that run IN PARALLEL (GitHub parallelises jobs; steps within a job are sequential):
 #   • windows — Native-AOT AcerHelper.exe + a WiX MSI installer, on a Windows runner
-#   • linux   — the repository's Dockerfile builds the portable (Native AOT) app and the KMDF driver package;
-#               the AppImage is packed from the publish folder that build exports
+#   • linux   — the repository's Dockerfile builds the portable (Native AOT) app; the AppImage is packed from
+#               the publish folder that build exports
 # Both app artefacts are Native AOT (analyzer clean, 0 IL30xx on both TFMs). Each job attaches its output to the
 # GitHub Release (the feed the in-app update check + AppImage self-update read). They stay separate jobs (not one
 # matrix) because the Windows artefact cannot leave Windows at all: WiX is a Windows tool, and Native AOT
 # refuses to cross-compile win-x64 from Linux — the toolchain's own refusals are quoted in docs/build-image.md.
 # The windows job's steps are therefore unchanged by the containerisation: same runner, same commands.
 #
-# The linux job builds nothing itself. Both artefacts the image can build are built by it, in one
-# `docker buildx build`, so the toolchain (SDK, clang, the WDK/SDK NuGet packages, KMDF) is pinned inside the
-# image instead of being installed on the runner: that job has no .NET setup, no dnf/apt step and no job-level
-# container left. Its own part is to run the build, pack the AppImage out of the exported folder, and hand that
-# to the release.
+# The linux job builds nothing itself. The one artefact the image builds is built by it, in one
+# `docker buildx build`, so the toolchain (SDK, clang) is pinned inside the image instead of being installed on
+# the runner: that job has no .NET setup, no dnf/apt step and no job-level container left. Its own part is to
+# run the build, pack the AppImage out of the exported folder, and hand that to the release.
 #
 # RUNS ONLY on a v* tag: a build's sole purpose is to produce a release, so plain pushes to master don't
 # build (no point building the same commit twice — once on the branch push, once on the tag). The release
-# assets ARE the deliverable, so the app artefacts get no upload-artifact step of their own; the one upload in
-# this file is the driver package, which is deliberately not a release asset — it is unsigned, Windows will not
-# load an unsigned driver package, and the shipping path is attestation signing, outside this workflow.
+# assets ARE the deliverable, so there is no upload-artifact step in this file at all — the MSI and the AppImage
+# go straight to the GitHub Release.
 # workflow_dispatch is kept for a manual build-only smoke test off a branch (the tag-guarded verify/release
 # steps just skip there).
 #
@@ -153,7 +151,7 @@ jobs:
           files: AcerHelper-Setup.msi
 
   linux:
-    name: AppImage + driver package (container build)
+    name: AppImage (container build)
     # No job-level `container:` any more, and this is not tidying: the fedora:41 container existed for the build
     # — clang and zlib for the AOT link — and that build is the image's now, with its toolchain pinned there
     # instead of installed per run. It cannot stay as an empty shell around the packaging either, because buildx
@@ -184,22 +182,22 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
 
-      # The build, verbatim as docs/build-image.md documents it: one invocation, both artefacts, and the
-      # container's own `artefacts` stage decides the layout — dist/linux (the publish folder this job packs the
-      # AppImage from), dist/driver (the driver package) and dist/PROVENANCE.txt. What the image pins is in that
-      # document; this job installs no toolchain because it needs none.
+      # The build, verbatim as docs/build-image.md documents it: one invocation, and the container's own
+      # `artefacts` stage decides the layout — dist/linux (the publish folder this job packs the AppImage from)
+      # and dist/PROVENANCE.txt. What the image pins is in that document; this job installs no toolchain because
+      # it needs none.
       #
       # GIT_SHA is handed in because .git is deliberately outside the build context (.dockerignore), so the image
       # cannot read the revision for itself — and a release folder that cannot name the commit it came from is
       # not auditable.
       #
-      # mode=max is required, not a tuning knob: the exported `artefacts` stage is scratch plus three COPYs, so
+      # mode=max is required, not a tuning knob: the exported `artefacts` stage is scratch plus two COPYs, so
       # the default mode=min would push almost nothing to the cache, while every expensive layer (the apt-get
-      # runs in dotnet-base and wdk-toolchain, the NuGet and WDK fetches, the AOT link) lives in a stage it drops.
+      # run in dotnet-base, the NuGet fetch, the AOT link) lives in a stage it drops.
       #
       # A failure here fails the job — no continue-on-error, no `|| true`: an artefact that quietly did not get
       # built is the one outcome this job must never produce.
-      - name: Build the Linux app and the driver in the release image
+      - name: Build the Linux app in the release image
         run: >
           docker buildx build
           --target artefacts
@@ -213,12 +211,12 @@ jobs:
       # nothing, if the export went wrong. Checked here, by name, so a bad export fails where it can say what is
       # missing instead of failing at appimagetool with a message about an AppDir. -s rather than -e: an empty
       # file is not an artefact either.
-      - name: Verify the container exported both artefacts
+      - name: Verify the container exported the artefact
         run: |
-          for f in dist/linux/AcerHelper dist/driver/AcerHelperLampArray.sys dist/driver/AcerHelperLampArray.inf dist/PROVENANCE.txt; do
+          for f in dist/linux/AcerHelper dist/PROVENANCE.txt; do
             [ -s "$f" ] || { echo "::error::the release image did not export $f"; exit 1; }
           done
-          ls -l dist/linux dist/driver
+          ls -l dist/linux
 
       # Cache appimagetool (continuous) so we don't re-fetch it from GitHub on every build — also removes a
       # network dependency that has flaked before. Static key = pinned; bump it to pick up a newer appimagetool.
@@ -255,21 +253,6 @@ jobs:
           [ -x appimagetool ] || curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$AD" AcerHelper-x86_64.AppImage
-
-      # The driver package is built here but is NOT released, and that is the signing boundary rather than an
-      # omission. It is unsigned; Windows will not load an unsigned driver package, so the only package that can
-      # ship is the one that comes back from attestation signing, whose key must not enter a container at all
-      # (driver/README.md, *Signing*). CI builds it so that what gets signed is a package built from the tagged
-      # commit by the pinned toolchain, and this upload is the handover to that step.
-      # if-no-files-found: error — an upload that quietly found nothing would waste the build that produced it.
-      - name: Upload the driver package (unsigned)
-        uses: actions/upload-artifact@v7
-        with:
-          name: AcerHelperLampArray-driver-package
-          path: |
-            dist/driver
-            dist/PROVENANCE.txt
-          if-no-files-found: error
 
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')

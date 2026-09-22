@@ -1,5 +1,27 @@
 # HID LampArray / Windows Dynamic Lighting — design
 
+> **Removed 2026-09-22 — kept as the record of what the feature was, and of why it went.** Windows Dynamic
+> Lighting support is gone: `driver/`, the `LampArray` transport, `LampArrayBridge` and the Options toggle were
+> removed by the owner's decision. Windows enumerates lighting devices **only** as HID LampArray collections,
+> and Microsoft's device guidance (quoted below) lists exactly two compatible routes — native firmware, or a
+> **VHF** driver. `VhfCreate` lives in `VhfKm.lib` and its documentation speaks of KMDF only: there is no
+> user-mode variant, so a UMDF2 driver — appealing precisely because a self-signed certificate suffices for one,
+> where a kernel-mode driver needs Microsoft's signature — cannot carry this capability. A KMDF driver therefore
+> needs either test signing (Secure Boot off, plus the BitLocker and anti-cheat consequences that brings) or
+> **attestation signing**. The owner declined both, so the feature is dropped rather than shipped. Everything
+> below is the historical record of a feature that no longer exists, kept because the reasoning is what gets
+> re-asked. The app's own keyboard lighting never went through this path and is unaffected. The two relative
+> links into `driver/` below are dead — that tree is gone — and are left as written because this file is the
+> record of it.
+
+> **The signing path, as the driver's own README established it.** Release meant attestation signing: an **EV
+> code-signing certificate** (~€250–400/year; Azure Trusted Signing is not accepted for driver attestation), a
+> free **Partner Center** hardware account validated with it, a `.cab` holding the package, signed with that
+> certificate and submitted for attestation, and the returned `.cat` shipped — after which Secure Boot stays on
+> and no warning is shown. The package was **deliberately never a release asset**: unsigned, it is one Windows
+> will not load, so CI built it on every tagged run and uploaded it as a workflow artefact only, so that what
+> got signed was a package built from the tagged commit. With the feature gone there is nothing left to sign.
+
 Goal: let **Windows Dynamic Lighting** (Settings → Personalisation → Dynamic Lighting) and any LampArray-aware
 app paint this laptop's keyboard, with AcerHelper as the translation layer — the equivalent of what Logitech
 G HUB provides for LIGHTSYNC hardware.

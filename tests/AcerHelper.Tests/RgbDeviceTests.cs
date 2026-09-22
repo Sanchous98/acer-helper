@@ -82,9 +82,10 @@ public class RgbDeviceTests
     public void ASubZoneCountBelowOne_IsReadAsOne(int subZones) =>
         Assert.Equal(1, Zone("Keyboard", subZones, (_, _, _) => true).SubZones);
 
-    /// <summary>A per-sub-zone write to a zone with no applier is a <c>false</c> no-op, not a throw: the UI and
-    /// the lamp-array bridge both address sub-zones by index without consulting <see cref="RgbZone.HasSubZones"/>
-    /// first, so a throw here would take down the caller's paint loop instead of quietly doing nothing.</summary>
+    /// <summary>A per-sub-zone write to a zone with no applier is a <c>false</c> no-op, not a throw: the port's
+    /// contract is that a write REPORTS whether it landed, so a caller walking sub-zones gets an answer rather
+    /// than an exception — the same shape <see cref="RgbZone.ApplyEffect"/> has, and the reason
+    /// <see cref="RgbZone.HasSubZones"/> exists for the callers that would rather ask first.</summary>
     [Fact]
     public void ApplySubZoneIsAFalseNoOpWhenTheZoneHasNoApplier()
     {
@@ -190,9 +191,9 @@ public class RgbDeviceTests
     // ================= RgbDevice: zone aggregation =================
 
     /// <summary>The composition order is the transport's, not the alphabet's: the UI renders one panel per zone in
-    /// this order, and the lamp-array bridge indexes into it, so reordering silently repoints every lamp and every
-    /// UI panel at a different physical region. The names below are deliberately neither sorted nor reversed, so
-    /// the assertion cannot be satisfied by accident.</summary>
+    /// this order and each panel's apply ops are bound to the zone it was built for, so reordering silently
+    /// repoints every panel at a different physical region. The names below are deliberately neither sorted nor
+    /// reversed, so the assertion cannot be satisfied by accident.</summary>
     [Fact]
     public void ZonesFromSeveralControllersKeepTheCompositionOrder()
     {

@@ -1,4 +1,3 @@
-using AcerHelper.Application;
 using AcerHelper.Infrastructure.Vendors.Acer;
 using AcerHelper.Infrastructure.Vendors.Dell;
 using AcerHelper.Infrastructure.Vendors.Generic;
@@ -41,13 +40,4 @@ public static class DeviceFactory
         device.FinalizeComposition();
         return device;
     }
-
-    /// <summary>How the application obtains this machine's virtual LampArray surface (Windows Dynamic
-    /// Lighting): the factory it names, built over this OS's transport — or null where the OS has none or the
-    /// driver isn't installed, which is what keeps the feature (and its Options row) absent instead of promising
-    /// a device that cannot exist. Kept here rather than in <see cref="LaptopService"/> so the OS choice stays
-    /// in composition: the two implementations are picked by file name (LampArrayTransport.Windows.cs /
-    /// .Linux.cs), like every other platform split.</summary>
-    public static IDynamicLightingFactory? CreateDynamicLightingFactory()
-        => LampArrayHost.Create() is { } transport ? new LampArrayBridgeFactory(transport) : null;
 }

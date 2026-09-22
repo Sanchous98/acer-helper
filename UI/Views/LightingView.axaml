@@ -9,11 +9,8 @@
   <StackPanel Spacing="12">
 
     <!-- Plain (non-RGB) keyboard backlight: brightness is the ONLY control. The levels are discrete hardware
-         steps, so the slider snaps to tick stops (Off/Dim/Bright) rather than a free 0-100 range.
-         DELIBERATELY NOT GREYED while a host owns the surface, unlike the follow switch below and the panels in
-         the tabs: a LampArray is built from the RGB device, so a host owns the zones and nothing else, and no
-         host claims this brightness port (which is another register on other hardware). Same rule, same reason,
-         as the settle this slider gets when the drawer opens — see LightingViewModel.Reapply. -->
+         steps, so the slider snaps to tick stops (Off/Dim/Bright) rather than a free 0-100 range. Its level is
+         settled by a read when the drawer opens rather than only at startup — see LightingViewModel.Reapply. -->
     <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasBacklight}" Margin="0,4,0,0">
       <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="{l:Tr Brightness}"/>
       <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding Backlight.MaxLevel}"
@@ -26,13 +23,9 @@
     <!-- The lightbar has no independent software state: the firmware paints it (and the keyboard) with the
          performance profile's palette on every switch. On (default) = leave it to the firmware, so it shows its
          per-profile colour seamlessly (no flash) and gets no tab; off = it becomes a normal zone (custom
-         colour/effects) at the cost of that brief palette flash on each profile switch.
-         GREYED while a host owns the surface: turning it off BUILDS a panel, and a panel's construction
-         re-applies its zone (LightViewModel's `if (state.Configured) ApplyNow()`), so this switch is a write
-         path and not only a preference. -->
+         colour/effects) at the cost of that brief palette flash on each profile switch. -->
     <CheckBox Content="{l:Tr 'Lightbar follows performance profile'}"
               IsChecked="{Binding FollowsProfile, Mode=TwoWay}"
-              IsEnabled="{Binding ControlsEnabled}"
               IsVisible="{Binding ShowFollowsProfile}"/>
 
     <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it

@@ -1,4 +1,3 @@
-using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Lighting;
@@ -17,21 +16,18 @@ namespace AcerHelper.Tests;
 ///
 /// THREE THINGS THE OPEN OWES, and they pull in different directions, which is why they are pinned together:
 ///
-///  * it must NOT paint the RGB zones while a host owns the surface. The panels write STRAIGHT to the zones
-///    (this path does not go through <c>LightingCoordinator.Paint</c>, which is where everything else yields),
-///    so an ungated re-apply lands the app's frame on Windows Dynamic Lighting's keyboard — and lands it out of
-///    band: the bridge's dedupe mirror (<c>LampArrayBridge._written</c>) is never told, so the host's own next
-///    frame of the same colours is judged unchanged and skipped, and the app's colour stays on the keyboard.
-///    Measured here as the write COUNT: the build re-applies a configured zone once, and an open must not add a
-///    second write when a host owns the surface. The differential control — the same open with
-///    <c>HostOwnsLighting</c> false — is the test below it, so neither the gate nor its polarity is assumed.
+///  * it MUST re-apply the RGB panels. The panels write STRAIGHT to the zones — this path does not go through
+///    <c>LightingCoordinator.Paint</c> — so the open is the doubt moment at the panel's own level: the write we
+///    sent may not have landed, and re-applying is idempotent on a last-write-wins device. Measured here as the
+///    write COUNT, with the build's own re-apply as the inline control: a panel that never wrote would make
+///    "no third write" hold for the wrong reason.
 ///
-///  * it MUST settle the plain backlight slider, host or no host. That control exists only where the device has
-///    NO RGB panels; its level can move with no event the app ever sees (another tool, a BIOS hotkey that raises
-///    no raw input, an Fn press made while the drawer was shut); and it is settled by a READ, because it has no
-///    stored value to push (its slider is a deferred placeholder whose write is verified by read-back). The host
-///    gate above is about the SURFACE a host holds — the LampArray is built from the RGB device, and no host
-///    claims an <see cref="IKeyboardBrightness"/> — so it must not decide the backlight's read.
+///  * it MUST settle the plain backlight slider. That control exists only where the device has NO RGB panels;
+///    its level can move with no event the app ever sees (another tool, a BIOS hotkey that raises no raw input,
+///    an Fn press made while the drawer was shut); and it is settled by a READ, because it has no stored value to
+///    push (its slider is a deferred placeholder whose write is verified by read-back). So the drawer does for it
+///    what <see cref="LightingViewModel.Prime"/> does at startup — and on a device whose RGB zone is the
+///    firmware's (no panel is built), the open is the ONLY moment the level can be picked up.
 ///
 ///  * a click on the button of the drawer ALREADY SHOWING closes it (<c>OpenDrawer</c>'s toggle) and must not
 ///    re-apply on the way out: the re-apply re-writes the panels and queues the backlight's read, and that read
@@ -39,49 +35,27 @@ namespace AcerHelper.Tests;
 ///    more of them.
 ///
 /// WHAT THIS FILE DOES NOT COVER, named rather than left implicit. The drawer's INTERACTIVE writes (a drag of a
-/// panel's brightness or colour) used to reach the zones while a host owned the surface; they no longer can,
-/// because the controls are greyed out on that flag — the owner's decision of 2026-09-18, taken in the shape the
-/// record in <c>docs/domain-refactoring-plan.md</c> §7 asked for. That gating lives in
-/// <c>LightingViewModel.ControlsEnabled</c> / <c>LightViewModel.ControlsEnabled</c> and is pinned by
-/// <see cref="LightingControlGateTests"/>, not here: this file is about the drawer's OPEN, which is the other
-/// half of the same rule (the open yields through <c>Reapply</c>, the controls through the flag).
+/// panel's brightness or colour) are the panels' own path, exercised where a panel is built directly; this file
+/// is about the drawer's OPEN. What a panel does with a value the mode does not hold yet is
+/// <c>LightingAdoptionTests</c>' business.
 /// </summary>
 public class LightingDrawerTests
 {
     private const string ZoneName = "Keyboard";
 
-    // ---------------------------------------------------------------- the open, while a host owns the surface
+    // ---------------------------------------------------------------- the open, and the panels it drives
 
-    /// <summary>The reported regression, at the level the app calls it: with a host holding the surface, opening
-    /// the Lighting drawer writes NOTHING. The write count is the witness in both directions — the build's own
-    /// re-apply of a configured zone has to be there (or "no second write" would hold for a panel that never
-    /// wrote at all), and the open must not add to it.</summary>
+    /// <summary>The doubt moment at the panel level: opening the Lighting drawer pushes OUR stored value at the
+    /// device again, so a write that never landed is retried rather than believed. The write count is the witness,
+    /// and the build's own re-apply of the configured zone is the inline control — without it, "no second write"
+    /// would hold for a panel that never wrote at all.</summary>
     [Fact]
-    public void TheDrawerOpen_WritesNothing_WhileAHostOwnsTheSurface()
+    public void TheDrawerOpen_ReappliesTheConfiguredZone()
     {
         var written = new List<byte>();
-        var vm = Lighting(Zone(written), Brightness(40), new FakeHostLighting { HostOwnsLighting = true });
+        var vm = Lighting(Zone(written), Brightness(40));
 
         Assert.Equal([40], written);            // Control: a configured zone IS re-applied when it is built
-
-        var main = Drawer(vm);
-        main.OpenLightingCommand.Execute(null);
-
-        Assert.True(main.IsLightingPage);       // Control: the command ran and really opened the drawer
-        Assert.Equal([40], written);            // ...and the host's surface was left alone
-    }
-
-    /// <summary>The differential control for the test above, and the reason that one is not vacuous: the same
-    /// open on the same panel, with the host's flag off (it never took the surface, or it let go), DOES
-    /// re-apply. Mutation that reddens this one while its twin stays green: gate on the presence of a surface
-    /// rather than on its ownership (<c>if (_host != null) return;</c>).</summary>
-    [Fact]
-    public void TheDrawerOpen_Reapplies_WhenTheHostHasLetGo()
-    {
-        var written = new List<byte>();
-        var vm = Lighting(Zone(written), Brightness(40), new FakeHostLighting { HostOwnsLighting = false });
-
-        Assert.Equal([40], written);            // Control: as above
 
         Drawer(vm).OpenLightingCommand.Execute(null);
 
@@ -90,9 +64,9 @@ public class LightingDrawerTests
 
     // ---------------------------------------------------------------- the open, on a plain-backlight device
 
-    /// <summary>The other reported regression, on the device shape where the backlight is the only control: a
-    /// device with no RGB panels at all, so the drawer-open's panel walk reaches nothing and the level is settled
-    /// by a read that has to happen on the open or an out-of-band change sits unreflected for the whole session.
+    /// <summary>The other owed settle, on the device shape where the backlight is the only control: a device with
+    /// no RGB panels at all, so the drawer-open's panel walk reaches nothing and the level is settled by a read
+    /// that has to happen on the open or an out-of-band change sits unreflected for the whole session.
     ///
     /// The signal is the POSTER, not the clock: the settle is enqueued on the backlight's serial worker and
     /// posts its correction (see <c>VerifiedHwValue</c>), so the poster is injected and waited on — and it is
@@ -134,30 +108,27 @@ public class LightingDrawerTests
         Assert.Empty(port.SetCalls);
     }
 
-    /// <summary>The settle is NOT gated by the host's flag, and the device arranged here is the one where that
-    /// rule costs something: a lightbar the firmware follows (so the drawer really does have an empty panel walk)
-    /// beside a plain backlight, on a machine whose surface a host holds. That is the shape
-    /// <c>AppController.BuildUi</c> describes — it hands the view-model BOTH <c>d.Lighting</c> and
-    /// <c>d.KeyboardBrightness</c>, and a host exists only because <c>d.Lighting</c> does — so it is buildable
-    /// rather than assembled to make the gate fire. The RGB device is not decoration: it is what makes the host
-    /// real, and the follow switch is what empties the panel walk.
+    /// <summary>The settle on the shape where the panel walk is genuinely empty for a DIFFERENT reason: an RGB
+    /// device whose only zone is one the firmware follows, so the section builds no panel for it (the follow
+    /// switch), beside a plain backlight. That is the shape <c>AppController.BuildUi</c> describes — it hands the
+    /// view-model BOTH <c>d.Lighting</c> and <c>d.KeyboardBrightness</c> — so it is buildable rather than
+    /// assembled to make a branch fire.
     ///
     /// NO BACKEND IN TODAY'S TREE EXPOSES BOTH (Acer publishes the RGB device and reads its keyboard brightness
     /// through the zone; Dell and the generic Linux backend publish the brightness port and have no RGB device),
-    /// so the gate this test pins is LATENT — reachable only when a backend wires a plain backlight beside an RGB
-    /// one. It is pinned because the gate was wrong about WHICH surface it guarded, not because production takes
-    /// it today.
+    /// so this arrangement is LATENT — reachable only when a backend wires a plain backlight beside an RGB one.
+    /// It is pinned because the settle must not depend on the RGB device being absent, only on the control being
+    /// there: the drawer's walk reaches no panel either way, and the level is still settled by the open.
     ///
-    /// MUTATION that reddens it: widen the gate back over the whole method (the early
-    /// <c>if (_host is { HostOwnsLighting: true }) return;</c> before the settle). The slider then stays on its
-    /// placeholder — 0, the level a failed read gives — for the whole session, which is the failure this read
-    /// exists to close.</summary>
+    /// MUTATION that reddens it: drop the <c>Backlight?.SyncFromHardware()</c> line from
+    /// <see cref="LightingViewModel.Reapply"/> — the slider then stays on its placeholder, 0, the level a failed
+    /// read gives, for the whole session, which is the failure this read exists to close.</summary>
     [Fact]
-    public void TheDrawerOpen_SettlesThePlainBacklight_EvenWhileAHostOwnsTheSurface()
+    public void TheDrawerOpen_SettlesThePlainBacklight_WhenNoPanelIsBuilt()
     {
         var port = new FakeKeyboardBrightness { Level = 2 };
         var poster = new Eventually.Poster();
-        var vm = BacklightDevice(port, poster, new FakeHostLighting { HostOwnsLighting = true });
+        var vm = BacklightDevice(port, poster);
 
         Assert.Empty(vm.Panels);                  // Control: the RGB surface is there, and no panel is built for it
         Assert.NotNull(vm.Backlight);
@@ -165,7 +136,7 @@ public class LightingDrawerTests
 
         Drawer(vm).OpenLightingCommand.Execute(null);
 
-        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the host's flag gated the backlight settle");
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the drawer never settled the slider");
         Assert.Equal(2, vm.Backlight!.Level);     // the out-of-band level reached the slider
 
         // ...and the settle reads rather than writes, drained as above: a non-event decided by a signal, with the
@@ -191,7 +162,7 @@ public class LightingDrawerTests
     public void ReClickingTheOpenDrawer_ClosesIt_WithoutReapplyingThePanels()
     {
         var written = new List<byte>();
-        var vm = Lighting(Zone(written), Brightness(40), new FakeHostLighting { HostOwnsLighting = false });
+        var vm = Lighting(Zone(written), Brightness(40));
 
         var main = Drawer(vm);
         main.OpenLightingCommand.Execute(null);
@@ -230,23 +201,22 @@ public class LightingDrawerTests
                                AppLanguage.System, _ => { })), lighting);
     }
 
-    /// <summary>The section as <c>AppController.BuildUi</c> builds it: one device, one mode's lighting as the
-    /// service's door, and the surface a host may be holding.</summary>
-    private static LightingViewModel Lighting(RgbZone zone, FakeLightZones mode, IDynamicLighting host)
+    /// <summary>The section as <c>AppController.BuildUi</c> builds it: one device and one mode's lighting as the
+    /// service's door.</summary>
+    private static LightingViewModel Lighting(RgbZone zone, FakeLightZones mode)
         => new(new RgbDevice(new FakeRgbController { Zones = [zone] }),
-               mode, followsProfile: false, _ => { }, host: host);
+               mode, followsProfile: false, _ => { });
 
     /// <summary>The same build for the other device shape: an RGB device whose only zone is the firmware's while
     /// the follow switch is on (so no panel is built and the backlight is), plus that backlight.</summary>
-    private static LightingViewModel BacklightDevice(FakeKeyboardBrightness port, Eventually.Poster poster,
-                                                     IDynamicLighting host)
+    private static LightingViewModel BacklightDevice(FakeKeyboardBrightness port, Eventually.Poster poster)
         => new(new RgbDevice(new FakeRgbController { Zones = [FollowZone()] }),
                FakeLightZones.Of("Lightbar", LightZoneState.Default),
                followsProfile: true, _ => { },
-               backlight: port, applyBacklight: l => port.Set(l), post: poster.Post, host: host);
+               backlight: port, applyBacklight: l => port.Set(l), post: poster.Post);
 
     /// <summary>A mode whose one zone is already configured — so the panel's construction re-apply is the write
-    /// the host gate has to stop.</summary>
+    /// the open adds to.</summary>
     private static FakeLightZones Brightness(int brightness)
         => FakeLightZones.Of(ZoneName, new LightZoneState(true, 0, brightness, 5, 1, 0xFF0000, []));
 
@@ -262,23 +232,4 @@ public class LightingDrawerTests
     private static RgbZone FollowZone()
         => new("Lightbar", 1, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                (_, _, _, _, _) => true, canFollowProfile: true);
-
-    /// <summary>The virtual LampArray surface, as the ONE thing this file needs from it: an ownership flag. Its
-    /// other members are stubs because the app reads none of them here — the drawer never drives the surface,
-    /// and the re-assertion of a clobbered frame belongs to <c>LightingCoordinator.Paint</c>, which is pinned
-    /// by the LampArray tests. <c>OwnerChanged</c> is implemented without a field: nothing in this file models
-    /// the flip, and a field-like event nobody raises is a warning rather than a seam.</summary>
-    private sealed class FakeHostLighting : IDynamicLighting
-    {
-        public bool Enabled { get; private set; }
-        public string? LastError { get; private set; }
-        public bool HostOwnsLighting { get; set; }
-
-        public event Action<bool>? OwnerChanged { add { } remove { } }
-
-        public bool Enable() { Enabled = true; return true; }
-        public void Disable() => Enabled = false;
-        public void Reassert() { }
-        public void Dispose() { }
-    }
 }
