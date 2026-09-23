@@ -6,17 +6,20 @@ namespace AcerHelper.Domain;
 /// <summary>Neutral RGB triple (no dependency on System.Drawing or Avalonia).</summary>
 public readonly record struct AccentColor(byte R, byte G, byte B);
 
-/// <summary>Coarse class of a performance profile — drives the tray-icon colour and the
-/// generic "toggle performance" hotkey semantics without naming any vendor profile.</summary>
-public enum ProfileKind { Quiet, Eco, Balanced, Performance, Turbo, Other }
-
 /// <summary>A performance/platform profile, as the app sees it. <paramref name="Id"/> is an
-/// opaque, stable key the owning backend understands (e.g. an Acer EC byte). <paramref name="FlashColor"/>
-/// is the fixed colour the firmware paints the "operating mode" indicator (lightbar + keyboard flash) for
-/// this profile — used to reproduce the per-profile lightbar colour when it follows the profile; null if
-/// the backend has no such palette.</summary>
-public sealed record PerformanceProfile(string Id, string DisplayName, ProfileKind Kind,
-                                        AccentColor? Accent = null, AccentColor? FlashColor = null);
+/// opaque, stable key the owning backend understands (e.g. an Acer EC byte), and <paramref name="DisplayName"/>
+/// is the label handed in from outside.
+///
+/// THAT IS THE WHOLE RECORD, and it is the owner's criterion for this layer applied literally: "только
+/// значения, важные для логики" — only values the logic depends on. The class a profile belongs to and the
+/// colours it is painted with are the BACKEND's knowledge, and nothing below Infrastructure ever reads them:
+/// every branch on the class is Infrastructure's (the Turbo switch, the EC usage-mode byte, the vendor tables)
+/// or the UI's (the segment colours, the Turbo row), and every reader of a colour paints it. Both left on
+/// 2026-09-22 — the class as the enum it always was, plus the per-backend lookup that answers with it, under
+/// Infrastructure/Vendors/Generic/; the colours stayed in the vendor tables they were already written in. That
+/// file's own docstring records the decision, and the type is deliberately not spelled by name here: the guard
+/// in tests/AcerHelper.Tests/DomainNeutralityTests is a source-text rule, so this layer must not name it at all.</summary>
+public sealed record PerformanceProfile(string Id, string DisplayName);
 
 /// <summary>Fan behaviour. Values are arbitrary to the app; a backend maps them to its own
 /// encoding. (They coincide with Acer's WMI values, and are persisted in settings.)</summary>

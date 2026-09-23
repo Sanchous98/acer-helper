@@ -12,7 +12,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// works without root. Preferred over raw sysfs; the composition root falls back to
 /// <see cref="SysfsPowerProfiles"/> when this isn't present.
 /// </summary>
-public sealed partial class PpdPowerProfiles : IPowerProfiles
+public sealed partial class PpdPowerProfiles : IPowerProfiles, IProfileTraits
 {
     private const string Bus   = "net.hadess.PowerProfiles";
     private const string Obj   = "/net/hadess/PowerProfiles";
@@ -50,16 +50,28 @@ public sealed partial class PpdPowerProfiles : IPowerProfiles
         return code == 0;
     }
 
+    /// <summary>What this source knows about one of its ids: its display name, its class, and the colour the UI
+    /// paints it with. ONE table for the three, because they are one row of per-backend data — the profile list
+    /// and the traits lookup below are two readings of it, which is what keeps a profile on screen from ever
+    /// being one this table cannot classify.</summary>
+    private static (string Name, ProfileKind Kind, AccentColor Accent) Describe(string id) => id switch
+    {
+        "power-saver" => ("Power saver", ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        "balanced"    => ("Balanced",    ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        "performance" => ("Performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
+        _             => (id,            ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
+    };
+
     private static PerformanceProfile ToProfile(string id)
     {
-        var (name, kind, accent) = id switch
-        {
-            "power-saver" => ("Power saver", ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
-            "balanced"    => ("Balanced",    ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-            "performance" => ("Performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
-            _             => (id,            ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
-        };
-        return new PerformanceProfile(id, name, kind, accent);
+        var (name, _, _) = Describe(id);
+        return new PerformanceProfile(id, name);
+    }
+
+    public ProfileTraits Traits(PerformanceProfile profile)
+    {
+        var (_, kind, accent) = Describe(profile.Id);
+        return new ProfileTraits(kind, accent);
     }
 
     [GeneratedRegex("\"Profile\"\\s+s\\s+\"([^\"]+)\"")]
@@ -98,7 +110,7 @@ internal static class Busctl
 /// <c>handlerToken</c> to the constructor — see its remarks for the third selection mode that adds. Passing
 /// nothing (the generic and Dell backends) keeps the best-effort choice below, untouched.
 /// </summary>
-public sealed class SysfsPowerProfiles : IPowerProfiles
+public sealed class SysfsPowerProfiles : IPowerProfiles, IProfileTraits
 {
     // Two kernel interfaces expose platform profiles: the ACPI alias (all kernels; a write fans out to
     // every registered handler) and per-handler class nodes (6.14+). The alias is frequently left
@@ -237,19 +249,36 @@ public sealed class SysfsPowerProfiles : IPowerProfiles
         catch (Exception ex) { LastError = ex.Message; return false; }
     }
 
+    /// <summary>The kernel token's row: display name, class and UI colour. See the note on the PPD table above —
+    /// one row, read twice. <c>"cool"</c> is a real fourth name generic sysfs handlers expose and it gets the
+    /// Quiet class and Quiet's colour, because that is what it is; a token this table does not know at all is
+    /// <see cref="ProfileKind.Other"/> with the neutral grey, and carries the token itself as its display name.
+    ///
+    /// A CLASS HERE IS THIS SOURCE'S OWN READING and it is not always the Acer table's: <c>"performance"</c> is
+    /// <see cref="ProfileKind.Performance"/> here and TURBO on the acer-wmi node (see AcerMappedProfiles) — which
+    /// is why a vendor whose handler speaks this vocabulary addresses its own class node, and why nothing above
+    /// may assume the two agree.</summary>
+    private static (string Name, ProfileKind Kind, AccentColor Accent) Describe(string choice) => choice switch
+    {
+        "low-power"            => ("Low power",            ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        "quiet"                => ("Quiet",                ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        "cool"                 => ("Cool",                 ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        "balanced"             => ("Balanced",             ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        "balanced-performance" => ("Balanced performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
+        "performance"          => ("Performance",          ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
+        _                      => (choice,                 ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
+    };
+
     private static PerformanceProfile ToProfile(string choice)
     {
-        var (name, kind, accent) = choice switch
-        {
-            "low-power"            => ("Low power",            ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
-            "quiet"                => ("Quiet",                ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
-            "cool"                 => ("Cool",                 ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
-            "balanced"             => ("Balanced",             ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-            "balanced-performance" => ("Balanced performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
-            "performance"          => ("Performance",          ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
-            _                      => (choice,                 ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
-        };
-        return new PerformanceProfile(choice, name, kind, accent);
+        var (name, _, _) = Describe(choice);
+        return new PerformanceProfile(choice, name);
+    }
+
+    public ProfileTraits Traits(PerformanceProfile profile)
+    {
+        var (_, kind, accent) = Describe(profile.Id);
+        return new ProfileTraits(kind, accent);
     }
 
     private static string? Read(string? path)

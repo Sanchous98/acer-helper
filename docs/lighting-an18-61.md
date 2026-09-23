@@ -128,8 +128,11 @@ Governed by a single vendor-scoped flag, "Lightbar follows performance profile" 
 - **The switch transition flash can be minimised (send the palette immediately) but not fully removed** — the
   EC defaults the slot to amber on every switch; NitroSense has the same brief transition.
 
-Implementation: `AppController.ApplyFollowLighting` sends `IRgbDevice.SetProfileFlash(profile.FlashColor)` then
-re-applies the per-zone colours, called the instant a profile change is seen (+ a couple of safety re-applies).
+Implementation: `AppController.ApplyFollowLighting` sends `IRgbDevice.SetProfileFlash(<the profile's flash
+colour>)` then re-applies the per-zone colours, called the instant a profile change is seen (+ a couple of safety
+re-applies). The colour is looked up per profile from the backend's own table since 2026-09-22
+(`LaptopService.FlashColorOf`, `ProfileTraits`) — it used to be a field on `PerformanceProfile`, which no longer
+carries it or the profile's class.
 Sleep/hibernate clears the EC's RGB state, so the same re-apply runs on wake too (`ResumeWatcher` →
 `AppController.ReapplyLighting`; Windows `SystemEvents.PowerModeChanged`/`Resume`, more retries as the
 HID/EC can be slow to wake). The keyboard-brightness read-back (`GetGamingKBBacklight`) is unreliable right

@@ -1,5 +1,6 @@
 using System.Threading;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 
 namespace AcerHelper.Infrastructure.Composition;
@@ -7,6 +8,29 @@ namespace AcerHelper.Infrastructure.Composition;
 public sealed partial class LaptopService
 {
     // ---- performance profiles ----
+
+    /// <summary>The class of a profile, as the port that offers it declares it. THE ONLY WAY THIS LAYER learns
+    /// which mode it is looking at, since the profile record stopped carrying it (2026-09-22): a profile is an
+    /// opaque id plus a label, and "this one is Turbo / that one is Balanced" is the backend's own reading of
+    /// its own table (<see cref="ProfileTraits.Of"/>). Null — no profile at all — reads as
+    /// <see cref="ProfileKind.Other"/>, which is what "there is nothing to classify" has always been treated as
+    /// everywhere below (none of the Turbo/Balanced branches is about a missing profile).</summary>
+    private ProfileKind KindOf(PerformanceProfile? profile)
+        => profile is { } p ? ProfileTraits.Of(device.PowerProfiles, p).Kind : ProfileKind.Other;
+
+    /// <summary>The class and colours of <paramref name="profile"/>, for the layers above (the UI paints the
+    /// profile segments and the tray icon with the accent, and hands the flash colour to the lighting
+    /// coordinator). Exposed here rather than read off the port at each site because the UI already asks this
+    /// service for everything else it knows about a profile, and because it makes the null-tolerant reading —
+    /// "no profile, no colour" — the one the caller can state plainly.</summary>
+    public ProfileTraits TraitsOf(PerformanceProfile profile) => ProfileTraits.Of(device.PowerProfiles, profile);
+
+    /// <summary>The colour the firmware paints the operating-mode indicator for <paramref name="profile"/>, or
+    /// null for no profile / a backend with no such palette. Null is the honest answer and it is also what the
+    /// lighting coordinator's cache already means by it (no palette to re-send), so the caller needs no branch of
+    /// its own — see <c>AppController</c>'s three hand-offs and <c>LightingCoordinator.OnProfileApplied</c>.</summary>
+    public AccentColor? FlashColorOf(PerformanceProfile? profile)
+        => profile is { } p ? TraitsOf(p).FlashColor : null;
 
     // Which power source we last saw, and its remembered mode slot. Null = unknown (no reading yet). Access
     // under _state (touched by the background SyncPowerSource and UI-thread profile actions).
@@ -36,7 +60,7 @@ public sealed partial class LaptopService
         // already materialised and ModeKeyFor is pure, so the hold is two field reads.
         if (cur == null) return ModeKey.None.Value;
         lock (_state)
-            return ModeKeyFor(cur, Settings.TurboToggles, Slot).Value;
+            return ModeKeyFor(cur, KindOf(cur), Settings.TurboToggles, Slot).Value;
     }
 
     /// <summary>The key the per-mode presets are filed under for <paramref name="cur"/>: the profile's own id,
@@ -55,9 +79,15 @@ public sealed partial class LaptopService
     /// the caller under <c>_state</c> and handed over by value; a static rule that read service state itself
     /// would either need that lock or drop it (see the sibling comment above). Internal rather than private so
     /// the rule can be asserted directly against literal keys (<c>ModeKeyTests</c>) instead of only through the
-    /// service that calls it.</summary>
-    internal static ModeKey ModeKeyFor(PerformanceProfile? cur, bool turboToggles, ProfileMemory slot)
-        => turboToggles && cur is { Kind: ProfileKind.Turbo } && slot.BaseId.Length > 0
+    /// service that calls it.
+    ///
+    /// <paramref name="curKind"/> is a parameter for the same reason and it is the shape the profile's class
+    /// forced (2026-09-22): the class no longer travels on the profile, so the one input this rule needs from it
+    /// — "is the current mode Turbo" — is handed over beside the profile rather than read off it. The caller
+    /// gets it from the port (<see cref="KindOf"/>); a rule that went looking for a port itself would be reading
+    /// service state inside what is deliberately a pure function of its four inputs.</summary>
+    internal static ModeKey ModeKeyFor(PerformanceProfile? cur, ProfileKind curKind, bool turboToggles, ProfileMemory slot)
+        => turboToggles && curKind == ProfileKind.Turbo && slot.BaseId.Length > 0
             ? ModeKey.From(slot.BaseId)
             : ModeKey.For(cur);
 
@@ -83,7 +113,7 @@ public sealed partial class LaptopService
     }
 
     /// <summary>True if the hardware is currently in the Turbo profile.</summary>
-    public bool IsTurboOn() => device.PowerProfiles?.Current()?.Kind == ProfileKind.Turbo;
+    public bool IsTurboOn() => KindOf(device.PowerProfiles?.Current()) == ProfileKind.Turbo;
 
     /// <summary>The base (non-Turbo) profile to show as selected: the current profile when it isn't Turbo,
     /// otherwise the remembered base (falling back to Balanced / the first non-Turbo profile).</summary>
@@ -94,11 +124,11 @@ public sealed partial class LaptopService
     {
         var pp = device.PowerProfiles;
         if (pp == null) return null;
-        if (cur != null && cur.Kind != ProfileKind.Turbo) return cur;
+        if (cur != null && KindOf(cur) != ProfileKind.Turbo) return cur;
         lock (_state)
             return pp.All.FirstOrDefault(p => p.Id == Slot.BaseId)
-                ?? pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Balanced)
-                ?? pp.All.FirstOrDefault(p => p.Kind != ProfileKind.Turbo);
+                ?? pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Balanced)
+                ?? pp.All.FirstOrDefault(p => KindOf(p) != ProfileKind.Turbo);
     }
 
     /// <summary>Turbo used as a switch (the "Turbo toggles" mode): on = apply Turbo over the current base;
@@ -113,10 +143,10 @@ public sealed partial class LaptopService
         {
             if (on)
             {
-                var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
+                var turbo = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
                 if (turbo == null) return (null, null);
                 var cur = pp.Current();
-                if (cur != null && cur.Kind != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
+                if (cur != null && KindOf(cur) != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
                 var r = Attempt(() => pp.Set(turbo), () => pp.LastError);
                 if (!r.ok) return (null, r.error);
                 Slot.Turbo = true;
@@ -142,7 +172,7 @@ public sealed partial class LaptopService
         {
             var slot = onAc ? Settings.OnAc : Settings.OnBattery;
             if (Settings.TurboToggles && slot.Turbo &&
-                pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo) is { } turbo) return turbo;
+                pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo) is { } turbo) return turbo;
             return pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
         }
     }
@@ -158,14 +188,14 @@ public sealed partial class LaptopService
         lock (_state)
         {
             var slot = onAc ? Settings.OnAc : Settings.OnBattery;
-            if (Settings.TurboToggles && p.Kind == ProfileKind.Turbo)
+            if (Settings.TurboToggles && KindOf(p) == ProfileKind.Turbo)
             {
                 // Turbo is not a base: keep whatever base it sits over, falling back to Balanced when this
                 // source has never held one (otherwise dropping Turbo later would leave nothing to return to).
                 slot.Turbo = true;
                 if (slot.BaseId.Length == 0)
-                    slot.BaseId = (pp.All.FirstOrDefault(x => x.Kind == ProfileKind.Balanced)
-                                ?? pp.All.FirstOrDefault(x => x.Kind != ProfileKind.Turbo))?.Id ?? "";
+                    slot.BaseId = (pp.All.FirstOrDefault(x => KindOf(x) == ProfileKind.Balanced)
+                                ?? pp.All.FirstOrDefault(x => KindOf(x) != ProfileKind.Turbo))?.Id ?? "";
             }
             else { slot.BaseId = p.Id; slot.Turbo = false; }
             Save();
@@ -202,11 +232,11 @@ public sealed partial class LaptopService
         var pp = device.PowerProfiles;
         var cur = pp?.Current();
         if (cur == null) return;
-        if (cur.Kind == ProfileKind.Turbo)
+        if (KindOf(cur) == ProfileKind.Turbo)
         {
             Slot.Turbo = true;                                       // base under Turbo is unknown -> best guess
-            Slot.BaseId = (pp!.All.FirstOrDefault(p => p.Kind == ProfileKind.Balanced)
-                        ?? pp.All.FirstOrDefault(p => p.Kind != ProfileKind.Turbo))?.Id ?? "";
+            Slot.BaseId = (pp!.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Balanced)
+                        ?? pp.All.FirstOrDefault(p => KindOf(p) != ProfileKind.Turbo))?.Id ?? "";
         }
         else { Slot.BaseId = cur.Id; Slot.Turbo = false; }
         Save();
@@ -230,7 +260,7 @@ public sealed partial class LaptopService
         if (baseP == null) return (true, null);
 
         var current = pp.Current();
-        var turbo = pp.All.FirstOrDefault(p => p.Kind == ProfileKind.Turbo);
+        var turbo = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
         var wantTurbo = slot.Turbo && Settings.TurboToggles
                         && turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id);
 
@@ -242,7 +272,7 @@ public sealed partial class LaptopService
         // active profile, so we don't need to re-drive it while Turbo is engaged.
         if (wantTurbo)
         {
-            if (current?.Kind == ProfileKind.Turbo) return (true, null);   // already in Turbo -> nothing to do
+            if (KindOf(current) == ProfileKind.Turbo) return (true, null);   // already in Turbo -> nothing to do
             if (current?.Id != baseP.Id) pp.Set(baseP);            // establish the base we sit over (skip if on it)
             return Attempt(() => pp.Set(turbo!), () => pp.LastError);
         }

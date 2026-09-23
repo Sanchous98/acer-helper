@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -12,10 +13,17 @@ namespace AcerHelper.UI.ViewModels;
 /// <c>selected</c> class (filled with the system accent in XAML); profiles not selectable right now are
 /// disabled. When the "Turbo toggles" option is on, Turbo is NOT one of the segments — it's a separate
 /// switch layered over the selected base profile (see <see cref="TurboOn"/>), so the segments show only
-/// the base profiles and the highlighted one is the base underneath Turbo.</summary>
+/// the base profiles and the highlighted one is the base underneath Turbo.
+///
+/// <paramref name="traits"/> is the backend's own reading of the profiles it offers — which class each one
+/// belongs to and the colour it is painted with (<see cref="ProfileTraits"/>, reached through the service). It
+/// is handed IN rather than read off the profile, because a profile stopped carrying either on 2026-09-22: the
+/// class is branched on here (is this Turbo? is Turbo selectable?) and the accent fills the segment, and both
+/// are the vendor table's data, not the Domain's.</summary>
 public sealed partial class ProfilesViewModel : SectionViewModel
 {
     private readonly IReadOnlyList<PerformanceProfile> _all;
+    private readonly Func<PerformanceProfile, ProfileTraits> _traits;
     private readonly Action<PerformanceProfile> _onApply;
     private readonly Action<bool> _setTurbo;
     private readonly Dictionary<string, ProfileButtonViewModel> _byId = new();
@@ -30,14 +38,15 @@ public sealed partial class ProfilesViewModel : SectionViewModel
     [ObservableProperty] private bool _turboOn;           // hardware currently in Turbo
     [ObservableProperty] private bool _turboEnabled = true;   // Turbo selectable right now (e.g. off on battery)
 
-    public ProfilesViewModel(IReadOnlyList<PerformanceProfile> all, Action<PerformanceProfile> onApply,
-                             bool turboAsToggle, Action<bool> setTurbo)
+    public ProfilesViewModel(IReadOnlyList<PerformanceProfile> all, Func<PerformanceProfile, ProfileTraits> traits,
+                             Action<PerformanceProfile> onApply, bool turboAsToggle, Action<bool> setTurbo)
     {
         _all = all;
+        _traits = traits;
         _onApply = onApply;
         _setTurbo = setTurbo;
         _turboAsToggle = turboAsToggle;
-        HasTurbo = all.Any(p => p.Kind == ProfileKind.Turbo);
+        HasTurbo = all.Any(p => traits(p).Kind == ProfileKind.Turbo);
         BuildButtons();
     }
 
@@ -47,8 +56,8 @@ public sealed partial class ProfilesViewModel : SectionViewModel
         _byId.Clear();
         foreach (var p in _all)
         {
-            if (_turboAsToggle && p.Kind == ProfileKind.Turbo) continue;   // Turbo lives in the switch instead
-            var vm = new ProfileButtonViewModel(p, _onApply);
+            if (_turboAsToggle && _traits(p).Kind == ProfileKind.Turbo) continue;   // Turbo lives in the switch instead
+            var vm = new ProfileButtonViewModel(p, _traits(p), _onApply);
             Profiles.Add(vm);
             _byId[p.Id] = vm;
         }
@@ -65,9 +74,9 @@ public sealed partial class ProfilesViewModel : SectionViewModel
 
         _updating = true;
         ShowTurboSwitch = turboAsToggle && HasTurbo;
-        bool inTurbo = current?.Kind == ProfileKind.Turbo;
+        bool inTurbo = current is { } c && _traits(c).Kind == ProfileKind.Turbo;
         TurboOn = inTurbo;
-        TurboEnabled = selectable.Any(p => p.Kind == ProfileKind.Turbo);
+        TurboEnabled = selectable.Any(p => _traits(p).Kind == ProfileKind.Turbo);
 
         // While Turbo is active in toggle mode, highlight the base profile it sits over; otherwise the current.
         string? selectedId = turboAsToggle && inTurbo ? baseHighlight?.Id : current?.Id;
@@ -85,15 +94,20 @@ public sealed partial class ProfileButtonViewModel : ObservableObject
     private readonly PerformanceProfile _profile;
     private readonly Action<PerformanceProfile> _onApply;
 
-    public ProfileButtonViewModel(PerformanceProfile profile, Action<PerformanceProfile> onApply)
+    /// <param name="traits">This profile's class and colours, as the backend that offers it declares them.
+    /// Only the accent is read here — the class is the section's business, and the button is painted, not
+    /// classified.</param>
+    public ProfileButtonViewModel(PerformanceProfile profile, ProfileTraits traits, Action<PerformanceProfile> onApply)
     {
         _profile = profile;
         _onApply = onApply;
         Name = Loc.T(profile.DisplayName);
-        // Each mode's signature colour (from the domain model) fills the segment when it's selected, so the
-        // active mode reads at a glance — Eco teal / Quiet blue / Balanced green / Performance orange /
-        // Turbo red. Unknown profiles fall back to neutral grey.
-        var a = profile.Accent ?? new AccentColor(0x80, 0x80, 0x80);
+        // Each mode's signature colour (from the backend's own table, reached through the service) fills the
+        // segment when it's selected, so the active mode reads at a glance — Eco teal / Quiet blue / Balanced
+        // green / Performance orange / Turbo red. Unknown profiles fall back to neutral grey — the painter's
+        // fallback, which is where it has always been: an unclassified mode reports no colour rather than
+        // inventing one.
+        var a = traits.Accent ?? new AccentColor(0x80, 0x80, 0x80);
         var c = Color.FromRgb(a.R, a.G, a.B);
         SelectedBrush = new SolidColorBrush(c);
         // Hover / press tint an UNSELECTED segment with a translucent wash of its own colour, so hovering

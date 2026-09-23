@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Composition;
 
@@ -39,7 +40,10 @@ public readonly record struct ModeKey
 
     /// <summary>The key of the mode <paramref name="cur"/> names: the profile's own id, or <see cref="None"/>
     /// when there is no profile to name. <see cref="ProfileKind"/> is deliberately not consulted — a mode is
-    /// keyed by the profile the user is on, not by the class that profile belongs to.</summary>
+    /// keyed by the profile the user is on, not by the class that profile belongs to. This file names it only to
+    /// say that, and the class itself lives in Infrastructure now
+    /// (Infrastructure/Vendors/Generic/ProfileKind.cs): the exception the <c>ModeKeyFor</c> wrapper exists for
+    /// is a rule about the switch, and the switch reads the class off the port.</summary>
     public static ModeKey For(PerformanceProfile? cur)
         => cur == null ? None : new ModeKey(cur.Id);
 

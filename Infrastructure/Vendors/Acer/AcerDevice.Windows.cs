@@ -39,7 +39,10 @@ public sealed partial class AcerDevice
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
         // The profile set: Acer's WMI is the richer source on Windows, so it replaces the generic overlay port.
-        PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile);
+        // The traits come off the SAME table, handed over as its lookup — so the rows the UI shows and the class
+        // and colours each row carries are one list rather than two that could drift (see ProfileTraits).
+        PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile,
+                                         new ProfileTraitsLookup(AcerProfiles.TraitsOf));
 
         // Boot sync, EC-ONLY: the profile byte survives a reboot but the EC usage mode behind it does not, so
         // the machine can report Turbo while running the lowest power row. Push the mode matching whatever
@@ -47,7 +50,7 @@ public sealed partial class AcerDevice
         // 0.28.0 did from LaptopService.ApplyStartupState) re-flashed the lightbar and raced the power-source
         // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
         // WMI write, no palette flash, and it cannot disagree with what the UI shows. See docs/power-an18-61.md.
-        if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(cur.Kind);
+        if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(AcerProfiles.TraitsOf(cur).Kind);
         Sensors       = new SensorsPort(new AcerSysInfoSensors(Sensor).Read);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         // The three settings this backend owns, DECLARED rather than parked in a slot of their own. Their keys
@@ -117,7 +120,7 @@ public sealed partial class AcerDevice
     // (it lands on the controller's writer thread), so it cannot slow this call down. See docs/power-an18-61.md.
     private (bool, string?) SetProfile(PerformanceProfile p)
     {
-        _ec?.Apply(p.Kind);
+        _ec?.Apply(AcerProfiles.TraitsOf(p).Kind);
         return GmSet(_gaming, "SetGamingMiscSetting", 0x0B | ((ulong)AcerProfiles.ToByte(p) << 8));
     }
 

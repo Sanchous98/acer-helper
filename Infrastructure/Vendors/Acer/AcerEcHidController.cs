@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
@@ -13,9 +14,14 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // while EVERY gaming-WMI value stayed frozen. So the envelope (GPU TGP/CTGP plus the CPU limits) lives in the
 // EC's own "system usage mode", reachable only over this HID interface.
 //
-// WIRE FORMAT: A0 00 A0 <featureId:LE16> <cmdId> <params…>, zero-padded to 65. A GetFeature of report 0xA0
-// answers with byte[2] = 0xE0 when the EC accepted the FRAME — but that is frame-level only: an out-of-range
-// mode is acknowledged the same way and then silently ignored, so this controller is WRITE-ONLY.
+// WIRE FORMAT: A0 00 A0 <featureId:LE16> <cmdId> <params…>, zero-padded to 65. A reply takes TWO calls, in
+// this order: SEND the request frame, then read the answer back. A get with no preceding send delivers nothing
+// to the device and hands back whatever frame the handle last held — measured. Nothing in this class reads
+// today (the mode byte is written, never queried), but that order is the channel's rather than this class's, so
+// a future read has to keep it.
+//
+// The reply carries byte[2] = 0xE0 when the EC accepted the FRAME — but that is frame-level only: an
+// out-of-range mode is acknowledged the same way and then silently ignored, so the MODE stays write-only.
 //
 // The EC LATCHES the mode: it survives this app exiting and needs no resident daemon. It does NOT necessarily
 // survive a reboot, which is why LaptopService re-asserts the profile at startup (EC-only — a full profile
@@ -52,6 +58,21 @@ internal sealed partial class AcerEcHidController : IDisposable
         if (!Available) return;
         _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "acer-ec-hid-writer" };
         _worker.Start();
+    }
+
+    /// <summary>Build one 65-byte request frame for a feature group: the report id and command marker, the
+    /// feature id as a little-endian uint16, the command id, and the first parameter byte (byte 6 — the usage
+    /// mode). THE ONE PLACE THE ENVELOPE IS SPELLED, so the usage-mode write below cannot drift from it.</summary>
+    internal static byte[] FrameFor(ushort feature, byte cmd, byte param6)
+    {
+        var report = new byte[FeatureLen];
+        report[0] = Frame;
+        report[2] = Frame;
+        report[3] = (byte)feature;
+        report[4] = (byte)(feature >> 8);
+        report[5] = cmd;
+        report[6] = param6;
+        return report;
     }
 
     /// <summary>The EC usage-mode byte for a profile class, or null when the class has no EC equivalent
@@ -103,12 +124,7 @@ internal sealed partial class AcerEcHidController : IDisposable
                 _pending = null;
             }
 
-            var report = new byte[FeatureLen];
-            report[0] = Frame;
-            report[2] = Frame;
-            report[3] = FeatureUsageMode;
-            report[5] = CmdSet;
-            report[6] = mode;
+            var report = FrameFor(FeatureUsageMode, CmdSet, mode);
 
             // WriteFeature drops the transport handle on failure so the next write re-opens it — a handle
             // opened in a bad state at boot-with-display would otherwise stay broken until restart.

@@ -56,23 +56,12 @@
         </Grid.Transitions>
         <DockPanel Margin="14">
 
-          <!-- Update banner: shown only when the startup GitHub-Releases check found a newer version;
-               clicking opens the release download page (notify-only, no auto-install). -->
-          <Button DockPanel.Dock="Top" Classes="accent" HorizontalAlignment="Stretch" Margin="2,0,2,10"
-                  IsVisible="{Binding UpdateAvailable}" Command="{Binding OpenUpdateCommand}"
-                  Content="{Binding UpdateLabel}"/>
-
-          <!-- "Grant hardware access" banner: Linux/AppImage only, when the udev rules aren't installed —
-               one click runs a pkexec install so the root-only controls become writable. The caption is BOUND
-               rather than a fixed markup string because the same banner also carries the reboot instruction
-               after an install whose module reload could not take (see MainViewModel.HardwareAccessLabel): the
-               banner is the only text in this window that stays put, so that is where that order has to live. -->
-          <Button DockPanel.Dock="Top" HorizontalAlignment="Stretch" Margin="2,0,2,10"
-                  IsVisible="{Binding NeedsHardwareAccess}" Command="{Binding GrantHardwareAccessCommand}"
-                  Content="{Binding HardwareAccessLabel}"/>
-
-          <!-- Header: device name + tiny version tag + current-profile accent chip -->
-          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,2,12">
+          <!-- Header: device name + tiny version tag + current-profile accent chip + the notification bell.
+               The messages this app has for the user used to sit ABOVE this row as full-width banners (an
+               available update, a missing permission). They are behind the bell now: a banner is on screen
+               whether or not it is news, and one that is always there stops being read — while the count on
+               the bell is what makes hiding them safe. See MainViewModel.Notifications. -->
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="2,2,2,12">
             <!-- DockPanel, NOT a horizontal StackPanel: a StackPanel measures children unconstrained, so a
                  long device name (raw DMI string on the Dell/generic backends, user-overridable JSON on
                  Acer) would push the version tag under the translucent chip / off the card. Here the tag
@@ -96,6 +85,32 @@
                            Foreground="{DynamicResource AccentBrush}" Text="{Binding ProfileName}"/>
               </StackPanel>
             </Border>
+            <!-- The bell. The badge is the point of it: the messages are hidden, so the COUNT of what has not
+                 been read has to be on screen instead — a bell with no badge is a place notifications go to be
+                 missed. A click toggles the list below (same control opens and closes it, like the drawer
+                 buttons). The glyph is drawn, not an icon font, like the drawer's back arrow. -->
+            <Button Grid.Column="2" Classes="icon" Margin="4,0,0,0"
+                    Command="{Binding ToggleNotificationsCommand}">
+              <Panel Width="20" Height="20">
+                <!-- Centred in its box: the glyph was drawn bottom-left to keep the badge's corner clear, which
+                     reads as an off-centre bell. The badge overhangs the corner instead (below). -->
+                <Path Width="16" Height="16" Stretch="None"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Stroke="{DynamicResource AppMuted}" StrokeThickness="1.4"
+                      StrokeLineCap="Round" StrokeJoin="Round"
+                      Data="M4.2,10.8 V6.4 C4.2,4.3 5.9,2.6 8,2.6 C10.1,2.6 11.8,4.3 11.8,6.4 V10.8
+                            M2.6,10.8 H13.4
+                            M6.5,13 C6.8,13.8 7.3,14.2 8,14.2 C8.7,14.2 9.2,13.8 9.5,13"/>
+                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-2,0"
+                        MinWidth="14" Height="14" CornerRadius="7" Padding="4,0"
+                        Background="{DynamicResource AccentBrush}"
+                        IsVisible="{Binding Notifications.HasUnread}">
+                  <TextBlock FontSize="9" FontWeight="SemiBold" Foreground="White"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             Text="{Binding Notifications.UnreadBadge}"/>
+                </Border>
+              </Panel>
+            </Button>
           </Grid>
 
           <!-- Footer: status text + drawer launch buttons -->
@@ -117,6 +132,61 @@
           </ScrollViewer>
 
         </DockPanel>
+
+        <!-- ===== The bell's list (the notification drop-down) =====
+             IN THE WINDOW, and not a popup window of its own like a ComboBox's drop-down. Three reasons, all of
+             them about what this app has measured rather than about taste:
+               * a popup is a separate top-level window, and this window HIDES ITSELF when it loses activation
+                 (FlyoutCoordinator.MaybeDismiss) — a drop-down that deactivated its owner would take the whole
+                 panel with it, which is a coupling nothing in this suite can see;
+               * the card is SizeToContent, and the anchor is re-read on every size change for exactly that
+                 reason, so a drop-down is not the place to discover a second source of resizes;
+               * the session's popup placement is the one thing that is NOT simply the toolkit's (see
+                 docs/ui-popup-placement.md), and an in-window panel has no placement to get wrong.
+             Anchored under the bell (the header row's height plus its own top margin), so it reads as that
+             button's drop-down. A plain overlay: the entries live in the view model, and nothing here is
+             conditional except its visibility. -->
+        <Border Width="360" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,44,14,0" Padding="10"
+                IsVisible="{Binding IsNotificationsOpen}"
+                Background="{DynamicResource AppAcrylicTint}"
+                BorderBrush="{DynamicResource AppCardStroke}" BorderThickness="1"
+                CornerRadius="{DynamicResource OverlayCornerRadius}"
+                BoxShadow="0 4 16 0 #55000000">
+          <StackPanel Spacing="8">
+            <TextBlock Classes="section" Margin="2,0,0,0" Text="{l:Tr Notifications}"/>
+            <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding Notifications.IsEmpty}"
+                       Text="{l:Tr 'No notifications.'}"/>
+            <ScrollViewer MaxHeight="260"
+                          HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding Notifications.Items}">
+                <ItemsControl.ItemTemplate>
+                  <!-- One entry. The two controls are the owner's two verbs: the message itself is the button
+                       (a click READS it and runs whatever the notification carries — the retry-install, the
+                       download-update), and the ✕ beside it IGNORES it, which takes it off the list for good.
+                       An unread entry is marked twice over — the dot and the weight — because a 6px dot alone
+                       is a thin clue for the one thing the badge is counting. -->
+                  <DataTemplate x:DataType="vm:NotificationViewModel">
+                    <Grid ColumnDefinitions="10,*,Auto" Margin="0,0,0,2">
+                      <Ellipse Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding Unread}" Fill="{DynamicResource AccentBrush}"/>
+                      <Button Grid.Column="1" Classes="notice" Classes.unread="{Binding Unread}"
+                              Command="{Binding ActivateCommand}">
+                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Text}"/>
+                      </Button>
+                      <Button Grid.Column="2" Classes="icon" Width="22" Height="22" Margin="2,0,0,0"
+                              Command="{Binding DismissCommand}" ToolTip.Tip="{l:Tr Ignore}">
+                        <!-- An ✕, drawn: the same convention as the bell and the drawer's back arrow. -->
+                        <Path Width="8" Height="8" Stretch="None"
+                              Stroke="{DynamicResource AppMuted}" StrokeThickness="1.4" StrokeLineCap="Round"
+                              Data="M0.8,0.8 L7.2,7.2 M7.2,0.8 L0.8,7.2"/>
+                      </Button>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
+        </Border>
       </Grid>
 
       <!-- ===== Options / Lighting page (pushed over Home) ===== -->

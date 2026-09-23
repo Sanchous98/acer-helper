@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
@@ -48,12 +49,24 @@ public static class AcerProfiles
     /// <summary>All standard profiles, display order.</summary>
     public static readonly IReadOnlyList<PerformanceProfile> All = Table.Select(Make).ToList();
 
-    private static PerformanceProfile Make(Entry e) => new(e.Byte.ToString(), e.Name, e.Kind, e.Accent, e.Flash);
+    private static PerformanceProfile Make(Entry e) => new(e.Byte.ToString(), e.Name);
+
+    /// <summary>The row's own kind and colours, for a profile this table produced — the lookup the app reaches
+    /// the per-profile presentation through (<see cref="ProfileTraits"/>), since the profile record no longer
+    /// carries any of it. A byte the table does not know, an id that is not a decimal EC byte at all (another
+    /// backend's profile, e.g. PPD's <c>power-saver</c>), and a profile that never came from here are all
+    /// <see cref="ProfileTraits.Unknown"/> rather than a nearby row — the same answer <see cref="ToDomain"/>
+    /// gives an unknown byte, and for the same reason: inventing a class for a mode this table cannot name is
+    /// how the wrong envelope gets sent.</summary>
+    public static ProfileTraits TraitsOf(PerformanceProfile profile)
+        => byte.TryParse(profile.Id, out var b) && Table.FirstOrDefault(e => e.Byte == b) is { } e
+            ? new ProfileTraits(e.Kind, e.Accent, e.Flash)
+            : ProfileTraits.Unknown;
 
     public static PerformanceProfile ToDomain(byte b)
     {
         var e = Table.ToList().Find(e => e.Byte == b);
-        return e == null ? new PerformanceProfile(b.ToString(), $"0x{b:X2}", ProfileKind.Other) : Make(e);
+        return e == null ? new PerformanceProfile(b.ToString(), $"0x{b:X2}") : Make(e);
     }
 
     public static byte ToByte(PerformanceProfile p) => byte.Parse(p.Id);

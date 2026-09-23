@@ -152,7 +152,7 @@ internal sealed class LightingCoordinator : IDisposable
     {
         _pendingId = applied.Id;          // suppress the stale passes still describing the previous profile
         _pendingSince = DateTime.UtcNow;
-        _flash = applied.FlashColor;
+        _flash = _svc.FlashColorOf(applied);
         Paint();
         KickReapply(withFlash: false);
     }

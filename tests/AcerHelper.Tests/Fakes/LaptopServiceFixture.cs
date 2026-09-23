@@ -75,18 +75,37 @@ public sealed class LaptopServiceFixture
 }
 
 /// <summary>The canonical five-profile device. Ids are the lowercase kind name, so an assertion reads as
-/// the mode it means ("balanced") rather than as an opaque backend byte.</summary>
+/// the mode it means ("balanced") rather than as an opaque backend byte.
+///
+/// The profiles carry an id and a label and nothing else, since 2026-09-22: the class each one belongs to and
+/// the colours it is painted with are <see cref="TestProfiles.TraitsOf"/> below — this fake machine's own
+/// reading of its own table, in the same shape a vendor backend answers in (<see cref="IProfileTraits"/>), and
+/// deliberately by ID rather than on the record. A test that hands one of these to a port therefore gets the
+/// same kind of answer the real thing would.</summary>
 public static class TestProfiles
 {
-    public static PerformanceProfile Quiet       => new("quiet",       "Quiet",       ProfileKind.Quiet);
-    public static PerformanceProfile Eco         => new("eco",         "Eco",         ProfileKind.Eco);
-    public static PerformanceProfile Balanced    => new("balanced",    "Balanced",    ProfileKind.Balanced);
-    public static PerformanceProfile Performance => new("performance", "Performance", ProfileKind.Performance);
-    public static PerformanceProfile Turbo       => new("turbo",       "Turbo",       ProfileKind.Turbo);
+    public static PerformanceProfile Quiet       => new("quiet",       "Quiet");
+    public static PerformanceProfile Eco         => new("eco",         "Eco");
+    public static PerformanceProfile Balanced    => new("balanced",    "Balanced");
+    public static PerformanceProfile Performance => new("performance", "Performance");
+    public static PerformanceProfile Turbo       => new("turbo",       "Turbo");
 
     /// <summary>A fresh array each call; records compare by value, so equality assertions still work.</summary>
     public static PerformanceProfile[] All => [Quiet, Eco, Balanced, Performance, Turbo];
 
     /// <summary>The canonical profile with the given id.</summary>
     public static PerformanceProfile ById(string id) => All.Single(p => p.Id == id);
+
+    /// <summary>The fake machine's table: which class each of its modes belongs to. No colours — this machine
+    /// has no per-profile palette to paint (its profiles are the domain's own fixtures, not a vendor's), and an
+    /// unclassified id is <see cref="ProfileTraits.Unknown"/> rather than the nearest of the five.</summary>
+    public static ProfileTraits TraitsOf(PerformanceProfile profile) => profile.Id switch
+    {
+        "quiet"       => new ProfileTraits(ProfileKind.Quiet),
+        "eco"         => new ProfileTraits(ProfileKind.Eco),
+        "balanced"    => new ProfileTraits(ProfileKind.Balanced),
+        "performance" => new ProfileTraits(ProfileKind.Performance),
+        "turbo"       => new ProfileTraits(ProfileKind.Turbo),
+        _             => ProfileTraits.Unknown,
+    };
 }

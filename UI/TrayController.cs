@@ -1,6 +1,7 @@
 using System.Globalization;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using Avalonia;
 using Avalonia.Controls;
@@ -16,6 +17,7 @@ internal sealed class TrayController : IDisposable
 {
     private readonly TrayIcon _tray;
     private readonly NativeMenu _menu;
+    private readonly Device _device;
     private readonly Dictionary<string, WindowIcon> _icons = new();
     private readonly Dictionary<string, NativeMenuItem> _menuItems = new();
     private NativeMenuItem? _updateItem;
@@ -23,6 +25,7 @@ internal sealed class TrayController : IDisposable
     public TrayController(Device device, Action<PerformanceProfile> applyProfile,
                           Action toggleMain, Action openMain, Action showLighting, Action exit)
     {
+        _device = device;
         _menu = BuildMenu(device, applyProfile, openMain, showLighting, exit);
         _tray = new TrayIcon
         {
@@ -85,7 +88,9 @@ internal sealed class TrayController : IDisposable
     private WindowIcon ProfileIcon(PerformanceProfile p)
     {
         if (_icons.TryGetValue(p.Id, out var cached)) return cached;
-        var c = p.Accent is { } a ? Color.FromRgb(a.R, a.G, a.B) : Colors.Gray;
+        // The accent comes off the port that offers the profile (its own table), not off the profile: the record
+        // stopped carrying it on 2026-09-22. An unclassified mode reports no accent and the icon stays grey.
+        var c = ProfileTraits.Of(_device.PowerProfiles, p).Accent is { } a ? Color.FromRgb(a.R, a.G, a.B) : Colors.Gray;
         return _icons[p.Id] = MakeIcon(c);
     }
 

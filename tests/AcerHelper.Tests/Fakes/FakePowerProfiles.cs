@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Tests.Fakes;
 
@@ -9,8 +10,14 @@ namespace AcerHelper.Tests.Fakes;
 ///
 /// <see cref="Current"/> is whatever the last successful <see cref="Set"/> landed, so a test can drive a
 /// whole AC/DC flow through the service and let the fake behave like the hardware would.
+///
+/// IT ALSO CLASSIFIES ITS OWN PROFILES (<see cref="IProfileTraits"/>), because a real port does: the class each
+/// mode belongs to is the backend's table's answer, not the profile's, since 2026-09-22. The default is
+/// <see cref="TestProfiles.TraitsOf"/> — the canonical id→kind table — and a test that stands this fake in for
+/// a source with a different reading of the same ids (the kernel's, where "performance" is Performance rather
+/// than Turbo) assigns <see cref="TraitsOf"/> itself.
 /// </summary>
-public sealed class FakePowerProfiles : IPowerProfiles
+public sealed class FakePowerProfiles : IPowerProfiles, IProfileTraits
 {
     private readonly List<PerformanceProfile> _all;
     private readonly List<PerformanceProfile> _selectable;
@@ -30,6 +37,13 @@ public sealed class FakePowerProfiles : IPowerProfiles
 
     public IReadOnlyList<PerformanceProfile> All => _all;
     public IReadOnlyList<PerformanceProfile> Selectable() => _selectable;
+
+    /// <summary>This fake machine's reading of a profile it offers. Defaults to the canonical table
+    /// (<see cref="TestProfiles.TraitsOf"/>), which is what a source spelling its ids "quiet"/"balanced"/… would
+    /// answer; assign it to stand in for a source that classifies the same ids differently.</summary>
+    public Func<PerformanceProfile, ProfileTraits> TraitsOf { get; set; } = TestProfiles.TraitsOf;
+
+    public ProfileTraits Traits(PerformanceProfile profile) => TraitsOf(profile);
 
     /// <summary>What <see cref="Current"/> reports. Set it directly to arrange a scenario.</summary>
     public PerformanceProfile? CurrentProfile { get; set; }

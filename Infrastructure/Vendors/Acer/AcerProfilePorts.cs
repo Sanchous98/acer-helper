@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
@@ -21,17 +22,30 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 ///
 /// A null delegate means this model has no EC channel, and the inner port then behaves exactly as it would
 /// unwrapped.
+///
+/// THE PROFILE'S CLASS COMES OFF THE INNER PORT (<see cref="ProfileTraits.Of"/>), not off the profile: the
+/// profile record stopped carrying it on 2026-09-22, and who the mode "is" is the offering backend's reading in
+/// any case. This decorator therefore sits transparently in front of that answer — an outer wrapper that
+/// classified what its inner port already knows would be a second table for the same machine, which is what the
+/// Acer-vs-kernel vocabulary trap is made of.
 /// </summary>
-internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, bool>? applyEnvelope) : IPowerProfiles
+internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, bool>? applyEnvelope)
+    : IPowerProfiles, IProfileTraits
 {
     public string? LastError => inner.LastError;
     public IReadOnlyList<PerformanceProfile> All => inner.All;
     public PerformanceProfile? Current() => inner.Current();
     public IReadOnlyList<PerformanceProfile> Selectable() => inner.Selectable();
 
+    /// <summary>The inner port's own reading, forwarded unchanged — including its refusals: a profile the inner
+    /// port does not classify reaches the envelope as <see cref="ProfileTraits.Unknown"/>, whose kind
+    /// <c>AcerEcHidController.ModeFor</c> maps to nothing, so the EC is left alone rather than sent another
+    /// mode's envelope.</summary>
+    public ProfileTraits Traits(PerformanceProfile profile) => ProfileTraits.Of(inner, profile);
+
     public bool Set(PerformanceProfile profile)
     {
-        applyEnvelope?.Invoke(profile.Kind);
+        applyEnvelope?.Invoke(Traits(profile).Kind);
         return inner.Set(profile);
     }
 }
@@ -55,7 +69,7 @@ internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, b
 /// a re-badged Acer one: wrapping an Acer profile in the choice name would mean building a second identity for a
 /// mode that already has one, and the inner port stays untouched.
 /// </summary>
-internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles
+internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles, IProfileTraits
 {
     // The decorator's own refusals have nowhere else to be reported: LastError is a read-only property and the
     // inner port was never asked. Kept to one call — a stale refusal must not be read after a later success
@@ -63,6 +77,14 @@ internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles
     private string? _refusal;
 
     public string? LastError => _refusal ?? inner.LastError;
+
+    /// <summary>The Acer table's reading, and NOT the inner source's — the second half of what this decorator is
+    /// for. The source classifies the kernel token <c>"performance"</c> as <see cref="ProfileKind.Performance"/>,
+    /// which on this node is Turbo's byte: handing that reading upwards would classify the app's Turbo as
+    /// Performance and send the EC envelope mode 1 (93 W) where the hardware wants mode 0 (108 W) — the live bug
+    /// this class exists to close. Profiles handed out here are the table's own, so the traits are the byte's
+    /// traits.</summary>
+    public ProfileTraits Traits(PerformanceProfile profile) => AcerProfiles.TraitsOf(profile);
 
     /// <summary>Only the profiles the source actually offers, in ACER display order — Eco, Quiet, Balanced,
     /// Performance, Turbo, which is also the order the performance hotkey cycles through. The inner source's own

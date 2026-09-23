@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Tests;
 
@@ -9,7 +10,8 @@ namespace AcerHelper.Tests;
 /// It is the only part of that class a test may touch, and the reason is worth stating plainly: constructing
 /// <c>AcerEcHidController</c> opens the EC HID transport and starts a writer thread, and on a machine that HAS
 /// the device — the owner's — <c>Apply</c> really writes the power envelope. A test that instantiated it would
-/// drive hardware. <see cref="ModeFor"/> is <c>public static</c> and pure, so it needs none of that.
+/// drive hardware. The members these tests reach — <see cref="ModeFor"/> and the envelope builder <c>FrameFor</c>
+/// — are <c>static</c> and pure, so they need none of that.
 ///
 /// Worth covering because the byte is silently load-bearing: the source records the measured envelope
 /// (0 = 108 W, 1 = 93 W, 2 = 79 W, 3 = 71 W, 4 = 71 W, 5+ acknowledged then ignored) and that an out-of-range
@@ -49,7 +51,7 @@ public class AcerEcUsageModeTests
     {
         foreach (var kind in EveryKind.Where(k => k != ProfileKind.Other))
         {
-            var profileByte = AcerProfiles.ToByte(AcerProfiles.All.Single(p => p.Kind == kind));
+            var profileByte = AcerProfiles.ToByte(AcerProfiles.All.Single(p => AcerProfiles.TraitsOf(p).Kind == kind));
             var usageMode = AcerEcHidController.ModeFor(kind);
 
             Assert.NotNull(usageMode);
@@ -97,5 +99,22 @@ public class AcerEcUsageModeTests
 
         Assert.Equal(modes.OrderBy(m => m), modes);
         Assert.Equal(modes.Count, modes.Distinct().Count());
+    }
+
+    /// <summary>The 65-byte envelope is built in ONE place, <c>FrameFor</c> — so its bytes are pinned here rather
+    /// than at the writer's call site they used to be spelled at. A builder that moved a byte would silently
+    /// move the WRITE that carries the power envelope, and the EC ACKs an out-of-range or garbled mode exactly
+    /// like a good one: the profile switch would look like it worked and the envelope would not move (see the
+    /// class docstring above).
+    ///
+    /// The write is Acer's own set template (`A0 00 A0 01 00 01 0{mode}`, feature 0x0001, cmd 0x01, the usage
+    /// mode in parameter byte 6), zero-padded to 65: everything past the parameters is frame, not payload.</summary>
+    [Fact]
+    public void TheUsageModeEnvelopeIsBuiltInOnePlaceAndZeroPadded()
+    {
+        var write = AcerEcHidController.FrameFor(feature: 0x0001, cmd: 0x01, param6: 3);
+        Assert.Equal(65, write.Length);
+        Assert.Equal(new byte[] { 0xA0, 0x00, 0xA0, 0x01, 0x00, 0x01, 0x03 }, write[..7]);
+        Assert.All(write[7..], b => Assert.Equal(0, b));
     }
 }

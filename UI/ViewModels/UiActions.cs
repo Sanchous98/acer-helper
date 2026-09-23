@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 
 namespace AcerHelper.UI.ViewModels;
@@ -16,9 +17,14 @@ public sealed record UiActions(
     BatterySection Battery,
     OptionsSection Options);
 
-/// <summary>Performance section: apply a profile, and (in "Turbo toggles" mode) flip Turbo over the base.</summary>
+/// <summary>Performance section: apply a profile, and (in "Turbo toggles" mode) flip Turbo over the base.
+/// <c>Traits</c> is the backend's own reading of a profile it offers — its class and its colours
+/// (<see cref="ProfileTraits"/>) — handed over as a delegate because the section needs it per profile at
+/// construction and on every update. It comes from the service, which reads it off the port that offers the
+/// profiles; the profile record itself carries neither since 2026-09-22.</summary>
 public sealed record ProfileActions(
-    Action<PerformanceProfile> Apply, bool TurboToggles, Action<bool> SetTurbo);
+    Action<PerformanceProfile> Apply, bool TurboToggles, Action<bool> SetTurbo,
+    Func<PerformanceProfile, ProfileTraits> Traits);
 
 /// <summary>Fan section: the current mode's fan state plus the apply/persist delegates. <c>Initial</c> is the
 /// DOMAIN's <see cref="FanAxisState"/> and not the stored preset, because the same value arrives here twice

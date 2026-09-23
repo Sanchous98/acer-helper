@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;
 using AcerHelper.UI.ViewModels;
@@ -180,19 +181,20 @@ public class HardwareAccessWiringTests
     /// translation: the English text is the localisation KEY (gettext-style, see <c>Loc</c>), so the literal in
     /// the UI and the literal in <c>Strings.Ru.cs</c> have to be identical or the Russian build silently falls
     /// back to English. The reboot case reaches the user TWICE, on purpose: a status line for the immediate
-    /// feedback, and the banner for persistence (the status slot is rewritten by the refresh timer, so an
-    /// instruction living only there is gone in seconds) — hence a row for the caption and the XAML binding that
-    /// puts it on screen.</summary>
+    /// feedback, and the notification behind the bell for persistence (the status slot is rewritten by the
+    /// refresh timer, so an instruction living only there is gone in seconds) — hence a row for the sentence, the
+    /// list it is raised into, and the row template that renders it.</summary>
     [Theory]
     [InlineData("Infrastructure/HardwareAccess.cs", "AccessInstall.PendingReboot")]     // decides it
     [InlineData("UI/AppController.cs", "AccessInstall.PendingReboot")]                 // branches on it
     [InlineData("UI/AppController.cs", PendingRebootMessage)]                          // and says so (status line)
     [InlineData("Localization/Strings.Ru.cs", PendingRebootMessage)]                   // translated verbatim
-    [InlineData("UI/AppController.cs", "SetHardwareAccessRebootPending")]              // and keeps the banner up
-    [InlineData("UI/ViewModels/MainViewModel.cs", RebootBannerCaption)]                // with the order in its caption
-    [InlineData("Localization/Strings.Ru.cs", RebootBannerCaption)]                    // translated verbatim
-    [InlineData("UI/MainWindow.axaml", "Content=\"{Binding HardwareAccessLabel}\"")]   // which the banner renders
-    [InlineData("UI/AppController.cs", "_accessRebootPending")]                       // and survives a UI rebuild
+    [InlineData("UI/AppController.cs", "SetHardwareAccessRebootPending")]              // and raises the message
+    [InlineData("UI/ViewModels/MainViewModel.cs", RebootMessage)]                // with the order in its text
+    [InlineData("Localization/Strings.Ru.cs", RebootMessage)]                    // translated verbatim
+    [InlineData("UI/MainWindow.axaml", "ItemsSource=\"{Binding Notifications.Items}\"")] // which the bell's list holds
+    [InlineData("UI/MainWindow.axaml", "Text=\"{Binding Text}\"")]                     // ...and the entry renders
+    [InlineData("UI/AppController.cs", "_accessRebootPending")]                        // and survives a UI rebuild
     public void ThePendingRebootOutcomeIsDecidedBranchedAndTranslated(string relativePath, string required)
         => Assert.Contains(required, Source(relativePath), StringComparison.Ordinal);
 
@@ -201,43 +203,47 @@ public class HardwareAccessWiringTests
     private const string PendingRebootMessage =
         "Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot.";
 
-    private const string RebootBannerCaption =
+    private const string RebootMessage =
         "Restart your computer to finish enabling the unlocked controls (click to retry).";
 
-    /// <summary>THE BANNER'S CLICK MUST BE WIRED BY WHOEVER RAISES IT, in BOTH ways the banner is raised — and
-    /// the reboot banner is raised a SECOND time on a FRESH view model, by <c>ApplyHardwareAccessBanner</c> after a
-    /// language rebuild. That second raise used to come with no callback at all (the method took none), so the
-    /// caption promised "(click to retry)" while the click ran nothing and said nothing, in the one state where a
-    /// retry is the only recovery short of a reboot and there is no way back to the installer (the files are in
-    /// /etc, so <c>RulesNeeded()</c> is false and the offer never returns).
+    /// <summary>THE MESSAGE'S CLICK MUST BE WIRED BY WHOEVER RAISES IT, in BOTH ways the hardware-access condition
+    /// is raised — and the reboot one is raised a SECOND time, by <c>ApplyHardwareAccess</c> after a language
+    /// rebuild. That second raise used to come with no callback at all (the method took none), so the text
+    /// promised "(click to retry)" while the click ran nothing and said nothing, in the one state where a retry is
+    /// the only recovery short of a reboot and there is no way back to the installer (the files are in /etc, so
+    /// <c>RulesNeeded()</c> is false and the offer never returns).
+    ///
+    /// WHAT CARRIES THE ACTION IS NOW THE ENTRY ITSELF (NotificationViewModel), which is why this row is about the
+    /// raise rather than about a command on the window: a raise with no action is an entry whose click does
+    /// nothing, and the entry is where the click lands.
     ///
     /// THIS ROW IS BEHAVIOURAL WHERE ITS NEIGHBOURS READ TEXT, because the view model is compiled into this TFM and
-    /// the command can simply be executed: the caption is a promise, and what it promises is a call.
+    /// the command can simply be executed: the text is a promise, and what it promises is a call.
     ///
-    /// MUTATION that reddens it: drop <c>_grantAccess = grant;</c> from
+    /// MUTATION that reddens it: drop the <c>grant</c> argument from the raise in
     /// <c>SetHardwareAccessRebootPending</c> — the click then reaches nothing and the recorded count stays zero.</summary>
     [Fact]
-    public void TheRebootBannerCarriesTheRetryItsCaptionPromises()
+    public void TheRebootNotificationCarriesTheRetryItsTextPromises()
     {
         var clicks = 0;
         var vm = Banner();
 
         vm.SetHardwareAccessRebootPending(() => clicks++);
 
-        Assert.True(vm.NeedsHardwareAccess);          // the banner is on screen...
-        vm.GrantHardwareAccessCommand.Execute(null);
-        Assert.Equal(1, clicks);                     // ...and its click is the retry it advertises
+        var entry = Assert.Single(vm.Notifications.Items);   // the message is on the bell...
+        entry.ActivateCommand.Execute(null);
+        Assert.Equal(1, clicks);                             // ...and its click is the retry it advertises
     }
 
-    /// <summary>The banner's view model over a machine with no capabilities: this row is about the click, and a
-    /// section that existed here would only add places for the build to be wrong. Built the way the lighting
-    /// tests build theirs (the sections themselves are their own tests).</summary>
+    /// <summary>The notification list's view model over a machine with no capabilities: this row is about the
+    /// click, and a section that existed here would only add places for the build to be wrong. Built the way the
+    /// lighting tests build theirs (the sections themselves are their own tests).</summary>
     private static MainViewModel Banner()
     {
         var d = new FakeDevice();
         var fan = new FanSettings(false, Fan.DefaultDuties(), 70);
         return new MainViewModel(d, new UiActions(
-            new ProfileActions(_ => { }, TurboToggles: false, _ => { }),
+            new ProfileActions(_ => { }, TurboToggles: false, _ => { }, _ => ProfileTraits.Unknown),
             new FanSection(new FanAxisState(FanMode.Auto, fan, fan),
                            (_, _, _) => { }, (_, _, _) => { }, _ => Task.CompletedTask),
             new GpuSection(new GpuAxisState(0, 0), (_, _) => { }),
@@ -245,20 +251,19 @@ public class HardwareAccessWiringTests
             new CoSection([], [], _ => { }),
             new BatterySection(d.Battery, null, null, null),
             new OptionsSection([], [], [], TurboToggles: false, _ => { }, _ => { }, _ => { },
-                               AppLanguage.System, _ => { })), lighting: null);
+                               AppLanguage.System, _ => { })), lighting: null, new NotificationCenter());
     }
 
-    /// <summary>THE BANNER IS THE HOME FOR THE REBOOT ORDER, and the way it can silently stop being one is the
-    /// branch clearing <c>NeedsHardwareAccess</c> — which hides the banner and leaves the install looking
-    /// complete: the files are in /etc, so <c>RulesNeeded()</c> goes false and the offer never returns, and the
-    /// user waits for controls that a reboot would have given them. So the branch is asserted BOTH ways: it
-    /// re-labels and it does not clear; the <c>Applied</c> branch right above it does clear, because there the
-    /// banner has finished its job.
+    /// <summary>THE REBOOT MESSAGE IS THE HOME FOR THE REBOOT ORDER, and the way it can silently stop being one is
+    /// the branch RETRACTING it — which takes it off the bell and leaves the install looking complete: the files
+    /// are in /etc, so <c>RulesNeeded()</c> goes false and the offer never returns, and the user waits for controls
+    /// that a reboot would have given them. So the branch is asserted BOTH ways: it raises the message and does not
+    /// retract; the <c>Applied</c> branch right above it does retract, because there the condition is over.
     ///
-    /// Mutations that redden it: put <c>NeedsHardwareAccess = false;</c> back into the pending branch; or drop
+    /// Mutations that redden it: put <c>_vm.ClearHardwareAccess();</c> back into the pending branch; or drop
     /// the <c>SetHardwareAccessRebootPending(…)</c> call.</summary>
     [Fact]
-    public void ThePendingRebootBranchKeepsTheBannerVisibleAndRelabelsIt()
+    public void ThePendingRebootBranchKeepsTheNotificationAndRetractsNothing()
     {
         var code = string.Join("\n", Source("UI/AppController.cs")
             .Split('\n')
@@ -275,24 +280,23 @@ public class HardwareAccessWiringTests
         var pendingBranch = code[pending..end];
 
         Assert.Contains("SetHardwareAccessRebootPending(RequestHardwareAccess)", pendingBranch, StringComparison.Ordinal);
-        Assert.DoesNotContain("NeedsHardwareAccess = false", pendingBranch, StringComparison.Ordinal);
-        Assert.Contains("NeedsHardwareAccess = false", appliedBranch, StringComparison.Ordinal);
-        // ...and remembers the state, because the banner is re-derived on a UI rebuild (the language switch calls
-        // ApplyHardwareAccessBanner again, and by then RulesNeeded() is false for the very reason this branch
-        // exists) — without the flag the instruction would survive the refresh timer only to vanish on a
-        // language change.
+        Assert.DoesNotContain("ClearHardwareAccess", pendingBranch, StringComparison.Ordinal);
+        Assert.Contains("ClearHardwareAccess", appliedBranch, StringComparison.Ordinal);
+        // ...and remembers the state, because the condition is re-stated on a UI rebuild (the language switch calls
+        // ApplyHardwareAccess again, and by then RulesNeeded() is false for the very reason this branch exists) —
+        // without the flag the instruction would survive the refresh timer only to vanish on a language change.
         Assert.Contains("_accessRebootPending = true", pendingBranch, StringComparison.Ordinal);
 
-        var bannerApply = code.IndexOf("private void ApplyHardwareAccessBanner()", StringComparison.Ordinal);
+        var reapply = code.IndexOf("private void ApplyHardwareAccess()", StringComparison.Ordinal);
         var nextMethod = code.IndexOf("private async Task CheckForUpdatesAsync", StringComparison.Ordinal);
-        Assert.True(bannerApply >= 0 && nextMethod > bannerApply, "the banner re-apply method must exist where this guard looks for it");
-        var bannerBody = code[bannerApply..nextMethod];
-        Assert.Contains("_accessRebootPending", bannerBody, StringComparison.Ordinal);
-        // BOTH raises hand the retry over, and the reboot one is the one that had none: it runs on a view model
-        // built by the rebuild a moment ago, so an argument-less call here is a caption promising a click that
-        // does nothing. The named method is what makes "the retry" one thing in both branches.
-        Assert.Contains("SetHardwareAccessRebootPending(RequestHardwareAccess)", bannerBody, StringComparison.Ordinal);
-        Assert.Contains("SetHardwareAccessNeeded(RequestHardwareAccess)", bannerBody, StringComparison.Ordinal);
+        Assert.True(reapply >= 0 && nextMethod > reapply, "the access re-state method must exist where this guard looks for it");
+        var reapplyBody = code[reapply..nextMethod];
+        Assert.Contains("_accessRebootPending", reapplyBody, StringComparison.Ordinal);
+        // BOTH raises hand the retry over, and the reboot one is the one that had none: it runs again on the view
+        // model built by the rebuild a moment ago, so an argument-less call here is a message promising a click
+        // that does nothing. The named method is what makes "the retry" one thing in both branches.
+        Assert.Contains("SetHardwareAccessRebootPending(RequestHardwareAccess)", reapplyBody, StringComparison.Ordinal);
+        Assert.Contains("SetHardwareAccessNeeded(RequestHardwareAccess)", reapplyBody, StringComparison.Ordinal);
     }
 
     /// <summary>THE PARSE THAT FEEDS THE CHECK, executed against the shipped file rather than described: the

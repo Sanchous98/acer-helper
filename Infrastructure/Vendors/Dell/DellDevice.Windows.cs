@@ -13,14 +13,29 @@ namespace AcerHelper.Infrastructure.Vendors.Dell;
 public sealed partial class DellDevice
 {
     // BIOS ThermalManagement values; Kind/accent align with the Linux platform_profile mapping
-    // (quiet/cool/balanced/performance) so the UI looks the same on both OSes.
-    private static readonly PerformanceProfile[] Thermal =
+    // (quiet/cool/balanced/performance) so the UI looks the same on both OSes. ONE row per mode, read twice: the
+    // profile set below is built from it, and so is the traits lookup that answers which class a mode belongs to
+    // and what colour it is painted — the per-profile presentation that used to travel on the profile record.
+    private sealed record ThermalRow(string Id, string Name, ProfileKind Kind, AccentColor Accent);
+
+    private static readonly ThermalRow[] ThermalRows =
     [
         new("Quiet",            "Quiet",       ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
         new("Cool",             "Cool",        ProfileKind.Quiet,       new AccentColor(0x00, 0x89, 0x7B)),
         new("Optimized",        "Optimized",   ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
         new("UltraPerformance", "Performance", ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
     ];
+
+    private static readonly PerformanceProfile[] Thermal =
+        [.. ThermalRows.Select(r => new PerformanceProfile(r.Id, r.Name))];
+
+    /// <summary>The BIOS attribute's own row. An id this table does not carry is
+    /// <see cref="ProfileTraits.Unknown"/> — the port only ever hands out the four above, so the answer is "not
+    /// one of mine" rather than a nearby mode's class.</summary>
+    private static ProfileTraits ThermalTraits(PerformanceProfile p)
+        => ThermalRows.FirstOrDefault(r => r.Id == p.Id) is { } r
+            ? new ProfileTraits(r.Kind, r.Accent)
+            : ProfileTraits.Unknown;
 
     // PrimaryBattChargeCfg values (the BIOS-attribute naming of the same five EC modes as Linux's
     // charge_types). The standard Dell set; a value this model lacks fails its write and reads back.
@@ -49,7 +64,8 @@ public sealed partial class DellDevice
         }
 
         if (bios.Get("ThermalManagement") != null)
-            PowerProfiles = new ProfilesPort(Thermal, () => Thermal, CurrentThermal, SetThermal);
+            PowerProfiles = new ProfilesPort(Thermal, () => Thermal, CurrentThermal, SetThermal,
+                                             new ProfileTraitsLookup(ThermalTraits));
         if (bios.Get("PrimaryBattChargeCfg") != null)
             Battery.ChargeMode = _bios.BatteryChoice("PrimaryBattChargeCfg", ChargeModes);
         if (bios.Get("FnLock") != null)

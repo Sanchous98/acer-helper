@@ -44,22 +44,16 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _status = "";
 
-    // Update banner (set once by AppController's startup GitHub-Releases check).
-    private Action? _openUpdate;
-    [ObservableProperty] private bool _updateAvailable;
-    [ObservableProperty] private string _updateLabel = "";
+    /// <summary>The notifications behind the bell: a message the app has for the user (access not granted, a
+    /// reboot pending, an update waiting), each with the action a click on it should run. Handed IN rather than
+    /// built here, because this whole view model is torn down and rebuilt on a live language switch
+    /// (<c>AppController.RebuildForLanguage</c>) while the conditions it is reporting outlive that swap — see
+    /// <see cref="NotificationCenter"/>.</summary>
+    public NotificationCenter Notifications { get; }
 
-    // "Grant hardware access" banner (Linux/AppImage: install the udev rules via pkexec; set at startup).
-    private Action? _grantAccess;
-    [ObservableProperty] private bool _needsHardwareAccess;
-
-    /// <summary>The banner's caption. A property rather than a fixed markup string because ONE banner carries two
-    /// messages: the offer to install, and — after an install whose module reload could not take — the order to
-    /// reboot. The second one has nowhere else to live, and this is deliberate: <c>Status</c> is rewritten from
-    /// the device's own status message by every refresh tick (a few seconds), while the banner stays until
-    /// something clears it. Read at construction, like every other string here, so a live language switch works
-    /// by rebuilding the view model (<c>Loc.Use</c> runs before that).</summary>
-    [ObservableProperty] private string _hardwareAccessLabel = Loc.T("Grant hardware access…");
+    /// <summary>Whether the bell's list is showing. PRESENTATION state, so it lives here and not in the list: a
+    /// rebuilt window opens with the drop-down closed, while the notifications themselves carry over.</summary>
+    [ObservableProperty] private bool _isNotificationsOpen;
 
     // Side drawer: which page is showing. DrawerContent identifies it; the three pages are hosted SIDE BY SIDE
     // in the view and toggled by the Is*Page flags below, NOT swapped through one shared host — see those flags.
@@ -98,16 +92,18 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsTuningPage));
     }
 
-    public MainViewModel(Device device, UiActions a, LightingViewModel? lighting)
+    public MainViewModel(Device device, UiActions a, LightingViewModel? lighting, NotificationCenter notifications)
     {
         DeviceName = device.VendorName;
         _lighting = lighting;
+        Notifications = notifications;
 
         // Main column (full width, glance order): sensors, performance modes, fans, battery.
         if (device.Sensors != null)
             Sections.Add(_monitor = new MonitorViewModel());
         if (device.PowerProfiles is { } pp)
-            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.Profiles.Apply, a.Profiles.TurboToggles, a.Profiles.SetTurbo));
+            Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.Profiles.Traits, a.Profiles.Apply,
+                                                          a.Profiles.TurboToggles, a.Profiles.SetTurbo));
         if (device.FanControl is { } fc)
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
                 a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
@@ -131,51 +127,75 @@ public sealed partial class MainViewModel : ObservableObject
             _tuning = new TuningViewModel(gpuVm, cpuVm, coVm);
     }
 
-    /// <summary>Show the "update available" banner + tray item (called from the startup update check).</summary>
+    /// <summary>The bell: show the list, or put it away again. A toggle, like the drawer buttons, so the one
+    /// control that opens the list also closes it.</summary>
+    [RelayCommand] private void ToggleNotifications() => IsNotificationsOpen = !IsNotificationsOpen;
+
+    // ---- the three sources that raise notifications ----
+    //
+    // Each of these was a banner in this window before the bell existed, and each keeps the action its banner's
+    // click ran. The word is this view model's — that is its job, every string in the app is read here at
+    // construction or per raise — while WHICH condition is live is the caller's, because only AppController can
+    // see the device, the check result and the install outcome.
+    //
+    // The text arrives as a factory, so a list that survives a language rebuild says itself in the new language
+    // (see NotificationViewModel.Text). Raising twice is harmless and expected — the periodic update check, a UI
+    // rebuild — because an id is one entry: the second raise refreshes it and keeps its read flag.
+
+    /// <summary>The startup (and later periodic) check found a newer release. The click runs the download/install
+    /// where the app can self-update and opens the release page where it cannot — the same action the update
+    /// banner's click had. The id carries the VERSION: a newer release is a new condition, and one the user has
+    /// ignored is not suppressed for it.
+    ///
+    /// ONE OFFER AT A TIME, which is what the family retirement is for: a check that finds v1.1 while the list
+    /// still holds v1.0 leaves ONE entry, because the older one's click would install an older release — a worse
+    /// answer than no row at all. The retirement spares this version's own id, so a re-check of the SAME release
+    /// refreshes the entry the user already has rather than replacing it (a supersede is not a dismissal: the
+    /// read flag and the ignore state survive it).</summary>
     public void SetUpdate(string version, Action open)
     {
-        _openUpdate = open;
-        UpdateLabel = Loc.T("Update available: v{0}", version);
-        UpdateAvailable = true;
+        var id = NotificationCenter.UpdateId(version);
+        Notifications.RetireFamilyExcept(NotificationCenter.UpdateIdPrefix, id);
+        Notifications.Raise(id, () => Loc.T("Update available: v{0}", version), open);
     }
 
-    [RelayCommand] private void OpenUpdate() => _openUpdate?.Invoke();
-
-    /// <summary>Show the "grant hardware access" banner (Linux install of the udev rules via pkexec).</summary>
+    /// <summary>The Linux permission files are not installed, so the root-only controls are out of reach: offer
+    /// the one-click pkexec install, whose click runs it (via the caller's callback).</summary>
     public void SetHardwareAccessNeeded(Action grant)
-    {
-        _grantAccess = grant;
-        HardwareAccessLabel = Loc.T("Grant hardware access…");
-        NeedsHardwareAccess = true;
-    }
+        => Notifications.Raise(NotificationCenter.HardwareAccessNeeded, () => Loc.T("Grant hardware access…"), grant);
 
-    /// <summary>Keep the banner up after an install that could not make the module parameters live, and re-label
-    /// it: what is missing now is a REBOOT, and the banner is the only surface in this window that persists —
-    /// the status line is overwritten by the next refresh tick with the device's own message (never null on the
-    /// Linux backend), so a reboot instruction put there is on screen for a few seconds and then replaced by
-    /// text that does not mention rebooting at all. Deliberately does NOT clear <see cref="NeedsHardwareAccess"/>:
-    /// clearing it would take the instruction off the screen entirely and leave the user at a dead end, because
-    /// the installer is idempotent — once the files are in /etc it never offers itself again, however useless the
-    /// install turned out to be.
+    /// <summary>An install could not make the module parameters live, so what is missing now is a REBOOT. This is
+    /// the one message with nowhere else to live: <c>Status</c> is rewritten from the device's own status message
+    /// by every refresh tick (a few seconds), so a reboot instruction put there is on screen briefly and then
+    /// replaced by text that does not mention rebooting at all.
+    ///
+    /// IT RETIRES THE OFFER, and that is the same arrangement the single banner had (its two messages were
+    /// branches of one decision): once the files are in /etc the offer is over — the installer is idempotent and
+    /// never offers itself again — so leaving it beside the reboot instruction would show the user a "grant
+    /// access" button for access they already granted. They are separate IDS all the same, and that is what
+    /// keeps an ignored offer from swallowing this instruction (see NotificationCenter.HardwareAccessRebootPending).
     ///
     /// THE GRANT CALLBACK COMES IN AS A PARAMETER, for the same reason it does in <see cref="SetHardwareAccessNeeded"/>,
-    /// and that is the whole of a defect this method carried: a language switch rebuilds the window and re-shows
-    /// this banner on a FRESH view model (AppController.ApplyHardwareAccessBanner), which had never been handed a
-    /// callback — so the caption promised "click to retry" while the click did nothing at all and said nothing,
-    /// in the one state where retrying is the only recovery short of a reboot. A banner whose text promises an
-    /// action has to carry that action with it, whoever raises it.
-    ///
-    /// The retry itself is genuinely useful in the worse variant of the failure, where the unload succeeded but
-    /// the load failed and the driver is gone for the session (a retry loads it back). The caption does not
-    /// promise that a retry will work, because while the module is held open it cannot.</summary>
+    /// and that is the whole of a defect this used to carry: the entry promises "(click to retry)" in its own
+    /// words, so the click has to be the retry — in the one state where retrying is the only recovery short of a
+    /// reboot, and with no other way back to the installer.</summary>
     public void SetHardwareAccessRebootPending(Action grant)
     {
-        _grantAccess = grant;
-        HardwareAccessLabel = Loc.T("Restart your computer to finish enabling the unlocked controls (click to retry).");
-        NeedsHardwareAccess = true;
+        Notifications.Ignore(NotificationCenter.HardwareAccessNeeded);
+        Notifications.Raise(NotificationCenter.HardwareAccessRebootPending,
+                            () => Loc.T("Restart your computer to finish enabling the unlocked controls (click to retry)."),
+                            grant);
     }
 
-    [RelayCommand] private void GrantHardwareAccess() => _grantAccess?.Invoke();
+    /// <summary>The hardware-access condition is over — the install took and the parameters are live, so the app
+    /// only has to be restarted. Both entries are retracted, whichever of the two the user was looking at, and
+    /// retracted for good: this is the branch that replaced the old banner's <c>NeedsHardwareAccess = false;</c>,
+    /// and it means the same thing.</summary>
+    public void ClearHardwareAccess()
+    {
+        Notifications.Ignore(NotificationCenter.HardwareAccessNeeded);
+        Notifications.Ignore(NotificationCenter.HardwareAccessRebootPending);
+    }
 
     [RelayCommand]
     private void OpenOptions()

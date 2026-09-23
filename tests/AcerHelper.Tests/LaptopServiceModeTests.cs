@@ -76,7 +76,7 @@ public class LaptopServiceProfileCycleTests
     [Fact]
     public void WithACurrentProfileThatIsNotInAll_AlsoStartsAtTheSecondProfile()
     {
-        var (landed, _) = Toggle(new PerformanceProfile("ghost", "Ghost", ProfileKind.Other));
+        var (landed, _) = Toggle(new PerformanceProfile("ghost", "Ghost"));
 
         Assert.Equal(TestProfiles.Eco, landed);
     }
@@ -150,7 +150,7 @@ public class LaptopServiceProfileCycleTests
     public void ASelectableListDisjointFromAll_FallsBackToTheCurrentProfile_WhichIsNotSelectable()
     {
         var (landed, f) = Toggle(TestProfiles.Balanced,
-                                 selectable: [new PerformanceProfile("alien", "Alien", ProfileKind.Other)]);
+                                 selectable: [new PerformanceProfile("alien", "Alien")]);
 
         Assert.Equal(TestProfiles.Balanced, landed);
         Assert.Equal(["balanced"], f.Pp!.SetCallIds);
@@ -163,7 +163,7 @@ public class LaptopServiceProfileCycleTests
     public void ASelectableListDisjointFromAll_WithNoCurrent_AppliesTheFirstProfile()
     {
         var (landed, _) = Toggle(current: null,
-                                 selectable: [new PerformanceProfile("alien", "Alien", ProfileKind.Other)]);
+                                 selectable: [new PerformanceProfile("alien", "Alien")]);
 
         Assert.Equal(TestProfiles.Quiet, landed);
     }

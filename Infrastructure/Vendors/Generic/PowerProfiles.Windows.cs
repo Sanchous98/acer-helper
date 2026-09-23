@@ -8,7 +8,7 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// slider): Best power efficiency / Balanced / Best performance. Vendor-agnostic — works on any
 /// laptop — so it backs the generic device when no vendor backend is present.
 /// </summary>
-public sealed class OverlayPowerProfiles : IPowerProfiles
+public sealed class OverlayPowerProfiles : IPowerProfiles, IProfileTraits
 {
     // Documented power-overlay scheme GUIDs (empty = Balanced/Recommended).
     private static readonly Guid Efficiency  = new("961cc777-2547-4f9d-8174-7d86181b8a7a");
@@ -36,7 +36,17 @@ public sealed class OverlayPowerProfiles : IPowerProfiles
     public string? LastError { get; private set; }
 
     public IReadOnlyList<PerformanceProfile> All { get; } =
-        Table.Select(t => new PerformanceProfile(t.g.ToString(), t.name, t.kind, t.accent)).ToList();
+        Table.Select(t => new PerformanceProfile(t.g.ToString(), t.name)).ToList();
+
+    /// <summary>The row for a profile's GUID — the overlay's own class and colour, which the table above has
+    /// carried all along. A GUID that is not one of the three is <see cref="ProfileTraits.Unknown"/>: this port
+    /// only ever hands out the three, so the answer is "not one of mine" rather than a nearby overlay.</summary>
+    public ProfileTraits Traits(PerformanceProfile profile)
+    {
+        foreach (var t in Table)
+            if (t.g.ToString() == profile.Id) return new ProfileTraits(t.kind, t.accent);
+        return ProfileTraits.Unknown;
+    }
 
     public IReadOnlyList<PerformanceProfile> Selectable() => All;
 

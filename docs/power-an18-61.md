@@ -40,9 +40,11 @@ byte  6…         parameters
                  …zero-padded to 65
 ```
 
-A `GetFeature` of report `0xA0` returns the reply, with **`byte[2] == 0xE0`** on success. That is
-**frame-level only**: an out-of-range value is acknowledged the same way and then silently ignored — see the
-methodology warning below.
+A `GetFeature` of report `0xA0` returns the reply, with **`byte[2] == 0xE0`** on success. **Sending the request
+first is part of the read** — a get with no preceding send delivers nothing to the device and hands back
+whatever frame the handle last held (measured; see warning 3). The status word itself is **frame-level only**:
+an out-of-range value is acknowledged the same way and then silently ignored — see the methodology warning
+below.
 
 ### Commands used / known
 
@@ -113,13 +115,18 @@ Two caveats:
 * Acer's `AcerQAAgent`, while running, re-applies **its** mode within a minute or two and will overwrite
   these writes. That is an argument for removing the Acer stack, not for polling here.
 
-## Methodology warnings (both of these produced a wrong answer first)
+## Methodology warnings (each of these produced a wrong answer first)
 
 1. **Never measure modes in a descending sequence.** A mode that is a no-op leaves the *previous* mode's
    power level in place and reads as if it worked — exactly how byte 5 first looked valid. Always return to
    mode 0, re-confirm ~108 W, then send the mode under test.
 2. **Allow 20–30 s per mode.** An 8-second settle reported mode 2 as a noisy 65–77 W when its true steady
    value is a clean 79 W.
+3. **A read on this channel is SEND, then read.** The reply only arrives if the request frame went out first
+   (Acer's own agent does `hid_send_feature_report` and then `hid_get_feature_report`). Read alone and the
+   handle hands back whatever frame it last held — measured here as status `0xE000`, feature echo `0x0001`,
+   payload all `FF` — a stale buffer that reads exactly like a measurement, so a read is only a measurement
+   when the request it answers went out first.
 
 Instrument with `nvidia-smi --query-gpu=enforced.power.limit` under load. *Max Power Limit* is useless here
 — it reads 115 W regardless. Idle readings mislead in the other direction: at idle, mode 5 shows a flat

@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Tests.Fakes;
 
 namespace AcerHelper.Tests;
@@ -32,7 +33,11 @@ public class AcerProfilePortsTests
     /// <summary>The whole point of the decorator, in one assertion: the profile's <see cref="ProfileKind"/> — not
     /// its id, not its index — reaches the envelope operation, and the switch itself still reaches the inner
     /// port. The kind is what <c>AcerEcHidController.ModeFor</c> maps, so passing the wrong member here silently
-    /// picks a different power limit.</summary>
+    /// picks a different power limit.
+    ///
+    /// It arrives from the INNER PORT (<see cref="IProfileTraits"/>), which is where a profile's class lives since
+    /// 2026-09-22 — the record no longer carries it. The fake below answers with the canonical table for its own
+    /// ids, exactly as a real source answers out of its own.</summary>
     [Fact]
     public void TheEnvelopeIsDrivenWithTheProfileKind()
     {
@@ -57,7 +62,25 @@ public class AcerProfilePortsTests
 
         foreach (var p in TestProfiles.All) port.Set(p);
 
-        Assert.Equal(TestProfiles.All.Select(p => p.Kind), kinds);
+        Assert.Equal(TestProfiles.All.Select(p => TestProfiles.TraitsOf(p).Kind), kinds);
+    }
+
+    /// <summary>A port that classifies NOTHING — the shape a source without a table has — sends no envelope
+    /// rather than a guessed one: <see cref="ProfileTraits.Unknown"/>'s kind is <see cref="ProfileKind.Other"/>,
+    /// which <c>AcerEcHidController.ModeFor</c> maps to no mode at all. This is the case that makes the lookup's
+    /// refusal load-bearing on the envelope path: the old field was whatever the builder passed, so an
+    /// unclassified-anything could not exist there and the refusal had nowhere to be expressed.</summary>
+    [Fact]
+    public void AnUnclassifiedProfileSendsNoEnvelope()
+    {
+        var inner = new FakePowerProfiles(TestProfiles.All);
+        inner.TraitsOf = _ => ProfileTraits.Unknown;
+        var kinds = new List<ProfileKind>();
+        var port = new EcSyncedProfiles(inner, k => { kinds.Add(k); return true; });
+
+        Assert.True(port.Set(TestProfiles.Turbo));            // the switch still happens...
+        Assert.Equal([ProfileKind.Other], kinds);             // ...and the envelope is told nothing it can map
+        Assert.Null(AcerEcHidController.ModeFor(kinds[0]));
     }
 
     /// <summary>A failing inner write is forwarded as-is. The decorator must not report the envelope's fate
@@ -119,17 +142,17 @@ public class AcerProfilePortsTests
     // ---- AcerMappedProfiles: the kernel's profile vocabulary translated to Acer's ----
 
     /// <summary>What the inner port offers on this hardware: the KERNEL's tokens as <c>Id</c>, described the way
-    /// <c>SysfsPowerProfiles</c> describes them — including its classification of <c>"performance"</c> as
-    /// <see cref="ProfileKind.Performance"/>, which is the source's own reading of a word that means Turbo to us.
-    /// The decorator has to override that reading, so a test that used the Acer table on both sides would prove
-    /// nothing.</summary>
+    /// <c>SysfsPowerProfiles</c> describes them. The fake answers for those ids with the canonical id→kind table,
+    /// which is a source's own reading of a word that means Turbo to Acer — <c>"performance"</c> classifies as
+    /// <see cref="ProfileKind.Performance"/> there. The decorator has to override that reading, so a test that
+    /// used the Acer table on both sides would prove nothing.</summary>
     private static class Kernel
     {
-        public static PerformanceProfile LowPower            => new("low-power",            "Low power",            ProfileKind.Eco);
-        public static PerformanceProfile Quiet               => new("quiet",                "Quiet",                ProfileKind.Quiet);
-        public static PerformanceProfile Balanced            => new("balanced",             "Balanced",             ProfileKind.Balanced);
-        public static PerformanceProfile BalancedPerformance => new("balanced-performance", "Balanced performance", ProfileKind.Performance);
-        public static PerformanceProfile Performance         => new("performance",          "Performance",          ProfileKind.Performance);
+        public static PerformanceProfile LowPower            => new("low-power",            "Low power");
+        public static PerformanceProfile Quiet               => new("quiet",                "Quiet");
+        public static PerformanceProfile Balanced            => new("balanced",             "Balanced");
+        public static PerformanceProfile BalancedPerformance => new("balanced-performance", "Balanced performance");
+        public static PerformanceProfile Performance         => new("performance",          "Performance");
 
         /// <summary>The full set the Acer handler offers under <c>predator_v4=1</c>: all five.</summary>
         public static PerformanceProfile[] All => [LowPower, Quiet, Balanced, BalancedPerformance, Performance];
@@ -141,8 +164,9 @@ public class AcerProfilePortsTests
     /// The ids are the load-bearing part: they are what <c>LaptopService</c> persists as <c>ProfileMemory.BaseId</c>
     /// and what <c>AcerProfiles.ToByte</c> parses for the EC write, so a port that passed the source's profiles
     /// through would put <c>"balanced-performance"</c> into <c>settings.json</c> — a value the Windows half has
-    /// never seen — and would hand the envelope a <see cref="ProfileKind"/> chosen by the kernel's name rather
-    /// than by the byte (Turbo arriving as Performance, the live 93 W/108 W bug).</summary>
+    /// never seen. The CLASS is the other half of the same override and it now has to be asserted through the
+    /// port: the source's own reading would hand the envelope Turbo as Performance, which is the live 93 W/108 W
+    /// bug this decorator exists to close.</summary>
     [Fact]
     public void TheMappedSetIsTheAcerTableInDisplayOrder()
     {
@@ -151,7 +175,12 @@ public class AcerProfilePortsTests
         Assert.Equal(["6", "0", "1", "4", "5"], port.All.Select(p => p.Id));
         Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"], port.All.Select(p => p.DisplayName));
         Assert.Equal([ProfileKind.Eco, ProfileKind.Quiet, ProfileKind.Balanced, ProfileKind.Performance, ProfileKind.Turbo],
-                     port.All.Select(p => p.Kind));
+                     port.All.Select(p => port.Traits(p).Kind));
+        // ...and NOT the source's reading of the very same token, which is the whole reason for the override: the
+        // kernel's "performance" classifies as Performance there, while the Acer profile behind it is Turbo.
+        var source = new FakePowerProfiles(Kernel.All);
+        Assert.Equal(ProfileKind.Performance, ProfileTraits.Of(source, Kernel.Performance).Kind);
+        Assert.Equal(ProfileKind.Turbo, port.Traits(AcerProfiles.FromChoiceName("performance")!).Kind);
 
         Assert.Equal(port.All.Select(p => p.Id), port.Selectable().Select(p => p.Id));
     }
@@ -191,7 +220,7 @@ public class AcerProfilePortsTests
     [Fact]
     public void AnUnknownTokenTheSourceOffersIsDropped()
     {
-        var cool = new PerformanceProfile("cool", "Cool", ProfileKind.Quiet);
+        var cool = new PerformanceProfile("cool", "Cool");
 
         var mixed = new AcerMappedProfiles(new FakePowerProfiles([Kernel.Quiet, cool]));
         Assert.Equal(["Quiet"], mixed.All.Select(p => p.DisplayName));
@@ -217,7 +246,7 @@ public class AcerProfilePortsTests
     [InlineData("performance", "5", "Turbo")]
     public void CurrentIsTheAcerProfileTheSourcesTokenStandsFor(string token, string id, string name)
     {
-        var inner = new FakePowerProfiles(Kernel.All, current: new PerformanceProfile(token, token, ProfileKind.Other));
+        var inner = new FakePowerProfiles(Kernel.All, current: new PerformanceProfile(token, token));
         var port = new AcerMappedProfiles(inner);
 
         Assert.Equal(id, port.Current()!.Id);
@@ -236,7 +265,7 @@ public class AcerProfilePortsTests
     [Fact]
     public void AnUnknownCurrentTokenIsNull_NotANearbyProfile()
     {
-        var custom = new PerformanceProfile("custom", "custom", ProfileKind.Other);
+        var custom = new PerformanceProfile("custom", "custom");
         var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All, current: custom));
 
         Assert.Null(port.Current());
@@ -281,11 +310,11 @@ public class AcerProfilePortsTests
     public void TheWritePathSpellsTurboPerformanceAndPerformanceBalancedPerformance()
     {
         var turboInner = new FakePowerProfiles(Kernel.All);
-        new AcerMappedProfiles(turboInner).Set(AcerProfiles.All.Single(p => p.Kind == ProfileKind.Turbo));
+        new AcerMappedProfiles(turboInner).Set(AcerProfiles.All.Single(p => AcerProfiles.TraitsOf(p).Kind == ProfileKind.Turbo));
         Assert.Equal(["performance"], turboInner.SetCallIds);
 
         var perfInner = new FakePowerProfiles(Kernel.All);
-        new AcerMappedProfiles(perfInner).Set(AcerProfiles.All.Single(p => p.Kind == ProfileKind.Performance));
+        new AcerMappedProfiles(perfInner).Set(AcerProfiles.All.Single(p => AcerProfiles.TraitsOf(p).Kind == ProfileKind.Performance));
         Assert.Equal(["balanced-performance"], perfInner.SetCallIds);
     }
 

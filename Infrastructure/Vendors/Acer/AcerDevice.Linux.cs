@@ -191,7 +191,8 @@ public sealed partial class AcerDevice
         // The EC usage mode has to move with whichever port we ended up with, or the envelope never changes on an
         // EC-HID model — including when the port is PPD's collapsed three-choice set. Enqueue-only and
         // best-effort (see EcSyncedProfiles); a null delegate means this model has no EC channel and the port
-        // behaves exactly as it did before.
+        // behaves exactly as it did before. The class the delegate is handed comes off the port itself
+        // (ProfileTraits), so whichever branch above produced it is the branch that answers for it.
         var envelope = _ec is { } ecDev ? (Func<ProfileKind, bool>)ecDev.Apply : null;
         PowerProfiles = port is null ? null : new EcSyncedProfiles(port, envelope);
 
@@ -201,7 +202,7 @@ public sealed partial class AcerDevice
         // above, but at startup, where it silently pushed mode 1 (93 W) at a machine the firmware had left in
         // Turbo. Deliberately still NOT a profile switch — no palette flash, exactly as Windows does it — and it
         // cannot disagree with what the UI shows, because it asks the port the UI reads.
-        if (envelope != null && port?.Current() is { } cur) envelope(cur.Kind);
+        if (envelope != null && port?.Current() is { } cur) envelope(ProfileTraits.Of(port, cur).Kind);
     }
 
     // ---- sensors: the acer chip, read exactly as Windows reads it ----

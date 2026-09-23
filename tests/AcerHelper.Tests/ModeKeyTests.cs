@@ -1,6 +1,7 @@
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Tests.Fakes;
 
 namespace AcerHelper.Tests;
@@ -31,6 +32,13 @@ namespace AcerHelper.Tests;
 /// </summary>
 public class ModeKeyTests
 {
+    /// <summary>One of the rule's four inputs — the CLASS of the current profile — read the way the rule's
+    /// caller reads it (off the port that offers the profiles), since the profile record stopped carrying it on
+    /// 2026-09-22. No profile at all reads as <see cref="ProfileKind.Other"/>, exactly as the service's own
+    /// <c>KindOf</c> does, so the null rows below still hand the rule the same value it would get in production.</summary>
+    private static ProfileKind KindOf(LaptopServiceFixture f, PerformanceProfile? profile)
+        => profile is { } p ? ProfileTraits.Of(f.Pp, p).Kind : ProfileKind.Other;
+
     /// <summary>Every combination that reaches a different branch of the rule. <c>currentId</c> null means the
     /// port reports no current profile; empty <c>baseId</c> means the slot remembers nothing.
     ///
@@ -60,11 +68,12 @@ public class ModeKeyTests
         var cur = f.Service.CurrentProfile();
 
         Assert.Equal(expected, f.Service.CurrentModeKey(cur));   // the rule, pinned...
-        Assert.Equal(expected, LaptopService.ModeKeyFor(cur, f.Service.TurboToggles, settings.OnAc).Value);
+        Assert.Equal(expected, LaptopService.ModeKeyFor(cur, KindOf(f, cur), f.Service.TurboToggles, settings.OnAc).Value);
         // The service's own answer against the rule fed the same slot. Since the service CALLS this rule, the
         // derivation is agreed by construction; what this line can still catch is the slot the service chose —
         // no reading has happened here, so the live slot is the AC one and the assertion is on that choice.
-        Assert.Equal(f.Service.CurrentModeKey(cur), LaptopService.ModeKeyFor(cur, f.Service.TurboToggles, settings.OnAc).Value);
+        Assert.Equal(f.Service.CurrentModeKey(cur),
+                     LaptopService.ModeKeyFor(cur, KindOf(f, cur), f.Service.TurboToggles, settings.OnAc).Value);
     }
 
     /// <summary>The same agreement on the BATTERY slot, which is the one case where the two could plausibly
@@ -89,8 +98,9 @@ public class ModeKeyTests
         Assert.Equal(TestProfiles.Turbo.Id, cur?.Id);          // the sync left the machine in Turbo...
         Assert.Equal("quiet", f.Service.CurrentModeKey(cur));  // ...so the key comes from the battery slot's base
 
-        Assert.Equal(f.Service.CurrentModeKey(cur), LaptopService.ModeKeyFor(cur, true, settings.OnBattery).Value);
-        Assert.NotEqual(f.Service.CurrentModeKey(cur), LaptopService.ModeKeyFor(cur, true, settings.OnAc).Value);   // not the AC one
+        Assert.Equal(f.Service.CurrentModeKey(cur), LaptopService.ModeKeyFor(cur, KindOf(f, cur), true, settings.OnBattery).Value);
+        Assert.NotEqual(f.Service.CurrentModeKey(cur),
+                        LaptopService.ModeKeyFor(cur, KindOf(f, cur), true, settings.OnAc).Value);   // not the AC one
     }
 
     /// <summary>The "ghost" case, and the reason the rule deliberately does NOT validate: a remembered base the
@@ -109,7 +119,7 @@ public class ModeKeyTests
 
         Assert.DoesNotContain(f.Pp!.All, p => p.Id == "ghost");     // the device does not offer it...
         Assert.Equal("ghost", f.Service.CurrentModeKey(cur));       // ...and it is the key anyway
-        Assert.Equal("ghost", LaptopService.ModeKeyFor(cur, true, settings.OnAc).Value);
+        Assert.Equal("ghost", LaptopService.ModeKeyFor(cur, KindOf(f, cur), true, settings.OnAc).Value);
     }
 
     /// <summary>The sentinel itself: one instance, the same string the settings file has always used, and what
@@ -120,8 +130,8 @@ public class ModeKeyTests
     {
         Assert.Equal("default", ModeKey.None.Value);
         Assert.Equal("default", ModeKey.None.ToString());
-        Assert.Equal(ModeKey.None, LaptopService.ModeKeyFor(null, turboToggles: true, new ProfileMemory { BaseId = "quiet" }));
-        Assert.Equal(ModeKey.None, LaptopService.ModeKeyFor(null, turboToggles: false, new ProfileMemory()));
+        Assert.Equal(ModeKey.None, LaptopService.ModeKeyFor(null, ProfileKind.Other, turboToggles: true, new ProfileMemory { BaseId = "quiet" }));
+        Assert.Equal(ModeKey.None, LaptopService.ModeKeyFor(null, ProfileKind.Other, turboToggles: false, new ProfileMemory()));
     }
 
     /// <summary>The other half of the relocation, and the reason it needs its own assertion: the DOMAIN must

@@ -237,6 +237,32 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!-- A notification entry (the bell's list): the message reads as text, not as a button, but the whole row
+         IS the control — a click reads the entry and runs what it carries. So the button's chrome is dropped
+         and the hover highlight is left as the only affordance that it can be clicked; an UNREAD entry is
+         weighted as well as dotted, which is why the class exists rather than a one-off FontWeight. -->
+    <Style Selector="Button.notice">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="4,3" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.notice /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.notice:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AppControl}" />
+    </Style>
+    <Style Selector="Button.notice:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AppControlHover}" />
+    </Style>
+    <Style Selector="Button.notice.unread">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
     <!-- THE DROP-DOWN IS THE WIDTH OF ITS BOX, FLUSH WITH ITS LEFT EDGE. The Fluent ComboBox template's
          Popup (PART_Popup) carries only a MinWidth bound to the control's own width and NO Placement at all, so
          it inherits Popup's default — PlacementMode.Bottom, which centres the popup on its target — and any item

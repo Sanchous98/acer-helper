@@ -29,6 +29,10 @@ internal sealed class AppController
     private readonly LightingCoordinator _lightingCoord;
     private LightingViewModel? _lighting;              // current lighting VM (rebuilt per language); handed to _lightingCoord
     private readonly UpdateChecker _updates = new();
+    // WHEN the check runs, and what has already been announced; the check and the announcement are injected
+    // (Infrastructure/UpdateSchedule.cs). Started in the ctor — see the note there for why it is a schedule
+    // rather than a single call.
+    private readonly UpdateSchedule _updateSchedule;
 
     private DateTime _lastTurbo = DateTime.MinValue;
     private DateTime _lastNitro = DateTime.MinValue;
@@ -43,12 +47,20 @@ internal sealed class AppController
     private volatile bool _cpuPrimed;
     private int _busy;                         // 0/1 single-flight guard for the refresh background pass (Interlocked)
     private int _rerun;                        // set when a Refresh() arrives mid-pass -> run exactly once more (coalesced)
-    private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-show it
-    // Set when an install could not make the module parameters live, so the banner's reboot instruction survives
-    // a UI rebuild (see ApplyHardwareAccessBanner). Same lifetime as the condition it describes: the session.
+    private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-add
+                                                            // the tray item (the tray is rebuilt empty; the
+                                                            // notification behind the bell carries over by itself)
+    // Set when an install could not make the module parameters live, so the reboot instruction survives a UI rebuild
+    // (see ApplyHardwareAccess). Same lifetime as the condition it describes: the session.
     private bool _accessRebootPending;
-    private bool _updating;   // a self-update download/install is in flight — both the banner and the tray item
-                              // stay clickable, so without this a second click starts a second download and a
+    // The notification list behind the bell (hardware access, the pending reboot, an available update). SESSION
+    // state and deliberately NOT built inside BuildUi with the rest of the UI: a live language switch replaces the
+    // window and the view model (RebuildForLanguage), and the list has to survive that — an entry the user has
+    // read must not come back unread, and a dismissed one must not come back at all. Only its TEXT is
+    // string-baked, and each entry re-derives that per read, so the rebuilt window shows it in the new language.
+    private readonly NotificationCenter _notifications = new();
+    private bool _updating;   // a self-update download/install is in flight — both the notification and the tray
+                              // item stay clickable, so without this a second click starts a second download and a
                               // second msiexec (which then trips over the Windows Installer mutex mid-upgrade)
 
     public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
@@ -111,11 +123,13 @@ internal sealed class AppController
         // On startup nothing else drives a profile-following lightbar (no switch yet), so paint the current
         // profile's palette once (and settle the keyboard's own colour on top) so it matches from launch. The
         // flash colour is read here and handed to the coordinator, which caches it; the mode's lighting is NOT
-        // handed over, because the section was built with it a moment ago (BuildUi -> Attach -> this).
-        _lightingCoord.ApplyFollowLighting(cur0?.FlashColor);
+        // handed over, because the section was built with it a moment ago (BuildUi -> Attach -> this). It comes
+        // from the same traits lookup the segment buttons use, so the lightbar palette and the button fill are
+        // the backend's one answer for that mode.
+        _lightingCoord.ApplyFollowLighting(_svc.FlashColorOf(cur0));
 
         // Linux (AppImage): if the udev rules aren't installed yet, offer a one-click pkexec install.
-        ApplyHardwareAccessBanner();
+        ApplyHardwareAccess();
 
         // Out-of-band keyboard-brightness input: the Fn brightness key raises raw input, so brightness the app did
         // not author is adopted from there instead of from the refresh pass — the pass read the same register
@@ -145,7 +159,10 @@ internal sealed class AppController
         // still created (shown lazily) and opens on demand via the tray icon or the Nitro key.
         if (!startMinimized) _windows.OpenMain();
 
-        _ = CheckForUpdatesAsync();   // fire-and-forget GitHub-Releases check; surfaces a banner + tray item
+        // Scheduled, not fired once: Start() checks now, then every six hours, and after each resume from sleep —
+        // the owner suspends the laptop rather than shutting it down, so a start-only check could go weeks without
+        // firing. The announcement path is unchanged (a notification + the tray item, see AnnounceUpdate).
+        (_updateSchedule = new UpdateSchedule(CheckForUpdatesAsync, AnnounceUpdate)).Start();
         _ = OfferDriverAsync(d, startMinimized);   // one-time consent prompt for the driver a feature needs
         _ = AskCardwireGpuAccessAsync();           // the remembered GPU-access consent, re-asked every start
     }
@@ -225,7 +242,7 @@ internal sealed class AppController
         // is the service's, and it is the one place the stored shape is read for this purpose.
         var fan0 = LaptopService.AxisStateOf(_svc.CurrentFan(cur));   // defaults if this mode has none
         var vm = new MainViewModel(d, new UiActions(
-            new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo),
+            new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo, _svc.TraitsOf),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(LaptopService.AxisStateOf(_svc.CurrentGpuOc(cur)), SetGpuOc),
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
@@ -245,7 +262,7 @@ internal sealed class AppController
                 _svc.TurboToggles, SetTurboToggles,
                 b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
                 _svc.Language, SetLanguage)),
-            lighting);
+            lighting, _notifications);   // the session's notifications: handed in, not built here — see the field
 
         var windows = new FlyoutCoordinator(vm);
         // The desktop is going away (KDE's logout asks through XSMP, Windows through WM_QUERYENDSESSION): tear the
@@ -289,9 +306,13 @@ internal sealed class AppController
         _lastModeKey = _svc.CurrentModeKey(cur);  // freshly seeded VMs; don't let Refresh re-trigger a mode reload
         _lastProfileId = cur?.Id ?? "";
         _cpuPrimed = false;                       // ...and the rebuilt CPU-power row holds a placeholder again
-        _lightingCoord.ApplyFollowLighting(cur?.FlashColor);
-        ApplyUpdateBanner();                       // re-show the update banner if the startup check already found one
-        ApplyHardwareAccessBanner();
+        _lightingCoord.ApplyFollowLighting(_svc.FlashColorOf(cur));
+        // Re-state the two conditions the bell may be holding (see ApplyUpdate / ApplyHardwareAccess). The list
+        // itself survives this rebuild — it is session state, built once outside BuildUi — so what these two do is
+        // refresh the entries rather than put them back: an id already on the list is replaced, not stacked, and
+        // its read flag is kept. The tray is the half that genuinely needs re-adding: it was rebuilt empty.
+        ApplyUpdate();
+        ApplyHardwareAccess();
         Refresh();                                 // push live state into the fresh view-models + tray
 
         // Reopen where the language switch lives so the change is immediately visible (only if it was open — the
@@ -299,35 +320,38 @@ internal sealed class AppController
         if (wasOpen) { _windows.OpenMain(); _vm.OpenOptionsCommand.Execute(null); }
     }
 
-    // Re-show the "update available" banner + tray item from the remembered check result (used after a UI
-    // rebuild, and by the initial check when it completes). No-op until an update has been found.
-    private void ApplyUpdateBanner()
+    // Re-state the remembered update-check result: the notification behind the bell (refreshed, never duplicated —
+    // the id carries the version) and the tray item. Used by the initial check when it completes and after a UI
+    // rebuild, where the tray genuinely needs it: a rebuilt tray holds no update item at all, while the
+    // notification would have survived the swap on its own. No-op until an update has been found.
+    private void ApplyUpdate()
     {
         if (_pendingUpdate is not { } u) return;
         _vm.SetUpdate(u.version, u.act);
         _tray.SetUpdate(Loc.T("Update available: v{0}", u.version), u.act);
     }
 
-    private void ApplyHardwareAccessBanner()
+    private void ApplyHardwareAccess()
     {
         // A pending reboot outranks the offer, and it has to outlive a UI rebuild: this runs again whenever the
         // language changes, and by then RulesNeeded() is false (the files are installed — that is exactly why the
-        // install could not make them live), so a banner derived from the rules alone would drop the reboot
+        // install could not make them live), so a notification derived from the rules alone would drop the reboot
         // instruction and leave the user with no explanation at all for the controls that never appeared. The flag
         // is remembered for the session, which is the same lifetime as the condition.
         //
-        // BOTH BRANCHES HAND OVER THE RETRY, and the reboot one has to: this is a FRESH view model after a rebuild
-        // (see RebuildForLanguage), so a caption reading "(click to retry)" raised without a callback is a click
-        // that does nothing and says nothing — in the one state where a retry is the only recovery short of a
-        // reboot, and with no other way to reach the installer again (RulesNeeded() is false, so the offer itself
-        // never comes back).
+        // BOTH BRANCHES HAND OVER THE RETRY, and the reboot one has to: the entry's own text promises
+        // "(click to retry)", and a message whose text promises an action has to carry that action with it,
+        // whoever raises it — in the one state where a retry is the only recovery short of a reboot, and with no
+        // other way to reach the installer again (RulesNeeded() is false, so the offer itself never comes back).
+        // The raise itself is idempotent: an entry already on the list is refreshed, not stacked, and its read
+        // flag is kept (NotificationCenter.Raise).
         if (_accessRebootPending) _vm.SetHardwareAccessRebootPending(RequestHardwareAccess);
         else if (HardwareAccess.RulesNeeded()) _vm.SetHardwareAccessNeeded(RequestHardwareAccess);
     }
 
-    /// <summary>What the banner's click does, named once so the offer and the pending-reboot retry cannot come to
-    /// mean different things. Fire-and-forget on purpose: the install reports through the banner and the status
-    /// line, and the click handler may not be awaited.</summary>
+    /// <summary>What a click on the hardware-access notification does, named once so the offer and the
+    /// pending-reboot retry cannot come to mean different things. Fire-and-forget on purpose: the install reports
+    /// through the notification and the status line, and the click handler may not be awaited.</summary>
     private void RequestHardwareAccess() => _ = GrantHardwareAccessAsync();
 
     // ---- update check + apply ----
@@ -336,7 +360,14 @@ internal sealed class AppController
     {
         var info = await _updates.CheckAsync();
         if (info == null) return;   // current / offline / no releases -> nothing shown
+        _updateSchedule.Announce(info);   // the schedule decides whether this release is news (see its docstring)
+    }
 
+    /// <summary>Announce a found release. This is the schedule's callback and therefore the ONLY path to the
+    /// notification and the tray item: if it ever stopped being called the failure is loud (nothing announced)
+    /// rather than silent (nothing checked).</summary>
+    private void AnnounceUpdate(UpdateInfo info)
+    {
         // Real self-update where we can: the Windows MSI install upgrades in place via msiexec; a Linux
         // AppImage self-replaces. Anything else (portable/dev run, RPM, missing asset) opens the release page.
         var msi = WindowsUpdater.IsSupported ? WindowsUpdater.PickAsset(info.Assets) : null;
@@ -348,8 +379,8 @@ internal sealed class AppController
 
         Dispatcher.UIThread.Post(() =>
         {
-            _pendingUpdate = (info.Version, act);   // remembered so a language rebuild can re-show it
-            ApplyUpdateBanner();
+            _pendingUpdate = (info.Version, act);   // remembered so a language rebuild can re-state it
+            ApplyUpdate();
         });
     }
 
@@ -390,16 +421,16 @@ internal sealed class AppController
     {
         // THE PROMPT COMES FIRST, and it is not a formality to click through: the install asks for the
         // administrator password, replaces files in /etc and, on an Acer, writes an options line that changes how
-        // the acer-wmi driver behaves at LOAD — a consequence the banner's "Grant hardware access…" caption does
-        // not state and that a user cannot be read as having agreed to. The prompt lists exactly what the
+        // the acer-wmi driver behaves at LOAD — a consequence the notification's "Grant hardware access…" sentence
+        // does not state and that a user cannot be read as having agreed to. The prompt lists exactly what the
         // install will place, from the installer's own table (see HardwareAccessConsent), so what is agreed to
         // cannot drift from what runs.
         //
         // Declining returns HERE, with nothing installed and no state touched: the files are untouched, the
-        // banner stays where it was, and the offer can be taken later. That is the whole of "cancel" — the
+        // notification stays on the bell, and the offer can be taken later. That is the whole of "cancel" — the
         // privileged mechanism below is exactly what it was, reached one answer later.
         //
-        // Called before the first await, so it is on the UI thread (the banner command's) where the dialog must
+        // Called before the first await, so it is on the UI thread (the entry's click) where the dialog must
         // be shown.
         if (!await _windows.ConfirmHardwareAccessAsync()) return;
 
@@ -412,7 +443,7 @@ internal sealed class AppController
                 // has to restart to see the sysfs paths it cached at construction.
                 case HardwareAccess.AccessInstall.Applied:
                     _accessRebootPending = false;   // a retry that took clears the reboot state for good
-                    _vm.NeedsHardwareAccess = false;
+                    _vm.ClearHardwareAccess();      // ...and takes the entry off the bell, whichever one it was
                     Notify(Loc.T("Hardware access granted — restart to use the unlocked controls."));
                     break;
                 // The files are in /etc but the parameters are not live: acer_wmi could not be reloaded (in use,
@@ -424,12 +455,13 @@ internal sealed class AppController
                 // TWO places are told, each for what it is good at. The status line gives the immediate feedback
                 // and is gone in seconds — the refresh timer overwrites Status from the device on every tick, and
                 // on this backend that message is never empty, so an instruction that must survive has no home
-                // there. The BANNER is the persistent surface, so it stays visible with the reboot wording
-                // (NeedsHardwareAccess deliberately NOT cleared: the install is idempotent, so once the files are
-                // in /etc the offer never comes back, and clearing it would leave the user at a dead end until
-                // the next boot).
+                // there. The NOTIFICATION is the persistent surface, so it stays on the bell with the reboot
+                // wording, and it is NOT retracted here — the raise below is what puts it there, and nothing later
+                // takes it off except the user ignoring it or the install finally taking (the branch above). The
+                // install is idempotent, so once the files are in /etc the offer never comes back, and a message
+                // dropped here would leave the user at a dead end until the next boot.
                 case HardwareAccess.AccessInstall.PendingReboot:
-                    _accessRebootPending = true;   // remembered so a language rebuild re-shows the banner
+                    _accessRebootPending = true;   // remembered so a language rebuild re-states the condition
                     _vm.SetHardwareAccessRebootPending(RequestHardwareAccess);   // and the retry travels with it
                     Notify(Loc.T("Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot."));
                     break;
@@ -685,7 +717,7 @@ internal sealed class AppController
             if (profileChanged)
             {
                 _lastProfileId = profileId;
-                flash = current?.FlashColor;
+                flash = _svc.FlashColorOf(current);
             }
 
             // ---- the CPU-power row's prime (wave 6) ----
@@ -767,6 +799,7 @@ internal sealed class AppController
         if (_exiting) return;
         _exiting = true;
         _timer.Stop();
+        _updateSchedule.Dispose();   // stops the periodic check and unsubscribes the wake hook (its Linux half owns a gdbus child)
         GateStatsLog.Write();   // inline, not queued: a task started here might never get to run
         _lightingCoord.Dispose();
         _tray.Dispose();

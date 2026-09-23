@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Tests;
 
@@ -46,8 +47,11 @@ public class AcerProfilesTests
     }
 
     /// <summary>Every column of the table, one profile per case, so a failure names the profile rather than
-    /// pointing at a diff. <c>Flash</c> is the colour the EC firmware paints the operating-mode indicator, and
-    /// the comment in the source says these are the only colours the firmware accepts on that write — sending
+    /// pointing at a diff. These are the table's answers ABOUT a profile and not fields ON it: the class and both
+    /// colours come off <see cref="AcerProfiles.TraitsOf"/> since 2026-09-22, and the record itself carries its id
+    /// and its display name. The values are unchanged, and that is the point of still asserting them here — the
+    /// move was a move. <c>Flash</c> is the colour the EC firmware paints the operating-mode indicator, and the
+    /// comment in the source says these are the only colours the firmware accepts on that write — sending
     /// anything else reverts to amber, which is why they are worth freezing exactly.</summary>
     [Theory]
     [InlineData(0x06, "Eco", ProfileKind.Eco, 0x43A047, 0x00DC10)]
@@ -59,16 +63,17 @@ public class AcerProfilesTests
     {
         var fromTable = AcerProfiles.All.Single(p => p.Id == b.ToString());
         Assert.Equal(name, fromTable.DisplayName);
-        Assert.Equal(kind, fromTable.Kind);
-        Assert.Equal(C(accent), fromTable.Accent);
-        Assert.Equal(C(flash), fromTable.FlashColor);
+        Assert.Equal(new PerformanceProfile(b.ToString(), name), fromTable);   // the id and the label, nothing else
+        Assert.Equal(kind, AcerProfiles.TraitsOf(fromTable).Kind);
+        Assert.Equal(C(accent), AcerProfiles.TraitsOf(fromTable).Accent);
+        Assert.Equal(C(flash), AcerProfiles.TraitsOf(fromTable).FlashColor);
 
         // ...and ToDomain(byte) agrees with the table row it stands for.
         var fromByte = AcerProfiles.ToDomain((byte)b);
         Assert.Equal(name, fromByte.DisplayName);
-        Assert.Equal(kind, fromByte.Kind);
-        Assert.Equal(C(accent), fromByte.Accent);
-        Assert.Equal(C(flash), fromByte.FlashColor);
+        Assert.Equal(kind, AcerProfiles.TraitsOf(fromByte).Kind);
+        Assert.Equal(C(accent), AcerProfiles.TraitsOf(fromByte).Accent);
+        Assert.Equal(C(flash), AcerProfiles.TraitsOf(fromByte).FlashColor);
     }
 
     /// <summary>The load-bearing invariant: <c>ToByte(ToDomain(b)) == b</c> for EVERY byte, not just the five
@@ -94,17 +99,35 @@ public class AcerProfilesTests
     /// <summary>An unrecognised byte is described as <see cref="ProfileKind.Other"/> and labelled with its hex
     /// value, so the UI shows something honest instead of picking a wrong profile. Accent and Flash are null:
     /// the app must not invent an accent for a profile it knows nothing about, and there is no flash colour it
-    /// could legitimately send.</summary>
+    /// could legitimately send — the lookup answers <see cref="ProfileTraits.Unknown"/> for it rather than the
+    /// nearest of the five, which is why it is table-keyed and not a fallback chain.</summary>
     [Fact]
     public void AnUnknownByteBecomesAnOtherProfileNamedAfterTheByte()
     {
         var p = AcerProfiles.ToDomain(0x1F);
 
-        Assert.Equal(ProfileKind.Other, p.Kind);
+        Assert.Equal(ProfileKind.Other, AcerProfiles.TraitsOf(p).Kind);
         Assert.Equal("0x1F", p.DisplayName);
         Assert.Equal("31", p.Id);
-        Assert.Null(p.Accent);
-        Assert.Null(p.FlashColor);
+        Assert.Null(AcerProfiles.TraitsOf(p).Accent);
+        Assert.Null(AcerProfiles.TraitsOf(p).FlashColor);
+    }
+
+    /// <summary>The lookup REFUSES what is not its own — the one thing a class-carrying record could never say,
+    /// because the field was whatever the builder passed. A profile that never came from this table (another
+    /// backend's id, the empty id) and an id that is a number but not a byte both answer
+    /// <see cref="ProfileTraits.Unknown"/>. The last one is the load-bearing case: <see cref="AcerProfiles.ToByte"/>
+    /// THROWS on <c>"300"</c>, and this lookup must not — it is a QUERY about a profile the app may be holding
+    /// while some other source owns the machine, exactly like <see cref="AcerProfiles.ToChoiceName"/>, and
+    /// "not ours" has to be an answer rather than an exception.</summary>
+    [Theory]
+    [InlineData("power-saver")]
+    [InlineData("")]
+    [InlineData("300")]
+    [InlineData("0x05")]     // the hex spelling its DisplayName uses for unknown bytes, which its Id never does
+    public void AProfileThatDidNotComeFromThisTableHasNoTraits(string id)
+    {
+        Assert.Equal(ProfileTraits.Unknown, AcerProfiles.TraitsOf(new PerformanceProfile(id, "Foreign")));
     }
 
     /// <summary><see cref="AcerProfiles.ToByte"/> is public and parses the profile's <c>Id</c> as a byte, but
@@ -120,7 +143,7 @@ public class AcerProfilesTests
     [InlineData("", typeof(FormatException))]
     public void ToByteRefusesAProfileThatDidNotComeFromThisTable(string id, Type expected)
     {
-        var foreign = new PerformanceProfile(id, "Foreign", ProfileKind.Quiet);
+        var foreign = new PerformanceProfile(id, "Foreign");
 
         Assert.Throws(expected, () => AcerProfiles.ToByte(foreign));
     }
@@ -167,9 +190,7 @@ public class AcerProfilesTests
         Assert.NotNull(fromToken);
         Assert.Equal(b.ToString(), fromToken.Id);            // the Acer id is the byte, in decimal
         Assert.Equal(profile.DisplayName, fromToken.DisplayName);
-        Assert.Equal(profile.Kind, fromToken.Kind);
-        Assert.Equal(profile.Accent, fromToken.Accent);
-        Assert.Equal(profile.FlashColor, fromToken.FlashColor);
+        Assert.Equal(AcerProfiles.TraitsOf(profile), AcerProfiles.TraitsOf(fromToken));
     }
 
     /// <summary>THE TRAP, stated as the one assertion that would catch it: the kernel's <c>"performance"</c> is
@@ -189,14 +210,14 @@ public class AcerProfilesTests
         Assert.NotNull(turbo);
         Assert.Equal("5", turbo.Id);                       // 0x05, the EC's Turbo byte
         Assert.Equal("Turbo", turbo.DisplayName);
-        Assert.Equal(ProfileKind.Turbo, turbo.Kind);       // NOT ProfileKind.Performance
+        Assert.Equal(ProfileKind.Turbo, AcerProfiles.TraitsOf(turbo).Kind);   // NOT ProfileKind.Performance
 
         var performance = AcerProfiles.FromChoiceName("balanced-performance");
 
         Assert.NotNull(performance);
         Assert.Equal("4", performance.Id);                 // 0x04
         Assert.Equal("Performance", performance.DisplayName);
-        Assert.Equal(ProfileKind.Performance, performance.Kind);
+        Assert.Equal(ProfileKind.Performance, AcerProfiles.TraitsOf(performance).Kind);
     }
 
     /// <summary>Round trip through the choice name for every profile in the table, in both directions. The
@@ -259,7 +280,7 @@ public class AcerProfilesTests
     [Fact]
     public void AForeignProfileIdHasNoChoiceName()
     {
-        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("power-saver", "Power saver", ProfileKind.Eco)));
-        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("", "Empty", ProfileKind.Other)));
+        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("power-saver", "Power saver")));
+        Assert.Null(AcerProfiles.ToChoiceName(new PerformanceProfile("", "Empty")));
     }
 }

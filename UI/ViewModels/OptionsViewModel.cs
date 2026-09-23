@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -105,7 +106,9 @@ public sealed class OptionsViewModel : SectionViewModel
         // the performance profile is chosen for you rather than about a piece of hardware.
         foreach (var c in o.ProfileChoices) vm.Rows.Add(new ChoiceRowViewModel(c, post));
 
-        if (device.PowerProfiles?.All.Any(p => p.Kind == ProfileKind.Turbo) ?? false)
+        // The row exists when the machine HAS a Turbo profile, and which modes those are is the offering port's
+        // own reading (ProfileTraits) — the profile record stopped carrying the class on 2026-09-22.
+        if (device.PowerProfiles is { } tpp && tpp.All.Any(p => ProfileTraits.Of(tpp, p).Kind == ProfileKind.Turbo))
             vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), o.TurboToggles, true, o.SetTurboToggles,
                 tip: Loc.T("Otherwise the Turbo key cycles through profiles."), post: post));
 

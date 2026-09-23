@@ -1,6 +1,7 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Lighting;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;
 using AcerHelper.UI.ViewModels;
@@ -185,7 +186,7 @@ public class LightingDrawerTests
     {
         var d = new FakeDevice();
         return new MainViewModel(d, new UiActions(
-            new ProfileActions(_ => { }, TurboToggles: false, _ => { }),
+            new ProfileActions(_ => { }, TurboToggles: false, _ => { }, _ => ProfileTraits.Unknown),
             // The same values the absent presets stand for: Auto at the schema's default 70/70, the default ramp
             // in each fan's unused curve field, and stock 0/0 offsets. This file is about the lighting section;
             // these two are fillers either way. (An EMPTY curve would not do as the filler: a FanSettings is one
@@ -198,7 +199,7 @@ public class LightingDrawerTests
             new CoSection([], [], _ => { }),
             new BatterySection(d.Battery, null, null, null),
             new OptionsSection([], [], [], TurboToggles: false, _ => { }, _ => { }, _ => { },
-                               AppLanguage.System, _ => { })), lighting);
+                               AppLanguage.System, _ => { })), lighting, new NotificationCenter());
     }
 
     /// <summary>The section as <c>AppController.BuildUi</c> builds it: one device and one mode's lighting as the

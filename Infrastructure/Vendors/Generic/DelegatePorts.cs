@@ -49,17 +49,26 @@ public sealed class FanPort(FanCapability capability,
 }
 
 /// <summary>Performance/platform profiles. The profile set/mapping is vendor data (e.g. <c>AcerProfiles</c>);
-/// only reading the current/available set and applying one is a transport op.</summary>
+/// only reading the current/available set and applying one is a transport op.
+///
+/// <paramref name="traits"/> is that same vendor data seen from the other side — which class each of these modes
+/// belongs to and the colours it is painted with (<see cref="ProfileTraits"/>, the per-profile presentation that
+/// used to travel on the profile record). It is a parameter here because this holder's <c>all</c> IS the table:
+/// the caller passes the table's lookup, so the set offered and the set classified are one list. Null means this
+/// port classifies nothing, and every profile then reads as <see cref="ProfileTraits.Unknown"/>.</summary>
 public sealed class ProfilesPort(IReadOnlyList<PerformanceProfile> all,
     Func<IReadOnlyList<PerformanceProfile>> selectable,
     Func<PerformanceProfile?> current,
-    Func<PerformanceProfile, (bool ok, string? error)> set) : IPowerProfiles
+    Func<PerformanceProfile, (bool ok, string? error)> set,
+    IProfileTraits? traits = null) : IPowerProfiles, IProfileTraits
 {
     public string? LastError { get; private set; }
     public IReadOnlyList<PerformanceProfile> All => all;
     public IReadOnlyList<PerformanceProfile> Selectable() => selectable();
     public PerformanceProfile? Current() => current();
     public bool Set(PerformanceProfile profile) { var (ok, e) = set(profile); LastError = e; return ok; }
+
+    public ProfileTraits Traits(PerformanceProfile profile) => traits?.Traits(profile) ?? ProfileTraits.Unknown;
 }
 
 /// <summary>Discrete brightness levels (0 - Max) for a plain, non-RGB keyboard backlight.</summary>

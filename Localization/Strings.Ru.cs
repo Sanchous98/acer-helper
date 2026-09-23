@@ -18,6 +18,13 @@ internal static partial class Strings
         ["Done"]                    = "Готово",
         ["Start"]                   = "Начать",
 
+        // ---- notifications (the bell's drop-down) ----
+        // The bell hides the messages that used to be banners, so the count on it and the words that open and
+        // dismiss the list are the whole of how the user finds them.
+        ["Notifications"]           = "Уведомления",
+        ["No notifications."]       = "Уведомлений нет.",
+        ["Ignore"]                  = "Проигнорировать",
+
         // ---- section headers ----
         ["PERFORMANCE"]             = "ПРОИЗВОДИТЕЛЬНОСТЬ",
         ["FANS"]                    = "ВЕНТИЛЯТОРЫ",
@@ -158,8 +165,9 @@ internal static partial class Strings
         // app's own restart cannot load a module, and only a reboot can. Deliberately not the string above.
         ["Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot."]
             = "Доступ к оборудованию предоставлен — драйвер acer-wmi не удалось перезагрузить, поэтому новые параметры модуля вступят в силу после перезагрузки системы.",
-        // The same case, in the BANNER: it is the only text that survives the refresh loop, so the reboot order
-        // lives here rather than in a status line that the next tick replaces (see MainViewModel).
+        // The same case, in the NOTIFICATION behind the bell: that list is the only surface that survives the
+        // refresh loop, so the reboot order lives here rather than in a status line that the next tick replaces
+        // (see MainViewModel.SetHardwareAccessRebootPending).
         ["Restart your computer to finish enabling the unlocked controls (click to retry)."]
             = "Перезагрузите компьютер, чтобы включить разблокированные функции (нажмите, чтобы повторить попытку).",
         ["Grant access failed"]     = "Не удалось предоставить доступ",
