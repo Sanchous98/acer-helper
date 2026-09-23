@@ -10,34 +10,27 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // the session probe, and the D-Bus read that verifies a write landed.
 //
 // MEASURED ON THIS MACHINE (KWin 6.7.5, 2026-09-20), because each of these is a trap otherwise:
-//   * THE WRITES MUST NOTIFY. `kwriteconfig6` without `--notify` writes the file and tells nobody, and KWin does
-//     not re-read its configuration by itself: it keeps using its in-memory copy. Measured both ways — with
-//     `--notify` a write takes effect at once, and without it KWin stayed at `enabled=false, mode=1,
-//     currentTemperature=6500` no matter what was written, and stayed there even with an
-//     `org.kde.KWin.reconfigure` call after every write. `reconfigure` is therefore NOT used anywhere in this
-//     file. The same fact applies to the release path: putting the original file back does not switch a running
-//     tint off until KWin is notified, which is why the restore writes notify too and why the release is verified
-//     against the compositor rather than against the file.
-//   * `Mode` is written as the INTEGER (see KwinConfig in the un-suffixed half); the choice NAME is a silent
-//     no-op that KWin reads as its own default.
+//   * THE WRITES MUST NOTIFY. `kwriteconfig6` without `--notify` writes the file and tells nobody, and KWin keeps
+//     using its in-memory copy. Measured both ways — with `--notify` a write takes effect at once, and without it
+//     KWin stayed at `enabled=false, mode=1, currentTemperature=6500` no matter what was written, and stayed there
+//     even with an `org.kde.KWin.reconfigure` call after every write. `reconfigure` is therefore NOT used anywhere
+//     in this file.
+//   * `Mode` is written as the INTEGER (see KwinConfig in the un-suffixed half); the choice NAME is a silent no-op
+//     that KWin reads as its own default.
 //   * `kreadconfig6 --file kwinrc --group NightColor --key X` answers EMPTY, with exit status 0, for a key that is
-//     not in the file — so "absent" is read from an empty answer, never from a failure. That is what makes an
-//     absent key restorable (delete it again) rather than being replaced by the default it resolves to.
+//     not in the file — so "absent" is read from an empty answer, never from a failure.
 //   * `--file` takes a BARE NAME resolved in the user's config directory, which is what KWin itself opens; a path
 //     would bypass XDG_CONFIG_HOME. (`--file probe.ini` writing to ~/.config/probe.ini is how that was found.)
 //   * One `kreadconfig6`/`kwriteconfig6` call is ~6 ms, so a write set costs a handful of process spawns — which
-//     matters because Apply runs on the UI thread. The one slow case is a LEVEL CHANGE while the filter is
-//     already on: verifying it requires KWin's 2000 ms quick-adjust walk to finish, so that click can take up to
-//     the Commit timeout below. Moving Apply off the UI thread would be the fix, and it is not this file's to make
-//     (the call site is LaptopService.SetBlueLight).
-//   * Reads do NOT include the global config files, which is exactly right here: the file this link restores is
-//     the USER's kwinrc, so a value that came from /etc/xdg must not be promoted into it. (No distribution ships a
-//     NightColor group, and the group only appears once a user configures night light, so the effective and
-//     per-user values are the same in practice.)
+//     matters because Apply runs on the UI thread. The one slow case is a LEVEL CHANGE while the filter is already
+//     on: verifying it requires KWin's 2000 ms quick-adjust walk to finish, so that click can take up to the Commit
+//     timeout below.
+//   * Reads do NOT include the global config files, which is right here: the file this link restores is the USER's
+//     kwinrc, so a value that came from /etc/xdg must not be promoted into it.
 //
 // WHY ITS OWN busctl RUNNER rather than the Busctl class in PowerProfiles.Linux.cs: that one is hard-wired to
 // --system and is shared with power-profiles-daemon and UPower. The KWin interface is per-SESSION, so every call
-// here has to carry --user; the two are different buses with different failure modes.
+// here has to carry --user.
 
 /// <summary>
 /// The <c>busctl --user</c> calls to KWin's night light, and the parse of its <c>GetAll</c> payload — the read side
@@ -57,7 +50,7 @@ internal static class KwinNightLightBus
 
     /// <summary>Whether a session bus answers this process at all. Asked of the bus daemon itself
     /// (<c>org.freedesktop.DBus.ListNames</c>), which exists on every session bus, so a failure here really does
-    /// mean "no session bus" and not "no KWin night light" — the two cases the chain's probe separates.</summary>
+    /// mean "no session bus" and not "no KWin night light".</summary>
     internal static bool SessionBusReachable()
         => Call("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames").code == 0;
 
@@ -123,9 +116,7 @@ internal static class KwinConfigFile
     /// SIZED FOR THE RAMP, not for a round trip. Enabling the night light applies the temperature at once, but
     /// CHANGING it while already enabled goes through KWin's quick-adjust, which walks currentTemperature towards
     /// the target in 50 K steps over QUICK_ADJUST_DURATION = 2000 ms. Since the verification requires the CURRENT
-    /// temperature (see NightLightState.Holds), a level change is only confirmable when that walk has finished, so
-    /// the wait has to outlast it. The loop still exits on the first poll that sees the state, which is the usual
-    /// case for the first apply.
+    /// temperature (see NightLightState.Holds), the wait has to outlast that walk.
     /// </summary>
     private const int CommitTimeoutMs = 2500;
 
@@ -151,9 +142,8 @@ internal static class KwinConfigFile
     /// Wait for the compositor to reach the state asked for: holding <paramref name="expected"/> degrees, or — when
     /// it is null — off with nothing being applied.
     ///
-    /// NO <c>reconfigure</c> HERE, and that is deliberate: it was measured not to help. KWin acts on the
-    /// configuration when it is NOTIFIED of the change, which the writes do; a reconfigure call on its own, with a
-    /// silently-written file, left KWin on its in-memory copy every time. If the state does not arrive within the
+    /// NO <c>reconfigure</c> HERE, deliberately: it was measured not to help — a reconfigure call on its own, with
+    /// a silently-written file, left KWin on its in-memory copy every time. If the state does not arrive within the
     /// timeout the caller's verification is what decides, and a failed verification rolls the write back.
     /// </summary>
     internal static void Commit(int? expected)

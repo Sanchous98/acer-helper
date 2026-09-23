@@ -3,10 +3,9 @@ using AcerHelper.Domain;
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // The blue-light CHAIN and the policy every link in it shares. UN-SUFFIXED deliberately, for the reason
-// AcerProfilePorts.cs, AcerFanPort.cs and KwinTint.cs all state at length: the test project targets
-// net10.0-windows while AcerHelper.csproj excludes **/*.Linux.cs from that TFM, so policy left in a Linux file
-// cannot be reached by the suite at all. Each link keeps its transport in its own *.Linux.cs half and arrives
-// here as delegates.
+// AcerProfilePorts.cs and KwinTint.cs state at length: the test project targets net10.0-windows while
+// AcerHelper.csproj excludes **/*.Linux.cs from that TFM, so policy left in a Linux file cannot be reached by the
+// suite at all. Each link keeps its transport in its own *.Linux.cs half and arrives here as delegates.
 //
 // THE CHAIN, in order, each falling through when its environment is not there:
 //
@@ -16,22 +15,18 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 //   4. wlr-gamma-control         (only where the compositor advertises it — not on KWin; see TintProbe)
 //   5. nothing — the port is null and the Options row hides. Never a link that cannot actually change the screen.
 //
-// WHY A CONFIG ROUTE AT ALL, given the compositor also exposes preview()/stopPreview() over D-Bus, which is
-// exact and self-clearing. That route was measured end to end and REJECTED: a preview lasts 15 s and re-arming
-// it — the only way to make it persistent — makes KWin pop its "Color Temperature Preview" OSD on every re-arm
-// (measured: two calls on the bus, two showText and two osdText). A popup every few seconds is not parity with
-// the Win32 gamma ramp, which is silent. Writing the compositor's own night-light settings is silent, persistent
-// and REVERSIBLE, and it is what the desktop's own settings dialog does. The preview measurements are kept in
-// docs/acer-linux.md as the reason it is not used here.
+// WHY A CONFIG ROUTE AT ALL, given the compositor also exposes preview()/stopPreview() over D-Bus. That route was
+// measured end to end and REJECTED: a preview lasts 15 s and re-arming it — the only way to make it persistent —
+// makes KWin pop its "Color Temperature Preview" OSD on every re-arm (measured: two calls on the bus, two showText
+// and two osdText). The preview measurements are kept in docs/acer-linux.md as the reason it is not used here.
 
 /// <summary>
 /// One candidate in the chain: a name (for the tests and for the order this file documents) and a probe that
 /// answers with the port, or null when this environment cannot be served by that link.
 ///
-/// The probe runs ONCE, when the chain is built, and that is the whole of the chain's fall-through: a link whose
-/// environment is absent is simply not the link. It is deliberately not retried per <see cref="IDisplayTint.Apply"/>
-/// — silently moving a user's click onto a different mechanism mid-flight would make a failure invisible and could
-/// change the rendering under them. An apply that fails reports false and stays put.
+/// The probe runs ONCE, when the chain is built, and that is the whole of the chain's fall-through. It is
+/// deliberately not retried per <see cref="IDisplayTint.Apply"/> — silently moving a user's click onto a different
+/// mechanism mid-flight would make a failure invisible.
 /// </summary>
 internal readonly record struct TintLink(string Name, Func<IDisplayTint?> Probe);
 
@@ -42,11 +37,9 @@ internal readonly record struct TintLink(string Name, Func<IDisplayTint?> Probe)
 ///
 /// IT IS ALSO THE PORT THE DEVICE RELEASES, and that is not decoration. Two of the links — KWin's and GNOME's —
 /// work by writing the user's OWN configuration and putting it back on the way out (KwinConfigTint.Dispose →
-/// Release, GnomeConfigTint the same), because a tint implemented as a configuration write survives the process
-/// that wrote it. The device releases what it owns (<c>Device.Own</c> takes an IDisposable), and what it is
-/// handed is THIS object, so a chain that cannot be disposed is a release that never reaches those two links:
-/// <c>kwinrc</c> keeps <c>Active=true</c> at this app's temperature after the user quits, and KWin goes on
-/// tinting a screen the app is no longer running behind — the exact opposite of the rule the links state.
+/// Release, GnomeConfigTint the same). The device releases what it owns through <c>Device.Own</c>, and a chain
+/// that cannot be disposed is a release that never reaches those two links: <c>kwinrc</c> keeps
+/// <c>Active=true</c> at this app's temperature after the user quits.
 /// </summary>
 internal sealed class DisplayTintChain(string activeName, IDisplayTint active) : IDisplayTint, IDisposable
 {
@@ -61,11 +54,9 @@ internal sealed class DisplayTintChain(string activeName, IDisplayTint active) :
 
     public bool Apply(int level) => active.Apply(level);
 
-    /// <summary>Release the chosen link, if it has anything to release. Forwarded rather than absorbed, for the
-    /// reason the class comment gives: the settings-writing links put the user's configuration back here and
-    /// nowhere else. A link that is not disposable holds nothing to give back — the X11 gamma ramp is the
-    /// process's own X connection and the server drops its ramp with the client — so it is skipped rather than
-    /// required to implement a no-op.</summary>
+    /// <summary>Release the chosen link, if it has anything to release. A link that is not disposable holds
+    /// nothing to give back — the X11 gamma ramp is the process's own X connection and the server drops its ramp
+    /// with the client — so it is skipped rather than required to implement a no-op.</summary>
     public void Dispose()
     {
         if (active is IDisposable owned) owned.Dispose();
@@ -98,31 +89,25 @@ internal static class TintProbe
     /// Plasma starts XWayland, so <c>xrandr --query</c> SUCCEEDS and reports "DP-1 connected primary 3440x1440"
     /// (measured). The old single-condition probe therefore returned true, the port was created, and
     /// <c>xrandr --gamma</c> wrote into XWayland's ramp — which is not the path the screen is composed from, so
-    /// nothing happened. The owner's report was exactly that: the row was there and did nothing.
-    ///
-    /// On a Wayland session the compositor owns colour and an X11 gamma ramp cannot reach it, whatever XWayland
-    /// answers. On a real X11 session (KWin or otherwise) it is the right, silent, config-free lever, and it wins
-    /// the chain there.
+    /// nothing happened. On a real X11 session it is the right, silent, config-free lever, and it wins the chain.
     /// </summary>
     internal static bool X11GammaWorks(bool xrandrFoundOutputs, bool sessionIsWayland)
         => xrandrFoundOutputs && !sessionIsWayland;
 
     /// <summary>
-    /// Whether KWin's own night-light SETTINGS can be written. All three facts are separate machines: no session
-    /// bus at all; a session whose compositor has no night-light interface (an X11 session under another window
-    /// manager — the X11 link's territory); and a KWin that has the interface but reports <c>available=false</c>,
-    /// where a write would be accepted and change nothing.
+    /// Whether KWin's own night-light SETTINGS can be written: no session bus at all; a session whose compositor
+    /// has no night-light interface (an X11 session under another window manager); and a KWin that has the
+    /// interface but reports <c>available=false</c>, where a write would be accepted and change nothing.
     ///
     /// Whether the USER's own night light is enabled is deliberately NOT part of this: that is checked per apply
-    /// against the config itself, because it changes while the app runs and because the answer decides whether the
-    /// app says something rather than whether the mechanism exists.
+    /// against the config itself, because it changes while the app runs.
     /// </summary>
     internal static bool KwinConfigUsable(bool busReachable, bool interfacePresent, bool compositorAvailable)
         => busReachable && interfacePresent && compositorAvailable;
 
     /// <summary>Whether GNOME's night light can be written: <c>gsettings</c> is on PATH and the colour schema it
     /// would write into is installed. The schema is the real test — <c>gsettings</c> ships on KDE systems too,
-    /// where the schema is absent, and a write without it fails.</summary>
+    /// where the schema is absent.</summary>
     internal static bool GnomeUsable(bool gsettingsPresent, bool colourSchemaPresent)
         => gsettingsPresent && colourSchemaPresent;
 }
@@ -130,22 +115,19 @@ internal static class TintProbe
 /// <summary>
 /// The five UI levels as colour temperatures in kelvin — the ladder the two temperature-based links share (KWin's
 /// night light and GNOME's). The level <i>vocabulary</i> is a cross-OS contract: the Options row builds its names
-/// from <see cref="Count"/> and the same Off/Low/Medium/High/Long-use list serves the Windows gamma ramp, the X11
-/// one and these, so the count and the ordering are fixed by that contract and only the temperatures are these
-/// links' own.
+/// from <see cref="Count"/>, so the count and the ordering are fixed by that contract and only the temperatures
+/// are these links' own.
 ///
 /// THEY ARE NOT THE SAME COLOUR AS THE GAMMA-RAMP LINKS, and that is inherent rather than a defect to fix. The
-/// Windows ramp and the X11 ramp scale the BLUE CHANNEL only (1.00/0.85/0.70/0.60/0.50), which does not move the
-/// white point along the Planckian locus at all: it tilts white towards yellow-green, and the correlated colour
-/// temperature of the result runs the WRONG WAY (0.50 blue computes to ≈6235 K against neutral's ≈4664 K by
-/// McCamy), so no honest "equivalent temperature" can be derived from those tables. So this ladder is a
-/// conventional warm ladder of the kind redshift/gammastep use — each step a real blackbody shift, which is the
-/// better colour of the two — and the links agree on the level NAMES and the direction, not on the rendering.
+/// Windows and X11 ramps scale the BLUE CHANNEL only (1.00/0.85/0.70/0.60/0.50), which does not move the white
+/// point along the Planckian locus: the correlated colour temperature of the result runs the WRONG WAY (0.50 blue
+/// computes to ≈6235 K against neutral's ≈4664 K by McCamy). So this ladder is a conventional warm ladder of the
+/// kind redshift/gammastep use, and the links agree on the level NAMES and the direction, not on the rendering.
 /// </summary>
 internal static class NightTintLevels
 {
     /// <summary>Neutral white. KWin's own <c>DEFAULT_DAY_TEMPERATURE</c> (read from its source: constants.h) and
-    /// already the observed value when nothing is applied; also the ceiling KWin clamps a temperature to.</summary>
+    /// already the observed value when nothing is applied.</summary>
     internal const int Neutral = 6500;
 
     // Off is never written: level 0 releases instead (see each adapter's Apply). The four warm steps are
@@ -159,26 +141,22 @@ internal static class NightTintLevels
     /// which is what "off" means; callers release rather than ask for it.</summary>
     internal static int TemperatureFor(int level) => Kelvin[Math.Clamp(level, 0, Kelvin.Length - 1)];
 
-    /// <summary>Clamp to what the compositor will accept, at the top end only. 6500 is KWin's own ceiling for a
-    /// night temperature (<c>DEFAULT_DAY_TEMPERATURE</c>, from constants.h); the FLOOR is KWin's too
-    /// (<c>MIN_TEMPERATURE = 1000</c>, same file, measured) so no constant of ours is invented for it, and the
-    /// ladder never goes near either bound anyway (3000..4500). GNOME's schema clamps to its own floor in the same
-    /// spirit.</summary>
+    /// <summary>Clamp at the top end only. 6500 is KWin's own ceiling for a night temperature
+    /// (<c>DEFAULT_DAY_TEMPERATURE</c>, from constants.h); the FLOOR is KWin's too (<c>MIN_TEMPERATURE = 1000</c>,
+    /// same file, measured), and the ladder never goes near either bound anyway (3000..4500).</summary>
     internal static int Clamp(int temperature) => Math.Min(temperature, Neutral);
 }
 
 /// <summary>
 /// One setting as it was <b>before</b> the app touched it, as read out of the config file.
 /// <see cref="Value"/> null means the key was ABSENT, which is not the same as present-and-empty: restoring an
-/// absent key means DELETING it so the application's own built-in default applies again, where writing back the
-/// default it happens to resolve to would leave a key the user never had. Every remember/restore path in the
-/// config-writing links goes through this distinction.
+/// absent key means DELETING it so the application's own built-in default applies again.
 /// </summary>
 internal readonly record struct TintPrior(string Key, string? Value)
 {
     internal bool WasAbsent => Value is null;
 
-    /// <summary>The string this prior should be written back as, or null when the key must be deleted — the one
-    /// expression both restore paths share, so "delete what was absent" cannot be forgotten in one of them.</summary>
+    /// <summary>The string this prior should be written back as, or null when the key must be deleted — shared by
+    /// both restore paths, so "delete what was absent" cannot be forgotten in one of them.</summary>
     internal string? RestoreValue => Value;
 }

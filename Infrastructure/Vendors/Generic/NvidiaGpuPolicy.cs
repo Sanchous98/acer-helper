@@ -5,23 +5,17 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // THE GPU CLOCK-OFFSET POLICY, IN AN UN-SUFFIXED FILE, for the reason AcerFanPort.cs and CurveOptimizerPolicy.cs
 // state at length: the test project targets net10.0-windows while AcerHelper.csproj's <Compile Remove> keeps
 // **/*.Linux.cs out of that TFM, so policy left in NvidiaGpu.Linux.cs cannot be reached by the suite at all. What
-// a port of this axis needs proved is therefore all here — the availability gate's decision, the safety caps and
-// the degenerate-range fallback, the clamping, the write/confirm ORDER and the NVML return-code vocabulary — and
-// what stays in the OS files is I/O: NvAPI function pointers on Windows, NVML entry points on Linux.
+// stays in the OS files is I/O: NvAPI function pointers on Windows, NVML entry points on Linux.
 //
-// IT IS THE AXIS'S SHARED POLICY, NOT THE LINUX ONE'S, and the Windows port now consumes the two rules below
-// (<see cref="Cap"/> and <see cref="ClampOffset"/>) rather than carrying a private copy. That is a decision rather
-// than a convenience: the caps are a SAFETY rule whose whole purpose is that a slider drag cannot reach an extreme
-// offset (NVIDIA XID 62), and two OS-local copies of a safety rule are exactly the thing that drifts while both
-// look correct. The measured ranges differ between the two APIs and that is fine — what must not differ is the
-// rule that narrows them.
+// IT IS THE AXIS'S SHARED POLICY, NOT THE LINUX ONE'S, and the Windows port consumes the two rules below
+// (<see cref="Cap"/> and <see cref="ClampOffset"/>) rather than carrying a private copy. That is a decision: the
+// caps are a SAFETY rule whose whole purpose is that a slider drag cannot reach an extreme offset (NVIDIA XID 62),
+// and two OS-local copies of a safety rule are exactly the thing that drifts while both look correct.
 //
 // UNITS: NVML speaks MHz on BOTH sides of this axis — nvmlDeviceGet/SetGpcClkVfOffset and …MemClkVfOffset take and
-// return a plain `int` in MHz, and the newer nvmlClockOffset_t carries `clockOffsetMHz`. There is therefore NO
-// kHz conversion here, unlike the Windows port, whose NvAPI NV_GPU_PERF_PSTATES20_PARAM_DELTA is in kHz and has to
-// divide by 1000 on the way out of the driver. A port that "helpfully" scaled these numbers would ask for a
-// thousandth of the offset it displayed; the tests pin the literal MHz values that reach the transport so that
-// mistake cannot survive.
+// return a plain `int` in MHz. There is therefore NO kHz conversion here, unlike the Windows port, whose NvAPI
+// NV_GPU_PERF_PSTATES20_PARAM_DELTA is in kHz and has to divide by 1000 on the way out of the driver; the tests
+// pin the literal MHz values that reach the transport.
 //
 // See docs/nvidia-gpu-oc.md (the Windows mechanism, measured on this machine) and docs/nvidia-gpu-oc-linux.md
 // (this port: the symbols verified against libnvidia-ml 615.71.09, the ranges read off the device, and what
@@ -29,20 +23,18 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 /// <summary>
 /// The NVIDIA dGPU clock-offset axis, expressed as rules a test can drive through injected I/O. The axis is the
-/// same one the Windows port drives (docs/nvidia-gpu-oc.md): a signed core- and memory-clock offset layered on the
-/// P0 max-performance state's frequency delta, shifting the whole voltage/frequency curve. On Linux the same
-/// numbers are reached through NVML (<c>libnvidia-ml.so.1</c>) instead of NvAPI.
+/// same one the Windows port drives: a signed core- and memory-clock offset layered on the P0 max-performance
+/// state's frequency delta. On Linux the same numbers are reached through NVML (<c>libnvidia-ml.so.1</c>) instead
+/// of NvAPI.
 ///
 /// VOLATILE, exactly as on Windows: the offset is a runtime RM/driver parameter and not firmware, so a driver
 /// reload, a module reload or the dGPU dropping to D3-cold zeroes it. The app is therefore the source of truth —
 /// LaptopService persists the pair per performance mode and re-applies it at startup, on resume and on every mode
-/// switch (Infrastructure/Composition/LaptopService.Tuning.cs), all through <see cref="IGpuOverclock.Set"/>, which
-/// is the only member this port adds to.
+/// switch, all through <see cref="IGpuOverclock.Set"/>.
 ///
 /// PRESENT ONLY WHERE IT CAN ACT. <see cref="TryCreate"/> returns null — the port stays null and the UI hides the
 /// GPU section — unless the library loaded, NVML initialised, at least one device is VISIBLE, and the offset APIs
-/// resolved. Probe, never require: no failure throws, and a machine with no NVIDIA driver, no visible dGPU, or an
-/// older library missing the VfOffset family simply has no axis here.
+/// resolved. Probe, never require: no failure throws.
 /// </summary>
 internal sealed class NvidiaGpuPolicy : IGpuOverclock
 {
@@ -51,10 +43,9 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     internal const string DefaultName = "NVIDIA GPU";
 
     // ---- safety caps on the exposed offset range (MHz) ----
-    // Applied EVEN WHERE THE DRIVER OFFERS MORE, for the reason docs/nvidia-gpu-oc.md gives: one slider drag to an
-    // extreme offset can hang or corrupt the GPU (NVIDIA XID 62). It is not theoretical on this side — the memory
-    // range this machine's driver reports is -2000..+6000 MHz, four times the cap — so the cap is what stands
-    // between the slider and the top of that range.
+    // Applied EVEN WHERE THE DRIVER OFFERS MORE: one slider drag to an extreme offset can hang or corrupt the GPU
+    // (NVIDIA XID 62). It is not theoretical on this side — the memory range this machine's driver reports is
+    // -2000..+6000 MHz, four times the cap.
     //
     // The memory value is the RAW memory-clock offset, matching G-Helper's convention (the number as written, with
     // no GDDR6/GDDR7 doubling); an Afterburner "effective" figure is ~2× this. Same convention as Windows, so the
@@ -64,8 +55,8 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
 
     // ---- NVML return codes this axis actually meets ----
     // Named rather than inlined because the NUMBER is what the transport hands back and the MEANING is what the
-    // user reads: NVML_ERROR_NO_PERMISSION in particular is the finding that decides whether the feature can work
-    // from an unprivileged app at all (see docs/nvidia-gpu-oc-linux.md).
+    // user reads: NVML_ERROR_NO_PERMISSION in particular decides whether the feature can work from an
+    // unprivileged app at all (see docs/nvidia-gpu-oc-linux.md).
     internal const int NvmlSuccess = 0;
     internal const int NvmlUninitialized = 1;
     internal const int NvmlInvalidArgument = 2;
@@ -111,8 +102,8 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
 
     // ---- the three calls the policy makes, injected ----
     // Each is the caller's: the Linux transport binds them to NVML entry points, a test binds them to a recording
-    // fake, and nothing above them knows which. They mirror the three SHAPES NVML offers rather than one generic
-    // accessor, because the point of the split is that a read and a write are different permissions.
+    // fake. They mirror the three SHAPES NVML offers rather than one generic accessor, because a read and a write
+    // are different permissions.
 
     /// <summary>Read one offset (MHz). Backed by <c>nvmlDeviceGetGpcClkVfOffset</c> /
     /// <c>nvmlDeviceGetMemClkVfOffset</c>.</summary>
@@ -151,14 +142,11 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     /// loaded, NVML initialised, a device is visible, all three call shapes resolved, and BOTH range reads
     /// succeeded.
     ///
-    /// NEVER THROWS AND NEVER WRITES. Composition runs on the UI thread and a probe that touched the hardware
-    /// would be a side effect nobody asked for, so the only calls this method makes are the two range reads; the
-    /// tests assert on the trace that no write reached the transport.
+    /// NEVER THROWS AND NEVER WRITES: composition runs on the UI thread and a probe that touched the hardware would
+    /// be a side effect nobody asked for, so the only calls this method makes are the two range reads.
     ///
-    /// "NO DEVICE" IS NOT "NO GPU", which matters on a machine whose dGPU is handed out by an access broker: a
-    /// hidden device makes <paramref name="visibleDevices"/> zero and this returns null, exactly as it should —
-    /// the gate is re-evaluated on the next composition, so the section appears the moment the device becomes
-    /// visible, with no state carried across the two.
+    /// "NO DEVICE" IS NOT "NO GPU": a hidden device makes <paramref name="visibleDevices"/> zero and this returns
+    /// null, and the gate is re-evaluated on the next composition.
     /// </summary>
     internal static NvidiaGpuPolicy? TryCreate(
         bool libraryLoaded,
@@ -182,11 +170,9 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
             readOffset!, writeOffset!, release);
     }
 
-    /// <summary>The availability gate's whole decision, as one predicate: every conjunct is a reason the axis
-    /// cannot act, and any of them missing means the port stays null and the UI hides the section. Separate from
-    /// <see cref="TryCreate"/> so the decision table is testable on its own — each term is a different machine
-    /// (no driver at all / a library that will not initialise / a hidden or absent dGPU / a driver too old to know
-    /// the VfOffset family).</summary>
+    /// <summary>The availability gate's whole decision, as one predicate: each term is a different machine (no
+    /// driver at all / a library that will not initialise / a hidden or absent dGPU / a driver too old to know the
+    /// VfOffset family). Separate from <see cref="TryCreate"/> so the decision table is testable on its own.</summary>
     internal static bool Available(
         bool libraryLoaded, bool initialized, int visibleDevices,
         bool readOffsetResolved, bool readRangeResolved, bool writeOffsetResolved)
@@ -202,13 +188,12 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     /// accepted the writes.
     ///
     /// THE ORDER IS CORE, THEN MEMORY, THEN BOTH READ-BACKS, and the write half fails FAST: if the core write is
-    /// refused, the memory write is never attempted, because the first refusal is the informative one (on a
-    /// permission failure the second would only repeat it) and nothing is gained by leaving the pair half applied
-    /// for a driver that already said no.
+    /// refused, the memory write is never attempted, because the first refusal is the informative one and nothing
+    /// is gained by leaving the pair half applied for a driver that already said no.
     ///
-    /// A READ-BACK THAT FAILS IS A FAILURE, not a shrug: both getters resolved at probe time, so a getter that
-    /// stops answering means the transport broke between the write and the confirmation — and reporting success
-    /// there would hand the user a number the app cannot vouch for, which is the one thing this axis must not do.
+    /// A READ-BACK THAT FAILS IS A FAILURE: both getters resolved at probe time, so a getter that stops answering
+    /// means the transport broke between the write and the confirmation, and reporting success there would hand
+    /// the user a number the app cannot vouch for.
     /// </summary>
     public bool Set(int coreMhz, int memMhz)
     {
@@ -224,8 +209,7 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
         if (rc != NvmlSuccess) { LastError = Describe(rc, "memory"); return false; }
 
         // Both are confirmed even if the first disagrees: the memory write has already happened, so its
-        // verification is not optional, and the second failure is what a "core was clamped by the driver" bug
-        // would otherwise hide.
+        // verification is not optional.
         var coreHeld = Confirm(OffsetDomain.Core, core, "core");
         var memHeld = Confirm(OffsetDomain.Memory, mem, "memory");
         return coreHeld && memHeld;
@@ -244,14 +228,12 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     ///
     /// A DEGENERATE READ FALLS BACK TO THE FULL ±cap ENVELOPE: a driver that answers 0..0 is not saying "no offset
     /// is allowed", it is not answering usefully — on an Optimus laptop that is what a dGPU which is powered off /
-    /// D3-cold at probe time looks like — and a literal reading would leave the user a dead 0..0 slider. The
-    /// envelope is the honest response: the axis exists, its bounds are ours, and the write is what proves it.
+    /// D3-cold at probe time looks like — and a literal reading would leave the user a dead 0..0 slider.
     ///
     /// AN EMPTY INTERSECTION COLLAPSES TO 0..0 RATHER THAN THROWING. A driver range lying entirely above the cap
-    /// (say +400..+1000 MHz against a 300 cap) has nothing safe to offer, and the intersection is genuinely empty;
-    /// clamping to stock is the safe reading. Returning a crossed pair instead would reach
-    /// <see cref="Math.Clamp(int,int,int)"/>, which THROWS on Min &gt; Max — so this is not tidiness, it is the
-    /// difference between a hidden slider and an exception on the UI thread.
+    /// (say +400..+1000 MHz against a 300 cap) has nothing safe to offer; returning a crossed pair instead would
+    /// reach <see cref="Math.Clamp(int,int,int)"/>, which THROWS on Min &gt; Max — the difference between a hidden
+    /// slider and an exception on the UI thread.
     /// </summary>
     internal static (int Min, int Max) Cap(int driverMin, int driverMax, int cap)
     {
@@ -275,8 +257,8 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     internal static bool Held(int asked, int reported) => asked == reported;
 
     /// <summary>NVML's verdict as something the UI can show. The permission case is spelled out because it is the
-    /// one a user can act on, and because it is the case this axis actually meets on a stock desktop Linux install
-    /// (see docs/nvidia-gpu-oc-linux.md).</summary>
+    /// one a user can act on, and because it is the case this axis actually meets on a stock desktop Linux
+    /// install (see docs/nvidia-gpu-oc-linux.md).</summary>
     internal static string Describe(int code, string what) => code switch
     {
         NvmlNoPermission =>

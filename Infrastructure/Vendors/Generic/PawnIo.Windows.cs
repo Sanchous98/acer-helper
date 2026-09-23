@@ -12,11 +12,11 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 ///
 /// Why not the drivers already on this class of machine: WinRing0 (which RyzenAdj ships) is named in Microsoft's
 /// vulnerable-driver blocklist and carries an active Defender signature, so it loads only while the blocklist and
-/// HVCI happen to be off — a posture one Windows policy push can revoke. inpoutx64 cannot do the job at all: its
-/// author documents <c>DlPortWritePortUlong</c> as not working as expected (and a 32-bit write to the PCI
-/// CONFIG_ADDRESS port at 0xCF8 is exactly what an SMN transaction needs — PCI does not treat a byte/word write
-/// there as an address-latch update, so it cannot be split), while <c>MapPhysToLin</c>/<c>GetPhysLong</c> are
-/// documented as limited to physical addresses under 2 GB, which excludes any plausible MMCFG base.
+/// HVCI happen to be off. inpoutx64 cannot do the job at all: its author documents <c>DlPortWritePortUlong</c> as
+/// not working as expected (and a 32-bit write to the PCI CONFIG_ADDRESS port at 0xCF8 is exactly what an SMN
+/// transaction needs — PCI does not treat a byte/word write there as an address-latch update, so it cannot be
+/// split), while <c>MapPhysToLin</c>/<c>GetPhysLong</c> are documented as limited to physical addresses under
+/// 2 GB, which excludes any plausible MMCFG base.
 ///
 /// Protocol: one device, two IOCTLs, both plain buffered.
 ///
@@ -26,13 +26,11 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// The execute buffer layout is a 32-byte ASCII function name (zero padded) followed by packed little-endian
 /// 64-bit arguments; the output is packed 64-bit values. Sizes are validated STRICTLY by the module (PawnIO's
 /// DEFINE_IOCTL_SIZED returns STATUS_INVALID_PARAMETER on any mismatch), so the caller must pass exactly the
-/// argument and result counts the function declares. Everything is blittable — plain <c>byte[]</c> written with
-/// <see cref="BitConverter"/>-free span helpers — so there is no marshalling stub and this stays Native-AOT-safe.
+/// argument and result counts the function declares. Everything is blittable, so this stays Native-AOT-safe.
 ///
-/// The driver and its module blobs ship SEPARATELY from the app (the same arrangement as the cardwire daemon the
-/// GPU-access row asks, see docs/cardwire-gpu-access.md): PawnIO is installed by its own signed installer, and the
-/// module is a signed binary only its author can produce. So this class never installs anything — it probes, and
-/// every consumer treats "absent" as "feature unavailable" rather than as an error. See docs/pawnio.md.
+/// The driver and its module blobs ship SEPARATELY from the app: PawnIO is installed by its own signed installer,
+/// and the module is a signed binary only its author can produce. So this class never installs anything — it
+/// probes, and every consumer treats "absent" as "feature unavailable". See docs/pawnio.md.
 /// </summary>
 internal sealed class PawnIo : IDisposable
 {
@@ -47,7 +45,7 @@ internal sealed class PawnIo : IDisposable
     private const uint IoctlExecuteFn  = 0xA1B22104;
     private const int  NameField       = 32;   // fixed-size ASCII function-name field that prefixes the args
 
-    // Serialises this handle's requests. A PawnIO handle carries one loaded module and the modules we use drive a
+    // Serialises this handle's requests: a PawnIO handle carries one loaded module and the modules we use drive a
     // stateful hardware mailbox, so overlapping executes on one handle are never valid.
     private readonly Lock _gate = new();
     private readonly SafeFileHandle _device;
@@ -95,13 +93,12 @@ internal sealed class PawnIo : IDisposable
             LastError = null;
 
             // The handle can be closed under us — Dispose runs on the app's teardown path while a background
-            // re-assert may still be mid-transaction — so it is checked here and the call itself is guarded. Every
-            // consumer of this class relies on the never-throws contract the sibling ports keep.
+            // re-assert may still be mid-transaction — so it is checked here and the call itself is guarded.
             if (_device.IsClosed || _device.IsInvalid) { LastError = "the PawnIO handle is closed"; return false; }
 
             var inBuf = new byte[NameField + input.Length * sizeof(ulong)];
             // ASCII, zero padded, and never terminated by us: the field is fixed width and the module compares the
-            // whole 32 bytes. A name longer than the field is a programming error, not a runtime condition.
+            // whole 32 bytes.
             var written = Encoding.ASCII.GetBytes(function, 0, Math.Min(function.Length, NameField), inBuf, 0);
             if (written != function.Length) { LastError = $"function name '{function}' exceeds {NameField} bytes"; return false; }
             for (var i = 0; i < input.Length; i++)
@@ -151,8 +148,7 @@ internal sealed class PawnIo : IDisposable
         return ok;
     }
 
-    // Little-endian 64-bit accessors over the packed argument/result buffers. Hand-rolled rather than via
-    // BinaryPrimitives so the offsets read the same way as the protocol comment above.
+    // Little-endian 64-bit accessors over the packed argument/result buffers.
     private static void WriteUInt64(byte[] b, int offset, ulong v)
     {
         for (var i = 0; i < 8; i++) b[offset + i] = (byte)(v >> (i * 8));
