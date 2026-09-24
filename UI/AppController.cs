@@ -411,9 +411,9 @@ internal sealed class AppController
                                       WindowsUpdater.IsSupported, AppImageUpdater.IsAppImage);
         Action act = plan.Kind switch
         {
-            UpdateAction.UpgradeWindows => () => _ = SelfUpdateWindowsAsync(plan.Asset!.Url),
-            UpdateAction.InstallWindows => () => _ = InstallWindowsAsync(plan.Asset!.Url),
-            UpdateAction.ReplaceAppImage => () => _ = SelfUpdateAsync(plan.Asset!.Url),
+            UpdateAction.UpgradeWindows => () => StartUpdate(() => SelfUpdateWindowsAsync(plan.Asset!.Url)),
+            UpdateAction.InstallWindows => () => StartUpdate(() => InstallWindowsAsync(plan.Asset!.Url)),
+            UpdateAction.ReplaceAppImage => () => StartUpdate(() => SelfUpdateAsync(plan.Asset!.Url)),
             _ => () => OpenUrl(info.Url),
         };
 
@@ -424,37 +424,56 @@ internal sealed class AppController
         });
     }
 
-    private async Task SelfUpdateAsync(string assetUrl)
+    /// <summary>Run one self-update body on the THREAD POOL, taking the single-flight guard HERE on the UI thread
+    /// before any work exists. The download, the MSI launch and the AppImage replace are all documented "Blocking
+    /// I/O — call off the UI thread", and a notification click arrives on the UI thread: running the body here is
+    /// what keeps the cursor from hitching while a 20-45 MB asset is fetched and written. Because <c>_updating</c>
+    /// is taken synchronously (before <c>Task.Run</c>), it stays authoritative against a second click, and the
+    /// body reports through <see cref="PostNotify"/> instead of the UI-thread-only <see cref="Notify"/>.
+    ///
+    /// A throw is a failure report, not a wedged guard: the finally always releases, on the UI thread.</summary>
+    private void StartUpdate(Func<Task> body)
     {
         if (_updating) return;   // one update at a time (see the field); failure resets so retry works
         _updating = true;
         try
         {
-            Notify(Loc.T("Downloading update…"));
-            var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl);
-            if (ok) { AppImageUpdater.Restart(); ExitApp(); }   // relaunch the updated AppImage, then quit
-            else Notify(Loc.T("Update failed") + Err(err));
+            _ = Task.Run(async () =>
+            {
+                try { await body().ConfigureAwait(false); }
+                catch (Exception ex) { PostNotify(() => Loc.T("Update failed") + Err(ex.Message)); }
+                finally { Dispatcher.UIThread.Post(() => _updating = false); }
+            });
         }
-        finally { _updating = false; }
+        catch
+        {
+            // Scheduler refused (rare): release the guard here rather than wedge it, and say so off-blocking.
+            _updating = false;
+            PostNotify(() => Loc.T("Update failed"));
+        }
+    }
+
+    private async Task SelfUpdateAsync(string assetUrl)
+    {
+        PostNotify(() => Loc.T("Downloading update…"));
+        var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl).ConfigureAwait(false);
+        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(err)); return; }
+        // The AppImage is replaced in place; hand the relaunch + quit to the UI thread (the process tree and the
+        // application lifetime belong there). Restart spawns the new binary detached, then we exit.
+        Dispatcher.UIThread.Post(() => { AppImageUpdater.Restart(); ExitApp(); });
     }
 
     // Windows: download the MSI, then hand off to the detached msiexec helper and quit so the exe unlocks —
     // the helper upgrades in place and relaunches us.
     private async Task SelfUpdateWindowsAsync(string assetUrl)
     {
-        if (_updating) return;   // one update at a time (see the field); failure resets so retry works
-        _updating = true;
-        try
-        {
-            Notify(Loc.T("Downloading update…"));
-            var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
-            if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
+        PostNotify(() => Loc.T("Downloading update…"));
+        var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl).ConfigureAwait(false);
+        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(res)); return; }
 
-            Notify(Loc.T("Installing update…"));
-            if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
-            else Notify(Loc.T("Update failed"));
-        }
-        finally { _updating = false; }
+        PostNotify(() => Loc.T("Installing update…"));
+        if (WindowsUpdater.InstallAndExit(res!)) Dispatcher.UIThread.Post(ExitApp);
+        else PostNotify(() => Loc.T("Update failed"));
     }
 
     // Portable/development Windows run: download the release MSI and launch the Windows Installer, which shows
@@ -462,18 +481,12 @@ internal sealed class AppController
     // and nothing to relaunch — the installer places the app under Program Files while this copy keeps running.
     private async Task InstallWindowsAsync(string assetUrl)
     {
-        if (_updating) return;   // one update at a time (see the field); failure resets so retry works
-        _updating = true;
-        try
-        {
-            Notify(Loc.T("Downloading update…"));
-            var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
-            if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
+        PostNotify(() => Loc.T("Downloading update…"));
+        var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl).ConfigureAwait(false);
+        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(res)); return; }
 
-            Notify(Loc.T("Launching installer…"));
-            if (!WindowsUpdater.LaunchInstaller(res!)) Notify(Loc.T("Update failed"));
-        }
-        finally { _updating = false; }
+        PostNotify(() => Loc.T("Launching installer…"));
+        if (!WindowsUpdater.LaunchInstaller(res!)) PostNotify(() => Loc.T("Update failed"));
     }
 
     private async Task GrantHardwareAccessAsync()
@@ -904,6 +917,12 @@ internal sealed class AppController
     // ---- helpers ----
 
     private void Notify(string text) => _vm.Status = text;
+
+    /// <summary>Progress from a body running on the thread pool (see <see cref="StartUpdate"/>): the string is
+    /// BUILT on the UI thread (Loc may be swapped by a live language rebuild there) and applied there too, so the
+    /// pool thread never touches <c>_vm</c> or the localization table. <c>_vm</c> is resolved at post time, so a
+    /// rebuild between queueing and running picks up the fresh view-model.</summary>
+    private void PostNotify(Func<string> text) => Dispatcher.UIThread.Post(() => _vm.Status = text());
 
     private static string Err(string? e) => e != null ? $": {e}" : string.Empty;
 }

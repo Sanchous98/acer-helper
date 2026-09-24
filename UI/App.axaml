@@ -72,6 +72,11 @@
                as subtle raised controls on either theme. Rest / hover-or-pressed. -->
           <SolidColorBrush x:Key="AppControl"      Color="#18000000" />
           <SolidColorBrush x:Key="AppControlHover" Color="#28000000" />
+          <!-- The notification drop-down is an overlay ABOVE the page, so unlike the window tint it must
+               not let the cards/sections behind it show through: nearly opaque, same hue as AppAcrylicTint so
+               it still reads as the same material. This is the pane's see-through knob (no real blur — nested
+               acrylic/blur is not reliable across compositors), and it stays readable on any wallpaper. -->
+          <SolidColorBrush x:Key="AppFlyoutSurface" Color="#F5F3F3F3" />
           <!-- Section-card acrylic. Theme-aware + a fairly dominant tint so the card keeps its tone (and
                text contrast) on ANY wallpaper — a near-transparent tint looks great on a matching desktop
                but washes out over the opposite one. TintOpacity/MaterialOpacity are the see-through knobs. -->
@@ -88,6 +93,8 @@
           <SolidColorBrush x:Key="AppSectionFg"   Color="#D6D6D6" />
           <SolidColorBrush x:Key="AppControl"      Color="#22FFFFFF" />
           <SolidColorBrush x:Key="AppControlHover" Color="#33FFFFFF" />
+          <!-- See the Light dict: nearly opaque overlay surface for the notification drop-down. -->
+          <SolidColorBrush x:Key="AppFlyoutSurface" Color="#F52A2A2A" />
           <ExperimentalAcrylicMaterial x:Key="CardMaterial" BackgroundSource="Digger"
               TintColor="#141414" TintOpacity="0.8" MaterialOpacity="0.6"/>
         </ResourceDictionary>
@@ -235,6 +242,36 @@
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="Padding" Value="8,3" />
       <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- The notification drop-down: one near-opaque surface (its own class, so its entry cards share a
+         single outer frame instead of each drawing its own box). -->
+    <Style Selector="Border.notifyPane">
+      <Setter Property="Background" Value="{DynamicResource AppFlyoutSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <!-- ONE NOTIFICATION = ONE CARD. The message and its ✕ are the card header, and the changelog/Install
+         body is the SAME surface continued below a hairline — so an expanded notice reads as one unit
+         rather than a row with a second, differently-tinted box floating under it. -->
+    <Style Selector="Border.noticeCard">
+      <Setter Property="Background" Value="{DynamicResource AppCard}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <!-- The expanded body draws NO background of its own (it is the same card), only a hairline separating
+         it from the header and a left inset that lines the changelog up under the message text. -->
+    <Style Selector="Border.noticeDetails">
+      <Setter Property="BorderBrush" Value="{DynamicResource AppCardStroke}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="18,8,8,8" />
     </Style>
 
     <!-- A notification entry (the bell's list): the message reads as text, not as a button, but the whole row

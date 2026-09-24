@@ -119,6 +119,36 @@ public class UpdateRouterTests
         Assert.Contains("InstallWindowsAsync", source, StringComparison.Ordinal);
     }
 
+    /// <summary>EVERY UPDATE ACTION RUNS OFF THE UI THREAD. The three updater calls are documented "Blocking I/O —
+    /// call off the UI thread", yet the click that reaches them is a UI-thread command: running the body inline
+    /// (the old <c>_ = SelfUpdateAsync(...)</c>) is what made pressing Install hitch the cursor. Each route is now
+    /// wrapped in <c>StartUpdate</c>, which takes the single-flight guard on the UI thread and hands the body to
+    /// the pool.
+    ///
+    /// MUTATIONS: put a route back to <c>() =&gt; _ = FooAsync(...)</c> — that route's <c>StartUpdate(() =&gt;</c>
+    /// assert goes red; move the <c>_updating</c> check inside the pool task — the guard assert goes red.</summary>
+    [Fact]
+    public void EveryUpdateActionRunsOffTheUiThread()
+    {
+        var source = Source("UI/AppController.cs");
+
+        // The guard is taken BEFORE any pool work exists, then the body is dispatched.
+        var guard = source.IndexOf("if (_updating) return;", StringComparison.Ordinal);
+        var pool = source.IndexOf("_ = Task.Run(async () =>", StringComparison.Ordinal);
+        Assert.True(guard >= 0, "the single-flight guard is gone");
+        Assert.True(pool > guard, "the guard must be taken before the work is handed to the pool");
+
+        // Each of the three routes goes through StartUpdate, never straight at the async body.
+        Assert.Contains("StartUpdate(() => SelfUpdateWindowsAsync(", source, StringComparison.Ordinal);
+        Assert.Contains("StartUpdate(() => InstallWindowsAsync(", source, StringComparison.Ordinal);
+        Assert.Contains("StartUpdate(() => SelfUpdateAsync(", source, StringComparison.Ordinal);
+        // ...and the blocking updater calls still sit on the body's side of the hand-off.
+        Assert.Contains("await WindowsUpdater.DownloadAsync", source, StringComparison.Ordinal);
+        Assert.Contains("WindowsUpdater.LaunchInstaller", source, StringComparison.Ordinal);
+        Assert.Contains("WindowsUpdater.InstallAndExit", source, StringComparison.Ordinal);
+        Assert.Contains("AppImageUpdater.ReplaceAsync", source, StringComparison.Ordinal);
+    }
+
     /// <summary>The repository root, taken from the COMPILER's path rather than the current directory (the test
     /// host runs with its working directory set to the output folder, where a relative path finds nothing).</summary>
     private static string Root([CallerFilePath] string thisFile = "")

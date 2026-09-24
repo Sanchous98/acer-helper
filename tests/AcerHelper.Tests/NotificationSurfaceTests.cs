@@ -90,6 +90,45 @@ public class NotificationSurfaceTests
         Assert.Contains("CloseNotificationsCommand", code, StringComparison.Ordinal);
     }
 
+    /// <summary>THE UPDATE ENTRY IS ONE CARD, NOT A ROW PLUS A SECOND BOX. The message and the ✕ share the
+    /// entry's header, and the changelog/Install body is the SAME surface continued below a hairline — the defect
+    /// this guards is the changelog drawing its own tinted box under a plain row, which read as two pieces.
+    ///
+    /// MUTATIONS: put the body back on its own background/margin outside the card — <c>noticeDetails</c> stops
+    /// following the header in the source and the order asserts go red; move the ✕ out of the card's header (above
+    /// the message) — the header assert goes red.</summary>
+    [Fact]
+    public void TheNotificationEntryIsOneCohesiveCard()
+    {
+        var xaml = Source("UI/MainWindow.axaml");
+        var card = xaml.IndexOf("Classes=\"noticeCard\"", StringComparison.Ordinal);
+        var dismiss = xaml.IndexOf("Command=\"{Binding DismissCommand}\"", StringComparison.Ordinal);
+        var details = xaml.IndexOf("Classes=\"noticeDetails\"", StringComparison.Ordinal);
+
+        Assert.True(card >= 0, "the entry lost its single-card surface");
+        Assert.True(dismiss > card, "the dismiss ✕ must sit INSIDE the entry card, in its header");
+        Assert.True(details > dismiss, "the changelog body must follow the header on the same card surface");
+    }
+
+    /// <summary>THE PANE IS ITS OWN OPAQUE SURFACE, not the window tint. The window's <c>AppAcrylicTint</c> is
+    /// deliberately see-through (it sits over the acrylic backdrop); the drop-down sits over the PAGE, so reusing
+    /// it let the cards/sections behind the pane show through. The overlay gets a near-opaque brush, defined in
+    /// BOTH theme dictionaries so it cannot regress on one theme.
+    ///
+    /// MUTATION: point the pane back at <c>AppAcrylicTint</c> (drop <c>Classes="notifyPane"</c>) — the first
+    /// assert goes red; define <c>AppFlyoutSurface</c> for one theme only — the count assert goes red.</summary>
+    [Fact]
+    public void TheNotificationPaneHasItsOwnOpaqueSurface()
+    {
+        Assert.Contains("Classes=\"notifyPane\"", Source("UI/MainWindow.axaml"), StringComparison.Ordinal);
+
+        var app = Source("UI/App.axaml");
+        const string key = "x:Key=\"AppFlyoutSurface\"";
+        var first = app.IndexOf(key, StringComparison.Ordinal);
+        var second = app.IndexOf(key, first + 1, StringComparison.Ordinal);
+        Assert.True(first >= 0 && second > first, "AppFlyoutSurface must be defined in both theme dictionaries");
+    }
+
     /// <summary>THE REBOOT STATE REPLACES THE OFFER, and it carries the retry its own words promise. This is
     /// the same arrangement the single two-message banner had: once the files are in /etc the offer is over (the
     /// installer is idempotent and never offers itself again), so the user must not be left with a "grant

@@ -157,12 +157,10 @@
              this comment lists for the list itself. -->
         <Border x:Name="NotificationDismissLayer" Background="Transparent"
                 IsVisible="{Binding IsNotificationsOpen}"/>
-        <Border x:Name="NotificationPanel" Width="360" HorizontalAlignment="Right" VerticalAlignment="Top"
-                Margin="0,44,14,0" Padding="10"
+        <Border x:Name="NotificationPanel" Classes="notifyPane"
+                Width="360" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,44,14,0"
                 IsVisible="{Binding IsNotificationsOpen}"
-                Background="{DynamicResource AppAcrylicTint}"
-                BorderBrush="{DynamicResource AppCardStroke}" BorderThickness="1"
-                CornerRadius="{DynamicResource OverlayCornerRadius}"
                 BoxShadow="0 4 16 0 #55000000">
           <StackPanel Spacing="8">
             <TextBlock Classes="section" Margin="2,0,0,0" Text="{l:Tr Notifications}"/>
@@ -180,41 +178,44 @@
                        marked twice over — the dot and the weight — because a 6px dot alone is a thin clue for the
                        one thing the badge is counting. -->
                   <DataTemplate x:DataType="vm:NotificationViewModel">
-                    <StackPanel Margin="0,0,0,2">
-                      <Grid ColumnDefinitions="10,*,Auto">
-                        <Ellipse Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                 IsVisible="{Binding Unread}" Fill="{DynamicResource AccentBrush}"/>
-                        <Button Grid.Column="1" Classes="notice" Classes.unread="{Binding Unread}"
-                                Command="{Binding ActivateCommand}">
-                          <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Text}"/>
-                        </Button>
-                        <Button Grid.Column="2" Classes="icon" Width="22" Height="22" Margin="2,0,0,0"
-                                Command="{Binding DismissCommand}" ToolTip.Tip="{l:Tr Ignore}">
-                          <!-- An ✕, drawn: the same convention as the bell and the drawer's back arrow. -->
-                          <Path Width="8" Height="8" Stretch="None"
-                                Stroke="{DynamicResource AppMuted}" StrokeThickness="1.4" StrokeLineCap="Round"
-                                Data="M0.8,0.8 L7.2,7.2 M7.2,0.8 L0.8,7.2"/>
-                        </Button>
-                      </Grid>
-                      <!-- The expanded body. Only an entry that carries one (HasDetails) can reach IsExpanded, so
-                           the hardware-access offers never grow this panel; Install is the only install trigger on
-                           the whole surface. -->
-                      <Border IsVisible="{Binding IsExpanded}" Margin="10,2,0,2" Padding="8"
-                              Background="{DynamicResource AppControl}"
-                              CornerRadius="{DynamicResource ControlCornerRadius}">
-                        <StackPanel Spacing="6">
-                          <TextBlock Classes="muted" FontWeight="SemiBold" IsVisible="{Binding HasChangelog}"
-                                     Text="{l:Tr Changelog}"/>
-                          <ScrollViewer MaxHeight="150" HorizontalScrollBarVisibility="Disabled"
-                                        VerticalScrollBarVisibility="Auto"
-                                        IsVisible="{Binding HasChangelog}">
-                            <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding Details}"/>
-                          </ScrollViewer>
-                          <Button Classes="accent" HorizontalAlignment="Right" Padding="14,5"
-                                  Content="{l:Tr Install}" Command="{Binding InstallCommand}"/>
-                        </StackPanel>
-                      </Border>
-                    </StackPanel>
+                    <!-- One entry IS one card. The message and its ✕ are the card header (the ✕ is inside
+                         the same surface, not a chip floating beside it), and the expanded changelog/Install
+                         body is that same surface continued below a hairline — no second box, no seam. -->
+                    <Border Classes="noticeCard">
+                      <StackPanel>
+                        <Grid ColumnDefinitions="10,*,Auto" Margin="8,6,6,6">
+                          <Ellipse Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   IsVisible="{Binding Unread}" Fill="{DynamicResource AccentBrush}"/>
+                          <Button Grid.Column="1" Classes="notice" Classes.unread="{Binding Unread}"
+                                  Command="{Binding ActivateCommand}">
+                            <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Text}"/>
+                          </Button>
+                          <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="2,0,0,0"
+                                  Command="{Binding DismissCommand}" ToolTip.Tip="{l:Tr Ignore}">
+                            <!-- An ✕, drawn: the same convention as the bell and the drawer's back arrow. -->
+                            <Path Width="8" Height="8" Stretch="None"
+                                  Stroke="{DynamicResource AppMuted}" StrokeThickness="1.4" StrokeLineCap="Round"
+                                  Data="M0.8,0.8 L7.2,7.2 M7.2,0.8 L0.8,7.2"/>
+                          </Button>
+                        </Grid>
+                        <!-- The expanded body, attached to the header's card. Only an entry that carries one
+                             (HasDetails) can reach IsExpanded, so the hardware-access offers never grow this
+                             panel; Install is the only install trigger on the whole surface. -->
+                        <Border Classes="noticeDetails" IsVisible="{Binding IsExpanded}">
+                          <StackPanel Spacing="6">
+                            <TextBlock Classes="muted" FontWeight="SemiBold" IsVisible="{Binding HasChangelog}"
+                                       Text="{l:Tr Changelog}"/>
+                            <ScrollViewer MaxHeight="150" HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto"
+                                          IsVisible="{Binding HasChangelog}">
+                              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding Details}"/>
+                            </ScrollViewer>
+                            <Button Classes="accent" HorizontalAlignment="Right" Padding="14,5"
+                                    Content="{l:Tr Install}" Command="{Binding InstallCommand}"/>
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
