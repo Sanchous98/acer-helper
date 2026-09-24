@@ -97,11 +97,24 @@ public sealed record ChoiceOption(string Id, string DisplayName);
 public enum BatteryState { Unknown, Charging, Discharging, Idle }
 
 /// <summary>Live battery readings. -1 means unknown/unsupported. <see cref="HealthPercent"/> is
-/// full-charge ÷ design capacity; <see cref="CycleCount"/> is often unsupported by the EC.</summary>
+/// full-charge ÷ design capacity; <see cref="CycleCount"/> is often unsupported by the EC.
+///
+/// <see cref="PowerWatts"/> is the one field that is NULLABLE rather than -1-sentinel, and that is deliberate:
+/// the integer fields above can spare -1 because no reading of theirs is ever negative, but a power rate is
+/// signed by nature — -1 W is a perfectly plausible draw — so a sentinel there would collide with a real
+/// measurement. Null is a third value the others do not have ("this battery reports no rate"), which is a
+/// different fact from zero watts.</summary>
 public sealed record BatteryInfoSnapshot
 {
     public int Percent { get; init; } = -1;
     public BatteryState State { get; init; } = BatteryState.Unknown;
     public int HealthPercent { get; init; } = -1;
     public int CycleCount { get; init; } = -1;
+
+    /// <summary>Live power flow through the battery, in watts, SIGNED: positive while the battery takes
+    /// energy in (charging from the wall), negative while it gives energy out (the machine running on the
+    /// battery). Null when this OS/firmware reports no rate for this battery — a different fact from zero.
+    /// The encoding on each wire (Windows milliwatts, Linux microwatts) is the backend's; this is the neutral
+    /// value it maps to.</summary>
+    public double? PowerWatts { get; init; }
 }

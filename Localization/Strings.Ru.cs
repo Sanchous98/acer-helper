@@ -92,6 +92,11 @@ internal static partial class Strings
         ["Charging"]                = "Зарядка",
         ["On battery"]              = "От батареи",
         ["Plugged in"]              = "Подключено",
+        // Live power row: the label flips with the sign of the reading (draw vs charge), and the unit follows the
+        // number so Russian gets "Вт" and a comma decimal through the format specifier.
+        ["Power draw"]              = "Потребление",
+        ["Charging power"]          = "Мощность зарядки",
+        ["{0:0.0} W"]               = "{0:0.0} Вт",
         ["Express charge"]          = "Быстрая зарядка",
         ["Standard"]                = "Стандартный",
         ["Adaptive"]                = "Адаптивный",
@@ -156,8 +161,14 @@ internal static partial class Strings
 
         // ---- updates / access ----
         ["Update available: v{0}"]  = "Доступно обновление: v{0}",
+        // The expanded update notice: the heading over the release notes. "Установить" for the Install button
+        // reuses the existing ["Install"] row further up, so it is deliberately not repeated here.
+        ["Changelog"]               = "Что нового",
         ["Downloading update…"]     = "Загрузка обновления…",
         ["Installing update…"]      = "Установка обновления…",
+        // A portable Windows run cannot upgrade in place, so it downloads the MSI and opens the Windows Installer
+        // (with its own UAC prompt) rather than the release page — see WindowsUpdater.LaunchInstaller.
+        ["Launching installer…"]    = "Запуск установщика…",
         ["Update failed"]           = "Не удалось обновить",
         ["Hardware access granted — restart to use the unlocked controls."]
             = "Доступ к оборудованию предоставлен — перезапустите приложение, чтобы использовать разблокированные функции.",

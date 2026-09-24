@@ -37,6 +37,20 @@ public sealed partial class BatteryInfo
         return (percent, state);
     }
 
+    private static partial double? ReadPowerWatts(BatteryState state)
+    {
+        if (state == BatteryState.Unknown) return null;   // no battery / boot before the power drivers settled
+        // CallNtPowerInformation(SystemBatteryState) is one powrprof call and no WMI transaction — the WMI
+        // gate is process-wide and shared with the Acer EC, so the per-tick power read stays off it. The API
+        // reports Rate in milliwatts; its own sign is not trusted, the caller's State orients the magnitude.
+        if (CallNtPowerInformation(SystemBatteryState, 0, 0, out SYSTEM_BATTERY_STATE s,
+                                   (uint)Marshal.SizeOf<SYSTEM_BATTERY_STATE>()) != 0)
+            return null;
+        if (s.BatteryPresent == 0 || s.Rate == 0) return null;
+        double watts = Math.Abs((double)s.Rate) / 1000.0;
+        return state == BatteryState.Discharging ? -watts : watts;
+    }
+
     private static int WmiUint(string scope, string query, string property)
     {
         using var session = WmiSession.Connect(scope, out _);
@@ -53,4 +67,24 @@ public sealed partial class BatteryInfo
     }
 
     [DllImport("kernel32.dll")] private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+
+    // The power-rate source. CallNtPowerInformation with SystemBatteryState fills SYSTEM_BATTERY_STATE, whose
+    // Rate IS the battery's instantaneous power (the API's unit is milliwatts; docs call it a discharge rate,
+    // but its sign varies, so the magnitude is used and the caller's State orients it). The Spare bytes are the
+    // struct's own `BOOLEAN Spare1[3]` padding; naming them separately keeps the layout explicit.
+    private const int SystemBatteryState = 5;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SYSTEM_BATTERY_STATE
+    {
+        public byte AcOnLine, BatteryPresent, Charging, Discharging;
+        public byte Spare0, Spare1, Spare2, Spare3;   // Spare1[3] plus the alignment pad before MaxCapacity
+        public uint MaxCapacity, RemainingCapacity;
+        public int Rate;                              // milliwatts
+        public uint EstimatedTime, DefaultAlert1, DefaultAlert2;
+    }
+
+    [DllImport("powrprof.dll")]
+    private static extern int CallNtPowerInformation(int informationLevel, nint inputBuffer, uint inputBufferLength,
+                                                     out SYSTEM_BATTERY_STATE outputBuffer, uint outputBufferLength);
 }

@@ -87,18 +87,22 @@ public sealed class NotificationCenter : ObservableObject
     /// FACTORY, not a string: an entry that survives a language rebuild has to be able to say itself in the new
     /// language, and evaluating it per read is the same rule the rest of the UI follows.
     ///
+    /// <paramref name="details"/> is the optional BODY (the update notice's changelog). An entry with a body does
+    /// not run its action when clicked — it EXPANDS, and only the body's Install button acts (see
+    /// <see cref="NotificationViewModel"/>). Pass null (the default) for a message whose click IS its action.
+    ///
     /// An id that is already on the list is REPLACED — same entry, refreshed text and action, read flag kept.
     /// That is what makes a re-raise harmless: the update check runs again, the UI is rebuilt, and the user's
     /// list does not grow a second copy of a message they have already dealt with.
     ///
     /// A raise of an id the user has IGNORED is dropped (see <see cref="Ignore"/>).</summary>
-    public void Raise(string id, Func<string> text, Action? action = null)
+    public void Raise(string id, Func<string> text, Action? action = null, Func<string>? details = null)
     {
         if (_ignored.Contains(id)) return;
 
-        if (Find(id) is { } existing) { existing.Replace(text, action); return; }
+        if (Find(id) is { } existing) { existing.Replace(text, action, details); return; }
 
-        var entry = new NotificationViewModel(this, id, text, action);
+        var entry = new NotificationViewModel(this, id, text, action, details);
         entry.PropertyChanged += OnEntryChanged;
         _items.Add(entry);
         OnPropertyChanged(nameof(IsEmpty));
@@ -119,7 +123,7 @@ public sealed class NotificationCenter : ObservableObject
     /// they are out of date, not that the user has dismissed them (so an id somehow raised again would be news
     /// rather than something already ignored). The relation this exists for is the one the centre cannot see by
     /// itself — that the VERSION is part of the condition (see <see cref="UpdateIdPrefix"/>): the superseded offer
-    /// is not merely stale, its click installs the older release.
+    /// is not merely stale, its Install button installs the older release.
     ///
     /// Walked backwards because the retraction mutates the list being walked.</summary>
     public void RetireFamilyExcept(string prefix, string keep)
@@ -130,6 +134,15 @@ public sealed class NotificationCenter : ObservableObject
             if (entry.Id == keep || !entry.Id.StartsWith(prefix, StringComparison.Ordinal)) continue;
             Drop(entry);
         }
+    }
+
+    /// <summary>Expand every entry whose id starts with <paramref name="prefix"/>. Reached from the TRAY item,
+    /// which is not itself an install trigger: its click brings the user to the update's body (changelog + the
+    /// explicit Install button) rather than straight into an install. No-op if there is no such entry.</summary>
+    public void ExpandFamily(string prefix)
+    {
+        foreach (var entry in _items)
+            if (entry.Id.StartsWith(prefix, StringComparison.Ordinal)) entry.IsExpanded = true;
     }
 
     /// <summary>Take one entry off the list, without deciding whether its id can come back — the caller of

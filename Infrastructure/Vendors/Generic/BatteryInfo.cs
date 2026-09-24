@@ -36,6 +36,7 @@ public sealed partial class BatteryInfo
             State = state,
             HealthPercent = _health,
             CycleCount = _cycles,
+            PowerWatts = ReadPowerWatts(state),
         };
     }
 
@@ -43,4 +44,11 @@ public sealed partial class BatteryInfo
     private static partial bool HasBattery();
     private static partial (int Health, int Cycles) ReadStatic();
     private static partial (int Percent, BatteryState State) ReadLive();
+
+    /// <summary>The battery's live power rate for the direction <paramref name="state"/> names (positive =
+    /// charging, negative = discharging, null = this OS reports none). Taken as an argument rather than
+    /// re-derived because the sign is the DOMAIN's convention (Domain/Models.cs) while each wire has its own
+    /// (Windows milliwatts, Linux microwatts) — the OS half maps its magnitude and lets the caller's state
+    /// orient it, so one place decides what "in" and "out" mean.</summary>
+    private static partial double? ReadPowerWatts(BatteryState state);
 }

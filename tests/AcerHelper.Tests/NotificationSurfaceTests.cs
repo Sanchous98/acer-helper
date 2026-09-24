@@ -135,7 +135,7 @@ public class NotificationSurfaceTests
         var session = new NotificationCenter();
 
         var before = Dashboard(session);
-        before.SetUpdate("9.9.9", () => { });
+        before.SetUpdate("9.9.9", "notes", () => { });
         before.SetHardwareAccessRebootPending(() => { });
         before.Notifications.Items[0].ActivateCommand.Execute(null);   // the user reads the update notice
         before.ToggleNotificationsCommand.Execute(null);               // ...with the list open
@@ -164,18 +164,143 @@ public class NotificationSurfaceTests
     {
         var vm = Dashboard(new NotificationCenter());
 
-        vm.SetUpdate("1.0", () => { });
-        vm.SetUpdate("1.0", () => { });          // the same release, found again by a later check
+        vm.SetUpdate("1.0", "notes", () => { });
+        vm.SetUpdate("1.0", "notes", () => { });          // the same release, found again by a later check
         var first = Assert.Single(vm.Notifications.Items);
         Assert.Equal(NotificationCenter.UpdateId("1.0"), first.Id);
         Assert.False(first.IsRead);
 
-        vm.SetUpdate("1.1", () => { });
+        vm.SetUpdate("1.1", "notes", () => { });
 
         var newer = Assert.Single(vm.Notifications.Items);   // ...the superseded offer is gone, not stacked
         Assert.Equal(NotificationCenter.UpdateId("1.1"), newer.Id);
         Assert.Contains("1.1", newer.Text, StringComparison.Ordinal);
         Assert.False(newer.IsRead);
+    }
+
+    /// <summary>THE UPDATE NOTICE EXPANDS — IT DOES NOT INSTALL. The owner's request: the notice must open to show
+    /// the changelog and an Install button, and only that button may start an install, so an accidental click on
+    /// the notification cannot download and run a release.
+    ///
+    /// MUTATION: make <c>Activate</c> run the action when <c>HasDetails</c> (drop the expansion branch) — the
+    /// install already ran and the count assert goes red.</summary>
+    [Fact]
+    public void TheUpdateNoticeExpandsInsteadOfInstalling()
+    {
+        var installs = 0;
+        var vm = Dashboard(new NotificationCenter());
+        vm.SetUpdate("1.2.3", "- fixed a thing", () => installs++);
+
+        var notice = Assert.Single(vm.Notifications.Items);
+        Assert.True(notice.HasDetails);
+        Assert.False(notice.IsExpanded);          // starts closed
+
+        notice.ActivateCommand.Execute(null);
+
+        Assert.True(notice.IsExpanded);           // the click opened it...
+        Assert.Equal(0, installs);                // ...and installed nothing
+        Assert.True(notice.IsRead);               // opening still reads it
+    }
+
+    /// <summary>A second click closes the body again and STILL does not install: the expand is a toggle, not a
+    /// one-way trip to the installer.
+    ///
+    /// MUTATION: set <c>IsExpanded = true</c> in <c>Activate</c> instead of the negation — the second assert goes
+    /// red.</summary>
+    [Fact]
+    public void ClickingTheUpdateNoticeAgainCollapsesIt()
+    {
+        var installs = 0;
+        var vm = Dashboard(new NotificationCenter());
+        vm.SetUpdate("1.2.3", "- notes", () => installs++);
+        var notice = Assert.Single(vm.Notifications.Items);
+
+        notice.ActivateCommand.Execute(null);
+        notice.ActivateCommand.Execute(null);
+
+        Assert.False(notice.IsExpanded);
+        Assert.Equal(0, installs);
+    }
+
+    /// <summary>ONLY THE INSTALL BUTTON INSTALLS: it runs exactly the action the check handed in (the one
+    /// <c>UpdateRouter</c> routed to the platform self-updater), and the changelog beside it is the release's own
+    /// body.
+    ///
+    /// MUTATION: drop <c>_action?.Invoke();</c> from <c>Install</c> — the count stays 0.</summary>
+    [Fact]
+    public void TheInstallButtonRunsTheRoutedInstallAction()
+    {
+        var installs = 0;
+        var vm = Dashboard(new NotificationCenter());
+        vm.SetUpdate("1.2.3", "- fixed a thing", () => installs++);
+        var notice = Assert.Single(vm.Notifications.Items);
+
+        notice.ActivateCommand.Execute(null);     // expand (no install)
+        Assert.Equal(0, installs);
+
+        notice.InstallCommand.Execute(null);      // the explicit button is what installs
+
+        Assert.Equal(1, installs);
+        Assert.Equal("- fixed a thing", notice.Details);
+        Assert.True(notice.HasChangelog);
+    }
+
+    /// <summary>A RELEASE WITH NO BODY STILL EXPANDS (the Install button is there) but shows no empty "Changelog"
+    /// heading — <c>HasChangelog</c> is what that heading binds to.
+    ///
+    /// MUTATION: base <c>HasChangelog</c> on <c>HasDetails</c> — this goes red for the empty body.</summary>
+    [Fact]
+    public void AReleaseWithNoChangelogStillExpandsButShowsNoHeading()
+    {
+        var installs = 0;
+        var vm = Dashboard(new NotificationCenter());
+        vm.SetUpdate("1.2.3", null, () => installs++);
+        var notice = Assert.Single(vm.Notifications.Items);
+
+        Assert.True(notice.HasDetails);
+        Assert.False(notice.HasChangelog);
+        Assert.Equal("", notice.Details);
+
+        notice.ActivateCommand.Execute(null);
+
+        Assert.True(notice.IsExpanded);
+        Assert.Equal(0, installs);
+    }
+
+    /// <summary>A MESSAGE WITH NO BODY KEEPS ITS OLD MEANING — the retry-install still runs on the click itself.
+    /// This is the other half of the split, and why <c>Activate</c> is conditional rather than always expanding.
+    ///
+    /// MUTATION: make <c>Activate</c> always toggle <c>IsExpanded</c> — the retry's click no longer runs and the
+    /// count goes red.</summary>
+    [Fact]
+    public void AMessageWithNoBodyStillRunsItsActionOnTheClick()
+    {
+        var retries = 0;
+        var vm = Dashboard(new NotificationCenter());
+        vm.SetHardwareAccessNeeded(() => retries++);
+        var offer = Assert.Single(vm.Notifications.Items);
+
+        Assert.False(offer.HasDetails);
+        offer.ActivateCommand.Execute(null);
+
+        Assert.Equal(1, retries);
+    }
+
+    /// <summary>THE APP HANDS THE NOTICE ITS CHANGELOG AND ITS INSTALL ACTION, and the TRAY OPENS THE NOTICE
+    /// rather than installing — the two halves of "only the Install button installs" that a view-model test
+    /// cannot reach (<c>AppController</c> is not constructible here, so the wiring is read out of the source).
+    ///
+    /// MUTATION: pass <c>u.act</c> to <c>TrayController.SetUpdate</c> again — the last assert goes red and the
+    /// tray is an install trigger again.</summary>
+    [Fact]
+    public void TheAppWiresTheChangelogIntoTheNoticeAndTheTrayIntoOpeningIt()
+    {
+        var source = Source("UI/AppController.cs");
+
+        Assert.Contains("_pendingUpdate = (info.Version, info.Changelog, act)", source, StringComparison.Ordinal);
+        Assert.Contains("_vm.SetUpdate(u.version, u.changelog, u.act)", source, StringComparison.Ordinal);
+        Assert.Contains("_vm.ShowUpdate()", source, StringComparison.Ordinal);
+        Assert.Contains("_windows.OpenMain();", source, StringComparison.Ordinal);
     }
 
     /// <summary>THE LIST IS THE SESSION'S, AND THE BUILD IS GIVEN IT. This is the one half of the rebuild

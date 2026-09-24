@@ -102,6 +102,7 @@ public class BatteryShapeTests
         Assert.Equal(BatteryState.Unknown, unread.State);
         Assert.Equal(-1, unread.HealthPercent);
         Assert.Equal(-1, unread.CycleCount);
+        Assert.Null(unread.PowerWatts);   // no battery -> no rate either; null, not -1 (a rate is signed)
 
         var telemetry = new FakeBatteryTelemetry
         {
@@ -236,5 +237,84 @@ public class BatteryTelemetryTests
         Assert.Equal(BatteryState.Charging, read.State);
         Assert.Equal(88, read.HealthPercent);
         Assert.Equal(1, telemetry.ReadCount);
+    }
+}
+
+/// <summary>
+/// The power row the Battery card shows: the live rate, with the label chosen by the reading's SIGN. The two
+/// directions are the two facts the user asked for — what the machine DRAWS while on battery, and how fast the
+/// battery CHARGES while on AC — and both are the same neutral value (<c>BatteryInfoSnapshot.PowerWatts</c>,
+/// Domain/Models.cs). The split is therefore presentation and is decided here, not in the domain, which only
+/// states that the battery's power is signed. The row's visibility is part of the claim: a battery that reports
+/// no rate shows no row, because a zero would be a made-up measurement.
+/// </summary>
+public class BatteryPowerTests
+{
+    private static BatteryViewModel Section() => new(hasInfo: true, limit: null, calibration: null, chargeMode: null);
+
+    /// <summary>On battery the value is negative in the domain, and the row names what the machine is drawing
+    /// rather than showing the sign.</summary>
+    [Fact]
+    public void OnBattery_ShowsTheDraw()
+    {
+        var vm = Section();
+
+        vm.Update(new BatteryInfoSnapshot { State = BatteryState.Discharging, PowerWatts = -12.3 });
+
+        Assert.True(vm.ShowPower);
+        Assert.Equal(Loc.T("Power draw"), vm.PowerLabel);
+        Assert.Equal(Loc.T("{0:0.0} W", 12.3), vm.Power);
+    }
+
+    /// <summary>On AC the value is positive, and the same row names the charge rate.</summary>
+    [Fact]
+    public void OnAc_ShowsTheChargePower()
+    {
+        var vm = Section();
+
+        vm.Update(new BatteryInfoSnapshot { State = BatteryState.Charging, PowerWatts = 45.0 });
+
+        Assert.True(vm.ShowPower);
+        Assert.Equal(Loc.T("Charging power"), vm.PowerLabel);
+        Assert.Equal(Loc.T("{0:0.0} W", 45.0), vm.Power);
+    }
+
+    /// <summary>No rate (null) hides the row rather than showing 0 W, and a later reading puts it back — the
+    /// flag follows the value, not the snapshot's existence.</summary>
+    [Fact]
+    public void NoReportedRate_HidesTheRow()
+    {
+        var vm = Section();
+
+        vm.Update(new BatteryInfoSnapshot { State = BatteryState.Discharging, PowerWatts = -10.0 });
+        Assert.True(vm.ShowPower);
+
+        vm.Update(new BatteryInfoSnapshot { State = BatteryState.Unknown });
+        Assert.False(vm.ShowPower);
+        Assert.Equal("", vm.Power);
+
+        vm.Update(new BatteryInfoSnapshot { State = BatteryState.Charging, PowerWatts = 30.0 });
+        Assert.True(vm.ShowPower);
+    }
+
+    /// <summary>A COARSE READING CHURNS NOTHING. The fast path ticks every second, but the OS fuel gauge behind
+    /// it is coarse — the same percent/state/rate come back for ten to twenty seconds at a time (measured on the
+    /// AN18-61: 17 one-second ticks in 18 s, Rate constant at -40.3 W throughout). Re-applying an unchanged
+    /// snapshot must therefore raise no notification at all; otherwise the one-second poll would repaint a value
+    /// that did not change and the "faster refresh" would be pure churn. This is what the generated
+    /// <c>[ObservableProperty]</c> setters give us, pinned here because the fast cadence depends on it.
+    /// MUTATION THAT REDDENS IT: replace a generated setter with an unconditional <c>OnPropertyChanged</c>.</summary>
+    [Fact]
+    public void AnUnchangedReading_RaisesNoNotification()
+    {
+        var vm = Section();
+        var snapshot = new BatteryInfoSnapshot { Percent = 53, State = BatteryState.Discharging, PowerWatts = -40.3 };
+        vm.Update(snapshot);   // the first read lands...
+
+        var raised = 0;
+        vm.PropertyChanged += (_, _) => raised++;
+        vm.Update(snapshot);   // ...and the next second's read of the same coarse value must be silent
+
+        Assert.Equal(0, raised);
     }
 }

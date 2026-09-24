@@ -45,9 +45,11 @@ internal sealed class UpdateSchedule : IDisposable
     private readonly Func<Task> _check;
     private readonly Action<UpdateInfo> _announce;
     private readonly TimeSpan _period;
-    // Created DISARMED (no due time) and armed by Start, so a schedule that is never started never fires: whether
-    // the feature is on is decided by the app, not by a timer that starts itself in a constructor.
-    private readonly Timer _timer;
+    // The cadence is the shared pool-thread PeriodicSchedule (created disarmed; armed by Start), the same one
+    // implementation the telemetry poll uses — see PeriodicSchedule for why the trigger must not be a UI-thread
+    // DispatcherTimer. This type keeps only what is genuinely its own: the resume hook and the anti-duplicate
+    // announcement ledger.
+    private readonly PeriodicSchedule _schedule;
     private readonly ResumeWatcher _resume;
     private readonly object _announcedGate = new();
 
@@ -71,7 +73,7 @@ internal sealed class UpdateSchedule : IDisposable
         _check = check;
         _announce = announce;
         _period = period ?? Period;
-        _timer = new Timer(_ => CheckNow());
+        _schedule = new PeriodicSchedule(CheckNow, _period);
         _resume = new ResumeWatcher(CheckNow);
     }
 
@@ -82,7 +84,7 @@ internal sealed class UpdateSchedule : IDisposable
     public void Start()
     {
         _resume.Start();
-        _timer.Change(_period, _period);
+        _schedule.Start();
         CheckNow();
     }
 
@@ -136,7 +138,7 @@ internal sealed class UpdateSchedule : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        _timer.Dispose();
+        _schedule.Dispose();
         _resume.Dispose();
     }
 }

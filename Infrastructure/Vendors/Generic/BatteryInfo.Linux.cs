@@ -47,6 +47,21 @@ public sealed partial class BatteryInfo
         return (percent, state);
     }
 
+    private static partial double? ReadPowerWatts(BatteryState state)
+    {
+        if (state == BatteryState.Unknown) return null;
+        var dir = BatDir();
+        if (dir == null) return null;
+        // power_now is the direct source in microwatts. Batteries that expose only charge/current carry the rate
+        // in current_now (µA) × voltage_now (µV) — a product in picowatts, divided down to watts below.
+        double? microWatts = ReadInt(dir, "power_now");
+        if (microWatts == null && ReadInt(dir, "current_now") is { } microAmps && ReadInt(dir, "voltage_now") is { } microVolts)
+            microWatts = microAmps * (double)microVolts / 1_000_000.0;
+        if (microWatts is not { } uw || uw == 0) return null;
+        double watts = Math.Abs(uw) / 1_000_000.0;
+        return state == BatteryState.Discharging ? -watts : watts;
+    }
+
     private static int? ReadInt(string dir, string file) => int.TryParse(ReadText(dir, file), out var v) ? v : null;
 
     private static string? ReadText(string dir, string file)

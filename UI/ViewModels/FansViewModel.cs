@@ -2,9 +2,9 @@ using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Localization;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -27,9 +27,9 @@ public sealed partial class FansViewModel : SectionViewModel
     private readonly Action<FanMode, byte, byte> _setFan;
     private readonly Action<bool, bool, int[]> _setFanCurve;                 // (gpu, use, points)
     private readonly Func<FanCurveDialogViewModel, Task> _showCurve;
-    private readonly DispatcherTimer _fixedDebounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
-    private readonly DispatcherTimer _cpuCurveDebounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
-    private readonly DispatcherTimer _gpuCurveDebounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly PeriodicSchedule _fixedDebounce;
+    private readonly PeriodicSchedule _cpuCurveDebounce;
+    private readonly PeriodicSchedule _gpuCurveDebounce;
     private bool _loading;
 
     public bool HasMax { get; }
@@ -50,9 +50,9 @@ public sealed partial class FansViewModel : SectionViewModel
         HasMax = cap.HasMax;
         HasCustom = cap.HasCustom;
         HasGpu = cap.HasGpuFan;
-        _fixedDebounce.Tick    += (_, _) => { _fixedDebounce.Stop(); ApplyFixedNow(); };
-        _cpuCurveDebounce.Tick += (_, _) => { _cpuCurveDebounce.Stop(); PersistCurve(false); };
-        _gpuCurveDebounce.Tick += (_, _) => { _gpuCurveDebounce.Stop(); PersistCurve(true); };
+        _fixedDebounce    = new PeriodicSchedule(ApplyFixedDebounced, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
+        _cpuCurveDebounce = new PeriodicSchedule(PersistCpuCurveDebounced, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
+        _gpuCurveDebounce = new PeriodicSchedule(PersistGpuCurveDebounced, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
         for (var i = 0; i < Anchors.Length; i++)
         {
@@ -163,17 +163,23 @@ public sealed partial class FansViewModel : SectionViewModel
     private void ApplyFixedIfLive() { if (!_loading) ApplyFixedNow(); }
     private void ApplyFixedNow() => _setFan(Mode(), (byte)Cpu, (byte)Gpu);
 
-    private void DebounceFixed() { if (_loading || !IsCustom) return; _fixedDebounce.Stop(); _fixedDebounce.Start(); }
+    private void DebounceFixed() { if (_loading || !IsCustom) return; _fixedDebounce.Restart(); }
 
     private void OnCurveChanged(bool gpu)
     {
         if (_loading) return;
         var t = gpu ? _gpuCurveDebounce : _cpuCurveDebounce;
-        t.Stop(); t.Start();
+        t.Restart();
     }
 
     private void PersistCurve(bool gpu)
         => _setFanCurve(gpu, gpu ? GpuUseCurve : CpuUseCurve, Duties(gpu ? GpuCurve : CpuCurve));
+
+    // The three debounce ticks: stop the (periodic) schedule first, so a late tick cannot re-enter, then do the
+    // one apply/persist the burst was coalescing to.
+    private void ApplyFixedDebounced()    { _fixedDebounce.Stop(); ApplyFixedNow(); }
+    private void PersistCpuCurveDebounced() { _cpuCurveDebounce.Stop(); PersistCurve(false); }
+    private void PersistGpuCurveDebounced() { _gpuCurveDebounce.Stop(); PersistCurve(true); }
 
     /// <summary>The array handed to the service, and the UI's half of the curve's rule: it is one duty% per
     /// anchor, always, because the collection it reads was built with one point per <see cref="Fan.Anchors"/>

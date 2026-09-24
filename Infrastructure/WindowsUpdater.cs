@@ -9,12 +9,13 @@ namespace AcerHelper.Infrastructure;
 /// running exe lives in Program Files and is LOCKED while we're alive, so we can't overwrite it ourselves;
 /// instead a tiny detached .cmd waits for THIS process to exit, runs msiexec, restarts the app, and deletes
 /// itself + the MSI. Our process is already elevated (app.manifest requireAdministrator), so the child cmd
-/// and msiexec inherit elevation — no second UAC prompt. Only meaningful for the installed build; a
-/// portable/dev run reports unsupported and the caller falls back to opening the release page.</summary>
+/// and msiexec inherit elevation — no second UAC prompt. A portable/dev run cannot use that in-place path (it
+/// lives outside Program Files and is not elevated), so there the caller downloads the same MSI and launches it
+/// through the Windows Installer (<see cref="LaunchInstaller"/>) — an install rather than the release page.</summary>
 public static class WindowsUpdater
 {
     /// <summary>True only for the MSI-installed build (AcerHelper.exe under Program Files). A portable or
-    /// dev-tree run returns false so the caller opens the release page instead.</summary>
+    /// dev-tree run returns false; the caller then installs the MSI instead of opening the release page.</summary>
     public static bool IsSupported =>
         OperatingSystem.IsWindows()
         && Environment.ProcessPath is { } p
@@ -38,16 +39,24 @@ public static class WindowsUpdater
     public static ReleaseAsset? PickAsset(IReadOnlyList<ReleaseAsset> assets)
         => assets.FirstOrDefault(a => a.Name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase));
 
-    // Staging directory for the downloaded MSI and the helper .cmd. NOT the user %TEMP%: everything staged
-    // here is later executed ELEVATED, and %TEMP% is writable by any same-user medium-IL process, which
-    // could swap the MSI (or rewrite the .cmd — cmd.exe reads batch files incrementally, so even a running
-    // script isn't safe) during the seconds between download and msiexec — a silent user→admin escalation.
-    // IsSupported guarantees the exe lives under Program Files, which only administrators can write, so the
-    // install folder itself is the protected staging area; we're elevated, so writing there is fine, and
+    // Staging directory for the downloaded MSI and the helper .cmd. For the INSTALLED build this is the install
+    // folder: everything staged here is later executed ELEVATED, and %TEMP% is writable by any same-user
+    // medium-IL process, which could swap the MSI (or rewrite the .cmd — cmd.exe reads batch files incrementally,
+    // so even a running script isn't safe) during the seconds between download and msiexec — a silent user→admin
+    // escalation. IsSupported guarantees the exe lives under Program Files, which only administrators can write,
+    // so the install folder itself is the protected staging area; we're elevated, so writing there is fine, and
     // the helper deletes both files when done.
-    private static string StagingDir => AppContext.BaseDirectory;
+    //
+    // A PORTABLE run stages under %LOCALAPPDATA%\AcerHelper\update instead: its own folder may be read-only
+    // (e.g. a mounted image) and offers no such protection anyway, because the process is not elevated — the MSI
+    // is launched through UAC, which is the elevation the user sees and approves.
+    private static string StagingDir =>
+        IsSupported
+            ? AppContext.BaseDirectory
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                           "AcerHelper", "update");
 
-    /// <summary>Download the MSI next to the installed exe (see <see cref="StagingDir"/>). (ok,
+    /// <summary>Download the MSI into the staging directory (see <see cref="StagingDir"/>). (ok,
     /// msiPath-or-error). Blocking I/O — call off the UI thread.</summary>
     public static async Task<(bool ok, string? result)> DownloadAsync(string assetUrl, CancellationToken ct = default)
     {
@@ -55,6 +64,7 @@ public static class WindowsUpdater
         var tmp = Path.Combine(StagingDir, $"AcerHelper-Setup-{Guid.NewGuid():N}.msi");
         try
         {
+            Directory.CreateDirectory(StagingDir);   // the portable staging dir may not exist yet
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("AcerHelper-update");   // some GitHub endpoints 403 UA-less
             await using (var src = await http.GetStreamAsync(assetUrl, ct))       // asset URL 302s to a CDN; HttpClient follows
@@ -67,6 +77,21 @@ public static class WindowsUpdater
             try { File.Delete(tmp); } catch { /* ignore */ }
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>Hand a downloaded MSI to the Windows Installer (shell-execute, so its own UI and UAC appear).
+    /// This is the portable build's install path: unlike the installed build's in-place helper there is nothing
+    /// to unlock and nothing to relaunch — the installer places the app under Program Files while this copy keeps
+    /// running. The staged file is swept on the next download (see <see cref="SweepStale"/>).</summary>
+    public static bool LaunchInstaller(string msiPath)
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo(msiPath) { UseShellExecute = true });
+            return p != null;
+        }
+        catch { return false; }
     }
 
     /// <summary>Spawn the detached upgrade helper and return true; the caller MUST exit immediately after so

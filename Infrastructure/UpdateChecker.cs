@@ -48,7 +48,8 @@ public sealed class UpdateChecker
                 .ToList();
             // Display the human-authored tag ("0.21.0", maybe "-beta"), not the 4-component normalized Version
             // ("0.21.0.0"); this string is only ever shown in the "Update available: v{0}" banner/tray text.
-            return new UpdateInfo(release.TagName.TrimStart('v', 'V'), release.HtmlUrl, assets);
+            // The body is the release's changelog, shown (unexpanded) in the notification's detail area.
+            return new UpdateInfo(release.TagName.TrimStart('v', 'V'), release.HtmlUrl, assets, release.Body);
         }
         catch { return null; }
     }
@@ -72,9 +73,10 @@ public sealed class UpdateChecker
     }
 }
 
-/// <summary>A newer release: its version, the release page URL (fallback), and its downloadable assets
-/// (used to self-replace the AppImage on Linux; see <see cref="AppImageUpdater"/>).</summary>
-public sealed record UpdateInfo(string Version, string Url, IReadOnlyList<ReleaseAsset> Assets);
+/// <summary>A newer release: its version, the release page URL (fallback), its downloadable assets and the
+/// release notes/changelog shown in the expanded update notification. (<see cref="Changelog"/> is nullable: a
+/// release can be published with an empty body.)</summary>
+public sealed record UpdateInfo(string Version, string Url, IReadOnlyList<ReleaseAsset> Assets, string? Changelog = null);
 
 /// <summary>One release asset: file name + direct download URL.</summary>
 public sealed record ReleaseAsset(string Name, string Url);
@@ -84,6 +86,8 @@ public sealed class GithubRelease
 {
     [JsonPropertyName("tag_name")] public string? TagName { get; set; }
     [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
+    /// <summary>The release notes (Markdown on GitHub); rendered as plain wrapped text in the notification.</summary>
+    [JsonPropertyName("body")] public string? Body { get; set; }
     [JsonPropertyName("assets")] public List<GithubAsset>? Assets { get; set; }
 }
 

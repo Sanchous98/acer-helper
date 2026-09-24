@@ -100,7 +100,7 @@ mechanism. That yields **137**, and the difference from 91 is the ~50 call sites
 | `Interlocked` sites (one protocol) | 6 |
 | `volatile` fields | 7 |
 | Named background threads | 4 |
-| `DispatcherTimer` instances | 9 |
+| Periodic timers (one impl: `PeriodicSchedule`) | 9 |
 | `Mutex` (one of them cross-process) | 2 |
 | Task-continuation chain (`HwSerial`) | 1 |
 | `Task.Run` hand-off sites | 10 |
@@ -217,19 +217,25 @@ window — which, despite `LidWatcher.cs`'s "window-message thread" comment, is 
 (`LidWatcher.Windows.cs:67`, and `Subscribe()` is called from `LightingCoordinator`'s ctor), so its `WndProc`
 runs on the dispatcher. The comment is stale; the behaviour is fine.
 
-### DispatcherTimer (9)
+### Periodic timers (9)
+
+All nine were `DispatcherTimer`s; all nine now go through **one implementation**,
+`Infrastructure/PeriodicSchedule.cs` (pool-thread trigger; UI work marshalled through an injected poster at an
+explicit priority), so none is created at the toolkit's default `Background` priority — which on the GLib backend
+is the idle source that starved while the window rendered. The three-second poll and the six-hourly update check
+run in **pool** mode; the rest run in **UI** mode with `UiSchedule.Normal` (or `Render` for the animation).
 
 | Timer | Interval | Purpose | Actor relevance |
 |---|---|---|---|
-| `AppController.cs:87` | 3 s | the refresh poll | **replaced** by an actor poll command |
-| `LightingCoordinator.cs:85` | 400 ms × 8 | post-switch lighting re-apply burst | survives — it is a UI-side retry policy |
-| `UI/FanSpinner.axaml.cs:38` | ~Tick ms | animation | survives |
-| `UI/ViewModels/CoViewModel.cs:26` | 400 ms | undervolt debounce | survives |
-| `UI/ViewModels/GpuViewModel.cs:15` | 400 ms | GPU OC debounce | survives |
-| `UI/ViewModels/FansViewModel.cs:25,26,27` | 400 ms × 3 | fan/curve debounce | survives |
-| `UI/ViewModels/LightingViewModel.cs:133` | 120 ms | lighting debounce | survives |
+| `PollSchedule` (AppController) | 3 s | the refresh poll | **replaced** by an actor poll command |
+| `LightingCoordinator` | 400 ms × 8 | post-switch lighting re-apply burst | survives — it is a UI-side retry policy |
+| `UI/FanSpinner.axaml.cs` | ~Tick ms | animation | survives |
+| `UI/ViewModels/CoViewModel.cs` | 400 ms | undervolt debounce | survives |
+| `UI/ViewModels/GpuViewModel.cs` | 400 ms | GPU OC debounce | survives |
+| `UI/ViewModels/FansViewModel.cs` | 400 ms × 3 | fan/curve debounce | survives |
+| `UI/ViewModels/LightingViewModel.cs` | 120 ms | lighting debounce | survives |
 
-All eight survivors are **input debouncing or animation on the UI thread**. They are not synchronisation and
+The UI-mode ones are **input debouncing or animation on the UI thread**. They are not synchronisation and
 must not be folded into an actor: debouncing is a policy about the user's hand, not about the hardware.
 
 ### Task.Run hand-offs (10)

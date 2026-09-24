@@ -142,21 +142,31 @@ public sealed partial class MainViewModel : ObservableObject
     // (see NotificationViewModel.Text). Raising twice is harmless and expected — the periodic update check, a UI
     // rebuild — because an id is one entry: the second raise refreshes it and keeps its read flag.
 
-    /// <summary>The startup (and later periodic) check found a newer release. The click runs the download/install
-    /// where the app can self-update and opens the release page where it cannot — the same action the update
-    /// banner's click had. The id carries the VERSION: a newer release is a new condition, and one the user has
-    /// ignored is not suppressed for it.
+    /// <summary>The startup (and later periodic) check found a newer release. The notification's click EXPANDS it
+    /// to show <paramref name="changelog"/> and an explicit Install button; only that button runs
+    /// <paramref name="install"/>. The id carries the VERSION: a newer release is a new condition, and one the
+    /// user has ignored is not suppressed for it.
     ///
     /// ONE OFFER AT A TIME, which is what the family retirement is for: a check that finds v1.1 while the list
-    /// still holds v1.0 leaves ONE entry, because the older one's click would install an older release — a worse
-    /// answer than no row at all. The retirement spares this version's own id, so a re-check of the SAME release
-    /// refreshes the entry the user already has rather than replacing it (a supersede is not a dismissal: the
-    /// read flag and the ignore state survive it).</summary>
-    public void SetUpdate(string version, Action open)
+    /// still holds v1.0 leaves ONE entry, because the older one's install button would install an older release —
+    /// a worse answer than no row at all. The retirement spares this version's own id, so a re-check of the SAME
+    /// release refreshes the entry the user already has rather than replacing it (a supersede is not a dismissal:
+    /// the read flag and the ignore state survive it).</summary>
+    public void SetUpdate(string version, string? changelog, Action install)
     {
         var id = NotificationCenter.UpdateId(version);
         Notifications.RetireFamilyExcept(NotificationCenter.UpdateIdPrefix, id);
-        Notifications.Raise(id, () => Loc.T("Update available: v{0}", version), open);
+        Notifications.Raise(id, () => Loc.T("Update available: v{0}", version), install, () => changelog ?? "");
+    }
+
+    /// <summary>Bring the update to the user from the TRAY item: open the bell's list and expand the update entry
+    /// so its changelog and Install button are on screen. The tray item is not itself an install trigger — only
+    /// the notification's Install button is (see <see cref="NotificationViewModel"/>) — so this is where its
+    /// click leads.</summary>
+    public void ShowUpdate()
+    {
+        IsNotificationsOpen = true;
+        Notifications.ExpandFamily(NotificationCenter.UpdateIdPrefix);
     }
 
     /// <summary>The Linux permission files are not installed, so the root-only controls are out of reach: offer
@@ -278,15 +288,21 @@ public sealed partial class MainViewModel : ObservableObject
         IsDrawerOpen = true;
     }
 
+    // The battery telemetry row is deliberately NOT refreshed here. It has its own, faster writer — the
+    // one-second BatteryPollSchedule path in AppController (RefreshBattery) — and this heavy pass is the SLOW
+    // half (three seconds) that may only reach the UI after its own EC/WMI sweep. Feeding a battery snapshot
+    // read at the start of this pass into the same BatteryViewModel would overwrite the fresh one-second value
+    // with an older one every three seconds, pinning the row the user watches back to this pass's cadence (the
+    // hazard the split exists to remove). One row, one writer: this method carries everything ELSE that the
+    // pass reads, and the battery card is updated solely by the fast path.
     public void Refresh(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable,
                         bool turboToggles, PerformanceProfile? baseProfile,
-                        SensorSnapshot s, BatteryInfoSnapshot battery, string? status)
+                        SensorSnapshot s, string? status)
     {
         HasProfile = current != null;
         ProfileName = current != null ? Loc.T(current.DisplayName) : "";
         _profiles?.Update(current, selectable, turboToggles, baseProfile);
         _monitor?.Update(s);
-        _battery?.Update(battery);
         if (status != null) Status = status;
     }
 }

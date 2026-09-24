@@ -25,7 +25,7 @@ namespace AcerHelper.UI;
 internal sealed class LightingCoordinator : IDisposable
 {
     private readonly LaptopService _svc;
-    private readonly DispatcherTimer _lightReapply;   // re-applies lighting for a while after a profile switch
+    private readonly PeriodicSchedule _lightReapply;  // re-applies lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
     private int _flashTicksLeft;                       // of those, how many still re-send the palette
 
@@ -91,16 +91,7 @@ internal sealed class LightingCoordinator : IDisposable
         // (or in a clean window on a display-contended bus) overrides it and it then stays. (Only user-driven
         // zones are re-applied; a "follows profile" lightbar has no panel and is left as the firmware's palette.
         // The palette flash itself is firmware and can't be suppressed.)
-        _lightReapply = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        _lightReapply.Tick += (_, _) =>
-        {
-            // Re-send the palette only while this burst has flash ticks left (a switch-driven burst has none —
-            // see KickReapply); every tick re-applies the per-zone keyboard paint.
-            var withFlash = _flashTicksLeft > 0;
-            if (withFlash) _flashTicksLeft--;
-            Paint(includeFlash: withFlash);
-            if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
-        };
+        _lightReapply = new PeriodicSchedule(ReapplyTick, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
         // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — ONCE.
         // The internal keyboard is always connected and never re-enumerates across sleep, so its HID handle
@@ -137,7 +128,18 @@ internal sealed class LightingCoordinator : IDisposable
     {
         _lightReapplyLeft = ReapplyTicks;
         _flashTicksLeft = withFlash ? FlashTicks : 0;
-        _lightReapply.Stop(); _lightReapply.Start();
+        _lightReapply.Restart();
+    }
+
+    // One re-apply tick of the bounded burst (see ReapplyTicks). Re-send the palette only while this burst has
+    // flash ticks left (a switch-driven burst has none — see KickReapply); every tick re-applies the per-zone
+    // keyboard paint, and the burst stops itself on its last tick.
+    private void ReapplyTick()
+    {
+        var withFlash = _flashTicksLeft > 0;
+        if (withFlash) _flashTicksLeft--;
+        Paint(includeFlash: withFlash);
+        if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
     }
 
     /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the

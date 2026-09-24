@@ -1,6 +1,6 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Localization;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -24,7 +24,7 @@ namespace AcerHelper.UI.ViewModels;
 public sealed partial class CoViewModel : SectionViewModel
 {
     private readonly Action<int[]> _apply;
-    private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly PeriodicSchedule _debounce;
     private bool _loading;
 
     public string CpuName { get; }
@@ -39,7 +39,7 @@ public sealed partial class CoViewModel : SectionViewModel
         _loading = true;
         _apply = apply;
         CpuName = name;
-        _debounce.Tick += (_, _) => { _debounce.Stop(); Apply(); };
+        _debounce = new PeriodicSchedule(ApplyDebounced, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
         // A domain label is an architecture name or a technical abbreviation ("Zen 5c", "iGPU"), neither of which is
         // translated, so it is shown as-is; the single-domain case has nothing to name the row after and uses the
@@ -82,8 +82,7 @@ public sealed partial class CoViewModel : SectionViewModel
     private void Debounce()
     {
         if (_loading) return;
-        _debounce.Stop();
-        _debounce.Start();
+        _debounce.Restart();
     }
 
     private void Apply()
@@ -92,6 +91,9 @@ public sealed partial class CoViewModel : SectionViewModel
         for (var i = 0; i < Rows.Count; i++) counts[i] = (int)Rows[i].Offset;
         _apply(counts);
     }
+
+    // The debounce tick: stop the (periodic) schedule first, so a late tick cannot re-enter, then apply once.
+    private void ApplyDebounced() { _debounce.Stop(); Apply(); }
 }
 
 /// <summary>One voltage domain's slider row. The label is an architecture name or abbreviation ("Zen 5c", "iGPU"),

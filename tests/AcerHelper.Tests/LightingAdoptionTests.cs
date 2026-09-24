@@ -45,7 +45,7 @@ namespace AcerHelper.Tests;
 /// pair removed) — reddens <c>AnOutOfBandInput_IsAdopted_AndStored</c> and
 /// <c>AnAdoption_NeverClaimsTheZoneAsConfigured</c>;</item>
 /// <item><b>drop the spurious-zero guard</b> — reddens <c>ASpuriousZeroRead_IsIgnored_AndNotStored</c>;</item>
-/// <item><b>drop the user-edit guard</b> (<c>_debounce.IsEnabled</c>) — reddens
+/// <item><b>drop the user-edit guard</b> (<c>_debounce.IsRunning</c>) — reddens
 /// <c>AUserEditInFlight_BeatsTheEvent</c>, which also proves the guard's precondition is real without a
 /// dispatcher: the debounce IS pending after a slider move, it just never ticks headless;</item>
 /// <item><b>let the adoption write to the device</b> (<c>ApplyNow()</c> added after the save) — reddens the two

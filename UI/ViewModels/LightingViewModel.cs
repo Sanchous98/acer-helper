@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using AcerHelper.Application;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Localization;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -221,7 +222,7 @@ public sealed partial class LightViewModel : ObservableObject
     private LightZoneState _state;
     // Write this zone's value back for the bound mode (LightingViewModel.Store -> ApplyLightZone.Run).
     private readonly Action<LightZoneState> _store;
-    private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    private readonly PeriodicSchedule _debounce;
     private bool _loading;
     private readonly object _readGate = new();   // guards the off-thread brightness read coalescing
     private bool _reading, _readPending;
@@ -266,6 +267,7 @@ public sealed partial class LightViewModel : ObservableObject
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
         _state = state;
         _store = store;
+        _debounce = new PeriodicSchedule(ApplyDebounced, TimeSpan.FromMilliseconds(120), UiSchedule.Normal);
         EffectNames = effects.Select(e => Loc.T(e.Name)).ToList();
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
@@ -295,7 +297,6 @@ public sealed partial class LightViewModel : ObservableObject
             }
         }
 
-        _debounce.Tick += (_, _) => { _debounce.Stop(); ApplyNow(); SaveState(); };
         UpdateColorMode();
         _loading = false;
 
@@ -395,7 +396,7 @@ public sealed partial class LightViewModel : ObservableObject
         // carries a stale value — accepting it would yank the slider back mid-drag, and (worse) the pending
         // debounce tick would then apply and PERSIST the stale value over the user's choice. The user wins;
         // the next input event re-reads after this apply has landed.
-        if (_debounce.IsEnabled) return;
+        if (_debounce.IsRunning) return;
         // A read-back of 0 while the app is driving a non-zero brightness is spurious: the OPMODE profile-flash
         // (follows-profile mode) zeroes the EC's keyboard-brightness register even though the keyboard is lit by
         // the STATIC re-apply — and that register stays 0 until the next firmware switch-flash, incl. across a
@@ -437,9 +438,11 @@ public sealed partial class LightViewModel : ObservableObject
     private void Schedule()
     {
         if (_loading) return;
-        _debounce.Stop();
-        _debounce.Start();
+        _debounce.Restart();
     }
+
+    // The debounce tick: stop the (periodic) schedule first, so a late tick cannot re-enter, then apply once.
+    private void ApplyDebounced() { _debounce.Stop(); ApplyNow(); SaveState(); }
 
     private void ApplyNow()
     {

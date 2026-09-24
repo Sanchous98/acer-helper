@@ -14,6 +14,11 @@
           <TextBlock Classes="metric" Text="{Binding Charge}"/>
           <TextBlock Classes="muted" VerticalAlignment="Bottom" Margin="0,0,0,4" Text="{Binding State}"/>
         </StackPanel>
+        <!-- Live power flow: draw while on battery, charge rate while plugged in (label flips with the sign) -->
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowPower}">
+          <TextBlock Classes="muted" Text="{Binding PowerLabel}"/>
+          <TextBlock Grid.Column="1" Text="{Binding Power}"/>
+        </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowHealth}">
           <TextBlock Classes="muted" Text="{l:Tr Health}"/>
           <TextBlock Grid.Column="1" Text="{Binding Health}"/>

@@ -23,7 +23,13 @@ internal sealed class AppController
     private MainViewModel _vm;
     private FlyoutCoordinator _windows;
     private TrayController _tray;
-    private readonly DispatcherTimer _timer;
+    // The full-refresh poll's cadence: a pool-thread timer, NOT a UI-thread DispatcherTimer (see the note where
+    // it is created). It carries no localized text and survives a live language rebuild untouched.
+    private readonly PollSchedule _poll;
+    // The FAST half of the telemetry cadence: the battery's live power/charge/percent row, read every second
+    // through the cheap OS call and posted to the UI. Deliberately separate from _poll — see RefreshBattery and
+    // Infrastructure/BatteryPollSchedule for why the heavy full pass must not run at this rate.
+    private readonly BatteryPollSchedule _batteryPoll;
     // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Created before
     // the UI so the follows-profile toggle can reach it, then re-pointed at each fresh UI via Attach.
     private readonly LightingCoordinator _lightingCoord;
@@ -47,9 +53,10 @@ internal sealed class AppController
     private volatile bool _cpuPrimed;
     private int _busy;                         // 0/1 single-flight guard for the refresh background pass (Interlocked)
     private int _rerun;                        // set when a Refresh() arrives mid-pass -> run exactly once more (coalesced)
-    private (string version, Action act)? _pendingUpdate;   // found update, remembered so a UI rebuild can re-add
-                                                            // the tray item (the tray is rebuilt empty; the
-                                                            // notification behind the bell carries over by itself)
+    private (string version, string? changelog, Action act)? _pendingUpdate;   // found update, remembered so a UI
+                                                            // rebuild can re-add the tray item (the tray is
+                                                            // rebuilt empty; the notification behind the bell
+                                                            // carries over by itself)
     // Set when an install could not make the module parameters live, so the reboot instruction survives a UI rebuild
     // (see ApplyHardwareAccess). Same lifetime as the condition it describes: the session.
     private bool _accessRebootPending;
@@ -142,12 +149,32 @@ internal sealed class AppController
         }
 
         Refresh();
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        // The periodic gate-stats write rides the poll's own timer (it self-throttles to a line a minute), so
-        // instrumentation costs no timer of its own. Periodic and not only on exit: a killed process never
-        // reaches ExitApp, and an owner's real session is exactly the one worth measuring.
-        _timer.Tick += (_, _) => { Refresh(); GateStatsLog.MaybeWrite(); };
-        _timer.Start();
+        // The poll is a THREAD-POOL timer, deliberately not a DispatcherTimer. A DispatcherTimer created here
+        // runs at DispatcherPriority.Background, which on the GLib backend is a g_idle_add source at
+        // G_PRIORITY_DEFAULT_IDLE — the LOWEST priority, below render/input. While the visible flyout has
+        // rendering or input to do the tick is deferred, so the readings froze at their last value on screen and
+        // only caught up once the window was hidden or minimized. The power row made this visible because it
+        // changes every second (the slower rows hid it). The pass already does all its hardware I/O off the UI
+        // thread and posts its own UI update, so the trigger belongs off the dispatcher; this is the same shape
+        // UpdateSchedule uses. The periodic gate-stats write rides the same tick (it self-throttles to a line a
+        // minute), so instrumentation costs no timer of its own; periodic and not only on exit, because a killed
+        // process never reaches ExitApp and an owner's real session is exactly the one worth measuring.
+        _poll = new PollSchedule(() => { Refresh(); GateStatsLog.MaybeWrite(); });
+        _poll.Start();
+        // ...and the battery row on its own, faster schedule. The full pass above reads the battery too
+        // (SyncPowerSource needs the state), but only once per three seconds; the reading gets the cheap
+        // every-second path (RefreshBattery) without dragging the EC/WMI sweep along with it, so a change the
+        // gauge does report is shown within a second rather than up to three. The gauge's own cadence is coarse —
+        // see RefreshBattery for the measurement — and this path is the ONLY writer of the battery card.
+        _batteryPoll = new BatteryPollSchedule(RefreshBattery);
+        _batteryPoll.Start();
+        // Fill the battery row NOW rather than leaving it on its constructor placeholder until the first one-second
+        // tick, off the UI thread like every other hardware read. From here on this is the ONLY writer of the
+        // battery card: the heavy pass no longer feeds it (see the Tick remark), so a snapshot it read at the
+        // start of its three-second sweep can never overwrite a fresher one-second reading.
+        // Wrapped like the Autostart call below and unlike the schedule's own ticks: a direct Task.Run is not
+        // covered by PeriodicSchedule's try/catch, and an unobserved pool exception is still a fault.
+        _ = Task.Run(() => { try { RefreshBattery(); } catch { /* the 1 s tick is the retry */ } });
 
         // Heal a stale run-at-logon entry from an older build (wrong launch command) so an in-place upgrade
         // migrates to the current definition. Best-effort, off the UI thread; only touches the entry if it
@@ -324,11 +351,19 @@ internal sealed class AppController
     // the id carries the version) and the tray item. Used by the initial check when it completes and after a UI
     // rebuild, where the tray genuinely needs it: a rebuilt tray holds no update item at all, while the
     // notification would have survived the swap on its own. No-op until an update has been found.
+    //
+    // The tray item OPENS the notification rather than installing (see MainViewModel.ShowUpdate): only the
+    // notification's explicit Install button starts an install, wherever the user came in from. The window is
+    // shown first because a tray-only (minimized) run has no window on screen for the notification to open in.
     private void ApplyUpdate()
     {
         if (_pendingUpdate is not { } u) return;
-        _vm.SetUpdate(u.version, u.act);
-        _tray.SetUpdate(Loc.T("Update available: v{0}", u.version), u.act);
+        _vm.SetUpdate(u.version, u.changelog, u.act);
+        _tray.SetUpdate(Loc.T("Update available: v{0}", u.version), () =>
+        {
+            _windows.OpenMain();
+            _vm.ShowUpdate();
+        });
     }
 
     private void ApplyHardwareAccess()
@@ -368,18 +403,23 @@ internal sealed class AppController
     /// rather than silent (nothing checked).</summary>
     private void AnnounceUpdate(UpdateInfo info)
     {
-        // Real self-update where we can: the Windows MSI install upgrades in place via msiexec; a Linux
-        // AppImage self-replaces. Anything else (portable/dev run, RPM, missing asset) opens the release page.
-        var msi = WindowsUpdater.IsSupported ? WindowsUpdater.PickAsset(info.Assets) : null;
-        var appImage = AppImageUpdater.IsAppImage ? AppImageUpdater.PickAsset(info.Assets) : null;
-        Action act =
-            msi != null      ? () => _ = SelfUpdateWindowsAsync(msi.Url) :
-            appImage != null ? () => _ = SelfUpdateAsync(appImage.Url) :
-                               () => OpenUrl(info.Url);
+        // Real self-update where we can: the Windows MSI install upgrades in place via msiexec; a portable
+        // Windows run downloads the MSI and launches the Windows Installer; a Linux AppImage self-replaces. Only
+        // when none of those applies (an RPM/other install, or a release with no asset we can handle) do we fall
+        // back to opening the release page. UpdateRouter owns the choice so it can be tested without the UI.
+        var plan = UpdateRouter.Route(info.Assets, OperatingSystem.IsWindows(),
+                                      WindowsUpdater.IsSupported, AppImageUpdater.IsAppImage);
+        Action act = plan.Kind switch
+        {
+            UpdateAction.UpgradeWindows => () => _ = SelfUpdateWindowsAsync(plan.Asset!.Url),
+            UpdateAction.InstallWindows => () => _ = InstallWindowsAsync(plan.Asset!.Url),
+            UpdateAction.ReplaceAppImage => () => _ = SelfUpdateAsync(plan.Asset!.Url),
+            _ => () => OpenUrl(info.Url),
+        };
 
         Dispatcher.UIThread.Post(() =>
         {
-            _pendingUpdate = (info.Version, act);   // remembered so a language rebuild can re-state it
+            _pendingUpdate = (info.Version, info.Changelog, act);   // remembered so a language rebuild can re-state it
             ApplyUpdate();
         });
     }
@@ -413,6 +453,25 @@ internal sealed class AppController
             Notify(Loc.T("Installing update…"));
             if (WindowsUpdater.InstallAndExit(res!)) ExitApp();
             else Notify(Loc.T("Update failed"));
+        }
+        finally { _updating = false; }
+    }
+
+    // Portable/development Windows run: download the release MSI and launch the Windows Installer, which shows
+    // its own UI and its own UAC prompt. Unlike the installed build's in-place helper there is nothing to unlock
+    // and nothing to relaunch — the installer places the app under Program Files while this copy keeps running.
+    private async Task InstallWindowsAsync(string assetUrl)
+    {
+        if (_updating) return;   // one update at a time (see the field); failure resets so retry works
+        _updating = true;
+        try
+        {
+            Notify(Loc.T("Downloading update…"));
+            var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl);
+            if (!ok) { Notify(Loc.T("Update failed") + Err(res)); return; }
+
+            Notify(Loc.T("Launching installer…"));
+            if (!WindowsUpdater.LaunchInstaller(res!)) Notify(Loc.T("Update failed"));
         }
         finally { _updating = false; }
     }
@@ -636,9 +695,12 @@ internal sealed class AppController
     // CpuPrimed says the CPU-power row has a value to take and is NOT a mode change (wave 6): its row is built
     // with a placeholder, so without this the first pass's value would be dropped and the row would sit on
     // Balanced until the user switched profile.
+    // NOTE: no battery snapshot here. The battery card is written only by the fast RefreshBattery path (see
+    // MainViewModel.Refresh and the split's rationale); the heavy pass still READS the battery, but only for
+    // SyncPowerSource's AC<->battery decision, and that value never reaches the UI from this pass.
     private readonly record struct Tick(
         PerformanceProfile? Current, IReadOnlyList<PerformanceProfile> Selectable, PerformanceProfile? Base,
-        SensorSnapshot Sensors, BatteryInfoSnapshot Battery, string? Status, bool TurboToggles,
+        SensorSnapshot Sensors, string? Status, bool TurboToggles,
         bool ModeChanged, FanAxisState? Fan, GpuAxisState? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
         ILightZoneMode? Lights);
@@ -661,6 +723,34 @@ internal sealed class AppController
         }
         try { _ = Task.Run(BackgroundPass); }
         catch { Interlocked.Exchange(ref _busy, 0); }   // scheduler refused (rare) -> release, don't wedge the guard
+    }
+
+    // The fast battery row's read, on the BatteryPollSchedule's pool thread (one second). It reads ONLY the
+    // battery — the cheap OS call behind percent/state/power (BatteryInfo.Read; health and cycle count are cached
+    // at construction, and Windows' power read uses CallNtPowerInformation, not WMI) — and posts the snapshot to
+    // the UI thread. Crucially it does NOT run BackgroundPass: that pass reads profiles and sensors over the
+    // EC/WMI gate, drives the fans and can restore a power-source mode, so it stays on the slower PollSchedule.
+    // Nothing here touches shared state, so it cannot corrupt a concurrent user write; the schedule's
+    // single-flight guard means a slow read skips a second rather than overlapping it, and PeriodicSchedule
+    // swallows a throw so a transient failure is retried next second.
+    //
+    // WHAT ONE SECOND DOES AND DOES NOT BUY, measured on the AN18-61: the schedule really does fire at 1 Hz
+    // (every ~1.00 s), but the OS fuel gauge behind the reading is COARSE — CallNtPowerInformation's Rate and
+    // the percent move in ~0.1 Wh steps, so in steady state the same value is returned for ten to twenty
+    // seconds at a time (a 20 s trace showed the Rate constant at -40.3 W throughout). No poll rate can make
+    // such a value change every second; the 1 s cadence only bounds the LATENCY to the next real change at
+    // ≤1 s, where the full pass would show it up to 3 s late. This is the sole writer of the battery card
+    // (MainViewModel.Refresh deliberately does not carry the battery), so a fresh reading here is never
+    // overwritten by the heavy pass's older one.
+    private void RefreshBattery()
+    {
+        // No telemetry port (a desktop, or an OS that reports no battery): there is no fast-changing reading to
+        // poll, so skip the per-second call rather than post the "unknown" snapshot forever.
+        if (_svc.Device.Battery.Telemetry == null) return;
+        var battery = _svc.ReadBatteryInfo();
+        // Re-resolve _vm at POST time so a live language rebuild — which swaps the view-model on the UI thread —
+        // is picked up. The UI thread owns _vm and the post runs there, so the read is race-free.
+        Dispatcher.UIThread.Post(() => _vm.Battery?.Update(battery), DispatcherPriority.Normal);
     }
 
     // Pool thread: every blocking hardware read/write lives here. LaptopService guards its shared Settings state
@@ -738,9 +828,12 @@ internal sealed class AppController
             _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
             var baseP = _svc.BaseProfile(current);
 
-            var t = new Tick(current, selectable, baseP, sensors, battery, status, turbo,
+            var t = new Tick(current, selectable, baseP, sensors, status, turbo,
                              modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights);
-            Dispatcher.UIThread.Post(() => UiPass(t));
+            // Posted at Normal, ABOVE the render priority (Default is below it on some backends): the reflected
+            // values are applied before the next paint, so a continuously-rendering window cannot keep a stale
+            // reading on screen behind a backlog of render jobs.
+            Dispatcher.UIThread.Post(() => UiPass(t), DispatcherPriority.Normal);
         }
         // A hardware throw aborts the WHOLE pass, not just the axis it came from: the reads above, the
         // mode-change re-apply and the UI post are all inside this try. Swallowed because a stalled ACPI-EC is
@@ -781,7 +874,7 @@ internal sealed class AppController
         if (t.ModeChanged || t.ProfileChanged)
             _lightingCoord.OnStateChanged(t.ProfileChanged, t.Current?.Id, t.Flash, t.Lights!);
 
-        _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Battery, t.Status);
+        _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Status);
         // No lighting sync on the UI pass: a read taken here carries whatever the wire last held, so the pass
         // used to ADOPT the previous profile's brightness (and persist it) while our own write was still in
         // flight. The Fn-key read on OnInputActivity is the event path; everything else re-applies instead.
@@ -798,7 +891,8 @@ internal sealed class AppController
     {
         if (_exiting) return;
         _exiting = true;
-        _timer.Stop();
+        _poll.Dispose();
+        _batteryPoll.Dispose();
         _updateSchedule.Dispose();   // stops the periodic check and unsubscribes the wake hook (its Linux half owns a gdbus child)
         GateStatsLog.Write();   // inline, not queued: a task started here might never get to run
         _lightingCoord.Dispose();

@@ -1,7 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Threading;
+using AcerHelper.Infrastructure;
 
 namespace AcerHelper.UI;
 
@@ -27,7 +27,7 @@ public partial class FanSpinner : UserControl
     private const double DegPerSecPerRpm = 0.12;     // far below real (rpm*6): ≈1 rev/s at 2900 rpm
     private const double MaxDegPerSec = 600;         // calm ceiling (~1.7 rev/s)
 
-    private readonly DispatcherTimer _timer;
+    private readonly PeriodicSchedule _timer;
     private readonly RotateTransform _rot;
     private double _degPerTick;
 
@@ -35,8 +35,10 @@ public partial class FanSpinner : UserControl
     {
         InitializeComponent();
         _rot = (RotateTransform)Rotor.RenderTransform!;   // the blades' rotation (named fields aren't generated for transforms)
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(TickMs) };
-        _timer.Tick += (_, _) => Advance();
+        // The shared periodic timer in UI mode, at Render priority: a default DispatcherTimer would be
+        // Background (the GLib idle priority) and the spin would stutter while the window renders — see
+        // PeriodicSchedule. The tick writes the transform, so it still runs on the UI thread (UiSchedule.Render).
+        _timer = new PeriodicSchedule(Advance, TimeSpan.FromMilliseconds(TickMs), UiSchedule.Render);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)

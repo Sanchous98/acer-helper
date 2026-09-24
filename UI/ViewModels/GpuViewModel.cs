@@ -1,6 +1,6 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
 using AcerHelper.Infrastructure.Composition;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -13,7 +13,7 @@ namespace AcerHelper.UI.ViewModels;
 public sealed partial class GpuViewModel : SectionViewModel
 {
     private readonly Action<int, int> _set;                 // (core MHz, mem MHz) -> apply + persist for the current mode
-    private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly PeriodicSchedule _debounce;
     private bool _loading;
 
     public string GpuName { get; }
@@ -30,7 +30,7 @@ public sealed partial class GpuViewModel : SectionViewModel
         GpuName = name;
         CoreMin = coreRange.Min; CoreMax = coreRange.Max;
         MemMin = memRange.Min; MemMax = memRange.Max;
-        _debounce.Tick += (_, _) => { _debounce.Stop(); Apply(); };
+        _debounce = new PeriodicSchedule(ApplyDebounced, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
         _core = Math.Clamp(initial.Core, CoreMin, CoreMax);
         _mem = Math.Clamp(initial.Mem, MemMin, MemMax);
@@ -75,11 +75,13 @@ public sealed partial class GpuViewModel : SectionViewModel
     private void Debounce()
     {
         if (_loading) return;
-        _debounce.Stop();
-        _debounce.Start();
+        _debounce.Restart();
     }
 
     private void Apply() => _set((int)Core, (int)Mem);
+
+    // The debounce tick: stop the (periodic) schedule first, so a late tick cannot re-enter, then apply once.
+    private void ApplyDebounced() { _debounce.Stop(); Apply(); }
 
     private static string Fmt(double mhz) => $"{(mhz > 0 ? "+" : "")}{(int)mhz} MHz";
 }
