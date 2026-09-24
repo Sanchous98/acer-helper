@@ -131,6 +131,12 @@ public sealed partial class MainViewModel : ObservableObject
     /// control that opens the list also closes it.</summary>
     [RelayCommand] private void ToggleNotifications() => IsNotificationsOpen = !IsNotificationsOpen;
 
+    /// <summary>Put the bell's list away. Reached from the window's dismiss layer, whose press is by
+    /// construction a click OUTSIDE the list (see <c>MainWindow.axaml</c>/<c>.axaml.cs</c>), so it must HIDE
+    /// and never open: a click elsewhere on the card while the list is showing dismisses it. Deliberately not
+    /// the toggle — the two gestures mean different things and only the bell is allowed to open.</summary>
+    [RelayCommand] private void CloseNotifications() => IsNotificationsOpen = false;
+
     // ---- the three sources that raise notifications ----
     //
     // Each of these was a banner in this window before the bell existed, and each keeps the action its banner's

@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
 
@@ -65,6 +66,16 @@ public partial class MainWindow : Window
         Backdrop.PointerPressed += (_, e) =>
         {
             if (ReferenceEquals(e.Source, Backdrop)) BackgroundClicked?.Invoke();
+        };
+
+        // The bell's list dismisses on a click outside it. The dismiss layer is a sibling UNDER the list (see
+        // the XAML), so a press that reaches it cannot have landed on the list itself — no hit-testing against
+        // the panel is needed, and a press on the Install button, on an expanding row or on the changelog's
+        // scrollbar stays with the list. The command is a one-way close, never the bell's toggle: an outside
+        // click must not open a list that is already away.
+        NotificationDismissLayer.PointerPressed += (_, _) =>
+        {
+            if (DataContext is MainViewModel vm) vm.CloseNotificationsCommand.Execute(null);
         };
     }
 

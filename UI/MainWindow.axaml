@@ -145,8 +145,20 @@
                  docs/ui-popup-placement.md), and an in-window panel has no placement to get wrong.
              Anchored under the bell (the header row's height plus its own top margin), so it reads as that
              button's drop-down. A plain overlay: the entries live in the view model, and nothing here is
-             conditional except its visibility. -->
-        <Border Width="360" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,44,14,0" Padding="10"
+             conditional except its visibility.
+
+             OUTSIDE-CLICK DISMISS is the transparent layer declared just before the list. It fills the page
+             while the list is showing, and the list is a LATER sibling, so the list draws (and therefore
+             hit-tests) ABOVE the layer: a press that lands on the layer is by construction a press OUTSIDE the
+             list, whatever it looks like underneath — the header, a section, the footer buttons. Closing is
+             one-way (there is no toggle here), so this click can only hide; the bell is still the only control
+             that opens it. The layer is visible only while the list is, so with the list away every click
+             reaches the app as before. This is the same idiom as Backdrop above, kept in-window for the reasons
+             this comment lists for the list itself. -->
+        <Border x:Name="NotificationDismissLayer" Background="Transparent"
+                IsVisible="{Binding IsNotificationsOpen}"/>
+        <Border x:Name="NotificationPanel" Width="360" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,44,14,0" Padding="10"
                 IsVisible="{Binding IsNotificationsOpen}"
                 Background="{DynamicResource AppAcrylicTint}"
                 BorderBrush="{DynamicResource AppCardStroke}" BorderThickness="1"

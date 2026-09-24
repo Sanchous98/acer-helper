@@ -41,6 +41,55 @@ public class NotificationSurfaceTests
         Assert.False(vm.IsNotificationsOpen);
     }
 
+    /// <summary>A CLICK OUTSIDE THE LIST CLOSES IT, AND ONLY CLOSES IT. The bell toggles; the window's dismiss
+    /// layer (a press that lands outside the list) runs this one-way close instead, so the same gesture that
+    /// dismisses can never reopen a list that is already away.
+    ///
+    /// MUTATION: make <c>CloseNotifications</c> toggle (<c>IsNotificationsOpen = !IsNotificationsOpen</c>) or
+    /// force it open (<c>= true</c>) — the "already closed stays closed" assert goes red.</summary>
+    [Fact]
+    public void TheOutsideClickClosesTheListAndOnlyClosesIt()
+    {
+        var vm = Dashboard(new NotificationCenter());
+
+        vm.ToggleNotificationsCommand.Execute(null);
+        Assert.True(vm.IsNotificationsOpen);
+
+        vm.CloseNotificationsCommand.Execute(null);
+        Assert.False(vm.IsNotificationsOpen);
+
+        // One-way: dismissing an already-closed list must not open it.
+        vm.CloseNotificationsCommand.Execute(null);
+        Assert.False(vm.IsNotificationsOpen);
+    }
+
+    /// <summary>THE WINDOW, NOT THE VIEW MODEL, OWNS WHAT "OUTSIDE" MEANS — because "outside" is geometry, and
+    /// the view model has none. The dismiss layer is a sibling declared UNDER the panel in the same grid, is
+    /// visible exactly while the panel is, and its own press runs the one-way close. That is pure Avalonia
+    /// toolkit routing and this host has no window, so the wiring is read out of the tree the same way the
+    /// tray/update wiring above is.
+    ///
+    /// MUTATIONS: point the handler at <c>ToggleNotificationsCommand</c> — the one-way close is gone (and the
+    /// view-model test above goes red too); declare the layer AFTER <c>NotificationPanel</c> — the layer would
+    /// cover the list, so the panel's Install button / expanding rows / changelog could never be clicked, and
+    /// the order assert here is what pins that.</summary>
+    [Fact]
+    public void TheWindowDismissesTheListOnAPressOutsideIt()
+    {
+        var xaml = Source("UI/MainWindow.axaml");
+        var code = Source("UI/MainWindow.axaml.cs");
+
+        var layer = xaml.IndexOf("x:Name=\"NotificationDismissLayer\"", StringComparison.Ordinal);
+        var panel = xaml.IndexOf("x:Name=\"NotificationPanel\"", StringComparison.Ordinal);
+        Assert.True(layer >= 0, "the dismiss layer is gone from MainWindow.axaml");
+        Assert.True(panel >= 0, "the notification panel lost its x:Name");
+        Assert.True(layer < panel, "the dismiss layer must be declared UNDER the panel, or it would bury it");
+
+        Assert.Contains("IsVisible=\"{Binding IsNotificationsOpen}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("NotificationDismissLayer.PointerPressed", code, StringComparison.Ordinal);
+        Assert.Contains("CloseNotificationsCommand", code, StringComparison.Ordinal);
+    }
+
     /// <summary>THE REBOOT STATE REPLACES THE OFFER, and it carries the retry its own words promise. This is
     /// the same arrangement the single two-message banner had: once the files are in /etc the offer is over (the
     /// installer is idempotent and never offers itself again), so the user must not be left with a "grant
