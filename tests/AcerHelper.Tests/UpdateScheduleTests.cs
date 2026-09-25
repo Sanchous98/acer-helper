@@ -8,8 +8,9 @@ namespace AcerHelper.Tests;
 ///
 /// WHY THIS FILE EXISTS. The owner suspends the laptop instead of shutting it down, so a check that ran only from
 /// the constructor could go weeks without firing (owner's request, 2026-09-22); the fix is a schedule — startup,
-/// six-hourly, and on every wake — and the risk the fix introduces is the opposite of the bug it fixes: a check
-/// that finds the same release three times a day putting it in the notification list three times.
+/// six-hourly, on every wake, and whenever the flyout is shown — and the risk the fix introduces is the opposite of
+/// the bug it fixes: a check that finds the same release three times a day putting it in the notification list
+/// three times (the show path would make that many times an afternoon, which is why it reuses the same ledger).
 ///
 /// HOW IT IS DRIVEN. The schedule is stepped BY HAND (<see cref="UpdateSchedule.CheckNow"/>) with a fake check,
 /// because asserting on a real timer would be a race; the one test that must use the timer gives it a
@@ -90,6 +91,72 @@ public class UpdateScheduleTests
         Assert.True(Eventually.Until(() => { s.CheckNow(); return check.Calls == 2; }),
                     "the guard must be released when the in-flight check finishes — a skipped tick costs one "
                     + $"interval, not the feature (saw {check.Calls})");
+    }
+
+    /// <summary>The SHOW/RESTORE trigger runs the same check the timer does: bringing the flyout up onto the
+    /// screen (the tray icon / its "Show" item, the Nitro hotkey) is the owner's real cue that a release might
+    /// exist, so the app must ask then rather than wait up to six hours for the tick.
+    /// MUTATION THAT REDDENS IT: make <c>OnWindowShown</c> a no-op (the count stays 0).</summary>
+    [Fact]
+    public void WindowShown_RunsTheCheckNow()
+    {
+        var check = new CountingCheck();
+        using var s = new UpdateSchedule(check.Run, _ => { });
+
+        Assert.Equal(0, check.Calls);   // control: constructing a schedule checks nothing
+        s.OnWindowShown();
+        Assert.Equal(1, check.Calls);
+    }
+
+    /// <summary>A show that arrives while a check is still in flight costs nothing: it is SKIPPED, not queued, so
+    /// a hung request cannot accumulate one check per window-open. This is the single-flight guard doing the work
+    /// for the show path, not a second throttle.
+    /// MUTATION THAT REDDENS IT: drop the <c>CompareExchange</c> guard from <c>CheckNow</c> (the second show
+    /// starts its own check and <c>Calls</c> reads 2).</summary>
+    [Fact]
+    public void AWindowShowDuringAnInFlightCheck_IsSkipped()
+    {
+        var gate = new TaskCompletionSource();
+        var check = new CountingCheck { Pending = gate.Task };
+        using var s = new UpdateSchedule(check.Run, _ => { });
+
+        s.OnWindowShown();
+        Assert.Equal(1, check.Calls);   // in flight
+
+        s.OnWindowShown();
+        Assert.Equal(1, check.Calls);   // the second show started nothing
+
+        gate.SetResult();
+    }
+
+    /// <summary>Showing the window repeatedly does NOT spam the user: each show runs a check (the show is the
+    /// trigger, not a reason to skip), but the release already announced is not announced again — the existing
+    /// anti-duplicate ledger suppresses it, so the show path needed no second mechanism. A genuinely newer
+    /// release that lands between two shows is still announced in turn.
+    /// MUTATION THAT REDDENS IT: delete the <c>_announced == info.Version</c> guard (the three same-release shows
+    /// all land -> three announcements).</summary>
+    [Fact]
+    public void RepeatedWindowShows_AnnounceTheSameReleaseOnce()
+    {
+        var releases = new Queue<UpdateInfo?>([
+            new UpdateInfo("0.21.0", "https://example.invalid/v0.21.0", []),   // first show
+            new UpdateInfo("0.21.0", "https://example.invalid/v0.21.0", []),   // ...and again
+            new UpdateInfo("0.21.0", "https://example.invalid/v0.21.0", []),   // ...and again
+            new UpdateInfo("0.22.0", "https://example.invalid/v0.22.0", [])]); // a release has landed
+        var announced = new List<string>();
+        UpdateSchedule? schedule = null;   // the check must reach the ledger of the schedule it is wired into
+        schedule = new UpdateSchedule(
+            () => { var info = releases.Dequeue(); if (info != null) schedule!.Announce(info); return Task.CompletedTask; },
+            i => announced.Add(i.Version));
+        using var _ = schedule;
+
+        schedule.OnWindowShown();
+        schedule.OnWindowShown();
+        schedule.OnWindowShown();
+        Assert.Equal(["0.21.0"], announced);   // three shows of the same release -> one announcement
+
+        schedule.OnWindowShown();
+        Assert.Equal(["0.21.0", "0.22.0"], announced);   // a newer release still gets through
     }
 
     /// <summary>THE ANTI-DUPLICATE RULE, keyed on the VERSION. The same release ticked twice is announced once —

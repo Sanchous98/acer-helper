@@ -182,14 +182,20 @@ internal sealed class AppController
         // killed), so there's no separate watcher process to keep alive.
         _ = Task.Run(() => { try { d.Autostart?.EnsureCurrent(); } catch { /* best-effort */ } });
 
+        // Scheduled, not fired once: Start() checks now, then every six hours, after each resume from sleep, and
+        // whenever the window is brought up onto the screen (see OnWindowShown) — the owner suspends the laptop
+        // rather than shutting it down, so a start-only check could go weeks without firing. The announcement path
+        // is unchanged (a notification + the tray item, see AnnounceUpdate).
+        (_updateSchedule = new UpdateSchedule(CheckForUpdatesAsync, AnnounceUpdate)).Start();
+        // The show/restore trigger: hooked BEFORE the launch OpenMain below, so the first bringing-up is covered
+        // by the same path as every later tray/hotkey one. Start() above already ran the startup check, so on a
+        // non-minimized launch the two arrive together and the single-flight guard makes the second a no-op —
+        // which is exactly why this is wired before the window opens rather than after it.
+        _windows.Shown += _updateSchedule.OnWindowShown;
+
         // Autostart (--startup) runs us resident in the tray — don't pop the flyout on every logon. The window is
         // still created (shown lazily) and opens on demand via the tray icon or the Nitro key.
         if (!startMinimized) _windows.OpenMain();
-
-        // Scheduled, not fired once: Start() checks now, then every six hours, and after each resume from sleep —
-        // the owner suspends the laptop rather than shutting it down, so a start-only check could go weeks without
-        // firing. The announcement path is unchanged (a notification + the tray item, see AnnounceUpdate).
-        (_updateSchedule = new UpdateSchedule(CheckForUpdatesAsync, AnnounceUpdate)).Start();
         _ = OfferDriverAsync(d, startMinimized);   // one-time consent prompt for the driver a feature needs
         _ = AskCardwireGpuAccessAsync();           // the remembered GPU-access consent, re-asked every start
     }
@@ -327,6 +333,7 @@ internal sealed class AppController
         Loc.Use(_svc.Language);
         var cur = _svc.CurrentProfile();          // read once, before the UI — see the same hoist in the constructor
         (_vm, _windows, _tray, _lighting) = BuildUi(cur);
+        _windows.Shown += _updateSchedule.OnWindowShown;   // the fresh coordinator needs the show trigger (see the ctor)
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
         _vm.OptionsPage?.Prime();                 // the rebuilt rows hold placeholders again — see the constructor
         _vm.Battery?.Prime();                     // ...and so do the battery section's three charging rows

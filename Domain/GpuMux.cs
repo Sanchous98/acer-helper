@@ -94,7 +94,7 @@ public static class GpuMuxMessages
     public const string Warning =
         "Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the "
         + "screen black — if that happens, force a shutdown by holding the power button, then start the machine "
-        + "and change the mode back from a console or another display. See docs/asus-support.md.";
+        + "and change the mode back from a console or another display. See docs/gpu-mux.md.";
 
     public const string Unsupported =
         "This machine's GPU mode cannot be switched from the app: the vendor's MUX/GPU-mode interface is not "

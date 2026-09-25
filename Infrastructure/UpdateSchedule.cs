@@ -2,15 +2,16 @@ namespace AcerHelper.Infrastructure;
 
 /// <summary>WHEN the update check runs — never what it does. The check is injected (<c>Func&lt;Task&gt; check</c>)
 /// and so is the announcement (<c>Action&lt;UpdateInfo&gt; announce</c>), so this type owns exactly two things:
-/// the schedule (startup, every <see cref="Period"/>, and on every wake from sleep) and the memory of what has
-/// already been announced (see <see cref="Announce"/>).
+/// the schedule (startup, every <see cref="Period"/>, on every wake from sleep, and whenever the window is
+/// brought up onto the screen — see <see cref="OnWindowShown"/>) and the memory of what has already been
+/// announced (see <see cref="Announce"/>).
 ///
 /// WHY IT EXISTS. The check used to run once, from AppController's constructor, and the owner suspends the laptop
 /// rather than shutting it down: a start-only check can therefore go weeks without firing, and a session that is
 /// never restarted never learns that a release exists (owner's request, 2026-09-22 — "обновление проверяется
-/// только при старте приложения… надо сделать проверку обновлений периодически"). The two triggers answer the
-/// two ways a process lives long: the timer covers one that merely stays up, and the resume hook covers the
-/// suspended machine, which is the case the owner actually hits.
+/// только при старте приложения… надо сделать проверку обновлений периодически"). The triggers answer the ways a
+/// process lives long: the timer covers one that merely stays up, the resume hook covers the suspended machine,
+/// and <see cref="OnWindowShown"/> covers the owner bringing the app up — which is the case the owner actually hits.
 ///
 /// THE RESUME HOOK IS <see cref="ResumeWatcher"/>, the same per-OS signal the lighting re-apply already uses:
 /// <c>SystemEvents.PowerModeChanged</c> with <c>PowerModes.Resume</c> on Windows (see ResumeWatcher.Windows.cs),
@@ -30,8 +31,8 @@ namespace AcerHelper.Infrastructure;
 /// interval and not the feature — and <see cref="UpdateChecker"/> bounds its own request with a 10 s timeout, so
 /// even a dead network releases the guard within seconds instead of parking it for the process's life.
 ///
-/// THE PERIOD IS HOURS ON PURPOSE. The resume hook already covers the case the owner hits, so the timer's only job
-/// is "a process that stays up for weeks must not go unchecked" — not "notice a release within minutes".
+/// THE PERIOD IS HOURS ON PURPOSE. The resume and show triggers cover the case the owner hits, so the timer's only
+/// job is "a process that stays up for weeks must not go unchecked" — not "notice a release within minutes".
 /// <see cref="Period"/> is six hours: a release is still seen the day it lands, four requests a day sit far under
 /// GitHub's 60-per-hour unauthenticated limit, and the app does not poll a service for an event that has not
 /// happened. Never more often than hourly, by construction.</summary>
@@ -89,13 +90,25 @@ internal sealed class UpdateSchedule : IDisposable
     }
 
     /// <summary>Run one check now, unless one is already in flight or the app is shutting down. Called by the
-    /// timer, by the resume hook, and by <see cref="Start"/> for the startup check.</summary>
+    /// timer, by the resume hook, by <see cref="Start"/> for the startup check, and by
+    /// <see cref="OnWindowShown"/> for the show trigger.</summary>
     public void CheckNow()
     {
         if (_disposed) return;   // a check found during teardown has nowhere to report to (see Dispose)
         if (Interlocked.CompareExchange(ref _inFlight, 1, 0) != 0) return;   // in flight -> skip, do not queue
         _ = RunAsync();
     }
+
+    /// <summary>The SHOW/RESTORE trigger: the flyout was brought up onto the screen (a hidden-to-visible
+    /// transition — the tray icon / its "Show" item, the Nitro hotkey, the update tray item, a rebuild reopening
+    /// what was open). This is the fourth way a long-lived session learns a release exists, and it exists because
+    /// the owner opens the app when they sit down at it rather than at any cadence the timer knows. It adds NO
+    /// mechanism of its own: it is <see cref="CheckNow"/> under a name that says who called it, so it inherits
+    /// BOTH existing guards — the single-flight guard means showing the window while a check is already running
+    /// costs nothing and starts nothing, and <see cref="Announce"/> means a check that finds the same release the
+    /// previous show already reported does not announce it again. So a user opening and closing the flyout all
+    /// afternoon is quiet after the first time a release is news, and only a genuinely newer release gets through.</summary>
+    public void OnWindowShown() => CheckNow();
 
     /// <summary>Announce a found release, once. "Already announced" means the VERSION STRING
     /// (<see cref="UpdateInfo.Version"/> — the human tag with the leading 'v' trimmed, exactly what the banner

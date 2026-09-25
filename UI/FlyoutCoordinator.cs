@@ -33,14 +33,23 @@ internal sealed class FlyoutCoordinator : IDisposable
         remove => _main.SessionEnding -= value;
     }
 
+    /// <summary>The flyout was brought UP onto the screen — a hidden-to-visible transition, not a re-activation
+    /// of an already-open window. Raised by every way the app shows its window: the tray icon / its "Show" menu
+    /// item, the Nitro toggle hotkey, the update tray item and a language rebuild re-opening what was open. The
+    /// app is tray-resident and normally hides its window, so THIS transition is what "the app unfolds onto the
+    /// screen" means here; there is no taskbar entry to restore from, so no separate minimized/restored event
+    /// exists to hook. AppController listens to run an update check on it (see UpdateSchedule.OnWindowShown).</summary>
+    public event Action? Shown;
+
     /// <summary>Tear the flyout window down for good — used when the UI is rebuilt for a live language switch.
     /// Unlike <see cref="HideAll"/> (which only hides it), this really closes the window and unhooks it.</summary>
     public void Dispose() => _main.Destroy();
 
     public void OpenMain()
     {
-        if (_main.IsOpen) { _main.Activate(); return; }
+        if (_main.IsOpen) { _main.Activate(); return; }   // already on screen: no Shown (see the event)
         _main.Open();
+        Shown?.Invoke();
     }
 
     /// <summary>Tray click: open if closed, hide if open. Skip reopen if the flyout just light-dismissed

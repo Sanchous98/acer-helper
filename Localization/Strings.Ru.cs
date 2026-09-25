@@ -283,8 +283,8 @@ internal static partial class Strings
             = "Режим GPU на этом устройстве нельзя переключить из приложения: интерфейс MUX/режима GPU производителя публично не документирован, а запись неизвестного значения может оставить экран чёрным. Используйте фирменную утилиту (NitroSense/PredatorSense) или BIOS.",
         ["That is not one of the GPU modes this machine offers."]
             = "Это не один из режимов GPU, доступных на этом устройстве.",
-        ["Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/asus-support.md."]
-            = "Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/asus-support.md.",
+        ["Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/gpu-mux.md."]
+            = "Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/gpu-mux.md.",
 
         // ---- language selector ----
         ["Language"]                = "Язык",
