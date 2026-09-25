@@ -228,6 +228,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         "lcd_override"      => "LCD overdrive",                  // Acer (both bindings)
         "backlight_timeout" => "Keyboard backlight timeout",     // Acer: the on/off flag
         "usb_charging"      => "USB charging when off:",         // Acer: battery thresholds
+        "panel_od"          => "Panel overdrive",                // ASUS/Windows: the ATK panel-overdrive flag
         "stop_timeout"      => "Keyboard backlight timeout:",    // Dell: a duration from a fixed set
         "FnLock"            => "Fn lock",                        // Dell: the BIOS attribute's own name
         "UsbPowerShare"     => "USB charging when off:",         // Dell

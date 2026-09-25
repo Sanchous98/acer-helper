@@ -3,16 +3,17 @@ using System.Runtime.CompilerServices;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Asus;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;
 
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// The shared GPU-mode (MUX) abstraction: the Acer gaming-WMI
+/// The shared GPU-mode (MUX) abstraction: the ASUS adapter over the Phase-3 armoury port, the Acer gaming-WMI
 /// adapter (read at selector 2, capability at selector 9, queued write at <c>(mode &lt;&lt; 8) | 2</c>), and the
 /// service/device flow. The safety properties that matter are pinned here:
-///   * a request QUEUES the value and never applies it immediately;
+///   * a request QUEUES the value and never applies it immediately (no <c>apply_queued_gpu_value</c> call);
 ///   * validation refuses over guessing (the armoury port's live-limit rule, and the Acer mode enum);
 ///   * the Acer port reads the real mode and refuses an unknown/unreadable one instead of guessing;
 ///   * a request is single-flight and a pending value never outlives the reboot it describes;
@@ -20,6 +21,194 @@ namespace AcerHelper.Tests;
 /// </summary>
 public class GpuMuxTests
 {
+    private sealed class FakeBus
+    {
+        public List<string[]> Calls { get; } = [];
+        public Func<string[], (int code, string output)> Answer { get; set; } = _ => (0, "");
+        public (int code, string output) Call(string[] args) { Calls.Add(args); return Answer(args); }
+        public string[]? LastSet => Calls.LastOrDefault(a => a.Length > 0 && a[0] == "set-property");
+        public bool CalledApply => Calls.Any(a => a.Length > 0 && a[0] == "call");
+    }
+
+    private const string MuxPath = "/xyz/ljones/asus_armoury/gpu_mux_mode";
+
+    private static FakeBus MuxBus(string current = "i 1", string queued = "i -1", string max = "i 1") => new()
+    {
+        Answer = args => args switch
+        {
+            ["tree", _] => (0, $"xyz.ljones.Asusd\n└─/xyz/ljones/asus_armoury\n  └─{MuxPath}\n"),
+            ["introspect", _, _] => (0, "xyz.ljones.AsusArmoury interface - - -\n"),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "name"] => (0, "s \"gpu_mux_mode\""),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "available_attrs"] => (0, "as 1 \"current_value\""),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "min_value"] => (0, "i 0"),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "max_value"] => (0, max),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "scalar_increment"] => (0, "i 1"),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "possible_values"] => (0, "ai 2 0 1"),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "current_value"] => (0, current),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "default_value"] => (0, "i 1"),
+            ["get-property", _, _, "xyz.ljones.AsusArmoury", "queued_gpu_value"] => (0, queued),
+            _ => (0, ""),
+        },
+    };
+
+    private static AsusdGpuMux AsusMux(FakeBus bus, AsusWriteConsent? consent = null)
+        => new(AsusdArmouryPort.TryCreate(bus.Call, consent ?? (_ => true))!);
+
+    // ---- ASUS adapter ----
+
+    [Fact]
+    public void TheAsusMuxOffersHybridAndDiscrete()
+    {
+        var mux = AsusMux(MuxBus());
+
+        Assert.True(mux.Supported);
+        Assert.Equal(["1", "0"], mux.Modes.Select(m => m.Id));   // Optimus first, then Discrete
+    }
+
+    [Fact]
+    public void TheAsusMuxReadsCurrentAndPendingState()
+    {
+        var mux = AsusMux(MuxBus(current: "i 1", queued: "i 0"));
+
+        var state = mux.Read();
+
+        Assert.Equal("1", state.Current!.Id);          // Optimus now
+        Assert.Equal("0", state.Pending!.Id);          // Discrete queued
+        Assert.True(state.RebootRequired);
+    }
+
+    [Fact]
+    public void WithNothingQueuedThereIsNoPendingAndNoRestart()
+    {
+        var state = AsusMux(MuxBus(current: "i 0", queued: "i -1")).Read();
+
+        Assert.Equal("0", state.Current!.Id);
+        Assert.Null(state.Pending);
+        Assert.False(state.RebootRequired);
+    }
+
+    /// <summary>A queued value equal to the current one is NOT a pending change: the state normalizes it away
+    /// (no pending, no restart), so the UI cannot claim a restart that would change nothing.</summary>
+    [Fact]
+    public void AQueuedValueEqualToTheCurrentOneNeedsNoRestart()
+    {
+        var state = AsusMux(MuxBus(current: "i 0", queued: "i 0")).Read();
+
+        Assert.Equal("0", state.Current!.Id);
+        Assert.Null(state.Pending);
+        Assert.False(state.RebootRequired);
+    }
+
+    /// <summary>Normalization is CONSERVATIVE about an unknown current: a queued value may not be judged equal
+    /// to a current the firmware did not report, so it stays pending with a restart.</summary>
+    [Fact]
+    public void AQueuedValueWithNoReadableCurrentStaysPending()
+    {
+        var state = AsusMux(MuxBus(current: "i -1", queued: "i 0")).Read();
+
+        Assert.Null(state.Current);
+        Assert.Equal("0", state.Pending!.Id);
+        Assert.True(state.RebootRequired);
+    }
+
+    /// <summary>The request QUEUES: it writes <c>current_value</c> (which asusd stores) and the app never calls
+    /// <c>apply_queued_gpu_value</c>. This is the core MUX-safety property for both vendors.</summary>
+    [Fact]
+    public void TheAsusRequestQueuesAndNeverAppliesImmediately()
+    {
+        var bus = MuxBus();
+        var mux = AsusMux(bus);
+
+        var change = mux.Request("0");
+
+        Assert.True(change.Ok);
+        Assert.True(change.Queued);
+        var set = bus.LastSet;
+        Assert.NotNull(set);
+        Assert.Equal(
+            ["set-property", "xyz.ljones.Asusd", MuxPath, "xyz.ljones.AsusArmoury", "current_value", "i", "0"],
+            set);
+        Assert.False(bus.CalledApply, "the app must never call apply_queued_gpu_value");
+    }
+
+    [Fact]
+    public void AnUnknownModeIsRefusedBeforeTheBus()
+    {
+        var bus = MuxBus();
+        var change = AsusMux(bus).Request("2");
+
+        Assert.False(change.Ok);
+        Assert.Equal(GpuMuxMessages.UnknownMode, change.Error);
+        Assert.Null(bus.LastSet);
+    }
+
+    /// <summary>Requesting the mode the firmware already reports is a NO-OP: nothing is written, no pending is
+    /// set and no restart follows. This is the fix for "same value before and after still shows the
+    /// after-restart result" — the port never fabricates a queued change for a value that is already current.</summary>
+    [Fact]
+    public void RequestingTheCurrentAsusModeIsANoOp()
+    {
+        var bus = MuxBus(current: "i 0");
+        var change = AsusMux(bus).Request("0");
+
+        Assert.True(change.Ok);
+        Assert.True(change.NoOp);
+        Assert.False(change.Queued);
+        Assert.Null(bus.LastSet);            // nothing written to asusd
+        Assert.False(bus.CalledApply);
+
+        var state = AsusMux(bus).Read();
+        Assert.Null(state.Pending);
+        Assert.False(state.RebootRequired);
+    }
+
+    /// <summary>When the current value cannot be read, the request is conservatively treated as a real change
+    /// (queued) rather than guessed to be a no-op.</summary>
+    [Fact]
+    public void AnUnreadableAsusCurrentValueIsNotTreatedAsANoOp()
+    {
+        var bus = MuxBus(current: "i -1");
+        var change = AsusMux(bus).Request("0");
+
+        Assert.True(change.Ok);
+        Assert.True(change.Queued);
+        Assert.False(change.NoOp);
+        Assert.NotNull(bus.LastSet);
+    }
+
+    /// <summary>A declined consent refuses through the armoury port's own gate (the same delegate a future UI
+    /// supplies), so no value reaches the firmware.</summary>
+    [Fact]
+    public void ADeclinedAsusConsentQueuesNothing()
+    {
+        var bus = MuxBus();
+        var change = AsusMux(bus, _ => false).Request("0");
+
+        Assert.False(change.Ok);
+        Assert.Equal(AsusArmouryMessages.Cancelled, change.Error);
+        Assert.Null(bus.LastSet);
+    }
+
+    /// <summary>When the machine does not expose <c>gpu_mux_mode</c> at all, the adapter is unsupported and every
+    /// request refuses rather than writing some other attribute.</summary>
+    [Fact]
+    public void WithoutTheAttributeTheAsusMuxIsUnsupported()
+    {
+        var bus = new FakeBus
+        {
+            Answer = args => args switch
+            {
+                ["tree", _] => (0, "xyz.ljones.Asusd\n└─/xyz/ljones\n"),
+                _ => (0, ""),
+            },
+        };
+        var armoury = AsusdArmouryPort.TryCreate(bus.Call, _ => true);
+
+        // No attributes -> no port at all; the adapter cannot be built. The device slot stays null and the UI
+        // hides the card (this is the absence case, distinct from a port that exists and refuses).
+        Assert.Null(armoury);
+    }
+
     // ---- Acer adapter ----
     //
     // THE WIRE, driven without WMI or an Acer machine: the gaming channel is two delegates — selector in /

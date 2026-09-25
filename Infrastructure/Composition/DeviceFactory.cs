@@ -1,4 +1,5 @@
 using AcerHelper.Infrastructure.Vendors.Acer;
+using AcerHelper.Infrastructure.Vendors.Asus;
 using AcerHelper.Infrastructure.Vendors.Dell;
 using AcerHelper.Infrastructure.Vendors.Generic;
 
@@ -32,6 +33,8 @@ public static class DeviceFactory
         var device =
             manufacturer?.Contains("Acer", StringComparison.OrdinalIgnoreCase) == true ? new AcerDevice(product) :
             manufacturer?.Contains("Dell", StringComparison.OrdinalIgnoreCase) == true ? new DellDevice(product) :   // "Dell Inc."
+            // "ASUSTeK COMPUTER INC." contains "ASUS", so one test covers both DMI spellings.
+            manufacturer?.Contains("ASUS", StringComparison.OrdinalIgnoreCase) == true ? new AsusDevice(product) :
             new GenericDevice();
 
         // Now that the vendor backend (if any) has finalized the port set — in particular whether the

@@ -1,13 +1,14 @@
-# GPU mode (MUX) switch — shared abstraction and the Acer implementation
+# GPU mode (MUX) switch — shared abstraction, ASUS + Acer
 
-Status: **implemented**. The Acer backend reads the mode over the recovered `AcerGamingFunction` selectors and
-queues a change. Runtime is **unverified** (no MUX hardware was available to this change), and the Acer `Set`
-effect in particular is untested (see §4).
+Status: **implemented**. The ASUS backend drives the switch (queued, consent-gated); the Acer backend reads the
+mode over the recovered `AcerGamingFunction` selectors and queues a change. Runtime is **unverified on all
+three paths** (no ASUS/Acer MUX hardware was available to this change), and the Acer `Set` effect in
+particular is untested (see §4).
 
 A MUX switch is the hardware multiplexer that routes the built-in panel either through the integrated GPU
 (hybrid / Optimus) or straight to the discrete GPU (discrete / Ultimate). Switching it is the most dangerous
 single control in the app: until the firmware re-routes the panel there may be **no display**, and the change
-only takes effect on the **next restart**. Every vendor path therefore shares one abstraction and one set of
+only takes effect on the **next restart**. Both vendor paths therefore share one abstraction and one set of
 safety rules.
 
 ## 1. The shared Domain port
@@ -46,8 +47,10 @@ every other control failure uses. No notification is raised for MUX outcomes.
 ## 2. Safety posture (applies to every implementation)
 
 1. **Queued, never immediate.** No implementation applies a MUX change directly or from the periodic refresh
-   loop. The Acer path has no "apply" call at all: its single `SetGamingMiscSetting` write is the queue, and the
-   panel re-routes on the next boot.
+   loop. The ASUS path writes `gpu_mux_mode` (which asusd stores) and the app NEVER calls
+   `apply_queued_gpu_value`; asusd applies the queue at shutdown — the restart the warning names. The Acer path
+   has no "apply" call at all: its single `SetGamingMiscSetting` write is the queue, and the panel re-routes on
+   the next boot.
 2. **Explicit consent with a warning.** Every real request goes through a confirmation dialog carrying the restart
    and black-screen warning (`GpuMuxMessages.Warning`). There is **no Apply button**: changing the selector IS
    the request (`GpuMuxViewModel.OnSelectedIndexChanged` → the apply flow). A declined prompt queues nothing AND
@@ -55,10 +58,12 @@ every other control failure uses. No notification is raised for MUX outcomes.
    equals the device-reported current mode is a no-op (no confirmation, nothing queued, no mark/note), and the
    ViewModel's own programmatic selection updates (from `Refresh`/a revert) are suppressed so they are never
    mistaken for a user request.
-3. **Refuse over guess.** The Acer path validates against its recovered mode enum and gates on the selector-9
-   capability signal, refusing an unknown mode or an unreadable state. Nothing writes a method id or a value the
-   device did not report.
-4. **Single-flight.** The Acer write is serialized by the MUX port's own lock, so two requests cannot overlap.
+3. **Refuse over guess.** The ASUS path validates the value against the device-reported range/possible-values
+   (the `AsusdArmouryPort` rule) on every request; the Acer path validates against its recovered mode enum and
+   gates on the selector-9 capability signal, refusing an unknown mode or an unreadable state. Nothing writes a
+   method id or a value the device did not report.
+4. **Single-flight.** The ASUS write is serialized by the armoury port's lock and the Acer write by the MUX
+   port's own lock, so two requests cannot overlap.
 5. **Current + pending are shown, in one line.** The card reads the live state when the drawer opens and after a
    request — never on a timer — and folds it into a single, non-wrapping sentence: the current mode, MARKED with
    a trailing `*` while the value that will apply after a reboot differs from the ORIGINAL the card first showed.
@@ -80,7 +85,29 @@ every other control failure uses. No notification is raised for MUX outcomes.
    restart/black-screen warning only appears when something will actually be queued; the port re-checks it
    independently.
 
-## 3. Acer implementation — the recovered gaming-WMI path
+## 3. ASUS implementation (Linux / asusd)
+
+`Infrastructure/Vendors/Asus/AsusdGpuMux.cs` is a thin adapter over the Phase-3 `AsusdArmouryPort`:
+
+- the attribute is `xyz.ljones.AsusArmoury.gpu_mux_mode` (`Gpu` kind, so asusd QUEUES it);
+- the value mapping is asusd's own (`rog-platform` `GpuMode::to_mux_attr`/`from_mux`): **0 = Ultimate
+  (discrete)**, **1 = Optimus (hybrid)**;
+- `Read()` reads the live `current_value` and the `queued_gpu_value` (`-1` = nothing queued);
+- `Request()` reuses the armoury port's refresh-then-validate, single-flight and queueing.
+
+Built in `AsusDevice.Linux.InitVendor` only when the `AsusArmoury` port exists. **Unverifiable**: no ASUS
+hardware was available, so the interface mapping and the wire form are taken from the asusd source and pinned
+by tests; no request has been made on a real machine. Re-verify against the installed asusd before trusting it.
+
+**Windows ASUS** uses the same shared port through the ATK ACPI device
+(`AsusWindowsGpuMux`, `Infrastructure/Vendors/Asus/AsusWindowsGpuMux.cs`): `gpu_mux_mode` `0x00090016`
+(VivoBook/ZenBook `0x00090026`), same value meaning (0 = dGPU/discrete, 1 = Optimus/hybrid), source
+`asus-wmi.h` + G-Helper. The ATK write stores the value at once, so the port reports a request made in this
+session as Pending with "restart required" (a fresh process reads the real mode and shows no pending). It is
+capability-probed (`DSTS` presence bit) and, when unsupported, is attached as an unsupported port so the shared
+card states the refusal. `AsusDevice.Windows` wires it; see `docs/asus-support.md` §5.
+
+## 4. Acer implementation — the recovered gaming-WMI path
 
 `Infrastructure/Vendors/Acer/AcerGpuMux.cs` implements the shared port over the SAME `AcerGamingFunction` WMI
 class this project already uses for profiles, fans and sensors (root\WMI, GUID
@@ -120,32 +147,38 @@ backend keeps the clean `AcerGpuMux.Unsupported` refusal on non-Windows.
 made, and the actual `SetGamingMiscSetting(selector 2)` effect on a real panel is untested. Nothing here
 guesses — but re-verify against the binary/device before trusting a write.
 
-## 4. Rollback / recovery
+## 5. Rollback / recovery
 
+- **ASUS.** The change is queued in asusd and applied at shutdown. If the screen is black after the restart,
+  force a power-off (hold the power button), start the machine, and set the mode back — possibly from a console
+  or a second display. The previous mode is readable through the armoury port's `current_value`, the queued one
+  through `queued_gpu_value`, and both are exposed by `IGpuMux.Read()`.
 - **Acer.** On an unsupported/refused machine nothing is ever written, so there is nothing to roll back; the
   user is directed to NitroSense/PredatorSense or the BIOS. On a supported machine the request is a single
-  `SetGamingMiscSetting` write that the panel applies at the next boot: if the screen is black after the restart,
-  force a power-off (hold the power button), start the machine, and set the mode back — possibly from a console
-  or a second display. The previous mode is readable through `IGpuMux.Read()` (selector 2).
+  `SetGamingMiscSetting` write that the panel applies at the next boot, exactly like ASUS: if the screen is
+  black after the restart, force a power-off (hold the power button), start the machine, and set the mode back —
+  possibly from a console or a second display. The previous mode is readable through `IGpuMux.Read()` (selector 2).
 - The app owns no "revert" timer and never restores a previous mode silently.
 
-## 5. Files, tests, and what is unverifiable
+## 6. Files, tests, and what is unverifiable
 
 | Area | Files |
 |---|---|
 | Domain | `Domain/GpuMux.cs` |
+| ASUS | `Infrastructure/Vendors/Asus/AsusdGpuMux.cs` (+ `AsusdArmouryPort.ReadCurrentValue` in `AsusArmoury.cs`, wiring in `AsusDevice.Linux.cs`) |
 | Acer | `Infrastructure/Vendors/Acer/AcerGpuMux.cs` (`AcerGpuMux` + `AcerGpuMuxProtocol`; wiring in `AcerDevice.Windows.InitVendor`) |
 | Composition | `Device.GpuMux`; `LaptopService.ReadGpuMux`/`RequestGpuMux` (`LaptopService.Tuning.cs`) |
 | UI | `GpuMuxViewModel.cs`, `TuningViewModel.cs`, `TuningView.axaml`, `UiActions.GpuMuxSection`, `AppController`/`FlyoutCoordinator` |
-| Tests | `GpuMuxTests.cs` (Acer read/packing/capability/queued/single-flight/refusal + wiring + service flow + translation), `GpuMuxViewModelTests.cs` |
+| Tests | `GpuMuxTests.cs` (ASUS adapter + Acer read/packing/capability/queued/single-flight/refusal + wiring + service flow + translation), `GpuMuxViewModelTests.cs` |
 
-Pinned by tests: the Acer read decode (`status`/`mode`, 255 and error status), the Acer write packing
+Pinned by tests: mode mapping, current/pending read, **queued-not-immediate** (no `apply_queued_gpu_value`),
+**the current-mode no-op** (nothing written / no pending / `RebootRequired = false`, and the conservative
+unknown-current path), **the equal-pending normalization** (a queued value equal to the reported current is
+reported as no pending / `RebootRequired = false`, for asusd, ASUS/ATK and Acer), unknown-mode and
+declined-consent refusals, the Acer read decode (`status`/`mode`, 255 and error status), the Acer write packing
 `(mode << 8) | 2`, the selector-9 capability gate, the Acer single-flight write, the session-scoped pending, the
-**queued-not-immediate** rule (a single WMI write, never an immediate apply), **the current-mode no-op** (no
-write / no pending / `RebootRequired = false`, and the conservative unknown-current path), **the equal-pending
-normalization** (a queued value equal to the reported current is reported as no pending / `RebootRequired =
-false`), unknown-mode and declined-consent refusals, the Windows wiring, the service/device flow, the card's
-confirm gating (including "already current" with no confirm), and that every shared message is translated.
+Windows wiring, the service/device flow, the card's confirm gating (including "already current" with no
+confirm), and that every shared message is translated.
 
 **The card is one line (the layout guard).** `GpuMuxViewModelTests` pins that a value differing from the
 ORIGINAL captured on the first populated read marks the current-mode sentence with a trailing `*` on the same
@@ -164,6 +197,7 @@ and that there is no `PendingText`/`Message` line; it also pins that `MainWindow
 `SizeToContent="WidthAndHeight"` flyout — no hard-coded 468x860 frame and no cap-to-Home, so a short Home page
 shows no empty gap and a queued MUX change cannot resize the flyout.
 
-**Unverifiable** (flagged, not hidden): the Acer selector numbers/packing (from the binary) and especially the
-actual effect of a `SetGamingMiscSetting(selector 2)` write on a real panel; and whether any given Acer model's
-NitroSense switch maps onto the same interface.
+**Unverifiable** (flagged, not hidden): the ASUS `gpu_mux_mode` value mapping and the on-device effect of a
+queued change; the Acer selector numbers/packing (from the binary) and especially the actual effect of a
+`SetGamingMiscSetting(selector 2)` write on a real panel; and whether any given Acer model's NitroSense switch
+maps onto the same interface.

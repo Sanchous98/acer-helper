@@ -262,7 +262,47 @@ internal static partial class Strings
         ["15 min"]                  = "15 мин",
         ["1 h"]                     = "1 ч",
 
-        // ---- GPU mode (MUX): shared by the vendor MUX backends and the recovered Acer gaming-WMI path ----
+        // ---- ASUS / asusd: EC-risky writes, validation refusals and consent warnings (Phase 3) ----
+        ["This setting is read-only on this machine."]
+            = "Этот параметр доступен только для чтения.",
+        ["This machine does not expose that setting."]
+            = "Устройство не предоставляет этот параметр.",
+        ["This machine does not report a range for that setting, so the app will not write it."]
+            = "Устройство не сообщает диапазон для этого параметра, поэтому приложение не будет его записывать.",
+        ["That value is outside the range this machine reports."]
+            = "Значение выходит за диапазон, сообщённый устройством.",
+        ["That value is not a multiple of the machine's step size."]
+            = "Значение не кратно шагу, сообщённому устройством.",
+        ["That value is not one of the values this machine accepts."]
+            = "Значение не входит в список значений, принимаемых устройством.",
+        ["The app does not know how this machine treats that setting, so it will not write it."]
+            = "Приложение не знает, как устройство обрабатывает этот параметр, поэтому оно не будет его записывать.",
+        ["Change cancelled."]
+            = "Изменение отменено.",
+        ["The change is queued and will be applied on the next restart."]
+            = "Изменение поставлено в очередь и применится при следующей перезагрузке.",
+        ["Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/asus-support.md."]
+            = "Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/asus-support.md.",
+        ["This writes a power limit to the firmware. It takes effect only while this profile's custom tuning is enabled in asusd."]
+            = "Запись лимита мощности в прошивку. Действует только пока для этого профиля включена пользовательская настройка в asusd.",
+        ["This writes a value to the firmware."]
+            = "Запись значения в прошивку.",
+        ["This writes a fan curve to the firmware and replaces the current curve for this profile. It takes effect immediately."]
+            = "Запись кривой вентилятора в прошивку; текущая кривая этого профиля будет заменена. Действует сразу.",
+        ["This resets this profile's fan curves to the machine's firmware defaults."]
+            = "Сброс кривых вентилятора этого профиля к заводским значениям прошивки.",
+        ["That profile is not one of the machine's performance profiles."]
+            = "Этот профиль не входит в набор профилей производительности устройства.",
+        ["This fan is not one of the machine's fans."]
+            = "Этот вентилятор не относится к вентиляторам устройства.",
+        ["A fan curve must have exactly eight points."]
+            = "Кривая вентилятора должна содержать ровно восемь точек.",
+        ["A fan curve's temperatures must not decrease."]
+            = "Температуры в кривой вентилятора не должны убывать.",
+        ["A fan curve's fan speeds must be between 0% and 100%."]
+            = "Скорости вентилятора в кривой должны быть в диапазоне от 0 до 100 %.",
+
+        // ---- GPU mode (MUX): shared by the ASUS asusd/ATK paths and the recovered Acer gaming-WMI path ----
         ["GPU mode"]                = "Режим GPU",
         ["Change"]                  = "Изменить",
         ["Change the GPU mode?"]    = "Изменить режим GPU?",
@@ -283,8 +323,9 @@ internal static partial class Strings
             = "Режим GPU на этом устройстве нельзя переключить из приложения: интерфейс MUX/режима GPU производителя публично не документирован, а запись неизвестного значения может оставить экран чёрным. Используйте фирменную утилиту (NitroSense/PredatorSense) или BIOS.",
         ["That is not one of the GPU modes this machine offers."]
             = "Это не один из режимов GPU, доступных на этом устройстве.",
-        ["Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/asus-support.md."]
-            = "Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/asus-support.md.",
+        ["Panel overdrive"]         = "Разгон панели",
+        ["This machine does not expose a fan curve for that fan."]
+            = "Устройство не предоставляет кривую вентилятора для этого вентилятора.",
 
         // ---- language selector ----
         ["Language"]                = "Язык",
