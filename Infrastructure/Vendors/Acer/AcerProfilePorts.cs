@@ -30,12 +30,18 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 /// Acer-vs-kernel vocabulary trap is made of.
 /// </summary>
 internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, bool>? applyEnvelope)
-    : IPowerProfiles, IProfileTraits
+    : IPowerProfiles, IProfileTraits, IProfileAvailability
 {
     public string? LastError => inner.LastError;
     public IReadOnlyList<PerformanceProfile> All => inner.All;
     public PerformanceProfile? Current() => inner.Current();
     public IReadOnlyList<PerformanceProfile> Selectable() => inner.Selectable();
+
+    /// <summary>Forwarded from the port underneath when it declares a policy, otherwise "everything offered".
+    /// This decorator's job is the EC envelope, not availability, so it must not swallow a capability its inner
+    /// port carries — the same pass-through rule as <see cref="Traits"/>.</summary>
+    public IReadOnlyList<PerformanceProfile> AvailableOn(bool onAc)
+        => inner is IProfileAvailability a ? a.AvailableOn(onAc) : inner.All;
 
     /// <summary>The inner port's own reading, forwarded unchanged — including its refusals: a profile the inner
     /// port does not classify reaches the envelope as <see cref="ProfileTraits.Unknown"/>, whose kind
@@ -69,7 +75,8 @@ internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, b
 /// a re-badged Acer one: wrapping an Acer profile in the choice name would mean building a second identity for a
 /// mode that already has one, and the inner port stays untouched.
 /// </summary>
-internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles, IProfileTraits
+internal sealed class AcerMappedProfiles(IPowerProfiles inner)
+    : IPowerProfiles, IProfileTraits, IProfileAvailability
 {
     // The decorator's own refusals have nowhere else to be reported: LastError is a read-only property and the
     // inner port was never asked. Kept to one call — a stale refusal must not be read after a later success
@@ -92,13 +99,23 @@ internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles,
     /// different sequence (or offer a subset).</summary>
     public IReadOnlyList<PerformanceProfile> All => Offered();
 
-    /// <summary>The same list as <see cref="All"/>, deliberately: this port does NOT gate on the power source.
-    /// All five profiles were measured WRITABLE on battery through the Acer handler on 2026-09-20 (that is the
-    /// Acer handler, not the AMD one — see the tombstone at the end of this file), and Windows has no such gate
-    /// either: parity with Windows is the whole point of this port. <c>All</c> and this can therefore only
-    /// differ by a source that stops offering a profile — the "available SET" is the EC's supported-mask on
-    /// Windows and the class node's <c>choices</c> here, and both are hardware facts, not policy.</summary>
+    /// <summary>The same list as <see cref="All"/>, deliberately: this port does NOT gate its SELECTABLE set on
+    /// the power source. All five profiles were measured WRITABLE on battery through the Acer handler on
+    /// 2026-09-20 (that is the Acer handler, not the AMD one — see the tombstone at the end of this file), so
+    /// "the hardware let us write it" stays true. Which of them the UI OFFERS per source is a separate,
+    /// vendor-declared policy, and it is exposed as data rather than applied here: see
+    /// <see cref="AvailableOn"/> and the tombstone below. <c>All</c> and this can therefore only differ by a
+    /// source that stops offering a profile — the available SET is the EC's supported-mask on Windows and the
+    /// class node's <c>choices</c> here, and both are hardware facts.</summary>
     public IReadOnlyList<PerformanceProfile> Selectable() => Offered();
+
+    /// <summary>The Acer table's own NitroSense-parity policy, over exactly the profiles this source offers:
+    /// on battery Eco and Balanced, on AC Quiet, Balanced, Performance and Turbo. Pure data — no node, no
+    /// machine input (see <see cref="AcerProfiles.IsAvailable"/>) — so it is testable off the laptop. The
+    /// decorator DECLARES it; deciding and applying it is <c>LaptopService</c>'s, which is why
+    /// <see cref="Selectable"/> above is left ungated.</summary>
+    public IReadOnlyList<PerformanceProfile> AvailableOn(bool onAc)
+        => Offered().Where(p => AcerProfiles.IsAvailable(p, onAc)).ToList();
 
     /// <summary>The Acer profile whose choice name the source reports as active, or null when it reports
     /// something this table cannot name (an unknown token, or nothing readable at all).
@@ -147,13 +164,15 @@ internal sealed class AcerMappedProfiles(IPowerProfiles inner) : IPowerProfiles,
 // The battery-gated profiles decorator stood here and is deliberately gone rather than merely unwired. Its name
 // is not spelled in this file on purpose: the removal is guarded by a source-text check over Infrastructure/, and
 // the guard is a plain substring test, so the pin that keeps the removal a decision rather than an accident —
-// and that names the deleted decorator in full — is TheMappedPortDoesNotGateOnPowerSource in
-// AcerProfilePortsTests.
+// and that names the deleted decorator in full — is TheMappedPortDeclaresAvailabilityWithoutGatingItsSelectable
+// in AcerProfilePortsTests.
 //
-// Why it went: it greyed out everything but balanced/low-power while unplugged, and both halves of that were
-// Linux-only policy. It had no Windows analogue at all (Windows has no power-source gate — see
-// AcerProfiles.FromMask, where the available set comes from the EC supported-mask), and its stated justification
-// — the driver refusing profile writes on battery — was measured against the AMD handler (platform-profile-0,
-// EOPNOTSUPP on battery), which is a DIFFERENT handler on a different node. On 2026-09-20 all five were written
-// on battery through the Acer handler on platform-profile-1 and read back. Keeping the gate would have been the
-// one place where Linux offered less than Windows for no reason the hardware gives.
+// Why it went, and what replaced it: it GREYED THE SET itself while unplugged, on a Linux-only I/O walk, and its
+// stated justification — the driver refusing profile writes on battery — was measured against the AMD handler
+// (platform-profile-0, EOPNOTSUPP on battery), which is a DIFFERENT handler on a different node; all five were
+// written on battery through the Acer handler on platform-profile-1 on 2026-09-20. The owner has since asked for
+// NitroSense parity (on battery only Eco and Balanced; on AC Quiet, Balanced, Performance and Turbo), so the
+// policy is back — but as a PURE vendor declaration (AcerProfiles.IsAvailable, surfaced through
+// IProfileAvailability) that both OSes carry, with the DECISION and the apply left to LaptopService. That split
+// is what keeps the old failure modes closed: the policy file does no I/O (AcerLinuxWiringTests), and a port
+// with no policy (ASUS, Dell, the generic ports) is never asked for one. See docs/acer-linux.md.

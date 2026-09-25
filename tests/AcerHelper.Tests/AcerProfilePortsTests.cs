@@ -371,30 +371,50 @@ public class AcerProfilePortsTests
         Assert.Equal("boom", port.LastError);
     }
 
-    /// <summary>The deliberate pin that keeps the removal of <c>BatteryGatedProfiles</c> a decision rather than an
-    /// accident. That decorator greyed out everything but balanced and low-power while unplugged, and BOTH halves
-    /// of its justification turned out to be wrong on this hardware: its stated reason — the driver returning
-    /// EOPNOTSUPP for profile writes on battery — was measured against the AMD handler on
-    /// <c>platform-profile-0</c>, which is a different handler on a different node, while all five profiles were
-    /// written on battery through the Acer handler on <c>platform-profile-1</c> on 2026-09-20; and the gate had no
-    /// Windows analogue at all, since Windows gets its available set from the EC supported-mask and has no
-    /// power-source input anywhere on the profile path. Windows parity is this port's whole purpose, so a gate
-    /// here would be the one place Linux offers less for no reason the hardware gives.
+    /// <summary>
+    /// THE POWER-SOURCE POLICY IS DECLARED, NOT GATED IN. The port still reports ALL five profiles as
+    /// <see cref="AcerMappedProfiles.Selectable"/> — the hardware fact measured on 2026-09-20, that every mode is
+    /// writable on battery — and it answers the UI's per-source question as DATA through
+    /// <see cref="AcerMappedProfiles.AvailableOn"/>: NitroSense parity (on battery Eco and Balanced; on AC Quiet,
+    /// Balanced, Performance and Turbo). The DECISION and the apply live in <c>LaptopService</c>, which is what
+    /// keeps this an injectable, I/O-free policy rather than the deleted Linux-only AC walk.
     ///
-    /// The last assertion is the structural half, and it is why this cannot be quietly reverted: the port takes no
-    /// power-source input, so re-introducing the gate means ADDING one — the five deleted tests cannot simply be
-    /// pasted back, and whoever does it has to delete this test to make the build pass. The behavioural half alone
-    /// (five profiles, no gate visible) would still pass if a gate were added with a default of "on AC".</summary>
+    /// WHY THE SEPARATION IS THE POINT, and it is the lesson of the decorator this replaced (whose name is
+    /// deliberately not spelled here — a source-text guard pins it in AcerLinuxWiringTests): a port that GREYED
+    /// its own set could only be tested on the machine it ran on, and it put a power-source input into a port
+    /// whose other half is Windows. Declaring the policy as a pure function over the table makes both sources
+    /// drivable by the suite without the laptop.
+    ///
+    /// The constructor shape is asserted too: the policy is data on the table, so the port needs NO new input —
+    /// a parameter here would be the old mistake wearing a capability's name.</summary>
     [Fact]
-    public void TheMappedPortDoesNotGateOnPowerSource()
+    public void TheMappedPortDeclaresAvailabilityWithoutGatingItsSelectable()
     {
         var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All));
 
+        // The set itself is untouched by the policy: five offered, five selectable, same ids.
         Assert.Equal(5, port.All.Count);
         Assert.Equal(5, port.Selectable().Count);
         Assert.Equal(port.All.Select(p => p.Id), port.Selectable().Select(p => p.Id));
 
+        // The declared policy, both sources, by display name so the mapping is readable.
+        Assert.Equal(["Eco", "Balanced"],
+                     port.AvailableOn(onAc: false).Select(p => p.DisplayName));
+        Assert.Equal(["Quiet", "Balanced", "Performance", "Turbo"],
+                     port.AvailableOn(onAc: true).Select(p => p.DisplayName));
+
         var ctor = Assert.Single(typeof(AcerMappedProfiles).GetConstructors());
         Assert.Equal(typeof(IPowerProfiles), Assert.Single(ctor.GetParameters()).ParameterType);
+    }
+
+    /// <summary>The outer decorator does not swallow the capability its inner port declares: the envelope
+    /// wrapper is about the EC channel, not about availability, and a machine whose outer port forgot to forward
+    /// this would lose the per-source policy silently.</summary>
+    [Fact]
+    public void TheEnvelopeDecoratorForwardsTheAvailabilityPolicy()
+    {
+        var port = new EcSyncedProfiles(new AcerMappedProfiles(new FakePowerProfiles(Kernel.All)), _ => true);
+
+        Assert.Equal(["Eco", "Balanced"], port.AvailableOn(onAc: false).Select(p => p.DisplayName));
     }
 }

@@ -60,7 +60,8 @@ public sealed class ProfilesPort(IReadOnlyList<PerformanceProfile> all,
     Func<IReadOnlyList<PerformanceProfile>> selectable,
     Func<PerformanceProfile?> current,
     Func<PerformanceProfile, (bool ok, string? error)> set,
-    IProfileTraits? traits = null) : IPowerProfiles, IProfileTraits
+    IProfileTraits? traits = null,
+    Func<PerformanceProfile, bool, bool>? available = null) : IPowerProfiles, IProfileTraits, IProfileAvailability
 {
     public string? LastError { get; private set; }
     public IReadOnlyList<PerformanceProfile> All => all;
@@ -69,6 +70,12 @@ public sealed class ProfilesPort(IReadOnlyList<PerformanceProfile> all,
     public bool Set(PerformanceProfile profile) { var (ok, e) = set(profile); LastError = e; return ok; }
 
     public ProfileTraits Traits(PerformanceProfile profile) => traits?.Traits(profile) ?? ProfileTraits.Unknown;
+
+    /// <summary>The vendor's per-source availability policy, or everything the port offers when no policy was
+    /// handed in (Dell and any other backend that lists a profile on both sources). A predicate rather than a
+    /// second list so the two cannot disagree about which profiles the table holds.</summary>
+    public IReadOnlyList<PerformanceProfile> AvailableOn(bool onAc)
+        => available == null ? all : all.Where(p => available(p, onAc)).ToList();
 }
 
 /// <summary>Discrete brightness levels (0 - Max) for a plain, non-RGB keyboard backlight.</summary>

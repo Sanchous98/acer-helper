@@ -213,6 +213,66 @@ public class LightingAdoptionTests
     }
 
     /// <summary>
+    /// A genuine dim to 0 IS an intent and must be adopted where the register is trustworthy. The reported bug:
+    /// every 0 read used to be refused (for the OPMODE-flash lie), so a keyboard dimmed to off could not be
+    /// adopted — the state stayed non-zero and the DECREASE control was dead until an increase made the register
+    /// non-zero again. Here the profile flash is not in play (<c>profileFlashPossible: () =&gt; false</c>, the
+    /// shape a device without a follows-profile lightbar answers), so the 0 lands: slider, stored value and the
+    /// next re-apply all follow.
+    ///
+    /// THE DIFFERENTIAL IS <see cref="ASpuriousZeroRead_IsIgnored_AndNotStored"/>: the same 0 read with the
+    /// profile flash possible is refused.
+    /// </summary>
+    [Fact]
+    public void AGenuineDimToZero_IsAdopted_WhenTheRegisterIsReliable()
+    {
+        var register = new StaleRegister(30);
+        var written = new List<byte>();
+        var mode = Mode(60);
+        var poster = new Eventually.Poster();
+        var panel = Panel(mode, written, register, poster.Post, profileFlashPossible: () => false);
+
+        register.Value = 0;                      // the Fn key dims the keyboard to off
+        panel.AdoptFromHardware();
+
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
+        Assert.Equal(0, panel.Brightness);             // the slider reaches 0...
+        Assert.Equal(0, mode[ZoneName].Brightness);    // ...the mode stores the dim-to-off...
+        Assert.Equal(1, mode.Persists);
+        Assert.Equal([30], written);                   // ...and the adoption reads, never writes
+    }
+
+    /// <summary>
+    /// The decrease control keeps working after a profile stored at 0: the state is 0 (off), an increase adopts
+    /// the new level, and a decrease adopts its way back to 0 — no dead-end, because a reliable register's 0 is
+    /// no longer refused. This is the "state stays in sync with hardware" half of the reported bug.
+    /// </summary>
+    [Fact]
+    public void AnIncreaseAndThenADecrease_AfterAProfileStoredAtZero_StayInSync()
+    {
+        var register = new StaleRegister(0);
+        var written = new List<byte>();
+        var mode = Mode(0);                      // this profile's stored keyboard brightness is 0
+        var poster = new Eventually.Poster();
+        var panel = Panel(mode, written, register, poster.Post, profileFlashPossible: () => false);
+
+        Assert.Equal(0, panel.Brightness);
+        Assert.Equal([0], written);              // Control: the construction re-apply really did turn it off
+
+        register.Value = 40;                     // Fn-up: an out-of-band increase
+        panel.AdoptFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the increase was never delivered");
+        Assert.Equal(40, panel.Brightness);
+        Assert.Equal(40, mode[ZoneName].Brightness);
+
+        register.Value = 0;                      // Fn-down: back to off, and it must land
+        panel.AdoptFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the decrease was never delivered");
+        Assert.Equal(0, panel.Brightness);
+        Assert.Equal(0, mode[ZoneName].Brightness);
+    }
+
+    /// <summary>
     /// A user edit in flight wins over the event: the read raced ahead of the apply we have not sent yet, so what
     /// it carries is the value the user is in the middle of replacing. Accepting it would yank the slider back
     /// mid-drag, and the pending debounce tick would then apply and persist the stale value over the user's
@@ -430,11 +490,12 @@ public class LightingAdoptionTests
     /// <see cref="ApplyLightZone"/> plus the local copy), so a test can see whether the adoption stored anything
     /// and whether it reached the file — not only whether it applied.</summary>
     private static LightViewModel Panel(FakeLightZones mode, List<byte> written, StaleRegister register,
-                                        Action<Action> post)
+                                        Action<Action> post, Func<bool>? profileFlashPossible = null)
         => new(ZoneName, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                zones: 1,
                applyAll: (_, _, brightness, _, _) => written.Add(brightness),
-               applyZone: null, mode[ZoneName], s => ApplyLightZone.Run(ZoneName, s, mode), register.Read, post);
+               applyZone: null, mode[ZoneName], s => ApplyLightZone.Run(ZoneName, s, mode), register.Read, post,
+               profileFlashPossible);
 
     /// <summary>A controllable brightness register that LIES: nothing we write changes what a read reports, which
     /// is the wire's lag after a profile switch — the write is sent, the EC has not applied it, and the register

@@ -25,6 +25,24 @@ public interface IPowerProfiles
     bool Set(PerformanceProfile profile);
 }
 
+/// <summary>Which of a port's profiles a POWER SOURCE allows — the vendor's own availability policy, declared
+/// beside the profiles it is about. It is a separate interface rather than a member of
+/// <see cref="IPowerProfiles"/> for the same reason <c>IProfileTraits</c> is: the capability is optional, and a
+/// backend that has no such policy must not be made to answer for one. A port that does not implement it offers
+/// everything it lists on both sources, so ASUS, Dell and the generic backends are untouched.
+///
+/// THE POLICY IS DATA, NOT I/O. Acer implements it for NitroSense parity (on battery only Eco and Balanced; on
+/// AC Quiet, Balanced, Performance and Turbo) by reading its own profile table — no machine input, no sysfs —
+/// which is what lets the suite drive both sources without the laptop. The LIVE source is the caller's
+/// (<c>LaptopService</c> already detects AC vs battery for its per-source memory); the port only states which
+/// of its modes that source offers.</summary>
+public interface IProfileAvailability
+{
+    /// <summary>The port's profiles that may be selected on the given source. <paramref name="onAc"/> is the
+    /// live power source; the answer is a subset of <see cref="IPowerProfiles.All"/>.</summary>
+    IReadOnlyList<PerformanceProfile> AvailableOn(bool onAc);
+}
+
 /// <summary>Fan behaviour and custom speeds.</summary>
 public interface IFanControl
 {

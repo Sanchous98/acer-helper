@@ -18,6 +18,38 @@
       </StackPanel>
     </ExperimentalAcrylicBorder>
 
+    <!-- GPU mode (MUX): the shared IGpuMux card. It shows ONE stable line — the mode the firmware is in NOW —
+         and, while the value that will apply after a reboot differs from the ORIGINAL value the card first
+         showed, marks that value with a trailing '*' and shows a short muted note NEXT TO THE SELECTOR. There is
+         NO Apply button: choosing a different mode in the ComboBox runs the change flow (confirm, then queue;
+         cancel/revert snaps the selection back), so the selector IS the switch. There is no inline suffix, no
+         second line and no always-present caption: the note is conditional (GpuMux.NoteVisible) and shares the
+         selector's row, so it neither reserves a blank nor adds a full-width caption. The line is explicitly
+         NoWrap with compact labels, so the mark can never wrap to a second row. The no-MUX refusal is prose and
+         may still wrap (Supported never changes at runtime, so exactly one of the two state TextBlocks is ever
+         visible). Rendered inline (not a separate view) because it has no children. -->
+    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasGpuMux}">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section" Text="{l:Tr GPU mode}"/>
+        <TextBlock x:Name="GpuMuxState" Text="{Binding GpuMux.CurrentText}" TextWrapping="NoWrap"
+                   IsVisible="{Binding GpuMux.Supported}"/>
+        <TextBlock x:Name="GpuMuxUnsupported" Text="{Binding GpuMux.CurrentText}" TextWrapping="Wrap"
+                   IsVisible="{Binding !GpuMux.Supported}"/>
+        <!-- The selector IS the switch (no Apply button): a selection change runs the ViewModel's confirm/queue
+             flow, and cancelling snaps the selection back. The conditional note sits immediately next to the
+             selector, so it never reserves an always-present blank. -->
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+          <ComboBox Grid.Column="0" MinWidth="160" HorizontalAlignment="Left"
+                    ItemsSource="{Binding GpuMux.Modes}"
+                    SelectedIndex="{Binding GpuMux.SelectedIndex, Mode=TwoWay}"
+                    IsEnabled="{Binding GpuMux.Supported}"/>
+          <TextBlock x:Name="GpuMuxNote" Grid.Column="1" Classes="muted" FontSize="11"
+                     VerticalAlignment="Center" TextWrapping="Wrap"
+                     IsVisible="{Binding GpuMux.NoteVisible}" Text="{Binding GpuMux.Note}"/>
+        </Grid>
+      </StackPanel>
+    </ExperimentalAcrylicBorder>
+
     <!-- One "CPU" card for both CPU axes: the OS power-mode picker and the undervolt slider are independent
          capabilities (either can be absent) but they are the same subject, so they share a header instead of
          producing two cards both titled "CPU". -->

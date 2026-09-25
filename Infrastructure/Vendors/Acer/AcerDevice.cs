@@ -20,6 +20,13 @@ public sealed partial class AcerDevice : GenericDevice
     {
         _model = AcerModels.Detect(product);
         VendorName = _model.Name;
+
+        // The shared GPU-MUX port starts as the clean refusal. The Windows half replaces it with the probed
+        // `AcerGamingFunction` port when its capability selector answers (see AcerGpuMux.cs); Linux has no MUX
+        // interface in mainline acer-wmi and keeps the refusal. Attaching the port either way (rather than
+        // leaving the slot null) is what lets the shared card state the refusal instead of silently omitting
+        // the capability.
+        GpuMux = AcerGpuMux.Unsupported;
         InitVendor();
     }
 

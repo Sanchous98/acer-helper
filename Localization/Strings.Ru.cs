@@ -55,9 +55,9 @@ internal static partial class Strings
         ["GPU fan curve"]           = "Кривая вентилятора GPU",
         ["{0} rpm"]                 = "{0} об/мин",
 
-        // ---- tuning tab (GPU clocks + CPU power + CPU undervolt) ----
+        // ---- overclocking & power tab (GPU clocks + CPU power + CPU undervolt) ----
         // "GPU" and "CPU" stay as-is (universal acronyms) -> no entries, fall back to the English keys.
-        ["Tuning"]                  = "Настройка",
+        ["Overclocking and Power"]  = "Разгон и питание",
         ["Core"]                    = "Ядро",
         ["Memory"]                  = "Память",
         ["Reset"]                   = "Сброс",
@@ -261,6 +261,30 @@ internal static partial class Strings
         ["5 min"]                   = "5 мин",
         ["15 min"]                  = "15 мин",
         ["1 h"]                     = "1 ч",
+
+        // ---- GPU mode (MUX): shared by the vendor MUX backends and the recovered Acer gaming-WMI path ----
+        ["GPU mode"]                = "Режим GPU",
+        ["Change"]                  = "Изменить",
+        ["Change the GPU mode?"]    = "Изменить режим GPU?",
+        ["GPU mode: {0}"]           = "Режим GPU: {0}",
+        ["GPU mode: unknown"]       = "Режим GPU: неизвестен",
+        // A real queued change marks the value with a trailing '*' (see GpuMuxViewModel); this short note next to
+        // the switcher explains the mark while the value differs from the original.
+        ["* Will be applied after a reboot."]
+            = "* Будет применено после перезагрузки.",
+        ["GPU mode changed."]       = "Режим GPU изменён.",
+        ["GPU mode change failed."] = "Не удалось изменить режим GPU.",
+        ["This is already the current GPU mode."]
+            = "Это уже текущий режим.",
+        ["Hybrid"]                  = "Гибридный",
+        ["Discrete"]                = "Дискретный",
+        ["Auto (DDS)"]              = "Авто (DDS)",
+        ["This machine's GPU mode cannot be switched from the app: the vendor's MUX/GPU-mode interface is not publicly documented, and writing an unknown value can leave the screen black. Use the vendor tool (NitroSense/PredatorSense) or the BIOS instead."]
+            = "Режим GPU на этом устройстве нельзя переключить из приложения: интерфейс MUX/режима GPU производителя публично не документирован, а запись неизвестного значения может оставить экран чёрным. Используйте фирменную утилиту (NitroSense/PredatorSense) или BIOS.",
+        ["That is not one of the GPU modes this machine offers."]
+            = "Это не один из режимов GPU, доступных на этом устройстве.",
+        ["Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/asus-support.md."]
+            = "Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/asus-support.md.",
 
         // ---- language selector ----
         ["Language"]                = "Язык",

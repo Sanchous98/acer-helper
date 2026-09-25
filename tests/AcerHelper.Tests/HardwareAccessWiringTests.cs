@@ -243,10 +243,11 @@ public class HardwareAccessWiringTests
         var d = new FakeDevice();
         var fan = new FanSettings(false, Fan.DefaultDuties(), 70);
         return new MainViewModel(d, new UiActions(
-            new ProfileActions(_ => { }, TurboToggles: false, _ => { }, _ => ProfileTraits.Unknown),
+            new ProfileActions(_ => true, TurboToggles: false, _ => true, _ => ProfileTraits.Unknown),
             new FanSection(new FanAxisState(FanMode.Auto, fan, fan),
                            (_, _, _) => { }, (_, _, _) => { }, _ => Task.CompletedTask),
             new GpuSection(new GpuAxisState(0, 0), (_, _) => { }),
+            new GpuMuxSection(_ => Task.FromResult(false), _ => new GpuMuxChange(false, false, null)),
             new CpuSection([], null, _ => { }),
             new CoSection([], [], _ => { }),
             new BatterySection(d.Battery, null, null, null),

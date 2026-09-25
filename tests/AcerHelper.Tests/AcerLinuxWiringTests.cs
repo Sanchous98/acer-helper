@@ -189,22 +189,20 @@ public class AcerLinuxWiringTests
     /// hidraw) and the second because it had no Windows analogue and its stated justification was measured
     /// against a different handler on a different node (see AcerProfilePorts.cs).
     ///
-    /// THE SCOPE OF THE <c>OnAc</c> ROW IS DELIBERATELY NARROWER, and the reason is a real name collision rather
-    /// than convenience: <c>OnAc</c> is also the clamshell backend's own partial method
-    /// (Infrastructure/Vendors/Generic/Clamshell.cs and its per-OS halves) and the name of a profile-memory slot
-    /// in the settings model (<c>Settings.OnAc</c>, read by LaptopService.Profiles). Neither has anything to do
-    /// with the AC walk this change deleted, which was Acer's own and lived beside the fan/gate code — so the row
-    /// is scoped to the Acer vendor folder, where the name is the deleted one.
+    /// THE <c>OnAc</c> ROW WAS DELETED WHEN THE POLICY CAME BACK, and that is a decision rather than relaxation.
+    /// The owner later asked for NitroSense parity (on battery only Eco and Balanced; on AC Quiet, Balanced,
+    /// Performance and Turbo), so a per-source policy is real again — but it is a PURE vendor declaration
+    /// (<c>AcerProfiles.IsAvailable</c>, surfaced through <c>IProfileAvailability</c>), with the decision and
+    /// the apply in <c>LaptopService</c>. Keeping the raw token row would forbid the legitimate naming the
+    /// capability needs while catching nothing of the deleted I/O walk, which the rows above still do.
     ///
-    /// A mutation that reddens each row: re-add the constant, call the deleted decorator again, or re-introduce
-    /// an AC walk on the Acer side. The first two are caught anywhere under Infrastructure/, including in a file
-    /// that does not exist yet.
+    /// A mutation that reddens each row: re-add the constant or call the deleted decorator again. Both are
+    /// caught anywhere under Infrastructure/, including in a file that does not exist yet.
     /// </summary>
     [Theory]
     [InlineData("Infrastructure", "LinuwuRoot")]
     [InlineData("Infrastructure", "/sys/module/linuwu_sense")]   // the same path written out rather than named
     [InlineData("Infrastructure", "BatteryGatedProfiles")]
-    [InlineData("Infrastructure/Vendors/Acer", "OnAc")]
     public void TheDeletedLinuwuTierAndThePowerGateStayDeleted(string subtree, string token)
     {
         var offenders = SourcesUnder(subtree)

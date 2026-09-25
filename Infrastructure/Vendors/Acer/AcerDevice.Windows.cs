@@ -42,7 +42,7 @@ public sealed partial class AcerDevice
         // The traits come off the SAME table, handed over as its lookup — so the rows the UI shows and the class
         // and colours each row carries are one list rather than two that could drift (see ProfileTraits).
         PowerProfiles = new ProfilesPort(AcerProfiles.All, SelectableProfiles, CurrentProfile, SetProfile,
-                                         new ProfileTraitsLookup(AcerProfiles.TraitsOf));
+                                         new ProfileTraitsLookup(AcerProfiles.TraitsOf), AcerProfiles.IsAvailable);
 
         // Boot sync, EC-ONLY: the profile byte survives a reboot but the EC usage mode behind it does not, so
         // the machine can report Turbo while running the lowest power row. Push the mode matching whatever
@@ -51,6 +51,14 @@ public sealed partial class AcerDevice
         // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
         // WMI write, no palette flash, and it cannot disagree with what the UI shows. See docs/power-an18-61.md.
         if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(AcerProfiles.TraitsOf(cur).Kind);
+
+        // The GPU-mode (MUX) switch, over the SAME gaming-WMI helpers the profiles use. The recovered interface
+        // is selector 9 = capability, selector 2 = read, `(mode << 8) | 2` = write (see AcerGpuMux.cs for the
+        // evidence and the safety posture). Built from the existing GmGet/GmSet so the port opens no WMI path of
+        // its own; if selector 9 does not answer, the port comes back unsupported and the shared card says so.
+        GpuMux = AcerGpuMux.Create(selector => GmGet(_gaming, "GetGamingMiscSetting", selector),
+                                   packed => GmSet(_gaming, "SetGamingMiscSetting", packed));
+
         Sensors       = new SensorsPort(new AcerSysInfoSensors(Sensor).Read);
         FanControl    = new FanPort(new FanCapability(HasMax: true, HasCustom: true, HasGpuFan: true), SetFanMode, SetFanSpeeds);
         // The three settings this backend owns, DECLARED rather than parked in a slot of their own. Their keys

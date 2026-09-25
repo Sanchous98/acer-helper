@@ -40,6 +40,7 @@ public class Device : IDisposable
 
     public IPowerProfiles?      PowerProfiles      { get; set; }
     public IFanControl?         FanControl         { get; set; }
+    public IGpuMux?             GpuMux             { get; set; }
     public ISensors?            Sensors            { get; set; }
     public Battery              Battery            { get; set; } = new();
     public IKeyboardBrightness? KeyboardBrightness { get; set; }

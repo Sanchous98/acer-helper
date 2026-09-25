@@ -86,6 +86,27 @@ public class LightingPrimeTests
         Assert.Equal([0], written);           // the guard in AdoptBrightness does NOT run on the construction path
     }
 
+    /// <summary>A configured 0 is the app's stored intent and is applied as 0 — a stale/non-zero read does NOT
+    /// resurrect the light. This is the reported bug: switching to a profile stored at 0 left the backlight on
+    /// because the construction read won over the stored value. The register lies after a profile flash
+    /// (docs/lighting-an18-61.md) and the app's settings are the source of truth (docs/state-and-events.md), so
+    /// a configured zero is authoritative; every NON-zero stored value keeps the read-wins behaviour (the sibling
+    /// test above), so out-of-band discovery is not lost.
+    ///
+    /// MUTATION THAT REDDENS IT: restoring the unconditional read
+    /// (<c>readBrightness?.Invoke() ?? state.Brightness</c>).</summary>
+    [Fact]
+    public void AConfiguredZero_IsAppliedAtConstruction_NotOverriddenByAStaleRead()
+    {
+        var written = new List<byte>();
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 0, 5, 1, 0xFF0000, []));
+
+        var panel = Panel(mode, written, readBrightness: () => 100);   // the register still holds the old 100
+
+        Assert.Equal(0, panel.Brightness);    // the stored 0 stands...
+        Assert.Equal([0], written);           // ...and it is what the device is told
+    }
+
     /// <summary>Nothing is re-applied while the user has never set this zone: a fresh install must not override
     /// whatever the firmware was showing. Unchanged by this wave, pinned because the tests above turn
     /// <c>Configured</c> on to reach the re-apply at all.

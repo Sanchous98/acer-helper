@@ -330,4 +330,20 @@ public sealed partial class LaptopService
         else co.Set(write[0]);
         return c;
     }
+
+    // ---- GPU MUX (shared IGpuMux) ----
+
+    /// <summary>The machine's MUX port, or null when its firmware exposes none. The port is read/written through
+    /// the members below so the UI never reaches a vendor port by name; the write is a QUEUE (next restart) on
+    /// every backend, and the confirmation prompt belongs to the caller.</summary>
+    public IGpuMux? GpuMux => device.GpuMux;
+
+    /// <summary>Read the MUX's current + queued state. Side-effect free, and deliberately NOT called from the
+    /// refresh loop — the UI reads it when the drawer opens and after a request.</summary>
+    public GpuMuxState ReadGpuMux() => device.GpuMux?.Read() ?? new GpuMuxState(null, null, false);
+
+    /// <summary>Queue a MUX change by mode id. The vendor port validates and refuses rather than guessing; the
+    /// result says whether it was queued (the success case) and carries the refusal reason on failure.</summary>
+    public GpuMuxChange RequestGpuMux(string modeId)
+        => device.GpuMux?.Request(modeId) ?? new GpuMuxChange(false, false, null);
 }

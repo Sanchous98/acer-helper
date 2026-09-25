@@ -269,9 +269,10 @@ internal sealed class AppController
         // is the service's, and it is the one place the stored shape is read for this purpose.
         var fan0 = LaptopService.AxisStateOf(_svc.CurrentFan(cur));   // defaults if this mode has none
         var vm = new MainViewModel(d, new UiActions(
-            new ProfileActions(ApplyProfile, _svc.TurboToggles, SetTurbo, _svc.TraitsOf),
+            new ProfileActions(TryApplyProfile, _svc.TurboToggles, SetTurbo, _svc.TraitsOf),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
             new GpuSection(LaptopService.AxisStateOf(_svc.CurrentGpuOc(cur)), SetGpuOc),
+            new GpuMuxSection(ConfirmGpuMuxAsync, _svc.RequestGpuMux),
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
             // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
             // maps an unknown id to Balanced. The real value arrives from the first background pass (see the
@@ -570,22 +571,35 @@ internal sealed class AppController
     // a repaint that lands ~750 ms later reads as a SECOND blink cycle of the keyboard and lightbar (and, if it
     // catches a still-running burst from the previous switch, in the PREVIOUS profile's colour). Every path that
     // changes the profile — pick, tray, hotkey, Turbo switch — goes through here.
-    private void ApplyProfile(PerformanceProfile p)
+    // The tray's apply: the result has no reader there, so it is discarded. The section
+    // (ProfilesViewModel) uses TryApplyProfile below and rolls its optimistic selection back on false.
+    private void ApplyProfile(PerformanceProfile p) => ApplyProfileCore(p);
+
+    // The section's apply. Like every profile-changing path it repaints the lighting from the profile it JUST
+    // applied (rather than waiting for the refresh pass to rediscover it), and it returns whether the write
+    // landed so the optimistic segment can roll back. The error is surfaced HERE, on the transient status line
+    // (the app's one non-blocking failure surface, not the bell), which is why only the flag travels back.
+    private bool TryApplyProfile(PerformanceProfile p) => ApplyProfileCore(p);
+
+    private bool ApplyProfileCore(PerformanceProfile p)
     {
         var r = _svc.ApplyProfile(p);
         if (r.ok) _lightingCoord.OnProfileApplied(p);
         else Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(r.error));
         Refresh();
+        return r.ok;
     }
 
     // Turbo used as a switch (the "Turbo toggles" mode). SetTurbo reports the profile that landed (Turbo, or the
-    // remembered base when switching off), so the lighting follows it without a read-back.
-    private void SetTurbo(bool on)
+    // remembered base when switching off), so the lighting follows it without a read-back. Returns whether it
+    // landed, for the section's optimistic switch (null applied == failure, exactly the branch the message is on).
+    private bool SetTurbo(bool on)
     {
         var r = _svc.SetTurbo(on);
         if (r.applied is { } applied) _lightingCoord.OnProfileApplied(applied);
         else Notify(Loc.T("Turbo failed") + Err(r.error));
         Refresh();
+        return r.applied != null;
     }
 
     // Flipping "Turbo key toggles Turbo" reshapes the Performance section (Turbo becomes a switch), so
@@ -641,6 +655,11 @@ internal sealed class AppController
     // The cardwire row's consent, shown where the consent belongs (FlyoutCoordinator), with the words that belong
     // to the consent (CardwireGpuAccessConsent) — the same split as the calibration and install prompts.
     private Task<bool> ConfirmGpuAccessAsync() => _windows.ConfirmCardwireGpuAccessAsync();
+
+    /// <summary>The shared MUX write's explicit-consent gate: a modal dialog carrying the restart + black-screen
+    /// warning. The warning key comes from the shared <c>GpuMuxMessages</c>, so ASUS and any future Acer
+    /// implementation prompt with the same words.</summary>
+    private Task<bool> ConfirmGpuMuxAsync(string warning) => _windows.ConfirmGpuMuxAsync(warning);
 
     // ---- the remembered GPU-access consent (cardwire) ----
 

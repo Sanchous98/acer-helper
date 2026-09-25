@@ -93,8 +93,45 @@ public sealed partial class LaptopService
 
     public PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
 
-    public IReadOnlyList<PerformanceProfile> SelectableProfiles() =>
-        device.PowerProfiles?.Selectable() ?? [];
+    /// <summary>The profiles the UI may offer RIGHT NOW: what the port lists as selectable, narrowed by the
+    /// vendor's per-source availability policy when it declares one
+    /// (<see cref="IProfileAvailability"/> — Acer's NitroSense parity: on battery Eco and Balanced, on AC
+    /// Quiet, Balanced, Performance and Turbo). A port with no policy — ASUS, Dell, the generic ports — is
+    /// returned verbatim, so nothing outside the declaring vendor is affected. The live source comes from
+    /// <see cref="_onAc"/>, set by <see cref="SyncPowerSource"/> before this is read in the refresh pass;
+    /// "unknown" (before the first battery reading) reads as AC, the safe default.</summary>
+    public IReadOnlyList<PerformanceProfile> SelectableProfiles()
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return [];
+        var offered = pp.Selectable();
+        if (pp is not IProfileAvailability availability) return offered;   // no vendor policy to apply
+        bool onAc;
+        lock (_state) onAc = _onAc ?? true;
+        var available = availability.AvailableOn(onAc);
+        return offered.Where(p => available.Any(a => a.Id == p.Id)).ToList();
+    }
+
+    /// <summary>Whether <paramref name="profile"/> may be selected on the given source. A port that declares no
+    /// policy allows everything it lists, which is the whole point of <see cref="IProfileAvailability"/> being
+    /// optional. Pure: the answer is the port's, not the hardware's.</summary>
+    private bool AvailableFor(PerformanceProfile profile, bool onAc)
+        => device.PowerProfiles is not IProfileAvailability a
+           || a.AvailableOn(onAc).Any(p => p.Id == profile.Id);
+
+    /// <summary>Where to land when the source's remembered (or current) profile is not offered there: Balanced
+    /// if this backend offers it, else the first non-Turbo, else the first offered. Null only when nothing is
+    /// offered at all. NitroSense does exactly this — it does not leave the machine in a mode the source
+    /// disabled — and the fallback is remembered for the live source so the slot cannot keep pointing at a
+    /// disabled profile.</summary>
+    private PerformanceProfile? FallbackProfile(bool onAc)
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return null;
+        return pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Balanced && AvailableFor(p, onAc))
+            ?? pp.All.FirstOrDefault(p => KindOf(p) != ProfileKind.Turbo && AvailableFor(p, onAc))
+            ?? pp.All.FirstOrDefault(p => AvailableFor(p, onAc));
+    }
 
     public (bool ok, string? error) ApplyProfile(PerformanceProfile p)
     {
@@ -102,6 +139,11 @@ public sealed partial class LaptopService
         if (pp == null) return (false, null);
         lock (_state)
         {
+            // A profile this source does not offer is refused rather than written: the UI disables those
+            // segments, and this is the backstop for the tray, the hotkey and the per-source paths. Null error
+            // means the standard "Failed to set X" line — the reason is already on screen, where the segment
+            // is greyed out, so no new message is invented for it.
+            if (!AvailableFor(p, _onAc ?? true)) return (false, null);
             var r = Attempt(() => pp.Set(p), () => pp.LastError);
             if (!r.ok) return r;
             // Remember this as the base for the current source; a direct profile pick clears the Turbo flag.
@@ -124,11 +166,22 @@ public sealed partial class LaptopService
     {
         var pp = device.PowerProfiles;
         if (pp == null) return null;
-        if (cur != null && KindOf(cur) != ProfileKind.Turbo) return cur;
         lock (_state)
-            return pp.All.FirstOrDefault(p => p.Id == Slot.BaseId)
-                ?? pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Balanced)
-                ?? pp.All.FirstOrDefault(p => KindOf(p) != ProfileKind.Turbo);
+        {
+            // Availability narrows the answer too, so a segment the source has disabled is never the one the
+            // section highlights: the current profile on a source that no longer offers it falls through to the
+            // remembered base, then Balanced, then the first available non-Turbo.
+            bool onAc = _onAc ?? true;
+            bool Ok(PerformanceProfile p) => AvailableFor(p, onAc);
+            if (cur != null && KindOf(cur) != ProfileKind.Turbo && Ok(cur)) return cur;
+            // NO last-resort fallback here: with no usable non-Turbo profile the answer is null, exactly as
+            // it was before availability existed. <see cref="FallbackProfile"/> is for the APPLY path (which
+            // may settle on Turbo if that is genuinely all a source offers); a base for Turbo to sit over must
+            // never be Turbo itself.
+            return pp.All.FirstOrDefault(p => p.Id == Slot.BaseId && Ok(p))
+                ?? pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Balanced && Ok(p))
+                ?? pp.All.FirstOrDefault(p => KindOf(p) != ProfileKind.Turbo && Ok(p));
+        }
     }
 
     /// <summary>Turbo used as a switch (the "Turbo toggles" mode): on = apply Turbo over the current base;
@@ -144,7 +197,9 @@ public sealed partial class LaptopService
             if (on)
             {
                 var turbo = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
-                if (turbo == null) return (null, null);
+                // Turbo is an AC-only mode under the declared policy (NitroSense parity): on battery the switch
+                // is disabled, and this is the backstop for the hotkey, which reports "nothing landed".
+                if (turbo == null || !AvailableFor(turbo, _onAc ?? true)) return (null, null);
                 var cur = pp.Current();
                 if (cur != null && KindOf(cur) != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
                 var r = Attempt(() => pp.Set(turbo), () => pp.LastError);
@@ -163,7 +218,11 @@ public sealed partial class LaptopService
     /// <summary>The profile a power source is set to use — what <see cref="SyncPowerSource"/> applies when the
     /// machine switches to it. Null when nothing is remembered for that source yet (fresh install, before the
     /// first time it was seen). Turbo used as a switch reports as the Turbo profile, because that is what the
-    /// slot means to the user even though it is stored as base + flag.</summary>
+    /// slot means to the user even though it is stored as base + flag.
+    ///
+    /// A slot pointing at a profile the source does not offer reports the FALLBACK rather than the stale id
+    /// (NitroSense parity): the per-source row in Options then shows what the machine would actually use, not a
+    /// mode the source disables. A port with no availability policy keeps returning the stored id verbatim.</summary>
     public PerformanceProfile? SourceProfile(bool onAc)
     {
         var pp = device.PowerProfiles;
@@ -172,8 +231,11 @@ public sealed partial class LaptopService
         {
             var slot = onAc ? Settings.OnAc : Settings.OnBattery;
             if (Settings.TurboToggles && slot.Turbo &&
-                pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo) is { } turbo) return turbo;
-            return pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
+                pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo) is { } turbo
+                && AvailableFor(turbo, onAc)) return turbo;
+            var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
+            if (baseP == null) return null;                      // nothing remembered for this source
+            return AvailableFor(baseP, onAc) ? baseP : FallbackProfile(onAc);
         }
     }
 
@@ -225,13 +287,29 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>Populate the current source's slot from the hardware's current profile (no change applied),
-    /// so a fresh install remembers what the machine was already on rather than forcing a default.</summary>
+    /// <summary>Populate the current source's slot from the hardware's current profile, so a fresh install
+    /// remembers what the machine was already on rather than forcing a default. Usually no change is applied;
+    /// the exception is a machine sitting in a profile THIS SOURCE does not offer (e.g. Turbo on battery, or Eco
+    /// after plugging in) — there the source's fallback is remembered AND applied, which is the NitroSense
+    /// behaviour: the source change is the doubt moment that must move the machine off a disabled mode.</summary>
     private void SeedSlotFromHardware()
     {
         var pp = device.PowerProfiles;
         var cur = pp?.Current();
         if (cur == null) return;
+        bool onAc = _onAc ?? true;
+
+        if (!AvailableFor(cur, onAc))
+        {
+            var fb = FallbackProfile(onAc);
+            if (fb == null) return;
+            Slot.BaseId = fb.Id;
+            Slot.Turbo = false;
+            Save();
+            ApplyProfile(fb);   // re-entrant lock; applies and re-saves
+            return;
+        }
+
         if (KindOf(cur) == ProfileKind.Turbo)
         {
             Slot.Turbo = true;                                       // base under Turbo is unknown -> best guess
@@ -256,13 +334,30 @@ public sealed partial class LaptopService
         var slot = Slot;
         if (string.IsNullOrEmpty(slot.BaseId)) return (true, null);
 
-        var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId);
-        if (baseP == null) return (true, null);
+        bool onAc = _onAc ?? true;
+        var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId && AvailableFor(p, onAc));
+        if (baseP == null)
+        {
+            // The remembered mode is not offered on this source — e.g. Turbo remembered on AC, then unplugged
+            // (NitroSense parity). Fall back to a valid one and REMEMBER it for the live source, so the slot
+            // never keeps pointing at a disabled profile. An unknown BaseId (no match at all) still no-ops, as
+            // before: only a profile we recognise but the source disallows is rewritten.
+            if (pp.All.Any(p => p.Id == slot.BaseId))
+            {
+                baseP = FallbackProfile(onAc);
+                if (baseP == null) return (true, null);
+                slot.BaseId = baseP.Id;
+                slot.Turbo = false;
+                Save();
+            }
+            else return (true, null);
+        }
 
         var current = pp.Current();
         var turbo = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
         var wantTurbo = slot.Turbo && Settings.TurboToggles
-                        && turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id);
+                        && turbo != null && pp.Selectable().Any(p => p.Id == turbo.Id)
+                        && AvailableFor(turbo, onAc);
 
         // Only touch the profile when the hardware isn't already in the target mode. Each Acer profile Set makes
         // the firmware re-flash the keyboard/lightbar palette, so blindly re-applying an already-active mode on
@@ -292,15 +387,17 @@ public sealed partial class LaptopService
         if (turboToggles)
             return SetTurbo(!IsTurboOn()).applied;   // returns what landed — no read-back needed
 
-        var target = NextSelectable(pp, pp.Current());
+        // The cycle runs over the FILTERED set, so the hotkey cannot land on a profile the live source
+        // disables (Acer's NitroSense parity); a port with no availability policy passes its own set through.
+        var target = NextSelectable(pp, pp.Current(), SelectableProfiles());
         return target != null && ApplyProfile(target).ok ? target : null;
     }
 
-    private static PerformanceProfile? NextSelectable(IPowerProfiles pp, PerformanceProfile? current)
+    private static PerformanceProfile? NextSelectable(IPowerProfiles pp, PerformanceProfile? current,
+                                                      IReadOnlyList<PerformanceProfile> sel)
     {
         var all = pp.All;
         if (all.Count == 0) return null;
-        var sel = pp.Selectable();
 
         var start = 0;
         if (current != null)

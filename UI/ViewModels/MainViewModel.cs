@@ -103,7 +103,8 @@ public sealed partial class MainViewModel : ObservableObject
             Sections.Add(_monitor = new MonitorViewModel());
         if (device.PowerProfiles is { } pp)
             Sections.Add(_profiles = new ProfilesViewModel(pp.All, a.Profiles.Traits, a.Profiles.Apply,
-                                                          a.Profiles.TurboToggles, a.Profiles.SetTurbo));
+                                                          a.Profiles.TurboToggles, a.Profiles.SetTurbo,
+                                                          ShowProfileHeader));
         if (device.FanControl is { } fc)
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
                 a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
@@ -114,17 +115,24 @@ public sealed partial class MainViewModel : ObservableObject
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a.Options);
 
-        // Performance tuning (GPU clock offsets + CPU power mode) lives in its own "Tuning" drawer, opened
-        // from the footer — kept off the main column so the dashboard stays uncluttered. The drawer exists when
-        // the device supports at least one of the two; each child is null when its capability is absent.
+        // Performance tuning (GPU clock offsets + CPU power mode) lives in its own "Overclocking and Power"
+        // drawer, opened from the footer — kept off the main column so the dashboard stays uncluttered. The
+        // drawer exists when the device supports at least one of the two; each child is null when its
+        // capability is absent.
         var gpuVm = device.GpuOverclock is { } gpu
             ? new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc) : null;
         var cpuVm = device.CpuPower is { } cpu
             ? new CpuViewModel(cpu.Modes, a.Cpu.Initial, a.Cpu.SetCpuPower) : null;
         var coVm = device.CurveOptimizer is { } co
             ? new CoViewModel(co.Name, co.Range, co.MillivoltsPerCount, a.Co.Domains, a.Co.Initial, a.Co.SetCo) : null;
-        if (gpuVm != null || cpuVm != null || coVm != null)
-            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm);
+        // The shared MUX card: built whenever the device exposes the port, including a port that reports itself
+        // unsupported (Acer's), so the card can state the refusal rather than silently omitting the capability.
+        // Non-queued outcomes (already the current mode, a refusal) go to the transient status line below — the
+        // card itself renders only the one stable current-mode sentence (see GpuMuxViewModel).
+        var muxVm = device.GpuMux is { } mux
+            ? new GpuMuxViewModel(mux, a.GpuMux.Confirm, a.GpuMux.Request, ReportGpuMuxOutcome) : null;
+        if (gpuVm != null || cpuVm != null || coVm != null || muxVm != null)
+            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm, muxVm);
     }
 
     /// <summary>The bell: show the list, or put it away again. A toggle, like the drawer buttons, so the one
@@ -220,7 +228,13 @@ public sealed partial class MainViewModel : ObservableObject
         OpenDrawer(Loc.T("Options"), _options);
     }
 
-    [RelayCommand] private void OpenTuning() => OpenDrawer(Loc.T("Tuning"), _tuning);
+    [RelayCommand] private void OpenTuning()
+    {
+        // Read the MUX state only when the drawer opens: the read reaches vendor hardware (a busctl get-property
+        // on ASUS), so it must not run on the UI thread merely because the dashboard was built.
+        _tuning?.GpuMux?.Refresh();
+        OpenDrawer(Loc.T("Overclocking and Power"), _tuning);
+    }
 
     [RelayCommand]
     private void OpenLighting()
@@ -237,6 +251,12 @@ public sealed partial class MainViewModel : ObservableObject
         if (_lighting != null && !IsShowing(_lighting)) _lighting.Reapply();
         OpenDrawer(Loc.T("Lighting"), _lighting);
     }
+
+    /// <summary>Surface a non-queued MUX outcome (asking for the mode the machine is already in, a refusal) on the
+    /// app's existing transient status line — the same one every other control failure uses. Deliberately NOT a
+    /// card line and NOT a notification: the MUX card renders only its one stable current-mode sentence, and the
+    /// status line is rewritten by the refresh pass like every other transient message in the app.</summary>
+    private void ReportGpuMuxOutcome(string text) => Status = text;
 
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 
@@ -305,10 +325,20 @@ public sealed partial class MainViewModel : ObservableObject
                         bool turboToggles, PerformanceProfile? baseProfile,
                         SensorSnapshot s, string? status)
     {
-        HasProfile = current != null;
-        ProfileName = current != null ? Loc.T(current.DisplayName) : "";
         _profiles?.Update(current, selectable, turboToggles, baseProfile);
+        // The section owns the displayed profile and reports it through ShowProfileHeader the moment it changes
+        // (optimistic pick, snap-back, confirmed read-back), so the chip never trails the segment. A device with
+        // no profile section has only the read-back to go on.
+        if (_profiles is null) ShowProfileHeader(current);
         _monitor?.Update(s);
         if (status != null) Status = status;
+    }
+
+    /// <summary>Show <paramref name="profile"/> in the header chip (or clear it). Wired into the profile section
+    /// as its display callback, and used directly when there is no section.</summary>
+    private void ShowProfileHeader(PerformanceProfile? profile)
+    {
+        HasProfile = profile != null;
+        ProfileName = profile != null ? Loc.T(profile.DisplayName) : "";
     }
 }

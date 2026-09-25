@@ -125,6 +125,19 @@ internal sealed class FlyoutCoordinator : IDisposable
             CardwireGpuAccessConsent.ConfirmText());
     }
 
+    /// <summary>Shown over the flyout before a GPU-mode (MUX) change. A MUX change is QUEUED and only takes
+    /// effect on the next restart, and a wrong value can leave the screen black, so this is the explicit-consent
+    /// gate for the shared <c>IGpuMux</c> port; the caller passes the warning sentence (a localization key).
+    /// Same modal-over-flyout idiom as the four above.</summary>
+    public Task<bool> ConfirmGpuMuxAsync(string warning)
+    {
+        _main.SuppressDismiss = true;
+        return Views.ConfirmDialog.ShowAsync(_main,
+            Loc.T("Change the GPU mode?"),
+            Loc.T(warning),
+            Loc.T("Change"));
+    }
+
     /// <summary>Shown over the flyout to ask before installing a third-party driver. Names the driver and where it
     /// comes from, because that is somebody else's kernel software and the user is agreeing to install it — not to
     /// "enable a feature".</summary>

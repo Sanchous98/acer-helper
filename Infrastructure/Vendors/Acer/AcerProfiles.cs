@@ -49,6 +49,19 @@ public static class AcerProfiles
     /// <summary>All standard profiles, display order.</summary>
     public static readonly IReadOnlyList<PerformanceProfile> All = Table.Select(Make).ToList();
 
+    /// <summary>NitroSense parity: which of these profiles the Acer firmware makes available on each power
+    /// source — on battery only Eco and Balanced, on AC only Quiet, Balanced, Performance and Turbo (Eco is
+    /// absent there, exactly as NitroSense hides it). Declared here, beside the table, because it is the same
+    /// vendor data as the kind and the colours; a port that does not implement <see cref="IProfileAvailability"/>
+    /// is never asked. A profile this table cannot classify is available on neither source.</summary>
+    public static bool IsAvailable(PerformanceProfile profile, bool onAc) => TraitsOf(profile).Kind switch
+    {
+        ProfileKind.Balanced                                          => true,
+        ProfileKind.Eco                                               => !onAc,
+        ProfileKind.Quiet or ProfileKind.Performance or ProfileKind.Turbo => onAc,
+        _                                                             => false,
+    };
+
     private static PerformanceProfile Make(Entry e) => new(e.Byte.ToString(), e.Name);
 
     /// <summary>The row's own kind and colours, for a profile this table produced — the lookup the app reaches

@@ -12,6 +12,7 @@ public sealed record UiActions(
     ProfileActions Profiles,
     FanSection Fans,
     GpuSection Gpu,
+    GpuMuxSection GpuMux,
     CpuSection Cpu,
     CoSection Co,
     BatterySection Battery,
@@ -21,9 +22,14 @@ public sealed record UiActions(
 /// <c>Traits</c> is the backend's own reading of a profile it offers — its class and its colours
 /// (<see cref="ProfileTraits"/>) — handed over as a delegate because the section needs it per profile at
 /// construction and on every update. It comes from the service, which reads it off the port that offers the
-/// profiles; the profile record itself carries neither since 2026-09-22.</summary>
+/// profiles; the profile record itself carries neither since 2026-09-22.
+///
+/// <c>Apply</c> and <c>SetTurbo</c> RETURN WHETHER THE WRITE LANDED, so the section can show the pick at once
+/// and roll it back on a refusal (optimistic UI, <c>ProfilesViewModel</c>). The error text is not returned: the
+/// implementation already puts it on the transient status line — the app's one failure surface — so the section
+/// only needs the flag.</summary>
 public sealed record ProfileActions(
-    Action<PerformanceProfile> Apply, bool TurboToggles, Action<bool> SetTurbo,
+    Func<PerformanceProfile, bool> Apply, bool TurboToggles, Func<bool, bool> SetTurbo,
     Func<PerformanceProfile, ProfileTraits> Traits);
 
 /// <summary>Fan section: the current mode's fan state plus the apply/persist delegates. <c>Initial</c> is the
@@ -42,6 +48,13 @@ public sealed record FanSection(
 public sealed record GpuSection(
     GpuAxisState Initial,
     Action<int, int> SetGpuOc);
+
+/// <summary>GPU-mode (MUX) section: the confirmation prompt (which carries the restart + black-screen warning)
+/// and the request delegate. The port itself is read by the view-model for its modes/support and its current +
+/// queued state. Built only when the device exposes an <see cref="IGpuMux"/> port.</summary>
+public sealed record GpuMuxSection(
+    Func<string, Task<bool>> Confirm,
+    Func<string, GpuMuxChange> Request);
 
 /// <summary>CPU-power section: the available power-mode overlays, the current mode's chosen id (or the live
 /// effective overlay when unconfigured), and the apply/persist delegate. Built only when the device exposes an
