@@ -16,11 +16,12 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 /// register window this port writes. Linux reaches the same window through an already-loaded kernel driver's smn
 /// node, which is why the port's policy is shared and only the transport differs (docs/pawnio.md).
 ///
-/// The module blob is EMBEDDED, which is what its author prescribes: modules are LGPL-2.1-or-later, the integration
-/// guide says to take a release blob and "include its contents in your software", and the project states outright
-/// that module APIs are NOT stable across releases — so the version whose call shapes this file is written against
-/// has to travel with it. Note the PawnIO installer ships no modules at all, so there is no shared system location to
-/// read one from; an explicit override file is honoured for advanced use. We do NOT use the module's generic
+/// The module blob is EMBEDDED, which is what its author prescribes: modules are LGPL-2.1-or-later and the
+/// integration guide says to take a release blob and "include its contents in your software". The blob is fetched
+/// from upstream at build time (AcerHelper.csproj -> FetchRyzenSMU, build/fetch-ryzensmu.ps1) rather than committed,
+/// verified against the release's published digest and against the two exported names below, and its resolved tag +
+/// SHA-256 are recorded in the build log. Note the PawnIO installer ships no modules at all, so there is no shared
+/// system location to read one from; an explicit override file is honoured for advanced use. We do NOT use the module's generic
 /// send-SMU-command entry point: its internal table resolves Strix Point to the RSMU address triple, so a 0x4C sent
 /// that way would go to the wrong mailbox. Hand-rolling the transaction over the raw register accessors is what
 /// G-Helper does, and it is legal because the module's own range check admits the whole 0x3B10000-0x3B10FFF window

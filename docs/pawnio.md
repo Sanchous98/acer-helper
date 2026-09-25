@@ -80,16 +80,22 @@ live in.
 
 - PawnIO modules are **LGPL-2.1-or-later**.
 - The author's integration guide says to take a release blob and *"include its contents in your software"*.
-- The project states outright that **module APIs are NOT stable across releases** — so the version whose call
-  shapes the code is written against has to **travel with it**.
+- The project states outright that **module APIs are NOT stable across releases** — so the module has to travel with
+  the build rather than be read from a shared system location.
 
-The PawnIO **installer ships no modules at all**, so there is no shared system location to read one from. An
-explicit override file is honoured for advanced use: `%APPDATA%\AcerHelper\RyzenSMU.bin`, then the file next to
+The PawnIO **installer ships no modules at all**, so there is no shared system location to read one from. The
+blob is **fetched at build time** from upstream rather than committed: `AcerHelper.csproj`'s `FetchRyzenSMU` target
+runs `build/fetch-ryzensmu.ps1`, which resolves the latest `namazso/PawnIO.Modules` release, verifies the release
+asset against the SHA-256 digest GitHub publishes for it, checks the two exported names above, caches under
+`obj/ryzensmu/` and embeds the result. If upstream is unreachable the cached copy is used; with no cache the feature
+simply hides. The pinning switches and the offline behaviour are detailed in `third-party/README.md`.
+
+An explicit override file is honoured for advanced use: `%APPDATA%\AcerHelper\RyzenSMU.bin`, then the file next to
 the executable. The override exists because module APIs are explicitly unstable — if a future blob changes a call
 shape, someone can pin their own without waiting for a build. It is deliberately an **explicit path** in the
 app's own config folder rather than a scan of shared locations, so a stray file elsewhere can never silently
-change which bytes get loaded into the kernel. A dev build without the fetched blob simply reports the feature as
-unavailable.
+change which bytes get loaded into the kernel. A dev build that is offline with no cache therefore reports the
+feature as unavailable.
 
 ## Installing it: the redistributable, and the three rules
 

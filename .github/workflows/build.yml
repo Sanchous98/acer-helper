@@ -75,8 +75,9 @@ jobs:
           dotnet-version: '10.0.x'
 
       # The PawnIO driver installer, for the CPU undervolt's one-click setup offer. Fetched pinned rather than
-      # committed (3.4 MB, proprietary freeware); the RyzenSMU module it pairs with IS committed, and the reasoning
-      # for treating the two differently is in third-party/README.md. Redistribution is granted by the binary itself
+      # committed (3.4 MB, proprietary freeware); the RyzenSMU module it pairs with is fetched at *build* time
+      # from its own upstream (AcerHelper.csproj -> FetchRyzenSMu, below), and the reasoning for treating the two
+      # differently is in third-party/README.md. Redistribution is granted by the binary itself
       # ("This installer can be redistributed unmodified."), so it travels untouched and the app only ever INVOKES
       # it — never unpacks it, never upgrades it, never removes it.
       # Both guards are fail-the-build, not warn: a hash mismatch means these are not the bytes the feature was
@@ -113,7 +114,23 @@ jobs:
           }
           Write-Host "RyzenSMU.COPYING OK"
 
+      # The RyzenSMU module itself is fetched during the publish below (AcerHelper.csproj -> FetchRyzenSMu), so
+      # cache its version-keyed object cache across runs. The key rolls per run and restore-keys picks up the
+      # newest previous cache: the release API is still queried every build so "latest" really is latest, but the
+      # module zip is only re-downloaded when a new tag appears. The Linux job never fetches it.
+      - name: Cache RyzenSMU module
+        uses: actions/cache@v4
+        with:
+          path: obj/ryzensmu
+          key: ryzensmu-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: ryzensmu-${{ runner.os }}-
+
+      # GH_TOKEN authorises the release-API call the fetch makes during this publish (unauthenticated GitHub API
+      # calls are 60/hour per IP, which a shared runner can exhaust). It is optional to the script: without it the
+      # fetch still works, and if upstream is unreachable the cached module or a clean skip is used.
       - name: Publish (self-contained, Native AOT)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           dotnet publish AcerHelper.csproj
           -c Release

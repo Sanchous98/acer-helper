@@ -91,12 +91,65 @@
 
   <!-- PawnIO's RyzenSMU module (LGPL-2.1-or-later, © namazso) — the bytecode the CPU undervolt loads into the
        driver. Its author prescribes bundling it ("include its contents in your software") precisely because module
-       APIs carry NO stability guarantee across releases, so the exact bytes this code was verified against travel
-       with the build; provenance, licence and the update procedure are in third-party/README.md. Conditional only so
-       a checkout that deliberately drops the blob still compiles — the undervolt section then hides itself. -->
-  <ItemGroup Condition="Exists('third-party\RyzenSMU.bin') And $(TargetFramework.Contains('windows'))">
-    <EmbeddedResource Include="third-party\RyzenSMU.bin" />
-  </ItemGroup>
+       APIs carry NO stability guarantee across releases, so the exact bytes the code was verified against must
+       travel with the build; provenance, licence and the update procedure are in third-party/README.md.
+
+       The blob is fetched from upstream AT BUILD TIME rather than committed. Upstream (namazso/PawnIO.Modules)
+       publishes each release as a zip asset and GitHub records a SHA-256 digest for it, so the fetch verifies the
+       download against the release's own digest before extracting RyzenSMU.bin, checks that the two functions the
+       app drives are still exported, records the resolved tag + module SHA-256 in obj/ryzensmu/<tag>/resolved.json
+       and in the build log, and caches under obj/ryzensmu so repeat builds do not re-download. It resolves the
+       LATEST release by default; -p:RyzenSmuPinnedVersion= / -p:RyzenSmuPinnedSha256= pin it hard. If upstream is
+       unreachable it uses the cached copy, and with none it skips staging with a warning — the undervolt section
+       then hides itself, the same posture a checkout without the blob always had. -p:RequireRyzenSmu=true turns
+       that skip into a build error for anyone who wants a release to fail rather than degrade.
+
+       Windows-TFM-only AND Windows-host-only: only the Windows transport loads the module, and the fetch uses
+       PowerShell. The Linux build (net10.0) and the Docker image never touch the network for it. The fetch runs
+       before AssignTargetPaths so the EmbeddedResource is added before the SDK assigns manifest resource names and
+       computes CoreCompile inputs. -p:FetchRyzenSmu=false disables the fetch entirely (the feature then hides). -->
+  <PropertyGroup>
+    <FetchRyzenSmu Condition="'$(FetchRyzenSmu)' == ''">true</FetchRyzenSmu>
+    <RequireRyzenSmu Condition="'$(RequireRyzenSmu)' == ''">false</RequireRyzenSmu>
+    <RyzenSmuCacheDir Condition="'$(RyzenSmuCacheDir)' == ''">$(MSBuildProjectDirectory)\obj\ryzensmu</RyzenSmuCacheDir>
+  </PropertyGroup>
+
+  <Target Name="FetchRyzenSmu"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(FetchRyzenSmu)' != 'false' And '$(BuildingProject)' == 'true' And '$(DesignTimeBuild)' != 'true' And $(TargetFramework.Contains('windows')) And '$(OS)' == 'Windows_NT' And '$(_RyzenSmuFetched)' != 'true'">
+    <PropertyGroup>
+      <_RyzenSmuFetched>true</_RyzenSmuFetched>
+      <_RyzenSmuScript>$(MSBuildProjectDirectory)\build\fetch-ryzensmu.ps1</_RyzenSmuScript>
+      <_RyzenSmuStage>$(MSBuildProjectDirectory)\third-party\RyzenSMU.bin</_RyzenSmuStage>
+      <_RyzenSmuCache>$(RyzenSmuCacheDir)</_RyzenSmuCache>
+      <_RyzenSmuPinArgs Condition="'$(RyzenSmuPinnedVersion)' != ''"> -PinnedVersion &quot;$(RyzenSmuPinnedVersion)&quot;</_RyzenSmuPinArgs>
+      <_RyzenSmuPinArgs Condition="'$(RyzenSmuPinnedSha256)' != ''">$(_RyzenSmuPinArgs) -PinnedSha256 &quot;$(RyzenSmuPinnedSha256)&quot;</_RyzenSmuPinArgs>
+      <_RyzenSmuForceArg Condition="'$(RyzenSmuForce)' == 'true'"> -Force</_RyzenSmuForceArg>
+    </PropertyGroup>
+
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(_RyzenSmuScript)&quot; -OutputPath &quot;$(_RyzenSmuStage)&quot; -CacheDir &quot;$(_RyzenSmuCache)&quot;$(_RyzenSmuPinArgs)$(_RyzenSmuForceArg)"
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_RyzenSmuExitCode" />
+    </Exec>
+
+    <!-- 2 = an integrity check failed, always fatal. 1 = upstream unavailable: a warning by default (the feature
+         hides), an error when RequireRyzenSmu=true. Any other non-zero is an unexpected script failure. The
+         EmbeddedResource is added ONLY when the script staged a verified file in THIS build, so a stale
+         third-party\RyzenSMU.bin cannot be embedded after an offline skip. -->
+    <Error Condition="'$(_RyzenSmuExitCode)' == '2'"
+           Text="RyzenSMU: the fetched module failed an integrity check; refusing to embed it. See the RYZENSMU-INTEGRITY-FAILURE line above." />
+    <Error Condition="'$(_RyzenSmuExitCode)' == '1' And '$(RequireRyzenSmu)' == 'true'"
+           Text="RyzenSMU: the latest module could not be fetched and no cached copy exists, and RequireRyzenSmu=true. See the RYZENSMU-UNAVAILABLE line above." />
+    <Error Condition="'$(_RyzenSmuExitCode)' != '0' And '$(_RyzenSmuExitCode)' != '1' And '$(_RyzenSmuExitCode)' != '2'"
+           Text="RyzenSMU: the fetch script failed with exit code $(_RyzenSmuExitCode). See the output above." />
+    <Warning Condition="'$(_RyzenSmuExitCode)' == '1' And '$(RequireRyzenSmu)' != 'true'"
+             Text="RyzenSMU: the latest module could not be fetched and no cached copy exists; the CPU-undervolt feature will be hidden in this build. Set FetchRyzenSmu=false to silence this, or RequireRyzenSmu=true to fail instead." />
+
+    <ItemGroup Condition="'$(_RyzenSmuExitCode)' == '0' And Exists('$(_RyzenSmuStage)')">
+      <EmbeddedResource Include="$(_RyzenSmuStage)" Link="third-party\RyzenSMU.bin" />
+    </ItemGroup>
+  </Target>
 
   <!-- Default packaging: one compressed, self-extracting single-file .exe (JIT).
        Mutually exclusive with Native AOT, so disabled when PublishAot=true. -->

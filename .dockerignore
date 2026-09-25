@@ -20,3 +20,10 @@
 publish
 publish-linux
 dist
+
+# Third-party payloads fetched during a build/CI run, never committed (see third-party/README.md and
+# AcerHelper.csproj's FetchRyzenSMU): a local `dotnet build` must not leak its fetched RyzenSMU blob into
+# the image, whose comment above promises it is built from committed sources.
+third-party/RyzenSMU.bin
+third-party/RyzenSMU.COPYING
+third-party/PawnIO_setup.exe
