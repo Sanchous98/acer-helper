@@ -17,9 +17,18 @@
        acrylic backdrop stays put while pages navigate on top of it. -->
   <Window.Styles>
     <!-- Push navigation: Home slides fully out to the left as the drawer page slides in from the right.
-         Both pages fill the card and translate by its width (468), so at every moment the visible area
-         shows exactly one page (no overlap => the shared acrylic reads continuously behind them). Driven
-         by the .pushed / .open classes bound to IsDrawerOpen; the Transitions animate the swap. -->
+         Both pages fill the card and translate by its width (468), so exactly one page is on screen at a
+         time (the two never overlap => the shared acrylic reads continuously behind them). Driven by the
+         .pushed / .open classes bound to IsDrawerOpen; the Transitions animate the swap.
+         THE MOTION IS CACHED, NOT RE-RASTERIZED. Both pages carry several ExperimentalAcrylicBorder cards
+         (Home's sections; Tuning's three cards; Lighting's pickers), and a RenderTransform transition over
+         such a tree re-samples the acrylic and re-rasterizes the clip every frame — the owner's report:
+         the screen switches, but jerky "as if there were no reason to lag". So while a slide is in flight
+         MainWindow's code-behind sets a BitmapCache on both grids and clears it when the slide ends (see
+         the transition cache there): the moving tree is rasterized once and blitted per frame, and static
+         rendering keeps full fidelity because the cache is only on for ~0.3 s. The only trade during the
+         slide is that the quarter-second frame is a cached bitmap (grayscale text AA, the acrylic material
+         baked once) — imperceptible, and strictly better than the alternative: no motion at all. -->
     <Style Selector="Grid#HomePage">
       <Setter Property="RenderTransform" Value="translateX(0)"/>
     </Style>
@@ -42,8 +51,8 @@
           CornerRadius="{DynamicResource OverlayCornerRadius}"
           ClipToBounds="True"
           BoxShadow="0 4 16 0 #55000000">
-    <!-- No open/close reveal on the window itself (it shows/hides instantly); only the in-window page-push
-         transitions below (Home <-> drawer) animate. -->
+    <!-- No reveal on the window itself (it shows/hides instantly). The pages DO animate (see the
+         push-navigation note above), render-cached for the duration of the slide so the motion stays cheap. -->
 
     <Panel>
 

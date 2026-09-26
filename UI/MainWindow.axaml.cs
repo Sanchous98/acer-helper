@@ -1,7 +1,10 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Threading;
+using AcerHelper.Infrastructure;
 using AcerHelper.UI.ViewModels;
 
 namespace AcerHelper.UI;
@@ -12,13 +15,25 @@ namespace AcerHelper.UI;
 /// set once on open. This holds the window behaviour: tray placement and foregrounding; light-dismiss is
 /// coordinated by <see cref="FlyoutCoordinator"/>.
 ///
-/// Open/close = plain <see cref="Window.Show"/>/<see cref="Window.Hide"/> (instant — no app-level reveal;
-/// only the in-window page-push transitions animate).</summary>
+/// Open/close = plain <see cref="Window.Show"/>/<see cref="Window.Hide"/> (instant — no app-level reveal).
+/// The in-window Home <-> drawer swap DOES animate (a 0.24 s push), and this class makes that motion cheap:
+/// see <see cref="ArmSlideCache"/> for why the two page grids carry a <see cref="BitmapCache"/> for exactly
+/// the duration of a slide and not a frame longer.</summary>
 public partial class MainWindow : Window
 {
     public bool IsOpen { get; private set; }
 
     private bool _destroying;   // set by Destroy() so the Closing handler lets a real close through (see below)
+
+    // ---- the push slide's render cache (see ArmSlideCache) ----
+    // A shared BitmapCache instance is fine: BitmapCache caches per-compositor internally and the two page
+    // grids live on the same compositor. Reusing it avoids re-allocating one per slide.
+    private readonly BitmapCache _slideCacheMode = new();
+    // Clears the cache once the slide has settled. A ONE-SHOT use of the app's shared timer primitive —
+    // Stop() on the first tick — never a raw DispatcherTimer (which the suite forbids: it defaults to the
+    // starvable Background priority). Restart() on each slide is what coalesces a rapid re-switch.
+    private readonly PeriodicSchedule _slideCache;
+    private MainViewModel? _navVm;   // the VM whose IsDrawerOpen drives the slide; subscribed in BindNavigation
 
     /// <summary>Set just before we programmatically open another of our windows (the calibration dialog)
     /// so the focus change isn't treated as a click "outside". One-shot.</summary>
@@ -30,6 +45,14 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // The push slide's render cache (see ArmSlideCache): a one-shot timer that clears the cache once
+        // the 0.24 s slide has settled. A hair longer than the transition plus a frame of slack.
+        _slideCache = new PeriodicSchedule(DisarmSlideCache, TimeSpan.FromMilliseconds(SlideCacheMs), UiSchedule.Normal);
+
+        // The slide is driven by IsDrawerOpen; arm the cache when it flips (BindNavigation subscribes once
+        // the DataContext arrives — FlyoutCoordinator sets it as an object initializer, so this fires here).
+        DataContextChanged += (_, _) => BindNavigation();
 
         // Hide, never destroy (unless torn down for a rebuild) — but never refuse the SESSION either: a close the
         // desktop initiated means it is going away, and cancelling that is what made KDE report "session end
@@ -121,8 +144,70 @@ public partial class MainWindow : Window
     public void Destroy()
     {
         CloseFlyout();           // hide + unhook the outside-click mouse hook
+        _slideCache.Stop();      // a pending disarm must not fire against a torn-down tree
+        _slideCache.Dispose();
+        UnbindNavigation();
         _destroying = true;      // let the Closing handler perform a real close this time
         Close();
+    }
+
+    // ---- the push slide's render cache ----
+    //
+    // WHY. The Home <-> drawer swap is a 0.24 s RenderTransform transition over two full-card trees that carry
+    // several ExperimentalAcrylicBorder cards each. Without a cache, every animated frame re-samples the acrylic
+    // and re-rasterizes the clip — the owner's "переключает экран, но как-то дёргано, как-будто поводов для
+    // тормозов нет" (there is no logical cost at all; the cost was the re-render). Avalonia's compositor honours
+    // Visual.CacheMode: with a BitmapCache the subtree is drawn into an offscreen layer once and blitted per
+    // frame (ServerCompositionVisualCache.Draw + ServerCompositionVisual.Render's PreSubgraph "draw from cache
+    // and skip rendering"), and a RenderTransform change is a compositor transform that does NOT invalidate that
+    // layer (ServerCompositionVisual.DirtyInputs: transform fields never set _contentChanged). So the slide
+    // becomes ~2 rasterizations (arm + disarm) and ~14 texture blits instead of ~15 full re-renders.
+    //
+    // WHY SCOPED TO THE SLIDE, NOT ALWAYS-ON. A cache bakes its layer, so text is grayscale-antialiased and the
+    // acrylic material is fixed for the frames it covers (BitmapCache.EnableClearType defaults false; the layer
+    // is created at Root.Scaling, so it is still DPR-sharp — only subpixel AA is lost). That is invisible for a
+    // quarter-second of motion and would be wrong for the static page the user then reads. So the cache is set
+    // when the slide starts and cleared once it has settled, and the page sits at full fidelity the rest of the
+    // time. The window shows/hides instantly and its content on open/close is NOT cached.
+    private const int SlideCacheMs = 300;   // the 0.24 s transition plus a frame of slack
+
+    private void BindNavigation()
+    {
+        UnbindNavigation();
+        if (DataContext is MainViewModel vm)
+        {
+            _navVm = vm;
+            _navVm.PropertyChanged += OnNavigationChanged;
+        }
+    }
+
+    private void UnbindNavigation()
+    {
+        if (_navVm != null) _navVm.PropertyChanged -= OnNavigationChanged;
+        _navVm = null;
+    }
+
+    /// <summary>The push began (IsDrawerOpen flipped): cache both animated page trees for the duration of the
+    /// slide, then clear the cache. Restart coalesces a rapid re-switch into one fresh window — the transition
+    /// itself restarts on each class change too, so clearing after the last one is exactly right.</summary>
+    private void OnNavigationChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainViewModel.IsDrawerOpen)) return;
+        ArmSlideCache();
+    }
+
+    private void ArmSlideCache()
+    {
+        HomePage.CacheMode = _slideCacheMode;
+        DrawerPage.CacheMode = _slideCacheMode;
+        _slideCache.Restart();
+    }
+
+    private void DisarmSlideCache()
+    {
+        _slideCache.Stop();              // one shot: the first tick is the whole job
+        HomePage.CacheMode = null;
+        DrawerPage.CacheMode = null;
     }
 
     private void Reanchor()
