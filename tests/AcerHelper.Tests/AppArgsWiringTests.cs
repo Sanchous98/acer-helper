@@ -22,11 +22,12 @@ namespace AcerHelper.Tests;
 /// compare the constant with itself.
 ///
 /// THE PATTERN IS AS PRECISE AS THAT END NEEDS, and that is measured rather than assumed.
-/// <c>Autostart.Windows.cs</c> names the constant TWICE — once in the task XML and once in <c>EnsureCurrent</c>'s
-/// staleness check — so a check that the FILE names it stays green while the registration itself has gone
-/// literal; the mutation "replace the task XML's <c>{AppArgs.Startup}</c> with <c>--startup</c>" was run and
-/// passed such a check, which is why that row pins the argument ELEMENT instead. The other two files name it
-/// once each, so naming the constant is exact for them.
+/// <c>Autostart.Windows.cs</c> names the constant in the task XML, so a check that the FILE names it stays green
+/// while the registration itself has gone literal; the mutation "replace the task XML's
+/// <c>{AppArgs.Startup}</c> with <c>--startup</c>" was run and passed such a check, which is why that row pins
+/// the argument ELEMENT instead. The staleness check that used to sit in <c>EnsureCurrent</c> moved to
+/// <c>AutostartPolicy</c> (the pure decision, Application layer), so that file is now the fourth end named here.
+/// The other three files name it once each, so naming the constant is exact for them.
 ///
 /// MUTATION-VERIFIED, one end at a time, and each is the historical bug:
 /// <c>Autostart.Windows.cs</c>'s <c>&lt;Arguments&gt;</c> hard-coded, <c>Autostart.Linux.cs</c>'s Exec line
@@ -74,6 +75,8 @@ public class AppArgsWiringTests
     [Theory]
     [InlineData("Infrastructure/Vendors/Generic/Autostart.Windows.cs",
                 "<Arguments>{AppArgs.Startup}</Arguments>")]   // registers: the scheduled task's argument element
+    [InlineData("Application/AutostartPolicy.cs",
+                "AppArgs.Startup")]                           // heals: whether the task already carries the switch
     [InlineData("Infrastructure/Vendors/Generic/Autostart.Linux.cs",
                 "AppArgs.Startup")]                           // registers: the .desktop file's Exec line
     [InlineData("UI/App.axaml.cs",

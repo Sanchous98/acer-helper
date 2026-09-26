@@ -53,26 +53,40 @@ public sealed partial class Autostart
     private static string StagingDir()
     {
         var dir = AppContext.BaseDirectory;
+        return IsUnderProgramFiles(dir) ? dir : Path.GetTempPath();
+    }
+
+    // Re-register the logon task if it exists but is out of date, so an upgrade heals itself. Two cases, decided
+    // by AutostartPolicy: (a) the entry still points at THIS exe but carries an older launch command (e.g. the
+    // removed --watch watcher); (b) the entry points at a DIFFERENT exe — the portable/dev tree the user once
+    // enabled, left behind after the MSI install took over. Only the installed build may claim (b) outright; a
+    // portable build adopts it only once the old target is gone, so a second portable can't hijack a live
+    // install. Read the task's XML (language-neutral) rather than the localised /fo LIST /v text.
+    public void EnsureCurrent()
+    {
+        var (exit, output) = Run($"/query /tn \"{TaskName}\" /xml");
+        if (exit != 0) return;
+        var (taskExe, taskArgs) = AutostartPolicy.ReadTaskCommand(output);
+        var taskExeExists = taskExe is { Length: > 0 } && File.Exists(taskExe);
+        if (AutostartPolicy.ShouldReRegister(ExePath, IsInstalled, taskExe, taskArgs, taskExeExists))
+            SetEnabled(true);
+    }
+
+    // True when this build is the MSI install (its exe lives under Program Files — the one location only an
+    // administrator can write). Mirrors WindowsUpdater.IsSupported and StagingDir's protection test; keep the
+    // three in step if the install root ever changes.
+    private static bool IsInstalled => IsUnderProgramFiles(ExePath);
+
+    private static bool IsUnderProgramFiles(string path)
+    {
         foreach (var f in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
         {
             var pf = Environment.GetFolderPath(f);
             // Compare with a trailing separator so "C:\Program Files" doesn't also match a sibling like
             // "C:\Program Filesque" (which would misclassify a user-writable folder as protected).
-            if (!string.IsNullOrEmpty(pf) && IsUnder(dir, pf)) return dir;
+            if (!string.IsNullOrEmpty(pf) && IsUnder(path, pf)) return true;
         }
-        return Path.GetTempPath();
-    }
-
-    // Re-register the logon task if it exists but is out of date (an older build's command — e.g. the removed
-    // --watch watcher), so an in-place upgrade heals itself. Only touches our OWN entry (same exe) so running a
-    // different build can't hijack autostart to its path. "Launches this exe with --startup" is treated as current.
-    public void EnsureCurrent()
-    {
-        var (exit, output) = Run($"/query /tn \"{TaskName}\" /fo LIST /v");
-        if (exit != 0) return;
-        if (output.Contains(ExePath, StringComparison.OrdinalIgnoreCase)
-            && !output.Contains(AppArgs.Startup, StringComparison.OrdinalIgnoreCase))
-            SetEnabled(true);
+        return false;
     }
 
     // Task definition. Two triggers: a LogonTrigger (instant launch of --startup at logon, resident in the tray)
