@@ -57,6 +57,8 @@ public sealed partial class BatteryViewModel : SectionViewModel
     public bool ShowCalibration => Calibration != null;
     public bool ShowMode => Mode != null;
 
+    private bool _calibrationSyncing;   // one out-of-band calibration read in flight; later refreshes wait for it
+
     [ObservableProperty] private string _charge = "—";
     [ObservableProperty] private string _state = "";
     [ObservableProperty] private string _health = "";
@@ -123,5 +125,33 @@ public sealed partial class BatteryViewModel : SectionViewModel
             Power = "";
             ShowPower = false;
         }
+
+        ReconcileCalibration();
+    }
+
+    /// <summary>Re-read the calibration row from the firmware on the periodic refresh, so the switch tracks
+    /// reality when the CYCLE ENDS ON ITS OWN. Calibration is firmware-owned and can run for hours; when it
+    /// finishes the firmware clears its own flag and restores the ~80% cap, with no write of ours to fire the
+    /// row's usual verified read-back (that read-back is attached to OUR write, see the constructor). This is
+    /// the same <see cref="ToggleRowViewModel.Sync"/> read-back the limit row already uses, now also driven by
+    /// the existing one-second battery refresh rather than only by a click or a restart.
+    ///
+    /// ONLY WHILE THE ROW SHOWS ON, which is what keeps the cheap battery poll cheap: the calibration status is
+    /// a WMI transaction (the fast path deliberately avoids the WMI/EC gate), and reading it every second
+    /// forever would be exactly the sweep that path exists not to be. While a calibration is active the read
+    /// costs one WMI call a second and stops the moment the row settles off. And it is skipped while a change
+    /// the user just asked for is pending (<see cref="ToggleRowViewModel.IsPending"/>) and coalesced to one read
+    /// in flight, so a refresh can never race a click's confirmation/write and fight it.
+    ///
+    /// A CHANGE ALSO RE-READS THE CHARGE LIMIT, because the firmware restores the cap its start lifted — the
+    /// same pairing the write path performs in the constructor. The reverse (a calibration started behind the
+    /// app's back) is not chased on this path, for the cost reason above: the row is settled off then, so there
+    /// is nothing a per-second WMI read would buy without also being paid while no calibration exists.</summary>
+    public void ReconcileCalibration()
+    {
+        if (_calibrationSyncing) return;
+        if (Calibration is not { IsOn: true, IsPending: false }) return;
+        _calibrationSyncing = true;
+        Calibration.Sync(onChanged: () => Limit?.Sync(), settled: () => _calibrationSyncing = false);
     }
 }

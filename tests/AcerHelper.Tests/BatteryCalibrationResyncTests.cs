@@ -26,6 +26,15 @@ namespace AcerHelper.Tests;
 /// the cap dropping by mutating the limit fake's <c>State</c> before the toggle; what is proven is that the
 /// app, having been told the hardware moved, looks again — not that a real Acer firmware moves it (which no
 /// test in this tree constructs a vendor device for, see <see cref="BatteryPrimeTests"/>'s own note).
+///
+/// THE OTHER HALF, added after the same class of bug on the OTHER end of a cycle: a calibration can run for
+/// hours and FINISH BY ITSELF, clearing the firmware's flag and restoring the cap with no write of ours. The
+/// row's reads were still only its prime and its own write's read-back, so the switch stayed "calibrating"
+/// forever. The periodic one-second battery refresh now drives the calibration row's read-back too
+/// (<c>BatteryViewModel.ReconcileCalibration</c>, called from <c>Update</c>), and the tests below pin that:
+/// the switch returns to off when the firmware reports the cycle over; the read is skipped while the row is off
+/// (the fast path must stay cheap) and while a click's confirmation/write is still pending (the refresh must not
+/// fight the user); and the firmware's end re-reads the restored cap, the same pairing as the write path.
 /// </summary>
 public class BatteryCalibrationResyncTests
 {
@@ -102,6 +111,99 @@ public class BatteryCalibrationResyncTests
         Thread.Sleep(50);              // let any trailing read land before the count is asserted
         Assert.Equal(readsAfterPrime, limit.GetCount);
         Assert.Empty(cal.SetCalls);
+    }
+
+    // ------------------------------------------- the OTHER end: the firmware ends the cycle on its own
+
+    /// <summary>
+    /// THE REPORTED BUG. A calibration the user started runs to completion on the hardware with no write of
+    /// ours; the firmware clears its flag and restores the cap. The calibration switch must stop saying it is
+    /// still calibrating on the next periodic refresh, and the cap it lifted must show as restored on the same
+    /// pass (the pairing the write path already performs).
+    /// </summary>
+    [Fact]
+    public void FirmwareEndingCalibration_ReturnsTheSwitchToOff_AndRestoresTheCap_OnTheNextRefresh()
+    {
+        var (h, limit, cal) = Arranged(limiterOn: false, calibrating: false);
+        var vm = Section(h);
+
+        vm.Prime();
+        Assert.True(Eventually.Until(() => cal.GetCount == 1), "the calibration prime never read");
+        Assert.False(vm.Calibration!.IsOn);
+
+        // The user starts a cycle; the write lands and the row shows ON (the cap was off to begin with).
+        vm.Calibration.IsOn = true;
+        Assert.True(Eventually.Until(() => vm.Calibration.IsOn && cal.SetCalls.Count == 1),
+                    "the calibration write never happened");
+        Assert.True(Eventually.Until(() => cal.GetCount >= 2 && !vm.Calibration.IsPending),
+                    "the write's read-back never settled");
+
+        // Hours later the firmware finishes ON ITS OWN: it clears its flag and restores the ~80% cap.
+        cal.State = false;
+        limit.State = true;
+
+        vm.Update(new BatteryInfoSnapshot());   // one tick of the existing one-second battery refresh
+
+        Assert.True(Eventually.Until(() => !vm.Calibration.IsOn),
+                    "the calibration switch stayed on after the firmware ended the cycle");
+        Assert.True(Eventually.Until(() => vm.Limit!.IsOn),
+                    "the limit switch did not pick up the cap the firmware restored");
+    }
+
+    /// <summary>
+    /// The cost guard, and the reason the refresh does not simply read the port every second forever: while the
+    /// row is settled OFF there is nothing a WMI read would buy, and the fast battery poll is deliberately free
+    /// of WMI transactions. A refresh must therefore not touch the calibration read at all in that state.
+    /// </summary>
+    [Fact]
+    public void ARefreshWhileCalibrationIsOff_DoesNotReadTheCalibrationPort()
+    {
+        var (h, _, cal) = Arranged(limiterOn: false, calibrating: false);
+        var vm = Section(h);
+
+        vm.Prime();
+        Assert.True(Eventually.Until(() => cal.GetCount == 1), "the calibration prime never read");
+        Assert.False(vm.Calibration!.IsOn);
+        var readsAfterPrime = cal.GetCount;
+
+        vm.Update(new BatteryInfoSnapshot());
+
+        Thread.Sleep(50);   // let any read the refresh (wrongly) queued land before the count is asserted
+        Assert.Equal(readsAfterPrime, cal.GetCount);
+    }
+
+    /// <summary>
+    /// The control that keeps the periodic read from FIGHTING THE USER. Calibration is gated behind a modal
+    /// confirmation, and the switch flips ON optimistically while that dialog is open — but nothing has been
+    /// written to the hardware yet, so a refresh that read it then would see the old OFF and snap the switch
+    /// back, yanking the click out from under the dialog. A pending change (confirming or writing) therefore
+    /// suppresses the reconcile entirely, read and all.
+    /// </summary>
+    [Fact]
+    public void ARefreshWhileTheCalibrationConfirmationIsOpen_DoesNotClobberTheClick()
+    {
+        var confirm = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (h, _, cal) = Arranged(limiterOn: false, calibrating: false, confirmCalibration: () => confirm.Task);
+        var vm = Section(h);
+
+        vm.Prime();
+        Assert.True(Eventually.Until(() => cal.GetCount == 1), "the calibration prime never read");
+        Assert.False(vm.Calibration!.IsOn);
+
+        vm.Calibration.IsOn = true;   // the user clicks; the dialog is open and NOTHING is written yet
+        Assert.True(vm.Calibration.IsOn, "the optimistic flip did not show");
+        var readsBefore = cal.GetCount;
+
+        vm.Update(new BatteryInfoSnapshot());   // a one-second refresh arrives mid-flight
+
+        Thread.Sleep(50);   // let any read it (wrongly) queued land
+        Assert.True(vm.Calibration.IsOn, "the refresh clobbered the click while the confirmation was open");
+        Assert.Equal(readsBefore, cal.GetCount);   // and it did not even ask the hardware
+        Assert.Empty(cal.SetCalls);
+
+        confirm.SetResult(true);   // the user confirms; the write now happens
+        Assert.True(Eventually.Until(() => cal.SetCalls.Count == 1 && vm.Calibration.IsOn),
+                    "the confirmed calibration write never reached the hardware");
     }
 
     // ---------------------------------------------------------------- helpers

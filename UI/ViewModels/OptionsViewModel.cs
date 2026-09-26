@@ -37,10 +37,18 @@ internal sealed class VerifiedHwValue<T>(Action<Action>? post = null)
     private readonly HwSerial _hw = new();
     private readonly Action<Action> _post = post ?? (a => Dispatcher.UIThread.Post(a));
     private T _desired = default!;
+    private int _pending;
 
     /// <summary>Record the latest intended value WITHOUT writing it (e.g. an optimistic UI flip awaiting a
     /// confirm dialog), so a still-pending read-back from an earlier write can tell it's been superseded.</summary>
     public void Latch(T desired) => _desired = desired;
+
+    /// <summary>True while a write this value queued is still running. A caller that paces OUT-OF-BAND reads
+    /// (<c>BatteryViewModel.ReconcileCalibration</c>, the periodic battery refresh) checks this so its read can't
+    /// race — and snap the control back from — a change the user just asked for. The serial worker already orders
+    /// a read after a write that is queued; this ALSO covers the window between the click and the write reaching
+    /// the queue, which is the whole of an async confirmation (see <c>ToggleRowViewModel.IsPending</c>).</summary>
+    public bool IsPending => Volatile.Read(ref _pending) > 0;
 
     /// <summary>Write <paramref name="desired"/> off-thread, read back, and snap the control to the actual
     /// value via <paramref name="snapBack"/> — unless a newer Apply/Latch superseded it or
@@ -48,25 +56,36 @@ internal sealed class VerifiedHwValue<T>(Action<Action>? post = null)
     public void Apply(T desired, Action<T> write, Func<T> read, Func<T> current, Action<T> snapBack)
     {
         _desired = desired;
+        Interlocked.Increment(ref _pending);
         _hw.Enqueue(() =>
         {
-            write(desired);
-            var actual = read();
-            _post(() =>
+            try
             {
-                if (!Eq.Equals(desired, _desired) || Eq.Equals(actual, current())) return;   // superseded / matches
-                snapBack(actual);
-            });
+                write(desired);
+                var actual = read();
+                _post(() =>
+                {
+                    if (!Eq.Equals(desired, _desired) || Eq.Equals(actual, current())) return;   // superseded / matches
+                    snapBack(actual);
+                });
+            }
+            finally { Interlocked.Decrement(ref _pending); }   // even when write/read throws (HwSerial swallows it)
         });
     }
 
     /// <summary>Re-read the hardware (no write) and snap the control to it if it differs — for out-of-band
-    /// changes (e.g. an Fn key). Not gated on the latch: a genuine external change should always show.</summary>
-    public void Sync(Func<T> read, Func<T> current, Action<T> snapBack)
+    /// changes (e.g. an Fn key). Not gated on the latch: a genuine external change should always show.
+    /// <paramref name="settled"/> runs on the UI thread once the read is done, changed or not, so a caller that
+    /// paces its reads (one in flight, later refreshes skipped until it settles) can release its guard.</summary>
+    public void Sync(Func<T> read, Func<T> current, Action<T> snapBack, Action? settled = null)
         => _hw.Enqueue(() =>
         {
             var actual = read();
-            _post(() => { if (!Eq.Equals(actual, current())) snapBack(actual); });
+            _post(() =>
+            {
+                if (!Eq.Equals(actual, current())) snapBack(actual);
+                settled?.Invoke();
+            });
         });
 }
 
@@ -160,6 +179,7 @@ public sealed class ToggleRowViewModel : ObservableObject
     private readonly Func<Task<bool>>? _confirmAsync;
     private readonly VerifiedHwValue<bool> _hw;
     private bool _isOn;
+    private bool _confirming;   // an async confirmation is open; the write it guards has not reached the queue yet
 
     public ToggleRowViewModel(OptionToggle t, Action<Action>? post = null)
         : this(t.Label, t.Initial, t.Supported, t.OnChange, read: t.Read, confirm: t.Confirm,
@@ -190,6 +210,12 @@ public sealed class ToggleRowViewModel : ObservableObject
     public bool IsEnabled { get; }
     public string? Tip { get; }
 
+    /// <summary>True while a change the user just asked for is being confirmed or written. The periodic
+    /// out-of-band reconcile skips a row in this state: its read would race the pending write (or the modal
+    /// confirmation, before the write even exists) and could snap the switch back to the value the hardware
+    /// still holds — the classic "the refresh fought my click" flicker.</summary>
+    public bool IsPending => _confirming || _hw.IsPending;
+
     public bool IsOn
     {
         get => _isOn;
@@ -209,6 +235,7 @@ public sealed class ToggleRowViewModel : ObservableObject
             {
                 SetProperty(ref _isOn, true);
                 _hw.Latch(true);   // so a pending earlier read-back sees this optimistic flip
+                _confirming = true;
                 _ = ConfirmAndApplyAsync();
                 return;
             }
@@ -234,29 +261,40 @@ public sealed class ToggleRowViewModel : ObservableObject
     }
 
     /// <summary>Re-read the hardware (no write) and snap the switch to it — for a change made out of band.
-    /// No-op on a row whose value can't be read back.</summary>
-    public void Sync() => ReadInto(_read);
+    /// No-op on a row whose value can't be read back. <paramref name="onChanged"/> runs on the UI thread only
+    /// when the read actually moved the switch (the snap-back fired); <paramref name="settled"/> runs once the
+    /// read is done regardless, so a periodic caller can release its one-read-at-a-time guard.</summary>
+    public void Sync(Action? onChanged = null, Action? settled = null) => ReadInto(_read, onChanged, settled);
 
     /// <summary>Replace the construction-time placeholder with the real value, off the UI thread. A row with
     /// a <see cref="OptionToggle.Read"/> uses that same read; only a row with no readback needs its own
     /// <see cref="OptionToggle.Prime"/>. No-op on a row that can't be read at all.</summary>
     public void Prime() => ReadInto(_prime ?? _read);
 
-    private void ReadInto(Func<bool>? read)
+    private void ReadInto(Func<bool>? read, Action? onChanged = null, Action? settled = null)
     {
-        if (read == null) return;
-        _hw.Sync(read, () => _isOn, actual => { _isOn = actual; OnPropertyChanged(nameof(IsOn)); });
+        if (read == null) { settled?.Invoke(); return; }
+        _hw.Sync(read, () => _isOn, actual =>
+        {
+            _isOn = actual;                   // reflect reality (honest snap-back)
+            OnPropertyChanged(nameof(IsOn));
+            onChanged?.Invoke();
+        }, settled);
     }
 
     private async Task ConfirmAndApplyAsync()
     {
-        if (await _confirmAsync!()) Apply(true);
-        else
+        try
         {
-            _isOn = false;                    // revert without applying (was never confirmed)
-            _hw.Latch(false);
-            OnPropertyChanged(nameof(IsOn));
+            if (await _confirmAsync!()) Apply(true);
+            else
+            {
+                _isOn = false;                    // revert without applying (was never confirmed)
+                _hw.Latch(false);
+                OnPropertyChanged(nameof(IsOn));
+            }
         }
+        finally { _confirming = false; }          // the write (if any) is now on the serial worker and IsPending tracks it
     }
 }
 
