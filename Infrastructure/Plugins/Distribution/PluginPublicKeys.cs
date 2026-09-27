@@ -35,21 +35,31 @@ internal static class PluginPublicKeys
     private const string TestPublicKeySpki =
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVPv7qhiS37R9geKir4fHiSSSs23Ky7fPsHppUTpo9M7A94zJP5Sqh0fuDFwW7U65Cuc36XzVxuWQTc2P2HmtuA==";
 
-    // TODO(owner): embed the REAL production public key here before the first plugin is published, under its own
-    // stable keyId (e.g. "2026-09-release"). It is the SPKI DER, base64, of the P-256 key whose PRIVATE half is
-    // the GitHub Actions signing secret (§5.4, §5.5) — generate it once, commit only the public half to the host
-    // (never the private half, and never a key that signed anything in a repo), and keep the private half only
-    // in the CI secret store / KMS (§7.3 item 2). Adding it is one entry below; do NOT repurpose TestKeyId, and
-    // do NOT read this map lazily from a file — the compile-time constant is the whole trust property (§5.4).
+    /// <summary>The <c>keyId</c> of the PRODUCTION signing key (§5.4, §5.5). CI signs the plugin assets and the
+    /// manifest with its private half (the GitHub Actions secret <c>PLUGIN_SIGNING_KEY</c>, PKCS#8 DER base64),
+    /// and every shipped host verifies with the public half below. The id is a stable, dated token so rotation is
+    /// "add a new dated entry", never "edit this one".</summary>
+    public const string ReleaseKeyId = "2026-09-release";
+
+    /// <summary>The PRODUCTION public key, SPKI DER base64 (P-256). Only the public half is committed; the
+    /// private half lives solely in the CI secret store (§5.4, §7.3 item 2 — never in the repo and never in a
+    /// build host beyond the signing step). Verification imports it with <c>ImportSubjectPublicKeyInfo</c>, which
+    /// names its own curve, so this cannot be silently read as another curve. REPLACING it is a new map entry
+    /// under a NEW <c>keyId</c>, never an edit: an old client accepts only the keys it was built with and cannot
+    /// learn a replacement over the network.</summary>
+    private const string ReleasePublicKeySpki =
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExZlJEy2ht9XSAZVaBANi6AiyE8+Es+aH0iRRtE9WbMwgdHoXV+tzcigbVHtZas32k/wU3o3aZ9L/miIQ+ledTA==";
 
     /// <summary>The trusted keys by <c>keyId</c> → SPKI DER base64. Add production keys here as they are
     /// created; never edit or remove an entry a shipped release was signed with, because an old client accepts
-    /// only the keys it was built with and cannot learn a replacement over the network (§7.3 item 2).</summary>
+    /// only the keys it was built with and cannot learn a replacement over the network (§7.3 item 2). The TEST
+    /// key stays so fixtures can sign without the secret; a production release is signed with
+    /// <see cref="ReleaseKeyId"/>.</summary>
     public static IReadOnlyDictionary<string, string> All { get; } =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [TestKeyId] = TestPublicKeySpki,
-            // TODO(owner): [ "2026-09-release" ] = "<real production P-256 SPKI, base64>" — see the note above.
+            [ReleaseKeyId] = ReleasePublicKeySpki,
         };
 
     /// <summary>Look up a trusted key's SPKI DER by its <c>keyId</c>, or null when unknown. The comparison is
