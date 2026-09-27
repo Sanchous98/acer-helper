@@ -37,7 +37,7 @@ conflict).
 | T4 | Loader / session / binding (`INativePluginBinding` + `NativeLibrary`, `VendorPluginLoader`, `PluginSession`) | **done** | T1, T3 | `Infrastructure/Plugins/VendorPluginLoader*`, `PluginSession*`, `NativePluginBinding*` |
 | T5 | Capability adapters (`PluginPowerProfiles/Fan/Sensors/Battery/DeclaredSetting/Hotkeys`, `PluginVendorDevice`) — **not wired into `DeviceFactory`** | **done** | T1 | `Infrastructure/Plugins/Adapters/**` |
 | T6 | Proof plugin (`plugins/AcerHelper.Vendor.Proof/`) + a synthetic deprecated-major fixture | **done** | T1 | `plugins/**` |
-| T7 | CI proof job (AOT-publish the proof plugin Win+Linux, smoke + 30-min soak) | todo | T6 | `.github/workflows/**`, test runner |
+| T7 | CI proof job (AOT-publish the proof plugin Win+Linux, smoke + 30-min soak) | **done** | T6 | `.github/workflows/**`, test runner |
 | T8 | Guards (host has no vendor names; every plugin exports the ABI names; ABI round-trip) | todo | T1–T6 | `tests/**` (new files only) |
 
 ### T1 — ABI foundation (`done`, commit pending)

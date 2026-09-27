@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE TWO-AOT-RUNTIME SMOKE + SOAK HOST (docs/vendor-plugins.md §2.4 "the largest unknown", §7.1 risk 1;
+       Phase 0 verification §6). A dependency-free console app that loads the AOT proof plugin by absolute
+       path, asserts the eight ah_* exports are present and callable, and (with the soak-minutes flag) holds a
+       session while hammering ah_invoke and churning managed garbage, to surface the
+       dotnet/runtime#121345 signal-handler/GC deadlock that a JIT run cannot reproduce.
+
+       WHY A SEPARATE CONSOLE AND NOT THE APP OR ITS TESTS. The shipping app requires administrator
+       (app.manifest requestedExecutionLevel="requireAdministrator"; Bootstrap/Program.cs starts Avalonia),
+       so it cannot be driven on a CI runner, and a test project cannot call [UnmanagedCallersOnly] exports
+       (the runtime forbids it) nor publish itself Native AOT. This host is deliberately the SMALLEST possible
+       AOT executable: it carries no Avalonia, no Domain/UI, and no Infrastructure beyond the source-included
+       ABI contract, so the only AOT runtime in play is the host's own plus the plugin's — exactly the
+       two-runtime condition §2.4 is about. It is published and RUN by .github/workflows/plugin-soak.yml.
+
+       WHY net10.0 (not net10.0-windows) EVEN ON THE WINDOWS RUNNER. The host has no Avalonia, no manifest
+       and no Windows-only API: it is raw NativeLibrary/function-pointer interop, which is identical on both
+       OSes. One TFM keeps the project honest about being OS-neutral and lets the same source run on the
+       Windows runner and in the Linux job; the OS difference is only the RID passed to publish.
+
+       NOT DEPENDENCY-FREE BY ACCIDENT: there is no PackageReference and no ProjectReference, and the ABI
+       files are SOURCE-INCLUDED (below), not referenced, so this host cannot drag the app in. That
+       dependency-freedom is itself guarded by tests/AcerHelper.Tests/PluginSoakHostSourceTests.cs. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- Function pointers (delegate* unmanaged[Cdecl]) are the AOT-friendly call path (§2.5); they require
+         unsafe, exactly as the host's own loader does. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>PluginSoakHost</AssemblyName>
+    <!-- PublishAot is passed on the publish command line by the workflow (the LocalizationAotProbe
+         precedent), not baked here: a plain `dotnet build` of this project stays a fast JIT compile for
+         local use, and AOT is a publish-time decision. -->
+  </PropertyGroup>
+
+  <!-- SOURCE-INCLUDE the shared ABI contract, do NOT reference the host. The ABI file is the one source of
+       truth for the eight export names, the AbiStatus/Capability/Operation vocabulary and the host-side
+       VendorAbiExports function-pointer struct (§3.1, §3.2); the plugin compiles the same file. Including it
+       by <Compile Include> keeps this host dependency-free (no ProjectReference to AcerHelper, which would
+       carry Avalonia/Domain/UI) while the assertions still use the real contract — the point of the smoke.
+       The path style mirrors tests/LocalizationAotProbe, which links Loc.cs the same way. -->
+  <ItemGroup>
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\VendorAbi.cs" Link="Abi\VendorAbi.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\AbiStatus.cs" Link="Abi\AbiStatus.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\Capability.cs" Link="Abi\Capability.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\Operation.cs" Link="Abi\Operation.cs" />
+  </ItemGroup>
+
+</Project>

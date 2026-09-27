@@ -1,0 +1,192 @@
+name: plugin-soak
+
+# THE PHASE 0 TWO-AOT-RUNTIMES PROOF (docs/vendor-plugins.md §2.4, §7.1 risk 1, §6 Phase 0 verification).
+#
+# WHAT IT PROVES AND WHY IT IS A SEPARATE WORKFLOW. The highest risk in the plugin design is that loading an
+# AOT shared library (the plugin) into an AOT executable (the host) puts a SECOND AOT runtime — its own GC and
+# signal handlers — into one process, with a real field report of it deadlocking (dotnet/runtime#121345). That
+# measurement needs Native AOT on both sides, so it cannot run in the unit-test suite and cannot run the app
+# itself (the app requires administrator and starts Avalonia). It runs here: publish the proof plugin AND a
+# tiny dependency-free host, both Native AOT, then RUN the host against the plugin and soak.
+#
+# IT IS DELIBERATELY NOT TRIGGERED ON PUSH. Native AOT publish of two artefacts is minutes of CI time and the
+# measurement changes only with the ABI/runtime, not with every commit — a push trigger would tax every PR for a
+# signal that a weekly run and a manual dispatch already cover. build.yml stays untouched so the release path is
+# unaffected: a failure here can never block or alter a release.
+#
+# TRIGGERS (recommended): workflow_dispatch for on-demand proof (the orchestrator dispatches this), plus a weekly
+# schedule as a standing regression net. No `push`, for the reason above.
+on:
+  workflow_dispatch:
+    inputs:
+      soak_minutes:
+        description: 'Minutes to soak after the smoke pass (0 = smoke only).'
+        required: false
+        default: '30'
+      smoke_only:
+        description: 'Run the smoke assertions only (overrides soak_minutes to 0).'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Weekly, Monday 04:00 UTC: a standing check that a runtime/toolchain change has not reintroduced the
+    # two-runtime signal hazard. A scheduled run uses the soak_minutes default below.
+    - cron: '0 4 * * 1'
+
+# Soak 30 + publish time + headroom. Native AOT of the app-scale artefact is minutes; the plugin/host are small,
+# but keep a single generous ceiling so a genuine soak HANG fails by timeout (the intended failure signal) rather
+# than hanging the runner indefinitely. 60 covers a 30-minute soak with margin; a smoke-only run finishes early.
+run-name: plugin-soak (${{ github.event.inputs.soak_minutes || '30' }} min)
+
+jobs:
+  # ---------------------------------------------------------------------------------------------------------
+  # windows — the plugin+host are built on Windows because Native AOT cannot cross-compile (docs/build-image.md
+  # lines 99-150): the win-x64 toolchain (MSVC) exists only on a Windows runner. Same runner as build.yml's
+  # windows job so the .NET SDK setup is identical.
+  # ---------------------------------------------------------------------------------------------------------
+  windows:
+    name: smoke + soak (win-x64)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # Publish the proof plugin as a Native AOT SHARED library (§2.1). A classlib with PublishAot and no
+      # explicit NativeLib is a shared library; the artefact is AcerHelper.Vendor.Proof.dll (a native DLL, not
+      # managed IL). net10.0-windows is the plugin's Windows TFM. -o out/plugin keeps it out of the host's folder.
+      - name: Publish proof plugin (Native AOT, win-x64)
+        run: >
+          dotnet publish plugins/AcerHelper.Vendor.Proof/AcerHelper.Vendor.Proof.csproj
+          -c Release
+          -f net10.0-windows
+          -r win-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/plugin
+
+      # Publish the smoke+soak host as a Native AOT executable. It MUST be AOT: under JIT there is no second AOT
+      # runtime and the two-runtime measurement is meaningless (the host's own header says so). net10.0 is the
+      # host's single, OS-neutral TFM.
+      - name: Publish soak host (Native AOT, win-x64)
+        run: >
+          dotnet publish tests/PluginSoakHost/PluginSoakHost.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/host
+
+      # FAIL LOUDLY IF THE PLUGIN IS MISSING/EMPTY before running (the build.yml precedent checks artefacts by
+      # name) — a host that runs against nothing would otherwise look like a pass. -not (Test-Path) rather than
+      # just existence: an empty file is not an artefact either (AcerHelper's own "0 bytes" rule).
+      - name: Locate the published plugin
+        shell: pwsh
+        run: |
+          $plugin = 'out/plugin/AcerHelper.Vendor.Proof.dll'
+          if (-not (Test-Path $plugin) -or (Get-Item $plugin).Length -eq 0) {
+            Write-Host "::error::the plugin publish produced no non-empty '$plugin'"
+            Get-ChildItem out/plugin -ErrorAction SilentlyContinue | Format-Table Name, Length
+            exit 1
+          }
+          Write-Host "OK: $plugin ($((Get-Item $plugin).Length) bytes)"
+
+      - name: Run smoke + soak
+        shell: pwsh
+        run: |
+          # smoke_only forces 0 minutes; otherwise use the dispatch input, defaulting to 30 for a scheduled run.
+          $minutes = '${{ github.event.inputs.soak_minutes }}'
+          if ('${{ github.event.inputs.smoke_only }}' -eq 'true') { $minutes = '0' }
+          if ([string]::IsNullOrWhiteSpace($minutes)) { $minutes = '30' }
+          Write-Host "soak_minutes=$minutes"
+          # No `|| true`: the host exits non-zero on any failed smoke assertion or on a soak crash, and a hang
+          # fails the job by the timeout above. Either outcome is the finding this workflow exists to surface.
+          & out/host/PluginSoakHost.exe 'out/plugin/AcerHelper.Vendor.Proof.dll' --soak-minutes $minutes
+          if ($LASTEXITCODE -ne 0) { throw "PluginSoakHost exited $LASTEXITCODE" }
+
+  # ---------------------------------------------------------------------------------------------------------
+  # linux — same publish+run, linux-x64. TOOLCHAIN DECISION: a PLAIN ubuntu-latest job with clang and
+  # zlib1g-dev, NOT the release Docker image. Reasons, from reading Dockerfile/.dockerignore/docs/build-image.md:
+  #   • The image is the release path: its `artefacts` stage exists to export the APP's publish folder, and
+  #     wiring a second (plugin+host) publish into it means adding stages to Dockerfile — a file this task must
+  #     not touch, and a change that entangles the soak with the release it is meant to be independent of.
+  #   • What the image actually pins for Linux AOT is exactly the documented prerequisite set — clang, binutils,
+  #     zlib1g-dev (Dockerfile lines 54-69, i.e. "apt-get install clang zlib1g-dev"). On the ubuntu runner that
+  #     same set is a two-line apt-get; the SDK comes from actions/setup-dotnet. Nothing about the soak needs the
+  #     image's other value (the source-only build context, the cache mounts, the AppImage layout).
+  #   • The plugin and host are small; the image's BuildKit cache is for the app's much larger AOT link. Reusing
+  #     the image here would cost a multi-GB toolchain pull to save an apt-get.
+  # So: self-contained ubuntu job. If a future need arises for the pinned clang-18 specifically, the image's
+  # Dockerfile is the reference for the exact pin; today the runner's default clang is sufficient for these tiny
+  # libraries (the app's own pin is about reproducible app releases, not the proof plugin).
+  # ---------------------------------------------------------------------------------------------------------
+  linux:
+    name: smoke + soak (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # The documented Ubuntu Native AOT prerequisites (docs/build-image.md / Microsoft Learn): clang is the AOT
+      # compiler/linker driver, zlib1g-dev is what the runtime's native libraries link against. binutils supplies
+      # objcopy, the symbol stripper.
+      - name: Install Native AOT prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang binutils zlib1g-dev
+
+      # The Linux half of the plugin: net10.0 (the plugin's portable TFM) -> AcerHelper.Vendor.Proof.so.
+      - name: Publish proof plugin (Native AOT, linux-x64)
+        run: >
+          dotnet publish plugins/AcerHelper.Vendor.Proof/AcerHelper.Vendor.Proof.csproj
+          -c Release
+          -f net10.0
+          -r linux-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/plugin
+
+      - name: Publish soak host (Native AOT, linux-x64)
+        run: >
+          dotnet publish tests/PluginSoakHost/PluginSoakHost.csproj
+          -c Release
+          -r linux-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/host
+
+      # Same fail-loud guard as the Windows job: -s (non-empty) rather than -e, because an empty .so is not an
+      # artefact either.
+      - name: Locate the published plugin
+        run: |
+          plugin=out/plugin/AcerHelper.Vendor.Proof.so
+          [ -s "$plugin" ] || { echo "::error::the plugin publish produced no non-empty $plugin"; ls -l out/plugin; exit 1; }
+          ls -l "$plugin"
+
+      - name: Run smoke + soak
+        env:
+          SOAK_MINUTES: ${{ github.event.inputs.soak_minutes }}
+          SMOKE_ONLY: ${{ github.event.inputs.smoke_only }}
+        run: |
+          minutes="${SOAK_MINUTES:-30}"
+          if [ "$SMOKE_ONLY" = "true" ]; then minutes=0; fi
+          echo "soak_minutes=$minutes"
+          # No `|| true`: non-zero on a failed assertion or a soak crash; a hang fails by the job timeout.
+          ./out/host/PluginSoakHost out/plugin/AcerHelper.Vendor.Proof.so --soak-minutes "$minutes"
+
+  # NOTE on the optional `-p:ProofApiMajor=0` refusal leg: deliberately NOT added here. The proof plugin can be
+  # rebuilt with -p:ProofApiMajor=0 to declare ABI 0.0 (unsupported by the host's SupportedMajors={1}), but
+  # proving the host REFUSES it is host-loader behaviour (the §3.8.4 gate-2 path), not this smoke host's; this
+  # host asserts the plugin's version EQUALS the expected one, so it has no refusal branch to exercise. Wiring
+  # the leg without that branch would only build an unused fixture and add a second publish to each job. The
+  # refusal path has its own coverage in tests/AcerHelper.Tests/PluginAbiVersioningTests.cs against the loader;
+  # it is kept out of this workflow so the job stays a single clear publish+run per OS.
