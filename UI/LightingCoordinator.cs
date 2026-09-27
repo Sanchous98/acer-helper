@@ -25,9 +25,8 @@ namespace AcerHelper.UI;
 internal sealed class LightingCoordinator : IDisposable
 {
     private readonly LaptopService _svc;
-    private readonly PeriodicSchedule _lightReapply;  // re-applies lighting for a while after a profile switch
+    private readonly PeriodicSchedule _lightReapply;  // re-applies the per-zone lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
-    private int _flashTicksLeft;                       // of those, how many still re-send the palette
 
     // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) restore the per-zone
     // colours the firmware's own palette repaint clobbers after a profile switch, and (2) self-heal a
@@ -36,21 +35,30 @@ internal sealed class LightingCoordinator : IDisposable
     // it sticks (the device is last-write-wins; idle state isn't re-corrupted). Bounded on purpose: if the bus
     // is corrupting CONSTANTLY (no clean window) this just retries for ~3 s and stops, rather than flickering
     // forever. Re-asserting an already-correct colour is visually silent (the firmware re-latches the same value).
+    //
+    // THE BURST NEVER RE-SENDS THE PALETTE, and that is a rule rather than an omission. The palette flash is a
+    // GLOBAL write that briefly repaints the whole keyboard with the palette colour before the per-zone paint
+    // overrides it — one visible blink of keyboard AND lightbar. Every path that wants the palette sends it
+    // ONCE, at the action instant (Paint); a burst tick re-asserts only the per-zone colours, which is silent
+    // when already correct. The shape this replaced re-sent the palette on the first couple of ticks, so a
+    // restore or a follows-profile flip blinked TWICE — the second write landing 400 ms after the first. One
+    // flash per action is the rule; the per-zone self-heal is the safety net this burst keeps (see
+    // docs/lighting-an18-61.md). A per-zone palette retry is not needed: re-sending the same palette is what
+    // BLINKS, while the lightbar keeps its colour between profile switches.
     private const int ReapplyTicks = 8;
-    // Of those ticks, how many also RE-SEND the profile palette flash. The flash is a global write that briefly
-    // repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one more
-    // visible blink of keyboard and lightbar. Worth that cost on the RESTORE paths (startup, resume, lid open),
-    // where nothing else re-establishes the palette and the bus may be contended, so those kicks ask for it.
-    // A profile SWITCH does not: the firmware flashes the new palette itself at the moment of
-    // the write and we now send ours in the same instant (see OnProfileApplied), so a re-send 400 ms later is
-    // simply a second blink cycle. The per-zone KEYBOARD paint (the actual "half green/half orange" self-heal)
-    // still runs on EVERY tick, which is silent when already correct. See docs/lighting-an18-61.md.
-    private const int FlashTicks = 2;
 
     // How long a locally-applied profile may stay unconfirmed by the refresh pass before we stop suppressing
     // pass-driven repaints. Only a write the firmware silently refused ever gets here; the normal case is
     // confirmed within one pass (~1 s).
     private const double PendingTimeoutSeconds = 5;
+
+    // The window that coalesces a wake with the refresh pass that follows it. OnResume paints the current
+    // profile's palette once; the 3 s poll then re-reads the same profile and reports it changed. When that pass
+    // still describes the palette the wake just painted it is the TAIL of the wake, not a second action, and
+    // repainting it is the other half of the reported resume double blink (see OnStateChanged). The window
+    // covers the poll interval, so the tail lands inside it. A pass carrying a DIFFERENT palette is a genuine
+    // restore and keeps its one flash.
+    private const double WakeTailSeconds = 5;
     private readonly ResumeWatcher _resume;            // re-applies lighting on wake (firmware drops it over sleep)
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
@@ -115,30 +123,40 @@ internal sealed class LightingCoordinator : IDisposable
         _lighting = lighting;
     }
 
-    /// <summary>The follows-profile flag was flipped in the Lighting panel: kick the re-apply so the lightbar
-    /// repaints now (ON -> this profile's palette; OFF -> its custom colour) instead of waiting for the next
-    /// switch, reusing the cached flash/lights. (Persisting the flag itself stays in AppController.)</summary>
-    public void OnFollowsProfileFlipped() => KickReapply(withFlash: true);
+    /// <summary>The follows-profile flag was flipped in the Lighting panel: paint now so the lightbar repaints
+    /// (ON -> this profile's palette; OFF -> its custom colour) instead of waiting for the next switch, reusing
+    /// the cached flash. The toggle itself already rebuilt the panel (OFF) or dropped it (ON) synchronously, so
+    /// the paint below is the single palette send for the flip; the burst that follows re-asserts only the
+    /// per-zone colours. (Persisting the flag itself stays in AppController.)</summary>
+    public void OnFollowsProfileFlipped()
+    {
+        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: false })
+        {
+            // Taking the zone over: the panel was just built and already wrote its custom colour, and there is
+            // no palette to send — the user's colour is what should show. Only keep the burst running.
+            KickReapply();
+            return;
+        }
+        Paint();                          // ON: send this profile's palette once, now
+        KickReapply();                    // ...and back it with the per-zone self-heal, no further flash
+    }
 
-    // Schedule a bounded re-apply burst (see ReapplyTicks). Restarting the timer coalesces overlapping kicks
-    // into one running burst. withFlash decides whether its first ticks also re-send the profile palette (see
-    // FlashTicks) — restore paths want that, a profile switch does not. Runs on the UI thread (all callers are
+    // Schedule a bounded re-apply burst (see ReapplyTicks), or re-arm one already running. Restarting the timer
+    // coalesces overlapping kicks into one running burst. The burst carries no palette flash — re-sending it on
+    // a tick is what turned one action into two blinks (see ReapplyTicks); every path that wants the palette
+    // paints it once, at the action instant, before calling this. Runs on the UI thread (all callers are
     // UI-thread), so no synchronisation needed.
-    private void KickReapply(bool withFlash)
+    private void KickReapply()
     {
         _lightReapplyLeft = ReapplyTicks;
-        _flashTicksLeft = withFlash ? FlashTicks : 0;
         _lightReapply.Restart();
     }
 
-    // One re-apply tick of the bounded burst (see ReapplyTicks). Re-send the palette only while this burst has
-    // flash ticks left (a switch-driven burst has none — see KickReapply); every tick re-applies the per-zone
-    // keyboard paint, and the burst stops itself on its last tick.
+    // One re-apply tick of the bounded burst (see ReapplyTicks): re-apply the per-zone keyboard paint and stop
+    // the burst on its last tick. No palette — see KickReapply.
     private void ReapplyTick()
     {
-        var withFlash = _flashTicksLeft > 0;
-        if (withFlash) _flashTicksLeft--;
-        Paint(includeFlash: withFlash);
+        Paint(includeFlash: false);
         if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
     }
 
@@ -156,7 +174,7 @@ internal sealed class LightingCoordinator : IDisposable
         _pendingSince = DateTime.UtcNow;
         _flash = _svc.FlashColorOf(applied);
         Paint();
-        KickReapply(withFlash: false);
+        KickReapply();
     }
 
     /// <summary>The refresh pass observed a profile and/or mode change (the profile's flash colour and the door
@@ -197,17 +215,37 @@ internal sealed class LightingCoordinator : IDisposable
 
         // An out-of-band profile change is the only case left that still needs the palette: nobody has painted
         // it yet, so adopt the colour, show it at once (otherwise the previous one lingers for a beat) and let
-        // the burst re-assert it. Everything else — a mode-only change, or the tail of our own switch — just
-        // binds the new mode's zones; the profile's colour is either unchanged or already on screen.
-        if (profileChanged) _flash = flash;
-        Paint(includeFlash: profileChanged, rebind: mode);
-        KickReapply(withFlash: profileChanged);
+        // the burst re-assert the zones. Everything else — a mode-only change, or the tail of our own switch —
+        // just binds the new mode's zones; the profile's colour is either unchanged or already on screen.
+        //
+        // THE PASS THAT FOLLOWS A WAKE IS THE WAKE'S TAIL, NOT A SECOND ACTION. OnResume painted the profile's
+        // palette at the wake instant; the poll then re-reads the same profile and reports it changed. Painting
+        // that palette again is the resume half of the double blink — the wake itself, plus the pass that
+        // followed it, each sending one. When the pass carries the SAME palette the wake just painted, the wake
+        // already did this pass's work: bind the mode's zones and send no palette. A pass carrying a DIFFERENT
+        // palette is a real restore (the firmware changed the profile under us) and keeps its one flash.
+        var wakesTail = IsWakeTail(_lastResume, DateTime.UtcNow, flash, _flash);
+        if (profileChanged && !wakesTail) _flash = flash;
+        Paint(includeFlash: profileChanged && !wakesTail, rebind: mode);
+        KickReapply();
     }
 
+    /// <summary>Whether a refresh pass is the TAIL of a wake — i.e. it reports a profile change but carries the
+    /// very palette <see cref="OnResume"/> already painted within <see cref="WakeTailSeconds"/>. Read as "the wake
+    /// already did this pass's work", so the pass must not send the palette a second time (the reported resume
+    /// double blink). Pure and static so the rule can be asserted directly without a desktop lifetime, which
+    /// <c>LightingCoordinator</c> itself needs (the limit <c>ReconcileScheduleTests</c> records).
+    ///
+    /// A pass carrying a DIFFERENT palette is not a tail — the firmware really changed the profile, and that
+    /// restore keeps its single flash. Nor is one outside the window: the wake's own work is done, and a later
+    /// profile change is a new action with its own one flash.</summary>
+    internal static bool IsWakeTail(DateTime lastResume, DateTime now, AccentColor? passFlash, AccentColor? cachedFlash)
+        => (now - lastResume).TotalSeconds < WakeTailSeconds && Equals(passFlash, cachedFlash);
+
     /// <summary>Startup / language-rebuild paint: seed the cached flash colour (read by the caller off the UI
-    /// thread) and paint, then re-apply for a few seconds. Startup is exactly the boot-with-external-display case
-    /// where the first apply is most likely to land corrupted on the contended HID-over-I2C bus, so the burst
-    /// gives the initial lighting several chances to settle correctly.
+    /// thread), paint it ONCE, then re-apply the per-zone colours for a few seconds. Startup is exactly the
+    /// boot-with-external-display case where the first apply is most likely to land corrupted on the contended
+    /// HID-over-I2C bus, so the burst gives the initial lighting several chances to settle correctly.
     ///
     /// IT TAKES NO LIGHTING: the sections are built with the current mode's values only moments before this runs
     /// (<c>BuildUi</c> hands them over, then <c>Attach</c>, then this), so there is nothing to rebind and the
@@ -216,7 +254,7 @@ internal sealed class LightingCoordinator : IDisposable
     {
         _flash = flash;
         Paint();
-        KickReapply(withFlash: true);
+        KickReapply();
     }
 
     // Repaint from the cached flash colour and the section's own values. First paint the profile's palette on a
@@ -242,12 +280,13 @@ internal sealed class LightingCoordinator : IDisposable
     // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE
     // re-apply from the cache (the internal keyboard's HID handle survives sleep, so one write lands; no
     // readiness to poll for). Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
-    // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the palette isn't flashed twice.
+    // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the OS's own double event doesn't paint twice.
+    // (The refresh pass that follows the wake is coalesced separately — see OnStateChanged's wake tail.)
     private void OnResume()
     {
         var now = DateTime.UtcNow;
         if ((now - _lastResume).TotalSeconds < 3) return;
-        _lastResume = now;
+        _lastResume = now;   // stamped BEFORE the paint, so a pass that lands during it still reads as a tail
         Paint();
         // The HARDWARE half of a wake, from the one place that knows the schedule: the GPU clock offsets (the dGPU
         // power-cycles across suspend, Optimus D3-cold, and comes back at 0), the CPU power overlay and the Curve

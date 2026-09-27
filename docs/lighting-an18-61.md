@@ -190,14 +190,14 @@ schedules a **bounded burst of re-applies**, not one.
   idle state isn't re-corrupted). Bounded on purpose: if the bus is corrupting **constantly** (no clean window)
   this retries for ~3 s and stops, rather than flickering forever. Re-asserting an already-correct colour is
   **visually silent** — the firmware re-latches the same value.
-- **`FlashTicks = 2`** of those ticks also **re-send the profile palette flash**. The flash is a **global** write
-  that briefly repaints the whole keyboard with the palette colour before the per-zone paint overrides it — one
-  more visible blink of keyboard and lightbar. That cost is worth paying on the **restore paths** (startup,
-  resume, lid open, host hand-back), where nothing else re-establishes the palette and the bus may be contended.
-  A **profile switch does not** pay it: the firmware flashes the new palette itself at the moment of the write,
-  and the app now sends its own in the **same instant**, so a re-send 400 ms later is just a **second blink
-  cycle**. The per-zone **keyboard** paint (the actual self-heal) still runs on **every** tick, which is silent
-  when already correct.
+- **The burst never re-sends the palette.** The palette flash is a **global** write that briefly repaints the
+  whole keyboard with the palette colour before the per-zone paint overrides it — one visible blink of keyboard
+  **and** lightbar. Every path that wants the palette sends it **ONCE**, at the action instant (a restore paints
+  at startup/resume/lid-open; the follows-profile flip paints on the flip; an out-of-band profile change paints
+  from the pass). A burst tick re-asserts only the per-zone colours, which is silent when already correct. An
+  earlier shape re-sent the palette on the first couple of ticks, which turned **every** restore and the
+  follows-profile flip into **two** blinks — the second write landing 400 ms after the first. The rule is one
+  flash per action; the per-zone self-heal is the safety net the burst keeps.
 
 ### Why applying on the switch instant matters (the double blink)
 
@@ -206,6 +206,19 @@ blink**: the firmware flashes the new palette the instant the profile byte is wr
 write then landed **~750 ms later** as a second, separate flash cycle. Painting at the switch instant puts both
 writes in the same moment so they **coincide into one** — and the burst kicked there deliberately carries **no**
 further palette re-sends, only the per-zone self-heal.
+
+### The two remaining double blinks, and how they are closed
+
+The switch instant fixed profile switches; two paths still blinked twice, each by a different mechanism:
+
+- **Resume.** `OnResume` paints the palette once at the wake instant. The refresh pass that follows the wake
+  re-reads the same profile and **reports it changed** — a second palette send ~1 s later. A pass within the
+  wake window that carries the **same** palette the wake just painted is the wake's **tail**, not a second
+  action: it binds the mode's zones and sends no palette (`LightingCoordinator.IsWakeTail`). A pass carrying a
+  **different** palette is a genuine out-of-band restore and keeps its one flash.
+- **Lightbar mode switch (the follows-profile toggle).** The flip painted the palette and then kicked a burst
+  that re-sent it on its first ticks — the same second blink, 400 ms later. With the burst palette-free the flip
+  is a single palette send.
 
 ## How the app drives the ENE controller — implementation notes
 
