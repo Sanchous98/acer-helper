@@ -242,21 +242,33 @@ public partial class MainWindow : Window
     /// scrollable content EXTENT (<c>HomeScroll.Extent.Height</c>) plus the chrome around that body, and the
     /// chrome is exactly what the window adds beyond the body's viewport (<c>Bounds.Height − viewport</c>).
     ///
-    /// WHY STABLE. The sections are built and populated over the first passes and the extent grows with them, so
-    /// an early reading is undercounted. The candidate must hold for two consecutive passes before it is pinned;
-    /// a window whose content never settles simply never locks and keeps sizing to content (the old behaviour).
+    /// WHY STABLE, THEN MONOTONIC. The sections are built and populated over the first passes and the extent grows
+    /// with them, so an early reading is undercounted: the candidate must hold for two consecutive passes before
+    /// it is pinned, which is what stops the initial build from pinning a half-populated Home. But some rows arrive
+    /// AFTER that — the battery card's power-source row is filled by an off-thread Acer EC read that lands whenever
+    /// it lands (see <c>AppController.RefreshPowerSource</c>), and it was measured appearing after the lock and
+    /// clipping the bottom of Home. The hook is therefore kept and the height is allowed to GROW to a later, larger
+    /// candidate; it is never allowed to SHRINK, which is what still makes navigation height-neutral (Home stays in
+    /// layout while a drawer is shown, so its extent — and the candidate — is unchanged by a drawer).
     ///
     /// WHY LayoutUpdated. Home must be laid out at least once for the reading to be real (the constructor reads
-    /// (0,0)). The hook is unhooked the first time the reading is usable; a rebuild for a live language switch
-    /// builds a new window (see FlyoutCoordinator/RebuildForLanguage), so there is no second measurement.</summary>
+    /// (0,0)). A rebuild for a live language switch builds a new window (see FlyoutCoordinator/RebuildForLanguage),
+    /// so there is no second measurement on this instance.</summary>
     private void LockFrameHeight(object? sender, EventArgs e)
     {
-        if (_frameHeightLocked) return;
         var extent = HomeScroll.Extent.Height;       // Home's body content — what it actually wants to show
         var viewport = HomeScroll.Viewport.Height;   // how much of that body the frame currently shows
-        var frame = Bounds.Height;                   // window height this pass (still content-sized)
+        var frame = Bounds.Height;                   // window height this pass
         if (extent <= 0 || viewport <= 0 || frame <= 0) return;   // no real measurement yet
         var candidate = frame - viewport + extent;   // Home's natural height = content + the chrome around it
+
+        if (_frameHeightLocked)
+        {
+            // A LATE row made Home taller than what we pinned. Grow to fit it; never shrink (see the summary).
+            if (candidate > Height + 0.5) { Height = candidate; if (IsOpen) Reanchor(); }
+            return;
+        }
+
         if (Math.Abs(candidate - _heightCandidate) > 0.5)
         {
             _heightCandidate = candidate;   // still growing (sections loading): restart the agreement count
@@ -266,7 +278,6 @@ public partial class MainWindow : Window
         if (++_stablePasses < 2) return;
 
         _frameHeightLocked = true;
-        LayoutUpdated -= LockFrameHeight;
         Height = _heightCandidate;
         SizeToContent = SizeToContent.Width; // stop content-sizing HEIGHT: it can never change again
         if (IsOpen) Reanchor();              // the pinned size is what the corner should be measured against

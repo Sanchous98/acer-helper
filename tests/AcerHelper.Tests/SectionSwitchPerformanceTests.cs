@@ -109,15 +109,19 @@ public class SectionSwitchPerformanceTests
     /// STABLE pass — the sections are built and populated over the first few layout passes, so an early reading is
     /// undercounted. <c>LockFrameHeight</c> therefore requires the candidate to agree on two consecutive passes,
     /// then assigns it to <c>Height</c> and switches the window to <c>SizeToContent="Width"</c>, so from then on
-    /// it sizes only its width and cannot be resized by a page swap. Because the height is locked, the old
-    /// collapse-on-disarm machinery is gone: both pages stay measured, which is also what the slide needs (the
-    /// incoming page must be visible for its transition to fire at all).
+    /// it sizes only its width and cannot be resized by a page swap. A row that arrives AFTER the lock (the
+    /// battery card's power-source row, filled by an off-thread EC read) makes Home taller still, so the lock is
+    /// MONOTONIC: a later larger candidate grows the frame, and it is never allowed to shrink — which is what
+    /// keeps navigation height-neutral (Home stays in layout while a drawer is shown). Because the height is
+    /// locked, the old collapse-on-disarm machinery is gone: both pages stay measured, which is also what the
+    /// slide needs (the incoming page must be visible for its transition to fire at all).
     ///
     /// MUTATION: delete the <c>Height = _heightCandidate</c> assignment or the
     /// <c>LayoutUpdated += LockFrameHeight</c> hook (nothing pins the frame, it sizes to a page again), drop the
-    /// <c>SizeToContent = SizeToContent.Width</c> line (a later layout pass can re-shrink the window), or go back
+    /// <c>SizeToContent = SizeToContent.Width</c> line (a later layout pass can re-shrink the window), go back
     /// to reading <c>HomePage.DesiredSize.Height</c> instead of the body's extent (the frame comes back one
-    /// viewport short and the asserts below name the extent go red). Putting a static <c>IsVisible="False"</c> on
+    /// viewport short and the asserts below name the extent go red), or drop the post-lock growth branch (a late
+    /// row clips the bottom of Home — the owner's screenshot). Putting a static <c>IsVisible="False"</c> on
     /// either page grid would kill the incoming page's transition, so the XAML must not collapse a page.</summary>
     [Fact]
     public void TheWindowHeightIsFixedToTheHomePage()
@@ -144,6 +148,10 @@ public class SectionSwitchPerformanceTests
 
         // ...and the window then STOPS content-sizing its height, so no later pass can resize it.
         Assert.Contains("SizeToContent = SizeToContent.Width", code, StringComparison.Ordinal);
+
+        // The lock is MONOTONIC: a row that arrives after it (the off-thread power-source read) grows the frame
+        // rather than clipping Home, and only growth is allowed (a shrink would make navigation height-differ).
+        Assert.Contains("if (candidate > Height + 0.5)", code, StringComparison.Ordinal);
 
         // The per-page collapse is gone: both pages stay measured, so nothing resizes the window on navigation.
         Assert.DoesNotContain("ShowOnlyActivePage", code, StringComparison.Ordinal);
