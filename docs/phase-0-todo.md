@@ -32,7 +32,7 @@ conflict).
 | # | Task | Status | Depends | Owner files |
 |---|---|---|---|---|
 | T1 | ABI foundation (`PluginApi` generation, `Abi/`, `PluginManifest`, `PluginJsonContext`, `IPluginSession`) | **done** | — | `AcerHelper.csproj`, `Infrastructure/Plugins/**` |
-| T2 | Manifest + signature (`vendor-plugins.json` schema, canonical string, ECDSA P-256 verifier, `keyId`) | todo | T1 | `Infrastructure/Plugins/PluginManifest*`, `PluginSignature*` |
+| T2 | Manifest + signature (`vendor-plugins.json` schema, canonical string, ECDSA P-256 verifier, `keyId`) | **done** | T1 | `Infrastructure/Plugins/Distribution/**` |
 | T3 | Per-major adapters (`IPluginAbiAdapter`, `PluginAbiRegistry`, `Abi/V1/`) | todo | T1 | `Infrastructure/Plugins/Abi/**` (Registry/V1) |
 | T4 | Loader / session / binding (`INativePluginBinding` + `NativeLibrary`, `VendorPluginLoader`, `PluginSession`) | todo | T1, T3 | `Infrastructure/Plugins/VendorPluginLoader*`, `PluginSession*`, `NativePluginBinding*` |
 | T5 | Capability adapters (`PluginPowerProfiles/Fan/Sensors/Battery/DeclaredSetting/Hotkeys`, `PluginVendorDevice`) — **not wired into `DeviceFactory`** | todo | T1 | `Infrastructure/Plugins/Adapters/**` |
