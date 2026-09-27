@@ -34,7 +34,7 @@ conflict).
 | T1 | ABI foundation (`PluginApi` generation, `Abi/`, `PluginManifest`, `PluginJsonContext`, `IPluginSession`) | **done** | — | `AcerHelper.csproj`, `Infrastructure/Plugins/**` |
 | T2 | Manifest + signature (`vendor-plugins.json` schema, canonical string, ECDSA P-256 verifier, `keyId`) | **done** | T1 | `Infrastructure/Plugins/Distribution/**` |
 | T3 | Per-major adapters (`IPluginAbiAdapter`, `PluginAbiRegistry`, `Abi/V1/`) | **done** | T1 | `Infrastructure/Plugins/Abi/**` (Registry/V1) |
-| T4 | Loader / session / binding (`INativePluginBinding` + `NativeLibrary`, `VendorPluginLoader`, `PluginSession`) | todo | T1, T3 | `Infrastructure/Plugins/VendorPluginLoader*`, `PluginSession*`, `NativePluginBinding*` |
+| T4 | Loader / session / binding (`INativePluginBinding` + `NativeLibrary`, `VendorPluginLoader`, `PluginSession`) | **done** | T1, T3 | `Infrastructure/Plugins/VendorPluginLoader*`, `PluginSession*`, `NativePluginBinding*` |
 | T5 | Capability adapters (`PluginPowerProfiles/Fan/Sensors/Battery/DeclaredSetting/Hotkeys`, `PluginVendorDevice`) — **not wired into `DeviceFactory`** | todo | T1 | `Infrastructure/Plugins/Adapters/**` |
 | T6 | Proof plugin (`plugins/AcerHelper.Vendor.Proof/`) + a synthetic deprecated-major fixture | todo | T1 | `plugins/**` |
 | T7 | CI proof job (AOT-publish the proof plugin Win+Linux, smoke + 30-min soak) | todo | T6 | `.github/workflows/**`, test runner |
