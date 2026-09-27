@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Composition;

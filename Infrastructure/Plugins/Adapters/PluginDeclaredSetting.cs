@@ -16,7 +16,7 @@ namespace AcerHelper.Infrastructure.Plugins.Adapters;
 /// <c>Apply</c>, <c>ReadbackVerifiesWrite</c> and the persisted value encoding all stay host-side and unchanged
 /// (§4.2: "Refuse/Apply/Remember stay host-side"). The adapter supplies exactly the <see cref="IFlagPort"/> /
 /// <see cref="IChoicePort"/> those types read/write through, implemented over the Settings capability — the same
-/// division the in-host <c>FlagPort</c>/<c>ChoicePort</c> occupy (Infrastructure/Vendors/Generic/DelegatePorts.cs).
+/// division the in-host <c>FlagPort</c>/<c>ChoicePort</c> occupy (Infrastructure/Plugins/Sdk/DelegatePorts.cs).
 ///
 /// A <c>Refused</c> write is reported through <c>LastError</c>, matching the port contract: the host's
 /// <c>FlagSetting.Write</c>/<c>ChoiceSetting.Write</c> read it only after a write that RETURNED false, so the

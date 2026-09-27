@@ -136,7 +136,7 @@ internal sealed class PluginVendorDevice : Device
 /// The keyboard-brightness adapter (docs/vendor-plugins.md §3.4, §3.5): <see cref="IKeyboardBrightness"/> over
 /// <c>Capability.KeyboardBrightness</c>. It lives in this file because the Phase 0 task scopes the owned files to
 /// the capabilities the proof plugin exercises; it is the same shape the in-host <c>LevelPort</c> has
-/// (Infrastructure/Vendors/Generic/DelegatePorts.cs:82-88). <see cref="MaxLevel"/> comes from the manifest; the
+/// (Infrastructure/Plugins/Sdk/DelegatePorts.cs:84-90). <see cref="MaxLevel"/> comes from the manifest; the
 /// level reads and writes are calls.
 /// </summary>
 internal sealed class PluginKeyboardBrightness : IKeyboardBrightness

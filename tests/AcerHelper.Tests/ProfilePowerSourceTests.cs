@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Tests.Fakes;
 

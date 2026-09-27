@@ -1,7 +1,9 @@
 using System.IO;
 using AcerHelper.Domain;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 /// <summary>Generic Linux sysfs transport scoped to a base directory — the Linux analogue of
 /// <see cref="WmiInvoker"/>: a thin, vendor-agnostic accessor that vendor feature partials receive in

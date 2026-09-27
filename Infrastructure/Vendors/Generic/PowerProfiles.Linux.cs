@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 

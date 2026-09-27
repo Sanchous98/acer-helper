@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using AcerHelper.Tests.Fakes;

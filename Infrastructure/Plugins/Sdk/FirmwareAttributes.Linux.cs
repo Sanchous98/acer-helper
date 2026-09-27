@@ -1,7 +1,9 @@
 using System.IO;
 using AcerHelper.Domain;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 /// <summary>Generic Linux accessor for the kernel's firmware-attributes class
 /// (<c>/sys/class/firmware-attributes/&lt;device&gt;/</c>) — BIOS settings exposed as sysfs attributes with

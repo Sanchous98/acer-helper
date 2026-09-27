@@ -1,4 +1,6 @@
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 // Why an UN-SUFFIXED file at all, when both callers are Linux-only (sysfs class nodes): the test project cannot
 // compile a *.Linux.cs file — AcerHelper.csproj removes them from its net10.0-windows TFM, see the argument at the

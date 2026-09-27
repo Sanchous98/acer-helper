@@ -216,7 +216,7 @@
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
-       API directly (see Infrastructure/Vendors/Generic/WbemInterop.Windows.cs) — NOT System.Management, which
+       API directly (see Infrastructure/Plugins/Sdk/WbemInterop.Windows.cs) — NOT System.Management, which
        is not Native-AOT-safe.
        HidSharp only serves the Windows RGB transport — Linux talks to hidraw directly
        (EneHidController.Linux.cs), because HidSharp's Linux enumeration misses HID-over-I2C devices. -->

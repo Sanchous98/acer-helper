@@ -1,4 +1,6 @@
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 /// <summary>The single place WMI method invocation is used: a thin, vendor-agnostic wrapper that binds to
 /// one <c>root\WMI</c> class and invokes its methods. Vendor codecs supply the method/parameter names.

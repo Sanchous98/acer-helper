@@ -1,6 +1,8 @@
 using AcerHelper.Domain;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 /// <summary>Coarse class of a performance profile — what the app branches on when it needs to know "is this the
 /// Turbo profile / the Balanced one" without naming any vendor profile. It drives the generic "toggle

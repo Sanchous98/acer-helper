@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using Avalonia.Media;

@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 

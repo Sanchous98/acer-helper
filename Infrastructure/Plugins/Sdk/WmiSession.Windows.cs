@@ -2,7 +2,9 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using AcerHelper.Infrastructure.Diagnostics;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source, so the WMI COM layer cannot drift between them.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 /// <summary>A short-lived WMI connection to one namespace, built on the source-generated COM interop in
 /// <see cref="Wbem"/>. Deliberately per-operation: WMI COM proxies are apartment-bound and can't be shared

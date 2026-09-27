@@ -7,7 +7,7 @@ namespace AcerHelper.Infrastructure.Plugins.Adapters;
 /// <summary>
 /// The sensors adapter (docs/vendor-plugins.md §3.5, §4.2): implements <see cref="ISensors"/> over
 /// <c>ah_invoke(Capability.Sensors, Operation.Sensors.Read)</c>, mirroring the in-host <c>SensorsPort</c>
-/// (Infrastructure/Vendors/Generic/DelegatePorts.cs:91-94).
+/// (Infrastructure/Plugins/Sdk/DelegatePorts.cs:93-96).
 ///
 /// Its PRESENCE is the override (§3.4): a non-null <c>sensors</c> object in the manifest is the whole declaration
 /// "this plugin replaces the generic read", which is how <c>AcerDevice.Linux.cs:222-223</c> wraps the generic

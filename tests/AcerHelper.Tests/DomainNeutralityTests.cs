@@ -16,7 +16,7 @@ namespace AcerHelper.Tests;
 /// THE DECISION THESE RULES PIN (owner, 2026-09-22) is that the Domain carries "только значения, важные для
 /// логики" — only values the logic depends on. A value the Domain merely CARRIES, so that some layer above can
 /// look at it, is a value the Domain should not know about; it belongs where it is produced and used. So
-/// <c>ProfileKind</c> moved to Infrastructure (Infrastructure/Vendors/Generic/ProfileKind.cs) with a lookup the
+/// <c>ProfileKind</c> moved to Infrastructure (Infrastructure/Plugins/Sdk/ProfileKind.cs) with a lookup the
 /// offering port implements (<c>IProfileTraits</c>), and <c>Accent</c>/<c>FlashColor</c> left the profile record
 /// for the vendor tables that had written them all along. <c>AccentColor</c> deliberately STAYED a Domain type:
 /// it is the payload of a lighting write, so the lighting chain really does reason in it.
@@ -82,7 +82,7 @@ public class DomainNeutralityTests
 
         Assert.True(offenders.Length == 0,
             "ProfileKind is named under Domain/ again — the classification of a performance profile is the "
-            + "BACKEND's (Infrastructure/Vendors/Generic/ProfileKind.cs, reached through IProfileTraits), because "
+            + "BACKEND's (Infrastructure/Plugins/Sdk/ProfileKind.cs, reached through IProfileTraits), because "
             + "no Domain or Application code branches on it. The owner's yardstick: \"только значения, важные для "
             + "логики\" — a value the Domain only CARRIES is a value it should not know, and returning this one is "
             + "a decision to argue rather than a line to restore:\n  " + string.Join("\n  ", offenders));

@@ -2,7 +2,9 @@ using System.IO;
 using System.Linq;
 using AcerHelper.Domain;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 // Generic laptop telemetry through the Linux hwmon sysfs tree (/sys/class/hwmon). This is the one
 // vendor-independent way to read fan speeds and temperatures: whatever the EC/ACPI driver exposes

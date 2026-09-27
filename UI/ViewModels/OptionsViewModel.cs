@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 using AcerHelper.Infrastructure.Composition;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;

@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source, so the source-generated WMI COM interop cannot drift between them.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 // Low-level WMI COM interop, done with SOURCE-GENERATED COM ([GeneratedComInterface]) + raw VARIANT/
 // SAFEARRAY pointers so the whole thing is Native-AOT-safe. This is why we don't use System.Management:

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Plugins.Abi;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Plugins.Adapters;
@@ -9,7 +10,7 @@ namespace AcerHelper.Infrastructure.Plugins.Adapters;
 /// <summary>
 /// The power-profiles adapter (docs/vendor-plugins.md §3.4, §3.5, §4.2): ONE object implementing
 /// <see cref="IPowerProfiles"/>, <see cref="IProfileTraits"/> and <see cref="IProfileAvailability"/>, exactly as
-/// the in-host <c>ProfilesPort</c> does (Infrastructure/Vendors/Generic/DelegatePorts.cs:59-64). The three
+/// the in-host <c>ProfilesPort</c> does (Infrastructure/Plugins/Sdk/DelegatePorts.cs:61-66). The three
 /// interfaces are one object because a backend's profile table is one table: the list the UI shows and the
 /// classification it paints cannot come from two places, and the design cites that pairing as the shape to
 /// mirror (§4.2).
@@ -24,7 +25,7 @@ namespace AcerHelper.Infrastructure.Plugins.Adapters;
 /// THE <c>kind</c> STRING IS PARSED HERE, IN THE HOST (§3.4, §6 "Domain neutrality"). The ABI carries the coarse
 /// class as one of the <c>ProfileKind</c> names — "Quiet", "Eco", "Balanced", "Performance", "Turbo", "Other" —
 /// and <see cref="ParseKind"/> maps that string domain onto the host enum
-/// (Infrastructure/Vendors/Generic/ProfileKind.cs:28). An unrecognised string is <see cref="ProfileKind.Other"/>,
+/// (Infrastructure/Plugins/Sdk/ProfileKind.cs:30). An unrecognised string is <see cref="ProfileKind.Other"/>,
 /// the enum's own "nobody classifies it" answer, never a nearby mode.
 ///
 /// LASTERROR BELONGS TO THIS CALL (§4.2, LaptopService.cs:121-149). Every forwarding member replaces

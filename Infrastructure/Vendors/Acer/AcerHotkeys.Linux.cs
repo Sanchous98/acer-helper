@@ -1,5 +1,6 @@
 using System.IO;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;

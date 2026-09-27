@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using AcerHelper.Infrastructure.Vendors.Generic;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 
 namespace AcerHelper.Tests;
 

@@ -11,7 +11,7 @@ namespace AcerHelper.Infrastructure.Plugins.Adapters;
 /// <summary>
 /// The fan-control adapter (docs/vendor-plugins.md §3.5, §4.2): implements <see cref="IFanControl"/> over
 /// <c>ah_invoke(Capability.Fan, …)</c>, mirroring the in-host <c>FanPort</c> (Infrastructure/Vendors/Generic/
-/// DelegatePorts.cs:41-49).
+/// DelegatePorts.cs:43-51).
 ///
 /// <see cref="Capability"/> comes from the MANIFEST, not a call (§4.2), because which fan controls the machine
 /// offers is a property of the machine, not of the current moment. <see cref="SetMode"/> and

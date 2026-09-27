@@ -1,0 +1,47 @@
+<!--  The source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md).
+
+      This file is the ONE SOURCE OF TRUTH for the vendor-agnostic transport code a vendor plugin must compile
+      into itself: the WMI COM layer (Windows), the sysfs/hwmon layer (Linux), the neutral port helpers, AND the
+      C ABI envelope itself. Both the host and every vendor plugin <Import> it so the two sides cannot compile
+      two copies of the same transport that then drift - the failure mode §4.4 rejects the duplicate-per-plugin
+      option for.
+
+      HOW A CONSUMER USES IT (this is P3's wiring, not P1's - the props is deliberately NOT imported by
+      AcerHelper.csproj yet, so this slice does not touch the host csproj):
+
+        <Import Project="..\..\Infrastructure\Plugins\Sdk\PluginSdk.props" />
+        <ItemGroup>
+          ... the same file-name OS split the host uses: a Compile Remove of **/*.Linux.cs on Windows and of
+          **/*.Windows.cs on the portable TFM. The compiled path still ends in those suffixes, so a plain glob
+          Remove selects correctly even though the items were declared here in the props.
+        </ItemGroup>
+
+      An EXPLICIT Compile list rather than a Compile Include="*.cs" glob: the folder holds only .cs today, but a
+      glob is path-relative and would also sweep any obj/ (or a future generated file) that appears under it,
+      silently compiling a build artefact into every plugin. The list is boring on purpose - a new SDK file
+      fails loudly (it is simply not compiled) rather than quietly (an unexpected file IS).
+
+      The Abi/ files are included here too: they are already dependency-free and the plugin needs them, so the
+      host and the plugin share exactly one Abi.cs rather than each embedding its own copy (§3.1, §4.4). -->
+<Project>
+
+  <ItemGroup>
+    <!-- Transports and neutral port helpers. -->
+    <Compile Include="$(MSBuildThisFileDirectory)WmiSession.Windows.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WbemInterop.Windows.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WmiInvoker.Windows.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SysfsInvoker.Linux.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FirmwareAttributes.Linux.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Hwmon.Linux.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SysfsLink.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DelegatePorts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ProfileKind.cs" />
+
+    <!-- The ABI envelope, shared verbatim with every plugin. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\Abi\VendorAbi.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\Abi\AbiStatus.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\Abi\Capability.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\Abi\Operation.cs" />
+  </ItemGroup>
+
+</Project>

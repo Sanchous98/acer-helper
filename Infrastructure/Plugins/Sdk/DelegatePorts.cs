@@ -1,6 +1,8 @@
 using AcerHelper.Domain;
 
-namespace AcerHelper.Infrastructure.Vendors.Generic;
+// Lives in the source-shared Plugin SDK (§4.4 of docs/vendor-plugins.md); compiled into the host and every
+// vendor plugin from one source.
+namespace AcerHelper.Infrastructure.Plugins.Sdk;
 
 // Generic, transport-agnostic feature holders shared by all vendors. Every simple vendor capability is
 // "read a value / write a value via a transport" — the transport + encoding is the ONLY thing that differs

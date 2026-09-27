@@ -73,7 +73,7 @@ internal sealed class CapabilitiesManifest
 }
 
 /// <summary>The <c>powerProfiles</c> capability (§3.4), mirroring <c>IPowerProfiles</c> +
-/// <c>IProfileAvailability</c> + <c>IProfileTraits</c> (Domain/Ports.cs:17-44, ProfileKind.cs:72-77).</summary>
+/// <c>IProfileAvailability</c> + <c>IProfileTraits</c> (Domain/Ports.cs:17-44, Plugins/Sdk/ProfileKind.cs:74-79).</summary>
 internal sealed class PowerProfilesManifest
 {
     /// <summary>The full profile set in display order (<c>IPowerProfiles.All</c>), immutable — no call needed.</summary>

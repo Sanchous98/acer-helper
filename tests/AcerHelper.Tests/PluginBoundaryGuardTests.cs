@@ -6,6 +6,7 @@ using AcerHelper.Infrastructure.Plugins;
 using AcerHelper.Infrastructure.Plugins.Abi;
 using AcerHelper.Infrastructure.Plugins.Adapters;
 using AcerHelper.Infrastructure.Plugins.Distribution;
+using AcerHelper.Infrastructure.Plugins.Sdk;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Tests.Fakes;
 
