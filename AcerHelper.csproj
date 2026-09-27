@@ -10,6 +10,12 @@
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
     <Version>0.37.0</Version>
+    <!-- The plugin API version the HOST runs: Major.Minor, deliberately NOT <Version> (§3.8.1 of
+         docs/vendor-plugins.md). The two move for different reasons — <Version> bumps every release,
+         PluginApiVersion bumps only when the C ABI changes (export set, struct layout, op numbers, payload
+         semantics). Bumping the app version must never force a plugin rebuild; bumping this major does.
+         The current shipped API is 1.0, so the host carries a single adapter (§3.8.2). -->
+    <PluginApiVersion>1.0</PluginApiVersion>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -80,6 +86,15 @@
     <Compile Remove="tests/**" />
     <EmbeddedResource Remove="tests/**" />
     <None Remove="tests/**" />
+    <!-- The plugins live in a sibling tree under plugins/ (§5.1 of docs/vendor-plugins.md), and the SDK's
+         implicit **/*.cs / **/*.resx / ** globs would otherwise compile the plugin sources INTO the host
+         (and embed their resources), for exactly the reason the tests/** removal above exists: those sources
+         belong to a SEPARATE Native AOT shared library that ships as a release asset, never inside the host
+         binary (§5). The host ships no vendor plugin at all. Kept beside the tests/** note so the two
+         "implicit glob would swallow a sibling tree" exclusions are read together. -->
+    <Compile Remove="plugins/**" />
+    <EmbeddedResource Remove="plugins/**" />
+    <None Remove="plugins/**" />
   </ItemGroup>
 
   <!-- The silent-failure targets are private by design (they are internal encodings, not API), so the test
@@ -233,6 +248,40 @@
     <ItemGroup>
       <Compile Include="$(_AppVersionFile)" />
       <FileWrites Include="$(_AppVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Bake <PluginApiVersion> into a compile-time int pair (Infrastructure/Plugins/PluginApi, generated) that
+       the handshake and the per-major adapter registry read (§3.8.1). It is generated for the SAME reason
+       GenerateAppVersion is: Native AOT strips assembly-version reflection metadata, so a runtime-read version
+       can lie (0.0.0.0) — a const is plain IL inlined at each use site and is immune to AOT/trim/single-file
+       stripping. It has its OWN property rather than reusing <Version> because the app version and the plugin
+       API version move for different reasons: <Version> bumps every release, the API version bumps only when
+       the C ABI changes (§3.8.1), and a plugin built against API 1 must keep loading across any number of 0.x
+       app releases. Emitting the const (rather than parsing the property at every call site) is what keeps the
+       host and each plugin from drifting the way the app-version target exists to prevent. Runs per-TFM (each
+       writes into its own obj/<tfm> intermediate), exactly like its sibling. The value is always int.int; the
+       two property functions below split it on the first '.'. -->
+  <Target Name="GeneratePluginApiVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_PluginApiVersionFile>$(IntermediateOutputPath)PluginApi.g.cs</_PluginApiVersionFile>
+      <_PluginApiMajor>$([System.String]::Copy('$(PluginApiVersion)').Split('.')[0])</_PluginApiMajor>
+      <_PluginApiMinor>$([System.String]::Copy('$(PluginApiVersion)').Split('.')[1])</_PluginApiMinor>
+    </PropertyGroup>
+    <ItemGroup>
+      <_PluginApiVersionLine Include="// &lt;auto-generated /&gt; Generated from &lt;PluginApiVersion&gt; in AcerHelper.csproj. Do not edit." />
+      <_PluginApiVersionLine Include="namespace AcerHelper.Infrastructure.Plugins%3B" />
+      <_PluginApiVersionLine Include="internal static class PluginApi" />
+      <_PluginApiVersionLine Include="{" />
+      <_PluginApiVersionLine Include="    public const int Major = $(_PluginApiMajor)%3B" />
+      <_PluginApiVersionLine Include="    public const int Minor = $(_PluginApiMinor)%3B" />
+      <_PluginApiVersionLine Include="    public const int Encoded = (Major &lt;&lt; 16) | Minor%3B" />
+      <_PluginApiVersionLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_PluginApiVersionFile)" Lines="@(_PluginApiVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_PluginApiVersionFile)" />
+      <FileWrites Include="$(_PluginApiVersionFile)" />
     </ItemGroup>
   </Target>
 </Project>
