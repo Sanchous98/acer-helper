@@ -1,0 +1,633 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Russian translations. See Localization/Loc.cs for the model.
+
+    THE ENGLISH SOURCE TEXT IS THE KEY (gettext-style). Each name below is byte-for-byte the English
+    literal at its call site, so a mismatch simply falls back to English and never throws. There is NO
+    neutral entry for a key (see Strings.resx), so an untranslated key resolves to null and Loc returns
+    the English source text unchanged. Format strings keep their {0}... placeholders.
+
+    This file is a real .resx satellite (ru/AcerHelper.resources.dll). The build workflow runs an
+    empirical Native-AOT probe (tests/LocalizationAotProbe) proving such satellites DO load under the
+    AOT builds this app ships as — the reason Loc historically avoided .resx.
+  -->
+  <data name="Options" xml:space="preserve">
+    <value>Параметры</value>
+  </data>
+  <data name="Lighting" xml:space="preserve">
+    <value>Подсветка</value>
+  </data>
+  <data name="Lighting…" xml:space="preserve">
+    <value>Подсветка…</value>
+  </data>
+  <data name="Grant hardware access…" xml:space="preserve">
+    <value>Предоставить доступ к оборудованию…</value>
+  </data>
+  <data name="Show" xml:space="preserve">
+    <value>Показать</value>
+  </data>
+  <data name="Exit" xml:space="preserve">
+    <value>Выход</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Отмена</value>
+  </data>
+  <data name="Done" xml:space="preserve">
+    <value>Готово</value>
+  </data>
+  <data name="Start" xml:space="preserve">
+    <value>Начать</value>
+  </data>
+  <data name="Notifications" xml:space="preserve">
+    <value>Уведомления</value>
+  </data>
+  <data name="No notifications." xml:space="preserve">
+    <value>Уведомлений нет.</value>
+  </data>
+  <data name="Ignore" xml:space="preserve">
+    <value>Проигнорировать</value>
+  </data>
+  <data name="PERFORMANCE" xml:space="preserve">
+    <value>Мощный</value>
+  </data>
+  <data name="FANS" xml:space="preserve">
+    <value>ВЕНТИЛЯТОРЫ</value>
+  </data>
+  <data name="BATTERY" xml:space="preserve">
+    <value>АККУМУЛЯТОР</value>
+  </data>
+  <data name="Eco" xml:space="preserve">
+    <value>Эко</value>
+  </data>
+  <data name="Quiet" xml:space="preserve">
+    <value>Тихий</value>
+  </data>
+  <data name="Balanced" xml:space="preserve">
+    <value>Баланс</value>
+  </data>
+  <data name="Turbo" xml:space="preserve">
+    <value>Турбо</value>
+  </data>
+  <data name="Turbo key toggles Turbo" xml:space="preserve">
+    <value>Клавиша Turbo включает Турбо</value>
+  </data>
+  <data name="Otherwise the Turbo key cycles through profiles." xml:space="preserve">
+    <value>Иначе клавиша Turbo переключает профили по кругу.</value>
+  </data>
+  <data name="Profile: {0}" xml:space="preserve">
+    <value>Профиль: {0}</value>
+  </data>
+  <data name="Failed to set {0}" xml:space="preserve">
+    <value>Не удалось включить {0}</value>
+  </data>
+  <data name="Turbo failed" xml:space="preserve">
+    <value>Не удалось включить Турбо</value>
+  </data>
+  <data name="Auto" xml:space="preserve">
+    <value>Авто</value>
+  </data>
+  <data name="Max" xml:space="preserve">
+    <value>Макс.</value>
+  </data>
+  <data name="Custom" xml:space="preserve">
+    <value>Пользовательский</value>
+  </data>
+  <data name="Curve" xml:space="preserve">
+    <value>Кривая</value>
+  </data>
+  <data name="Follow curve" xml:space="preserve">
+    <value>Использовать кривую</value>
+  </data>
+  <data name="CPU fan curve" xml:space="preserve">
+    <value>Кривая вентилятора CPU</value>
+  </data>
+  <data name="GPU fan curve" xml:space="preserve">
+    <value>Кривая вентилятора GPU</value>
+  </data>
+  <data name="{0} rpm" xml:space="preserve">
+    <value>{0} об/мин</value>
+  </data>
+  <data name="Overclocking and Power" xml:space="preserve">
+    <value>Разгон и питание</value>
+  </data>
+  <data name="Core" xml:space="preserve">
+    <value>Ядро</value>
+  </data>
+  <data name="Memory" xml:space="preserve">
+    <value>Память</value>
+  </data>
+  <data name="Reset" xml:space="preserve">
+    <value>Сброс</value>
+  </data>
+  <data name="GPU overclock failed" xml:space="preserve">
+    <value>Не удалось разогнать GPU</value>
+  </data>
+  <data name="Power mode" xml:space="preserve">
+    <value>Режим питания</value>
+  </data>
+  <data name="Best power efficiency" xml:space="preserve">
+    <value>Энергоэффективность</value>
+  </data>
+  <data name="Power mode failed" xml:space="preserve">
+    <value>Не удалось изменить режим питания</value>
+  </data>
+  <data name="Undervolt" xml:space="preserve">
+    <value>Андервольт</value>
+  </data>
+  <data name="CPU undervolt failed" xml:space="preserve">
+    <value>Не удалось изменить андервольт CPU</value>
+  </data>
+  <data name="CPU undervolt" xml:space="preserve">
+    <value>андервольт CPU</value>
+  </data>
+  <data name="Install {0}?" xml:space="preserve">
+    <value>Установить {0}?</value>
+  </data>
+  <data name="Install" xml:space="preserve">
+    <value>Установить</value>
+  </data>
+  <data name="{0} needs the {1} kernel driver from {2}. It is third-party software, shared with other tuning tools, and Acer Helper will never update or remove it. You can install it yourself instead." xml:space="preserve">
+    <value>Для «{0}» нужен драйвер ядра {1} с {2}. Это сторонняя программа, её используют и другие утилиты настройки, и Acer Helper никогда не будет её обновлять или удалять. Можно установить и вручную.</value>
+  </data>
+  <data name="{0} installed — restart Acer Helper to use {1}" xml:space="preserve">
+    <value>{0} установлен — перезапустите Acer Helper, чтобы использовать {1}</value>
+  </data>
+  <data name="Lower voltage at the same clocks, in AVFS steps. Too much is unstable — test for hours, and reset if anything crashes." xml:space="preserve">
+    <value>Меньше напряжения на тех же частотах, шагами AVFS. Перебор ведёт к нестабильности — проверяйте часами, при сбоях сбросьте.</value>
+  </data>
+  <data name="Start guided undervolt" xml:space="preserve">
+    <value>Запустить авто-андервольт</value>
+  </data>
+  <data name="Guided undervolt sweep?" xml:space="preserve">
+    <value>Запустить автоматический андервольт?</value>
+  </data>
+  <data name="The sweep tries deeper CPU offsets and load-tests each one, one core at a time. It is long and invasive and can make the machine unstable or reboot it. It REQUIRES AC power: on battery the platform can accept a Curve-Optimizer write without applying it, so a probe could pass against an offset that was never set. During the run the app temporarily switches to a performance profile (Turbo where available) and restores your previous profile when the sweep ends. Keep the laptop plugged in and close other tuning tools (Ryzen Master, RyzenAdj, HWiNFO) — they share the SMU/PCI lock. Offsets are never saved automatically, and a reboot always restores stock." xml:space="preserve">
+    <value>Перебор будет пошагово углублять смещения CPU и нагрузочно проверять каждое, по одному ядру за раз. Это долго и агрессивно и может сделать систему нестабильной или вызвать перезагрузку. ТРЕБУЕТСЯ питание от сети: от батареи платформа может принять запись Curve Optimizer, не применив её, поэтому проверка может «пройти» на смещении, которое фактически не было задано. Во время перебора приложение временно переключается в профиль производительности (Турбо, где доступен) и восстанавливает прежний профиль по завершении. Держите ноутбук подключённым к сети и закройте другие утилиты настройки (Ryzen Master, RyzenAdj, HWiNFO) — они делят блокировку SMU/PCI. Смещения никогда не сохраняются автоматически, а перезагрузка всегда возвращает сток.</value>
+  </data>
+  <data name="Start sweep" xml:space="preserve">
+    <value>Начать перебор</value>
+  </data>
+  <data name="Cancel sweep" xml:space="preserve">
+    <value>Отменить перебор</value>
+  </data>
+  <data name="Result on the sliders above — save to keep it or discard." xml:space="preserve">
+    <value>Результат — на ползунках выше: сохраните его или отклоните.</value>
+  </data>
+  <data name="Save to this mode" xml:space="preserve">
+    <value>Сохранить для этого режима</value>
+  </data>
+  <data name="Discard" xml:space="preserve">
+    <value>Отклонить</value>
+  </data>
+  <data name="Best offsets under this test only — idle and short-transient stability are NOT proven. Test for hours, and reset if anything crashes." xml:space="preserve">
+    <value>Это лучшие смещения только по результатам данной проверки — стабильность в простое и при коротких переходах НЕ доказана. Проверяйте часами и при сбоях сбрасывайте.</value>
+  </data>
+  <data name="Guided undervolt failed" xml:space="preserve">
+    <value>Сбой авто-андервольта</value>
+  </data>
+  <data name="Applying the first offset…" xml:space="preserve">
+    <value>Применяется первое смещение…</value>
+  </data>
+  <data name="Applying" xml:space="preserve">
+    <value>Применение</value>
+  </data>
+  <data name="Testing" xml:space="preserve">
+    <value>Проверка</value>
+  </data>
+  <data name="Backing off" xml:space="preserve">
+    <value>Откат</value>
+  </data>
+  <data name="Returning to stock" xml:space="preserve">
+    <value>Возврат к стоку</value>
+  </data>
+  <data name="temperature unreadable" xml:space="preserve">
+    <value>температура не читается</value>
+  </data>
+  <data name="{0} °C" xml:space="preserve">
+    <value>{0} °C</value>
+  </data>
+  <data name="stage {0}/{1}" xml:space="preserve">
+    <value>этап {0}/{1}</value>
+  </data>
+  <data name="cluster {0}" xml:space="preserve">
+    <value>кластер {0}</value>
+  </data>
+  <data name="all cores (cluster not identified)" xml:space="preserve">
+    <value>все ядра (кластер не определён)</value>
+  </data>
+  <data name="{0} — {1} — {2} {3} — {4}" xml:space="preserve">
+    <value>{0} — {1} — {2} {3} — {4}</value>
+  </data>
+  <data name="{0} — {1} — {2} {3} — core {4}/{5}, {6}" xml:space="preserve">
+    <value>{0} — {1} — {2} {3} — ядро {4}/{5}, {6}</value>
+  </data>
+  <data name="Elapsed {0}" xml:space="preserve">
+    <value>Прошло {0}</value>
+  </data>
+  <data name="Finished — review the proposal." xml:space="preserve">
+    <value>Завершено — проверьте предложение.</value>
+  </data>
+  <data name="Stopped: the CPU reached the thermal limit." xml:space="preserve">
+    <value>Остановлено: CPU достиг теплового предела.</value>
+  </data>
+  <data name="Stopped: cancelled." xml:space="preserve">
+    <value>Остановлено: отменено.</value>
+  </data>
+  <data name="Stopped: the SMU refused a write." xml:space="preserve">
+    <value>Остановлено: SMU отклонил запись.</value>
+  </data>
+  <data name="Refused: the guided sweep requires AC power." xml:space="preserve">
+    <value>Отказано: авто-андервольт требует питания от сети.</value>
+  </data>
+  <data name="Connect AC power first — the guided sweep does not run on battery." xml:space="preserve">
+    <value>Сначала подключите питание от сети — авто-андервольт не запускается от батареи.</value>
+  </data>
+  <data name="Waiting for the power source; the guided sweep requires AC power." xml:space="preserve">
+    <value>Ожидание источника питания; авто-андервольт требует питания от сети.</value>
+  </data>
+  <data name="Requires AC power. Estimated {0}." xml:space="preserve">
+    <value>Требует питания от сети. Примерно {0}.</value>
+  </data>
+  <data name="Stopped." xml:space="preserve">
+    <value>Остановлено.</value>
+  </data>
+  <data name="{0:0.#} h" xml:space="preserve">
+    <value>{0:0.#} ч</value>
+  </data>
+  <data name="{0:0.#} min" xml:space="preserve">
+    <value>{0:0.#} мин</value>
+  </data>
+  <data name="{0:0.#} s" xml:space="preserve">
+    <value>{0:0.#} с</value>
+  </data>
+  <data name="Health" xml:space="preserve">
+    <value>Состояние</value>
+  </data>
+  <data name="Charge cycles" xml:space="preserve">
+    <value>Циклы заряда</value>
+  </data>
+  <data name="Charge mode" xml:space="preserve">
+    <value>Режим зарядки</value>
+  </data>
+  <data name="Charge limit (~80%)" xml:space="preserve">
+    <value>Ограничение заряда (~80%)</value>
+  </data>
+  <data name="Calibration (full cycle)" xml:space="preserve">
+    <value>Калибровка (полный цикл)</value>
+  </data>
+  <data name="Charging" xml:space="preserve">
+    <value>Зарядка</value>
+  </data>
+  <data name="On battery" xml:space="preserve">
+    <value>От батареи</value>
+  </data>
+  <data name="Plugged in" xml:space="preserve">
+    <value>Подключено</value>
+  </data>
+  <data name="Power draw" xml:space="preserve">
+    <value>Потребление</value>
+  </data>
+  <data name="Charging power" xml:space="preserve">
+    <value>Мощность зарядки</value>
+  </data>
+  <data name="{0:0.0} W" xml:space="preserve">
+    <value>{0:0.0} Вт</value>
+  </data>
+  <data name="Express charge" xml:space="preserve">
+    <value>Быстрая зарядка</value>
+  </data>
+  <data name="Standard" xml:space="preserve">
+    <value>Стандартный</value>
+  </data>
+  <data name="Adaptive" xml:space="preserve">
+    <value>Адаптивный</value>
+  </data>
+  <data name="Start battery calibration?" xml:space="preserve">
+    <value>Запустить калибровку аккумулятора?</value>
+  </data>
+  <data name="This runs a full charge then a full discharge cycle and can take several hours. Keep the laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop." xml:space="preserve">
+    <value>Будет выполнен полный цикл: сначала полная зарядка, затем полная разрядка — это может занять несколько часов. Держите ноутбук подключённым к сети и не рассчитывайте на него в это время. Чтобы остановить, выключите переключатель обратно.</value>
+  </data>
+  <data name="LCD overdrive" xml:space="preserve">
+    <value>Разгон матрицы</value>
+  </data>
+  <data name="Keyboard backlight timeout" xml:space="preserve">
+    <value>Тайм-аут подсветки клавиатуры</value>
+  </data>
+  <data name="Keyboard backlight timeout:" xml:space="preserve">
+    <value>Тайм-аут подсветки клавиатуры:</value>
+  </data>
+  <data name="Backlight timeout" xml:space="preserve">
+    <value>Тайм-аут подсветки</value>
+  </data>
+  <data name="Fn lock" xml:space="preserve">
+    <value>Блокировка Fn</value>
+  </data>
+  <data name="USB charging when off:" xml:space="preserve">
+    <value>Зарядка по USB в выключенном состоянии:</value>
+  </data>
+  <data name="USB charging" xml:space="preserve">
+    <value>Зарядка по USB</value>
+  </data>
+  <data name="Battery limit" xml:space="preserve">
+    <value>Ограничение заряда</value>
+  </data>
+  <data name="Battery calibration" xml:space="preserve">
+    <value>Калибровка аккумулятора</value>
+  </data>
+  <data name="Blue-light filter:" xml:space="preserve">
+    <value>Фильтр синего света:</value>
+  </data>
+  <data name="Profile on AC power:" xml:space="preserve">
+    <value>Профиль в сети:</value>
+  </data>
+  <data name="Profile on battery:" xml:space="preserve">
+    <value>Профиль на батарее:</value>
+  </data>
+  <data name="Power-source profile" xml:space="preserve">
+    <value>Профиль по источнику питания</value>
+  </data>
+  <data name="{0} failed" xml:space="preserve">
+    <value>Ошибка: {0}</value>
+  </data>
+  <data name="Off" xml:space="preserve">
+    <value>Выкл.</value>
+  </data>
+  <data name="On" xml:space="preserve">
+    <value>Вкл.</value>
+  </data>
+  <data name="Low" xml:space="preserve">
+    <value>Низкий</value>
+  </data>
+  <data name="Medium" xml:space="preserve">
+    <value>Средний</value>
+  </data>
+  <data name="High" xml:space="preserve">
+    <value>Высокий</value>
+  </data>
+  <data name="Long-use" xml:space="preserve">
+    <value>Долгое использование</value>
+  </data>
+  <data name="Dim" xml:space="preserve">
+    <value>Тускло</value>
+  </data>
+  <data name="Bright" xml:space="preserve">
+    <value>Ярко</value>
+  </data>
+  <data name="Brightness" xml:space="preserve">
+    <value>Яркость</value>
+  </data>
+  <data name="Speed" xml:space="preserve">
+    <value>Скорость</value>
+  </data>
+  <data name="Direction" xml:space="preserve">
+    <value>Направление</value>
+  </data>
+  <data name="Colour" xml:space="preserve">
+    <value>Цвет</value>
+  </data>
+  <data name="Normal" xml:space="preserve">
+    <value>Обычное</value>
+  </data>
+  <data name="Reversed" xml:space="preserve">
+    <value>Обратное</value>
+  </data>
+  <data name="Lightbar follows performance profile" xml:space="preserve">
+    <value>Световая панель следует за профилем производительности</value>
+  </data>
+  <data name="Zone {0}" xml:space="preserve">
+    <value>Зона {0}</value>
+  </data>
+  <data name="Keyboard" xml:space="preserve">
+    <value>Клавиатура</value>
+  </data>
+  <data name="Lightbar" xml:space="preserve">
+    <value>Световая панель</value>
+  </data>
+  <data name="Static" xml:space="preserve">
+    <value>Статичный</value>
+  </data>
+  <data name="Breathing" xml:space="preserve">
+    <value>Дыхание</value>
+  </data>
+  <data name="Neon" xml:space="preserve">
+    <value>Неон</value>
+  </data>
+  <data name="Wave" xml:space="preserve">
+    <value>Волна</value>
+  </data>
+  <data name="Shifting" xml:space="preserve">
+    <value>Сдвиг</value>
+  </data>
+  <data name="Zoom" xml:space="preserve">
+    <value>Зум</value>
+  </data>
+  <data name="Meteor" xml:space="preserve">
+    <value>Метеор</value>
+  </data>
+  <data name="Twinkling" xml:space="preserve">
+    <value>Мерцание</value>
+  </data>
+  <data name="Stay awake when lid closed (docked, on AC)" xml:space="preserve">
+    <value>Не засыпать при закрытой крышке (в доке, от сети)</value>
+  </data>
+  <data name="Start with Windows" xml:space="preserve">
+    <value>Запускать вместе с Windows</value>
+  </data>
+  <data name="Start at login" xml:space="preserve">
+    <value>Запускать при входе</value>
+  </data>
+  <data name="Update available: v{0}" xml:space="preserve">
+    <value>Доступно обновление: v{0}</value>
+  </data>
+  <data name="Changelog" xml:space="preserve">
+    <value>Что нового</value>
+  </data>
+  <data name="Downloading update…" xml:space="preserve">
+    <value>Загрузка обновления…</value>
+  </data>
+  <data name="Installing update…" xml:space="preserve">
+    <value>Установка обновления…</value>
+  </data>
+  <data name="Launching installer…" xml:space="preserve">
+    <value>Запуск установщика…</value>
+  </data>
+  <data name="Update failed" xml:space="preserve">
+    <value>Не удалось обновить</value>
+  </data>
+  <data name="Hardware access granted — restart to use the unlocked controls." xml:space="preserve">
+    <value>Доступ к оборудованию предоставлен — перезапустите приложение, чтобы использовать разблокированные функции.</value>
+  </data>
+  <data name="Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot." xml:space="preserve">
+    <value>Доступ к оборудованию предоставлен — драйвер acer-wmi не удалось перезагрузить, поэтому новые параметры модуля вступят в силу после перезагрузки системы.</value>
+  </data>
+  <data name="Restart your computer to finish enabling the unlocked controls (click to retry)." xml:space="preserve">
+    <value>Перезагрузите компьютер, чтобы включить разблокированные функции (нажмите, чтобы повторить попытку).</value>
+  </data>
+  <data name="Grant access failed" xml:space="preserve">
+    <value>Не удалось предоставить доступ</value>
+  </data>
+  <data name="Install hardware access?" xml:space="preserve">
+    <value>Установить доступ к оборудованию?</value>
+  </data>
+  <data name="Acer Helper asks for administrator rights once (pkexec) to copy the following into /etc:" xml:space="preserve">
+    <value>Acer Helper один раз запросит права администратора (pkexec), чтобы скопировать в /etc следующее:</value>
+  </data>
+  <data name="The files come from this app's own copy — nothing is downloaded, no other permission is added, and cancelling changes nothing." xml:space="preserve">
+    <value>Файлы берутся из собственной копии приложения — ничего не скачивается, никакие другие разрешения не добавляются, а отмена ничего не меняет.</value>
+  </data>
+  <data name="Restart Acer Helper afterwards to use the new controls." xml:space="preserve">
+    <value>После этого перезапустите Acer Helper, чтобы воспользоваться новыми функциями.</value>
+  </data>
+  <data name="Write access for the {0} group to the nodes the app drives: the performance/thermal profile, the keyboard-backlight brightness and timeout, the Acer fan-speed controls, the battery charge mode and thresholds, and the Dell BIOS attributes — plus session access to the two Acer HID interfaces (RGB keyboard/lightbar and the power-envelope channel) and to the keyboard that carries the Nitro key. It also covers the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd and smn), which is how the Curve Optimizer undervolt reaches the processor without the app ever running as root." xml:space="preserve">
+    <value>Доступ на запись для группы {0} к узлам, которыми управляет приложение: профиль производительности/охлаждения, яркость и тайм-аут подсветки клавиатуры, управление оборотами вентиляторов Acer, режим и пороги зарядки батареи, атрибуты BIOS Dell — плюс доступ в рамках сеанса к двум HID-интерфейсам Acer (RGB-клавиатура и световая полоса, канал конверта мощности) и к клавиатуре, несущей клавишу Nitro. Он же распространяется на атрибуты почтовых ящиков SMU процессора в /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd и smn) — именно так андервольт Curve Optimizer доходит до процессора, и приложению для этого не нужен root.</value>
+  </data>
+  <data name="Write access for the {0} group to the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd and smn), re-applied at every boot by a systemd unit: the udev rule above can only grant them when the driver's bind event reaches a running udev, which is not what happens on a machine whose ryzen_smu module is loaded from the initramfs. This is what keeps the CPU undervolt working after a restart." xml:space="preserve">
+    <value>Доступ на запись для группы {0} к атрибутам почтового ящика SMU процессора в /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd и smn), заново выдаваемый при каждой загрузке юнитом systemd: правило udev выше может выдать их, только когда событие bind драйвера доходит до работающего udev, а на машине, где модуль ryzen_smu загружается из initramfs, этого не происходит. Именно это сохраняет андервольт CPU рабочим после перезагрузки.</value>
+  </data>
+  <data name="The same file permissions re-applied at every boot by systemd-tmpfiles, for the nodes that exist at boot: the legacy platform-profile alias, the battery thresholds, the keyboard backlight and the Dell BIOS attributes." xml:space="preserve">
+    <value>Те же права на файлы, применяемые при каждой загрузке через systemd-tmpfiles, для узлов, которые существуют на момент загрузки: устаревший псевдоним профиля платформы, пороги батареи, подсветка клавиатуры и атрибуты BIOS Dell.</value>
+  </data>
+  <data name="An options line for the acer-wmi kernel driver: it is loaded with predator_v4=1 and force_caps=7200, which is what enables the five Acer performance profiles, the fan telemetry and the fan-speed control (PWM) on a model the driver's own device table does not know. This changes how the driver behaves at load rather than granting a file permission, and if the module is in use it takes effect only after you restart the computer." xml:space="preserve">
+    <value>Строка options для драйвера ядра acer-wmi: он загружается с predator_v4=1 и force_caps=7200, и именно это включает пять профилей производительности Acer, телеметрию вентиляторов и управление их оборотами (PWM) на модели, которой нет в собственной таблице устройств драйвера. Это меняет поведение драйвера при загрузке, а не выдаёт права на файл, и если модуль используется, изменение вступит в силу только после перезагрузки компьютера.</value>
+  </data>
+  <data name="Use the discrete GPU" xml:space="preserve">
+    <value>Использовать дискретную видеокарту</value>
+  </data>
+  <data name="GPU access failed" xml:space="preserve">
+    <value>Не удалось получить доступ к GPU</value>
+  </data>
+  <data name="Let Acer Helper use the discrete GPU?" xml:space="preserve">
+    <value>Разрешить Acer Helper использовать дискретную видеокарту?</value>
+  </data>
+  <data name="Allow" xml:space="preserve">
+    <value>Разрешить</value>
+  </data>
+  <data name="Acer Helper will ask cardwire — the daemon that hides the discrete GPU from programs it has not allowed to use it — to let THIS process see that GPU. Nothing is written to disk and no file permission changes: the request is a D-Bus call, made while the app is running." xml:space="preserve">
+    <value>Acer Helper попросит cardwire — службу, которая скрывает дискретную видеокарту от программ, которым это не разрешено, — показать её ЭТОМУ процессу. Ничего не записывается на диск и права на файлы не меняются: запрос идёт по D-Bus во время работы приложения.</value>
+  </data>
+  <data name="The grant belongs to this one process and disappears the moment Acer Helper exits. cardwire has no way to take it back, so it cannot be revoked while the app runs — turning this option off stops the next start, not this one, and quitting the app is what ends it." xml:space="preserve">
+    <value>Разрешение выдаётся только этому процессу и исчезает, как только Acer Helper завершится. В cardwire нет способа его отозвать, поэтому во время работы приложения его отменить нельзя — выключение этой опции остановит следующий запуск, но не текущий; уже выданное разрешение прекращает только завершение приложения.</value>
+  </data>
+  <data name="Every other application stays blocked. While this option stays on, Acer Helper asks again on each start." xml:space="preserve">
+    <value>Все остальные приложения остаются заблокированными. Пока эта опция включена, Acer Helper спрашивает заново при каждом запуске.</value>
+  </data>
+  <data name="Acer WMI unavailable — run as administrator." xml:space="preserve">
+    <value>Acer WMI недоступен — запустите от имени администратора.</value>
+  </data>
+  <data name="Linux: profiles, fans and temperatures come from the mainline acer-wmi driver (the installer's module parameters enable them) — it has no interface for LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging or the keyboard-brightness read-back, so those stay unavailable." xml:space="preserve">
+    <value>Linux: профили, вентиляторы и температуры даёт штатный драйвер acer-wmi (включается параметрами модуля от установщика) — интерфейса для LCD overdrive, лимитера и калибровки батареи, таймаута подсветки, USB-зарядки и чтения яркости подсветки в нём нет, поэтому эти функции недоступны.</value>
+  </data>
+  <data name="Linux: the five Acer profiles, fan control and the Acer temperature chip need the installer's module parameters — until they are in place the profile set is the generic one; LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging and the keyboard-brightness read-back have no mainline interface at all." xml:space="preserve">
+    <value>Linux: пять профилей Acer, управление вентиляторами и чип температур Acer требуют параметров модуля от установщика — пока их нет, набор профилей берётся из generic-источника; интерфейса для LCD overdrive, лимитера и калибровки батареи, таймаута подсветки, USB-зарядки и чтения яркости подсветки в mainline нет вообще.</value>
+  </data>
+  <data name="The fans are read-only — fan control needs the hardware-access grant and the driver's PWM interface; grant access from the app and restart." xml:space="preserve">
+    <value>Вентиляторы доступны только для чтения — для управления нужен доступ к оборудованию и интерфейс PWM драйвера; предоставьте доступ в приложении и перезапустите его.</value>
+  </data>
+  <data name="Dell BIOS controls are locked by a BIOS admin password and were hidden." xml:space="preserve">
+    <value>Элементы управления Dell BIOS заблокированы паролем администратора BIOS и скрыты.</value>
+  </data>
+  <data name="Some Dell controls are locked by the firmware (BIOS admin password, or the model rejects writes) and were hidden." xml:space="preserve">
+    <value>Некоторые элементы управления Dell заблокированы прошивкой (пароль администратора BIOS или модель отклоняет запись) и скрыты.</value>
+  </data>
+  <data name="No power-profile interface found — limited controls." xml:space="preserve">
+    <value>Интерфейс профилей питания не найден — ограниченный набор функций.</value>
+  </data>
+  <data name="Best efficiency" xml:space="preserve">
+    <value>Экономичный</value>
+  </data>
+  <data name="Best performance" xml:space="preserve">
+    <value>Макс. мощность</value>
+  </data>
+  <data name="Power saver" xml:space="preserve">
+    <value>Энергосбережение</value>
+  </data>
+  <data name="Low power" xml:space="preserve">
+    <value>Мин. мощность</value>
+  </data>
+  <data name="Balanced performance" xml:space="preserve">
+    <value>Баланс+</value>
+  </data>
+  <data name="Cool" xml:space="preserve">
+    <value>Прохладный</value>
+  </data>
+  <data name="Optimized" xml:space="preserve">
+    <value>Оптимальный</value>
+  </data>
+  <data name="Primarily AC use" xml:space="preserve">
+    <value>Преимущественно от сети</value>
+  </data>
+  <data name="5 s" xml:space="preserve">
+    <value>5 с</value>
+  </data>
+  <data name="10 s" xml:space="preserve">
+    <value>10 с</value>
+  </data>
+  <data name="30 s" xml:space="preserve">
+    <value>30 с</value>
+  </data>
+  <data name="1 min" xml:space="preserve">
+    <value>1 мин</value>
+  </data>
+  <data name="5 min" xml:space="preserve">
+    <value>5 мин</value>
+  </data>
+  <data name="15 min" xml:space="preserve">
+    <value>15 мин</value>
+  </data>
+  <data name="1 h" xml:space="preserve">
+    <value>1 ч</value>
+  </data>
+  <data name="GPU mode" xml:space="preserve">
+    <value>Режим GPU</value>
+  </data>
+  <data name="Change" xml:space="preserve">
+    <value>Изменить</value>
+  </data>
+  <data name="Change the GPU mode?" xml:space="preserve">
+    <value>Изменить режим GPU?</value>
+  </data>
+  <data name="GPU mode: {0}" xml:space="preserve">
+    <value>Режим GPU: {0}</value>
+  </data>
+  <data name="GPU mode: unknown" xml:space="preserve">
+    <value>Режим GPU: неизвестен</value>
+  </data>
+  <data name="* Will be applied after a reboot." xml:space="preserve">
+    <value>* Будет применено после перезагрузки.</value>
+  </data>
+  <data name="GPU mode changed." xml:space="preserve">
+    <value>Режим GPU изменён.</value>
+  </data>
+  <data name="GPU mode change failed." xml:space="preserve">
+    <value>Не удалось изменить режим GPU.</value>
+  </data>
+  <data name="This is already the current GPU mode." xml:space="preserve">
+    <value>Это уже текущий режим.</value>
+  </data>
+  <data name="Hybrid" xml:space="preserve">
+    <value>Гибридный</value>
+  </data>
+  <data name="Discrete" xml:space="preserve">
+    <value>Дискретный</value>
+  </data>
+  <data name="Auto (DDS)" xml:space="preserve">
+    <value>Авто (DDS)</value>
+  </data>
+  <data name="This machine's GPU mode cannot be switched from the app: the vendor's MUX/GPU-mode interface is not publicly documented, and writing an unknown value can leave the screen black. Use the vendor tool (NitroSense/PredatorSense) or the BIOS instead." xml:space="preserve">
+    <value>Режим GPU на этом устройстве нельзя переключить из приложения: интерфейс MUX/режима GPU производителя публично не документирован, а запись неизвестного значения может оставить экран чёрным. Используйте фирменную утилиту (NitroSense/PredatorSense) или BIOS.</value>
+  </data>
+  <data name="That is not one of the GPU modes this machine offers." xml:space="preserve">
+    <value>Это не один из режимов GPU, доступных на этом устройстве.</value>
+  </data>
+  <data name="Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/gpu-mux.md." xml:space="preserve">
+    <value>Смена режима GPU ставится в очередь и вступит в силу только при следующей перезагрузке. Неверное значение может оставить экран чёрным — если это произошло, принудительно выключите машину удержанием кнопки питания, затем включите её и смените режим обратно из консоли или с другого дисплея. См. docs/gpu-mux.md.</value>
+  </data>
+  <data name="Language" xml:space="preserve">
+    <value>Язык</value>
+  </data>
+  <data name="System" xml:space="preserve">
+    <value>Системный</value>
+  </data>
+</root>

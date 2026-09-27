@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    NEUTRAL resource file for the app's translations. IT IS DELIBERATELY EMPTY.
+
+    The English source text is the lookup key (gettext-style; see Localization/Loc.cs), so English needs no
+    resource at all — a key that resolves to nothing already IS its English value. This file exists only so the
+    ResourceManager has a neutral base name to hang the `ru` satellite off (ru/AcerHelper.resources.dll), and
+    the SDK emits it as the neutral AcerHelper.resources in the main assembly. An absent key returns null, and
+    Loc returns the English text unchanged — which is exactly the fallback the app wants.
+
+    Do not add entries here: an entry would shadow the English key with a second copy of the same sentence and
+    silently defeat the "English is the key" contract the call sites and the localisation guards rely on.
+  -->
+</root>

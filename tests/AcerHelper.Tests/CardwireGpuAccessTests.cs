@@ -432,8 +432,8 @@ public class CardwireGpuAccessTests
         Assert.True(keys.Length >= 6, $"only {keys.Length} keys were collected — the extraction is probably broken");
 
         foreach (var key in keys)
-            Assert.True(Strings.Ru.ContainsKey(key),
-                        "this feature shows a sentence with no entry in Localization/Strings.Ru.cs, so the Russian "
+            Assert.True(Loc.Ru(key) is not null,
+                        "this feature shows a sentence with no entry in Localization/Strings.ru.resx, so the Russian "
                         + "build shows it in English:\n  " + key);
     }
 

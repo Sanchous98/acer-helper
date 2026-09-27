@@ -322,11 +322,13 @@ public class GpuMuxTests
     /// explaining note sits NEXT TO THE SELECTOR (the same Grid row) and is conditional on the baseline-vs-changed
     /// flag, so it neither reserves an always-present blank nor adds a full-width caption. There is NO Apply
     /// button: the selector IS the switch. The separate no-MUX refusal is prose and may wrap. Neither a queued
-    /// mode nor a non-queued outcome may appear as a second (pending) line or an outcome/message line. That is
-    /// why the flyout can go back to its normal <c>SizeToContent="WidthAndHeight"</c>: no fixed frame and no
-    /// reserved blank area is needed. The reserved-blank cap is absent too.</summary>
+    /// mode nor a non-queued outcome may appear as a second (pending) line or an outcome/message line. The card
+    /// stays one line because the flyout's height is FIXED to the Home page (see
+    /// <c>SectionSwitchPerformanceTests.TheWindowHeightIsFixedToTheHomePage</c>), so a queued MUX change cannot
+    /// grow the card or resize the flyout, and no reserved blank area is needed. The reserved-blank cap is absent
+    /// too.</summary>
     [Fact]
-    public void TheMuxCardHasOneStableLineAndTheFlyoutIsSizeToContentAgain()
+    public void TheMuxCardHasOneStableLineAndTheFlyoutHasAFixedFrame()
     {
         var xaml = Source("UI/Views/TuningView.axaml");
 
@@ -373,8 +375,9 @@ public class GpuMuxTests
 
         var window = Source("UI/MainWindow.axaml");
 
-        // Back to the app's normal flyout: SizeToContent, with no hard-coded height (the fixed frame is what put
-        // a gap under the Home page) and no cap-to-Home workaround either.
+        // The flyout opens content-sizing so its first HOME measurement is unconstrained, then pins its height
+        // to Home in code (MainWindow.LockFrameHeight) and switches to width-only sizing — so a queued MUX change
+        // (or a shorter drawer page) cannot resize it. No hard-coded height and no cap-to-Home workaround.
         var tagStart = window.IndexOf("<Window ", StringComparison.Ordinal);
         Assert.True(tagStart >= 0, "the window element is gone from MainWindow.axaml");
         var tagEnd = window.IndexOf('>', tagStart);
@@ -451,7 +454,7 @@ public class GpuMuxTests
 
         Assert.True(keys.Length >= 5, $"only {keys.Length} keys were collected — the extraction is broken");
         foreach (var key in keys)
-            Assert.True(Strings.Ru.ContainsKey(key),
-                "this shared GPU-mode message has no entry in Localization/Strings.Ru.cs:\n  " + key);
+            Assert.True(Loc.Ru(key) is not null,
+                "this shared GPU-mode message has no entry in Localization/Strings.ru.resx:\n  " + key);
     }
 }

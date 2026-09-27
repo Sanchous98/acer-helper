@@ -1,36 +1,39 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- A tiny AOT console probe whose ONLY job is to answer one question empirically:
-       does a Native-AOT build resolve .resx SATELLITE assemblies at runtime?
+  <!-- An AOT probe that verifies THE APP'S OWN localisation resolves under Native AOT.
 
-       WHY THIS EXISTS. The app compiles its translations into an in-memory table
-       (Localization/Loc.cs) instead of using the conventional ResourceManager +
-       satellite model, because a satellite that fails to load under Native AOT is a
-       language that SILENTLY becomes English — the exact failure dotnet/runtime#86651
-       describes. That concern is either true or stale on .NET 10, and only a real AOT
-       build can say which. This project is published and RUN by the build workflow
-       (a plain JIT run cannot prove it), and it exits nonzero the moment the Russian
-       string does not come back.
+       WHY. The app historically compiled its translations into an in-memory table because Native AOT was
+       believed not to load .resx satellites (dotnet/runtime#86651) — and a satellite that silently fails to
+       load ships English. That belief was re-measured, not trusted: this project uses the REAL
+       Localization/Loc.cs and the REAL Localization/Strings.ru.resx, is published Native AOT (the shipping
+       configuration) by .github/workflows/build.yml, and is RUN; it fails the build if the Russian string does
+       not come back. Testing the actual files (not a toy copy) is the point — a toy proves the mechanism, only
+       this proves the migration.
 
-       IT MUST STAY DEPENDENCY-FREE. No Avalonia, no packages: the point is the
-       resource path and nothing else. -->
+       IT MUST STAY DEPENDENCY-FREE. Loc.cs pulls in nothing but System.Globalization/System.Resources, so it
+       is linked in directly; there is no Avalonia here. RootNamespace = AcerHelper makes the linked resx embed
+       under the SAME resource base name Loc.cs hardcodes ("AcerHelper.Localization.Strings"). -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>LocalizationAotProbe</RootNamespace>
+    <RootNamespace>AcerHelper</RootNamespace>
     <AssemblyName>LocalizationAotProbe</AssemblyName>
-    <!-- Culture-sensitive resource lookup REQUIRES real globalization; an AOT app
-         that sets this true cannot resolve by culture at all and would fail this
-         probe for the wrong reason. Stated explicitly, not left to a default. -->
+    <!-- Culture-sensitive resource lookup REQUIRES real globalization; an AOT app that sets this true cannot
+         resolve by culture at all and would fail this probe for the wrong reason. Stated, not defaulted. -->
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
-  <!-- Strings.resx (neutral) and Strings.ru.resx are picked up by the SDK's default
-       **/*.resx glob: the neutral one is embedded in the main assembly, the .ru one
-       becomes the ru/LocalizationAotProbe.resources.dll satellite. No ItemGroup needed
-       — and that IS the mechanism under test. -->
+  <!-- The app's real localisation core and its two resource files, used verbatim. Link= keeps the project
+       layout that decides the embedded resource base name (AcerHelper.Localization.Strings) and the satellite
+       (ru/<assembly>.resources.dll); the app's Strings.resx is empty by design and Strings.ru.resx holds the
+       Russian rows, keyed by the English text. -->
+  <ItemGroup>
+    <Compile Include="..\..\Localization\Loc.cs" Link="Localization\Loc.cs" />
+    <EmbeddedResource Include="..\..\Localization\Strings.resx" Link="Localization\Strings.resx" />
+    <EmbeddedResource Include="..\..\Localization\Strings.ru.resx" Link="Localization\Strings.ru.resx" />
+  </ItemGroup>
 
 </Project>

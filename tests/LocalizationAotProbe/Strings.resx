@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<root>
-  <!-- Neutral (English) resource. The probe compares the ru value against THIS one:
-       if the ru satellite fails to load, ResourceManager falls back here and the probe
-       reports the exact silent-English failure the app is trying to avoid. -->
-  <data name="Greeting" xml:space="preserve">
-    <value>HELLO-FROM-RESX-NEUTRAL</value>
-  </data>
-</root>

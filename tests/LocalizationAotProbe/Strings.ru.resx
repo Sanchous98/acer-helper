@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<root>
-  <!-- The Russian satellite. Its value is deliberately a sentinel the neutral file does not
-       share, so "the satellite loaded" and "fell back to English" are distinguishable. -->
-  <data name="Greeting" xml:space="preserve">
-    <value>ПРИВЕТ-ИЗ-RESX</value>
-  </data>
-</root>

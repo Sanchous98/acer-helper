@@ -13,10 +13,10 @@ public class NavigationLabelsTests
     [Fact]
     public void ThePerformanceDrawerIsNotSynonymousWithOptions()
     {
-        Assert.True(Strings.Ru.TryGetValue("Overclocking and Power", out var performance),
-            "the performance drawer's English key is missing from the Russian table");
-        Assert.True(Strings.Ru.TryGetValue("Options", out var options),
-            "the Options key is missing from the Russian table");
+        var performance = Loc.Ru("Overclocking and Power");
+        var options = Loc.Ru("Options");
+        Assert.NotNull(performance);
+        Assert.NotNull(options);
 
         Assert.Equal("Разгон и питание", performance);
         Assert.NotEqual(options, performance);

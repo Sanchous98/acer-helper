@@ -35,7 +35,7 @@
             <!-- Wrap the label: two-word localized names (e.g. Russian "Макс. мощность" on the generic
                  backend) break at the space into two lines on the fixed 468px flyout. Wrapping can NOT
                  hyphenate a single long word — translations must keep profile names to short words (see
-                 the note in Strings.Ru.cs). Button.seg MinHeight keeps one- and two-line segments the
+                 the note in Strings.ru.resx). Button.seg MinHeight keeps one- and two-line segments the
                  same height (see App.axaml). -->
             <Button Classes="seg" Classes.selected="{Binding IsSelected}"
                     Command="{Binding ApplyCommand}" IsEnabled="{Binding IsEnabled}">

@@ -179,7 +179,7 @@ public class HardwareAccessWiringTests
     /// <summary>Both success shapes must reach the user, in words that differ — the pending-reboot case has to
     /// say "a reboot", because "restart the app" is precisely what cannot help — and the words must survive
     /// translation: the English text is the localisation KEY (gettext-style, see <c>Loc</c>), so the literal in
-    /// the UI and the literal in <c>Strings.Ru.cs</c> have to be identical or the Russian build silently falls
+    /// the UI and the literal in <c>Strings.ru.resx</c> have to be identical or the Russian build silently falls
     /// back to English. The reboot case reaches the user TWICE, on purpose: a status line for the immediate
     /// feedback, and the notification behind the bell for persistence (the status slot is rewritten by the
     /// refresh timer, so an instruction living only there is gone in seconds) — hence a row for the sentence, the
@@ -188,10 +188,10 @@ public class HardwareAccessWiringTests
     [InlineData("Infrastructure/HardwareAccess.cs", "AccessInstall.PendingReboot")]     // decides it
     [InlineData("UI/AppController.cs", "AccessInstall.PendingReboot")]                 // branches on it
     [InlineData("UI/AppController.cs", PendingRebootMessage)]                          // and says so (status line)
-    [InlineData("Localization/Strings.Ru.cs", PendingRebootMessage)]                   // translated verbatim
+    [InlineData("Localization/Strings.ru.resx", PendingRebootMessage)]                 // translated verbatim
     [InlineData("UI/AppController.cs", "SetHardwareAccessRebootPending")]              // and raises the message
     [InlineData("UI/ViewModels/MainViewModel.cs", RebootMessage)]                // with the order in its text
-    [InlineData("Localization/Strings.Ru.cs", RebootMessage)]                    // translated verbatim
+    [InlineData("Localization/Strings.ru.resx", RebootMessage)]                    // translated verbatim
     [InlineData("UI/MainWindow.axaml", "ItemsSource=\"{Binding Notifications.Items}\"")] // which the bell's list holds
     [InlineData("UI/MainWindow.axaml", "Text=\"{Binding Text}\"")]                     // ...and the entry renders
     [InlineData("UI/AppController.cs", "_accessRebootPending")]                        // and survives a UI rebuild

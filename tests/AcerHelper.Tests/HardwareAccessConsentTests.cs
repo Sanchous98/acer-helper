@@ -153,8 +153,8 @@ public class HardwareAccessConsentTests
         Assert.True(keys.Length >= 5, $"only {keys.Length} keys were collected from the prompt — the extraction, not the table, is probably broken");
 
         foreach (var key in keys)
-            Assert.True(Strings.Ru.ContainsKey(key),
-                        "the prompt shows a sentence with no entry in Localization/Strings.Ru.cs, so the Russian "
+            Assert.True(Loc.Ru(key) is not null,
+                        "the prompt shows a sentence with no entry in Localization/Strings.ru.resx, so the Russian "
                         + "build shows it in English:\n  " + key);
 
         // The confirm button deliberately reuses the DRIVER prompt's word for "agree to install this" rather
@@ -162,7 +162,7 @@ public class HardwareAccessConsentTests
         // asserting the literal is what keeps the reuse a decision instead of a coincidence (in English, the
         // source text IS the key, which is why this reads as the word itself).
         Assert.Equal("Install", HardwareAccessConsent.ConfirmText());
-        Assert.Equal(Strings.Ru["Install"], Strings.Ru[HardwareAccessConsent.ConfirmText()]);
+        Assert.Equal(Loc.Ru("Install"), Loc.Ru(HardwareAccessConsent.ConfirmText()));
     }
 
     /// <summary>THE ROWS ARE THE ENTRY LIST, IN BOTH DIRECTIONS AND IN ORDER, for a machine of each kind. The

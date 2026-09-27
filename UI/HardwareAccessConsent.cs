@@ -19,7 +19,7 @@ namespace AcerHelper.UI;
 /// A separate, toolkit-free file rather than three literals inside <c>FlyoutCoordinator</c> (where the other two
 /// prompts compose theirs) for one reason: the body is BUILT, and a built message has to be readable by a test —
 /// <c>HardwareAccessConsentTests</c> pins the rows against the installer's table and the keys against
-/// Strings.Ru.cs, and neither is possible through an Avalonia window that needs a live flyout to exist.</summary>
+/// Strings.ru.resx, and neither is possible through an Avalonia window that needs a live flyout to exist.</summary>
 public static class HardwareAccessConsent
 {
     /// <summary>The dialog's heading. A question, like the driver prompt's ("Install {0}?"), because the dialog

@@ -726,7 +726,7 @@ EC-режим, что и `balanced-performance`: две строки табли�
   Сначала — что здесь исправлено, потому что это половина записи: совет больше **не** одноразовый.
   При `PendingReboot` (файлы легли, но модуль не перезагрузился, поэтому параметры не в силе)
   приложение оставляет баннер доступа на экране и **переподписывает** его: «Restart your computer to
-  finish enabling the unlocked controls (click to retry).» (русская строка — в `Strings.Ru.cs`), а
+  finish enabling the unlocked controls (click to retry).» (русская строка — в `Strings.ru.resx`), а
   строка состояния несёт только немедленную обратную связь («… the acer-wmi driver could not be
   reloaded, so the new module settings take effect after a reboot.»). Почему именно баннер, а не
   строка состояния, — причина **механическая** и её стоит помнить: `Notify` пишет тот же слот

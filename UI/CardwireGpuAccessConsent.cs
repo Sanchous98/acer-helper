@@ -25,7 +25,7 @@ namespace AcerHelper.UI;
 ///
 /// A separate, toolkit-free file for the reason <see cref="HardwareAccessConsent"/> is one: the body is BUILT
 /// from localized sentences, and a built message has to be readable by a test —
-/// <c>CardwireGpuAccessTests</c> holds every sentence here to <c>Strings.Ru.cs</c> and holds the four facts above
+/// <c>CardwireGpuAccessTests</c> holds every sentence here to <c>Strings.ru.resx</c> and holds the four facts above
 /// to the text, neither of which is possible through an Avalonia window that needs a live flyout to exist.</summary>
 public static class CardwireGpuAccessConsent
 {

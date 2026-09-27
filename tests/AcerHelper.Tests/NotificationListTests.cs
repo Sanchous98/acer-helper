@@ -213,7 +213,7 @@ public class NotificationListTests
     /// Scope: MainWindow.axaml, the file this change puts its own literals in (the section views' literals are
     /// their own files' business, and they are not what this test is about).
     ///
-    /// MUTATION: delete the <c>["Notifications"]</c> row from Localization/Strings.Ru.cs — this row names the
+    /// MUTATION: delete the <c>Notifications</c> entry from Localization/Strings.ru.resx — this row names the
     /// key the bell's tooltip and the list's heading both use.</summary>
     [Fact]
     public void EveryLiteralTheShellShowsIsInTheRussianTable()
@@ -227,8 +227,8 @@ public class NotificationListTests
         Assert.True(keys.Length >= 5, $"only {keys.Length} literals were parsed from the shell — the extraction, not the table, is probably broken");
 
         foreach (var key in keys)
-            Assert.True(Strings.Ru.ContainsKey(key),
-                        "the window shows a literal with no entry in Localization/Strings.Ru.cs, so the Russian "
+            Assert.True(Loc.Ru(key) is not null,
+                        "the window shows a literal with no entry in Localization/Strings.ru.resx, so the Russian "
                         + "build shows it in English:\n  " + key);
     }
 }

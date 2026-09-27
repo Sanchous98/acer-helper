@@ -73,7 +73,7 @@ public interface IGpuMux
 
 /// <summary>The shared MUX vocabulary: the mode display names and the sentences the UI and the adapters share.
 /// The warning is the SAME sentence as the AsusArmouryMessages.GpuRebootWarning the armoury port uses, so one
-/// Russian entry covers both (Localization/Strings.Ru.cs is keyed by the English text).</summary>
+/// Russian entry covers both (Localization/Strings.ru.resx is keyed by the English text).</summary>
 public static class GpuMuxMessages
 {
     /// <summary>The generic mode labels. Each backend maps its own wire values onto these. The labels are kept
