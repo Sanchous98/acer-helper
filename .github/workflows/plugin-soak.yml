@@ -17,14 +17,6 @@ name: plugin-soak
 # TRIGGERS (recommended): workflow_dispatch for on-demand proof (the orchestrator dispatches this), plus a weekly
 # schedule as a standing regression net. No `push`, for the reason above.
 on:
-  # TEMPORARY one-off (removed after the run is captured): workflow_dispatch and schedule only fire from the
-  # DEFAULT branch, and this workflow lives on linux-acer-probe-first, so a push trigger is the only way to run
-  # the proof here without merging the branch into master. Path-filtered so it is not a general push tax.
-  push:
-    paths:
-      - '.github/workflows/plugin-soak.yml'
-      - 'plugins/**'
-      - 'tests/PluginSoakHost/**'
   workflow_dispatch:
     inputs:
       soak_minutes:

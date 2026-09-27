@@ -38,7 +38,7 @@ conflict).
 | T5 | Capability adapters (`PluginPowerProfiles/Fan/Sensors/Battery/DeclaredSetting/Hotkeys`, `PluginVendorDevice`) — **not wired into `DeviceFactory`** | **done** | T1 | `Infrastructure/Plugins/Adapters/**` |
 | T6 | Proof plugin (`plugins/AcerHelper.Vendor.Proof/`) + a synthetic deprecated-major fixture | **done** | T1 | `plugins/**` |
 | T7 | CI proof job (AOT-publish the proof plugin Win+Linux, smoke + 30-min soak) | **done** | T6 | `.github/workflows/**`, test runner |
-| T8 | Guards (host has no vendor names; every plugin exports the ABI names; ABI round-trip) | todo | T1–T6 | `tests/**` (new files only) |
+| T8 | Guards (host has no vendor names; every plugin exports the ABI names; ABI round-trip) | **done** | T1–T6 | `tests/**` (new files only) |
 
 ### T1 — ABI foundation (`done`, commit pending)
 
