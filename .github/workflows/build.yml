@@ -74,6 +74,25 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # THE .resx / AOT SATELLITE PROBE — the one thing that decides whether the app
+      # may drop its compiled-in translation tables for the conventional ResourceManager
+      # + satellite model. It is a tiny dependency-free console app with a neutral
+      # Strings.resx and a Strings.ru.resx satellite; this step publishes it Native AOT
+      # (exactly the shipping configuration) and RUNS it, so a satellite that fails to
+      # load — the silent-English fallback the whole question is about — fails the build.
+      # The probe exits nonzero on a missing OR neutral-fallback value, so "green here"
+      # is a measured answer, not a compile-only hope. It is built to its own -o probe
+      # folder so it never mixes with the app's publish output. See tests/LocalizationAotProbe.
+      - name: Verify .resx loads under Native AOT (probe)
+        run: >
+          dotnet publish tests/LocalizationAotProbe/LocalizationAotProbe.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o probe
+          && probe\LocalizationAotProbe.exe
+
       # The PawnIO driver installer, for the CPU undervolt's one-click setup offer. Fetched pinned rather than
       # committed (3.4 MB, proprietary freeware); the RyzenSMU module it pairs with is fetched at *build* time
       # from its own upstream (AcerHelper.csproj -> FetchRyzenSMu, below), and the reasoning for treating the two

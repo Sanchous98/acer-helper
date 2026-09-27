@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A tiny AOT console probe whose ONLY job is to answer one question empirically:
+       does a Native-AOT build resolve .resx SATELLITE assemblies at runtime?
+
+       WHY THIS EXISTS. The app compiles its translations into an in-memory table
+       (Localization/Loc.cs) instead of using the conventional ResourceManager +
+       satellite model, because a satellite that fails to load under Native AOT is a
+       language that SILENTLY becomes English — the exact failure dotnet/runtime#86651
+       describes. That concern is either true or stale on .NET 10, and only a real AOT
+       build can say which. This project is published and RUN by the build workflow
+       (a plain JIT run cannot prove it), and it exits nonzero the moment the Russian
+       string does not come back.
+
+       IT MUST STAY DEPENDENCY-FREE. No Avalonia, no packages: the point is the
+       resource path and nothing else. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LocalizationAotProbe</RootNamespace>
+    <AssemblyName>LocalizationAotProbe</AssemblyName>
+    <!-- Culture-sensitive resource lookup REQUIRES real globalization; an AOT app
+         that sets this true cannot resolve by culture at all and would fail this
+         probe for the wrong reason. Stated explicitly, not left to a default. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Strings.resx (neutral) and Strings.ru.resx are picked up by the SDK's default
+       **/*.resx glob: the neutral one is embedded in the main assembly, the .ru one
+       becomes the ru/LocalizationAotProbe.resources.dll satellite. No ItemGroup needed
+       — and that IS the mechanism under test. -->
+
+</Project>
