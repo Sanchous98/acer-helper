@@ -57,6 +57,19 @@ Result: net10.0 / net10.0-windows 0 warnings / 0 errors; **1791 passed / 0 faile
 - Plugin search path: per-user writable cache + `%ACERHELPER_PLUGIN_DIR%` override.
 - API version: separate from the app version; host holds current + deprecated major.
 
+## Phase 0 measured result — the two-runtime risk (2026-09-27)
+
+`plugin-soak` run **36319990062**, `conclusion=success`, both `win-x64` and `linux-x64` jobs `success`:
+
+- smoke: all eight `ah_*` exports; `ah_abi_version` `0x00010000`; `ah_matches` true/false; `ah_create`
+  482-byte manifest + handle 1; `ah_invoke(Power.Current)` → `{"id":"proof"}`; `ah_dispose`.
+- soak: **30 min each, ~161.4 M (Linux) / ~164.1 M (Windows) `ah_invoke` iterations with GC churn**,
+  heap steady 32–82 MB, `clean finish — no hang, no crash`.
+
+This retires the empirical unknown that gated the approach (§2.4 / §7.1 risk 1). `plugin-soak` stays as
+the weekly regression net (and fires only from the default branch, so it must be merged to `master` to
+run on schedule).
+
 ## Open knobs (owner, non-blocking for Phase 0)
 
 See `docs/vendor-plugins.md` §7.3 (Authenticode cert, key rotation, Nitro/Predator discrimination,

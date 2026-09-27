@@ -1307,11 +1307,21 @@ all. `DeviceFactory` only knows `GenericDevice` + "load the best-matching downlo
 
 ### 7.1 Risks (unchanged, or updated where a decision moved them)
 
-1. **Two Native AOT runtimes in one process (highest risk).** The host and every plugin each carry a
-   runtime with its own GC and signal handlers. `dotnet/runtime#121345` is a real hang caused by
-   exactly this interaction. Mitigations in the design: no callbacks except the one event sink, all
-   plugin threads internal, no plugin P/Invoke back into host code. But this must be **measured with
-   the Phase 0 proof plugin on both OSes before any vendor moves.** If it proves unstable, the
+1. **Two Native AOT runtimes in one process (highest risk) — MEASURED CLEAN, 2026-09-27.** The host and
+   every plugin each carry a runtime with its own GC and signal handlers. `dotnet/runtime#121345` is a
+   real hang caused by exactly this interaction. Mitigations in the design: no callbacks except the one
+   event sink, all plugin threads internal, no plugin P/Invoke back into host code. This was
+   **measured with the Phase 0 proof plugin on both OSes** — run `plugin-soak` 36319990062,
+   `conclusion=success`, both jobs (`win-x64`, `linux-x64`) `success`:
+   - smoke: all eight `ah_*` exports resolved; `ah_abi_version` `0x00010000`; `ah_matches` true for a
+     "Proof" descriptor and false otherwise; `ah_create` returned a 482-byte manifest + handle 1;
+     `ah_invoke(Power.Current)` → `{"id":"proof"}`; `ah_dispose` called.
+   - soak: **30 minutes each, ~161.4 M (Linux) / ~164.1 M (Windows) `ah_invoke` iterations with GC
+     churn every iteration**, managed heap steady (32–82 MB), `clean finish — no hang, no crash`.
+   This retires the empirical unknown that gated the approach: a single AOT host loading a single AOT
+   plugin is stable over a sustained soak on both OSes. It does NOT prove a two-runtime hang is
+   impossible in general (the field report stays real), so the mitigations above remain the design's
+   posture, and `plugin-soak` stays as a weekly regression net. If a future run destabilises, the
    fallback is reverting to build-time vendor selection — a decision for the owner.
 2. **No unload, no isolation.** Learn and `dotnet/runtime#64629`: Native AOT libraries cannot be
    unloaded. A plugin is trusted in-process code; a bug crashes the app, and a plugin can never be
