@@ -95,6 +95,14 @@
     <Compile Remove="plugins/**" />
     <EmbeddedResource Remove="plugins/**" />
     <None Remove="plugins/**" />
+    <!-- The CI/build tools live in a sibling tree under tools/ (the PluginSign signer, §5.4/§5.5). They are their
+         own projects, so the host's implicit **/*.cs glob would otherwise compile their sources INTO the shipping
+         app for exactly the reason the tests/** and plugins/** removals above exist: those sources belong to a
+         build tool that must never be part of the Native AOT host. Kept beside the other two so the three
+         "implicit glob would swallow a sibling project tree" exclusions are read together. -->
+    <Compile Remove="tools/**" />
+    <EmbeddedResource Remove="tools/**" />
+    <None Remove="tools/**" />
   </ItemGroup>
 
   <!-- The silent-failure targets are private by design (they are internal encodings, not API), so the test

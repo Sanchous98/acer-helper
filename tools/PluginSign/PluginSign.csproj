@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE CI PLUGIN SIGNER (docs/vendor-plugins.md §5.4 "Code signing and trust", §5.5 "CI").
+       A tiny, dependency-free console app the release workflow runs in the job that produced the plugin bytes:
+       it hashes the asset, signs the manifest entry with the CI secret, and (in `manifest` mode) merges the
+       per-OS fragments into the one `vendor-plugins.json`. It reads and writes the EXACT wire types the host
+       verifies against, so the canonical string cannot drift between the CI signer and the loaded host.
+
+       WHY A CONSOLE APP AND NOT A TEST / SCRIPT. §5.5 puts signing in the job that produced the bytes, on both
+       OSes (Windows PowerShell and Linux bash); a .NET tool is the one artifact that runs identically on both
+       with no shell-specific crypto and no extra dependency. It is a BUILD tool, not a shipped binary, so JIT
+       is fine and Native AOT is irrelevant (§5.4 explicitly leaves the tool AOT-irrelevant); PublishAot and the
+       AOT analyzers are therefore OFF, and there is NO PackageReference — BCL only.
+
+       NO PRIVATE COPY OF THE CONTRACT. The signer does NOT re-implement `CanonicalString`, the ECDSA call, the
+       manifest DTOs or the key map: it SOURCE-INCLUDES the three host files below (`<Compile Include=... />`
+       with `Link=`), the same §3.1/§4.4 source-share pattern the plugin SDK uses. `PluginSignature.Sign` and
+       `PluginCatalogJsonContext` are `internal`, and source-including them compiles them INTO this tool's own
+       assembly, so the tool can call them directly while the host keeps them internal (the shipping host must
+       never expose a sign capability — see PluginSignature.cs's own note). The signer-verification test
+       (tests/AcerHelper.Tests/PluginSignerTests.cs) pins this include list, so a future "helpful" local copy of
+       the canonical string reddens a test rather than silently splitting the signer from the verifier. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PluginSign</AssemblyName>
+    <RootNamespace>AcerHelper.Tools.PluginSign</RootNamespace>
+    <!-- A build tool: JIT is correct and the AOT analyzers do not apply (§5.4/§5.5). -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- THE HOST'S OWN SIGNATURE/MANIFEST CODE, source-included (never a ProjectReference — that would drag the
+       whole Avalonia host into a build tool — and never a copy — that is the drift this file exists to prevent).
+       PluginPublicKeys.cs is required because PluginSignature.Verify (compiled in here) resolves keyIds through
+       it; PluginCatalog.cs carries the DTOs and the source-generated JSON context the manifest is written with. -->
+  <ItemGroup>
+    <Compile Include="..\..\Infrastructure\Plugins\Distribution\PluginSignature.cs" Link="Host\PluginSignature.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Distribution\PluginCatalog.cs" Link="Host\PluginCatalog.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Distribution\PluginPublicKeys.cs" Link="Host\PluginPublicKeys.cs" />
+  </ItemGroup>
+
+</Project>

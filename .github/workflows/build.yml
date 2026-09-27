@@ -17,8 +17,11 @@ name: build
 #
 # RUNS ONLY on a v* tag: a build's sole purpose is to produce a release, so plain pushes to master don't
 # build (no point building the same commit twice — once on the branch push, once on the tag). The release
-# assets ARE the deliverable, so there is no upload-artifact step in this file at all — the MSI and the AppImage
-# go straight to the GitHub Release.
+# assets ARE the deliverable, so no APP artefact is routed through the Actions artifact cache — the MSI and the
+# AppImage go straight to the GitHub Release. (The ONE exception is the plugin: task D3 routes the per-OS signed
+# plugin + its one-entry manifest fragment from the windows/linux jobs to the small `plugins-manifest` job below
+# via upload-artifact/download-artifact, because that job must see BOTH OSes' output to write one
+# `vendor-plugins.json`. The plugin assets themselves still go straight to the Release from the aggregate job.)
 # workflow_dispatch is kept for a manual build-only smoke test off a branch (the tag-guarded verify/release
 # steps just skip there).
 #
@@ -180,6 +183,108 @@ jobs:
           # not the repo root, so a bare "publish" harvested nothing -> an empty ~32 KB MSI.
           wix build packaging\AcerHelper.wxs -arch x64 -d Version=$ver -d "PublishDir=$PWD\publish" -o AcerHelper-Setup.msi
 
+      # ================================ VENDOR PLUGIN (win-x64) ==============================================
+      # docs/vendor-plugins.md §5.2 (asset naming), §5.4 (signing), §5.5 (CI), task D3.
+      #
+      # TAG-ONLY (§5.5). The plugin is a release deliverable published BESIDE the MSI, so a branch
+      # workflow_dispatch (a build-only smoke test) neither spends Native AOT minutes nor needs the signing
+      # secret. This mirrors the tag guard the MSI/AppImage steps already use, so a branch run simply skips the
+      # plugin — the same posture, not a new one. Windows builds the win-x64 half because Native AOT cannot
+      # cross-compile (docs/build-image.md:99-150); the linux job builds the .so half.
+      #
+      # NO COPY INTO publish/ — the MSI must not carry a plugin (§5). The WiX harvest of publish\** (below) is
+      # untouched and this output lands in out/plugin-win, a folder the MSI never sees.
+      - name: Publish acer-nitro plugin (Native AOT, win-x64)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >
+          dotnet publish plugins/AcerHelper.Vendor.acer-nitro/AcerHelper.Vendor.acer-nitro.csproj
+          -c Release
+          -f net10.0-windows
+          -r win-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/plugin-win
+
+      # Fail loudly on a missing/empty native DLL BEFORE signing (the plugin-soak.yml guard, by name; -not plus
+      # a length check, because a 0-byte file is not an artefact). A silent sign of nothing would attach an empty
+      # asset to the release.
+      - name: Verify the plugin publish produced a native DLL
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $plugin = 'out/plugin-win/AcerHelper.Vendor.acer-nitro.dll'
+          if (-not (Test-Path $plugin) -or (Get-Item $plugin).Length -eq 0) {
+            Write-Host "::error::the plugin publish produced no non-empty '$plugin'"
+            Get-ChildItem out/plugin-win -ErrorAction SilentlyContinue | Format-Table Name, Length
+            exit 1
+          }
+          Write-Host "OK: $plugin ($((Get-Item $plugin).Length) bytes)"
+
+      # Normalise to the §5.2 release asset name <AssemblyName>-<os>-<arch>.<ext> BEFORE signing, so the file
+      # name on the release, the `asset`/`url` in the manifest and the host's downloaded name are ONE name. The
+      # Native AOT publish names the file after the assembly (AcerHelper.Vendor.acer-nitro.dll); the canonical
+      # asset name adds the os/arch. Do not keep both: a release whose asset is named differently from the
+      # manifest's `asset` makes the manifest's url 404.
+      - name: Rename the plugin to its canonical release asset name
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          Move-Item -Force 'out/plugin-win/AcerHelper.Vendor.acer-nitro.dll' `
+                          'out/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll'
+          Write-Host "canonical asset: AcerHelper.Vendor.acer-nitro-win-x64.dll"
+
+      # Sign (§5.4). The private key is the GitHub Actions secret PLUGIN_SIGNING_KEY (PKCS#8 DER, base64); it is
+      # NOT in the repo, and the public half is embedded in the host (PluginPublicKeys.ReleaseKeyId =
+      # "2026-09-release"). FAIL LOUDLY if it is absent: a release with an unsigned plugin is worse than a failed
+      # build (owner decision, task D3). tools/PluginSign SOURCE-INCLUDES the host's own PluginSignature/
+      # PluginCatalog, so the canonical string cannot drift from the verifier, and it self-verifies with
+      # PluginSignature.Verify/VerifyBinary before writing anything.
+      #
+      # version = the app <Version> (not a second plugin version): the tag guard above already proved
+      # <Version> == the git tag, so this is the release version the manifest advertises; minHost below is the
+      # floor the plugin actually needs.
+      - name: Sign acer-nitro plugin
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PLUGIN_SIGNING_KEY)) {
+            Write-Host "::error::PLUGIN_SIGNING_KEY is not set. A v* tag release must sign its plugins (docs/vendor-plugins.md §5.4/§5.5)."
+            exit 1
+          }
+          # Anchor on </Version> so a "<Version>" mention in a csproj comment can't be picked up instead (same
+          # idiom as the tag guard and the MSI step).
+          $version = [regex]::Match((Get-Content AcerHelper.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+          # The exact browser_download_url base for this tag, so the manifest's url/sig are the real release
+          # URLs and the host never assembles a URL from parts (§5.2).
+          $base = "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          # minHost is the app <Version> where plugin support first lands (the whole distribution/loader stack is
+          # in this tree at 0.37.0, AcerHelper.csproj:12), NOT the doc's hypothetical "0.38.0" sample: the
+          # selector accepts minHost == the host version, so a floor of 0.37.0 can never EXCLUDE the host that
+          # ships the plugin (a floor above the tagged <Version> would), while any later host satisfies it too.
+          dotnet run --project tools/PluginSign/PluginSign.csproj --configuration Release -- sign `
+            --asset out/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll `
+            --out out/plugin-win/vendor-plugins-fragment.json `
+            --sig-out out/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll.sig `
+            --id acer-nitro --vendor acer --os win --arch x64 `
+            --version $version --api-major 1 --api-minor 0 --min-host 0.37.0 `
+            --hint-manufacturer Acer --hint-product Nitro --hint-product AN18 `
+            --base-url $base --key-id 2026-09-release
+
+      # Hand the signed plugin + its one-entry fragment to the aggregate job. This is the ONE artifact hop in
+      # this file (see the header): `plugins-manifest` must see BOTH OSes' output to write one vendor-plugins.json.
+      - name: Upload the signed win-x64 plugin to the aggregate job
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-win          # `plugins-manifest` downloads by this name (no merge-multiple, so the two
+                                    # OSes cannot collide on the identically-named fragment file)
+          path: |
+            out/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll
+            out/plugin-win/vendor-plugins-fragment.json
+            out/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll.sig
+
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
@@ -290,8 +395,177 @@ jobs:
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$AD" AcerHelper-x86_64.AppImage
 
+      # ================================ VENDOR PLUGIN (linux-x64) ===========================================
+      # docs/vendor-plugins.md §5.2/§5.4/§5.5, task D3. TAG-ONLY, for the reason the windows job states: the
+      # plugin is a release deliverable and a branch dispatch neither needs the secret nor should spend AOT
+      # minutes.
+      #
+      # TOOLCHAIN DECISION — a PLAIN ubuntu-latest job with clang/binutils/zlib1g-dev, NOT the release Docker
+      # image, exactly as .github/workflows/plugin-soak.yml §linux decided (its header, lines 111-125). REASONS,
+      # restated for this job: (a) the image's `artefacts` stage exists to export the APP's publish folder;
+      # routing a second publish through it means editing Dockerfile — a file this task must not touch, and a
+      # change that would entangle the plugin with the app release the image is pinned for; (b) the only thing
+      # the image pins for Linux AOT is the documented prerequisite set — clang, binutils, zlib1g-dev — which is
+      # a two-line apt-get here; (c) the plugin is a small shared library, so the image's multi-GB BuildKit cache
+      # (for the app's far larger AOT link) buys nothing. The .NET SDK comes from actions/setup-dotnet, the same
+      # action the windows job uses.
+      - name: Setup .NET 10 (for the plugin)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # The documented Ubuntu Native AOT prerequisites (docs/build-image.md): clang is the AOT compiler/linker
+      # driver, zlib1g-dev is what the runtime's native libraries link against, binutils supplies the symbol
+      # stripper. Same set plugin-soak.yml installs on this same runner.
+      - name: Install Native AOT prerequisites (for the plugin)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang binutils zlib1g-dev
+
+      # The Linux half of the plugin: net10.0 (the plugin's portable TFM) → AcerHelper.Vendor.acer-nitro.so.
+      # net10.0-windows is refused on Linux (Native AOT cannot cross-compile, docs/build-image.md:99-150), which
+      # is why this job uses the portable TFM and produces a .so.
+      - name: Publish acer-nitro plugin (Native AOT, linux-x64)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >
+          dotnet publish plugins/AcerHelper.Vendor.acer-nitro/AcerHelper.Vendor.acer-nitro.csproj
+          -c Release
+          -f net10.0
+          -r linux-x64
+          --self-contained true
+          -p:PublishAot=true
+          -o out/plugin-linux
+
+      # Same fail-loud artefact guard as the windows job, with -s (non-empty) instead of -e.
+      - name: Verify the plugin publish produced a native .so
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          plugin=out/plugin-linux/AcerHelper.Vendor.acer-nitro.so
+          [ -s "$plugin" ] || { echo "::error::the plugin publish produced no non-empty $plugin"; ls -l out/plugin-linux; exit 1; }
+          ls -l "$plugin"
+
+      # Normalise to the §5.2 canonical asset name <AssemblyName>-<os>-<arch>.<ext> BEFORE signing, so the file
+      # name on the release, the `asset`/`url` in the manifest and the host's downloaded name are ONE name (the
+      # Windows job does the same; see its step for the 404 the mismatch would cause).
+      - name: Rename the plugin to its canonical release asset name
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mv out/plugin-linux/AcerHelper.Vendor.acer-nitro.so \
+             out/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so
+          echo "canonical asset: AcerHelper.Vendor.acer-nitro-linux-x64.so"
+
+      # Sign (§5.4) — fail loudly when the secret is absent, same policy as the windows job.
+      - name: Sign acer-nitro plugin
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+        run: |
+          if [ -z "$PLUGIN_SIGNING_KEY" ]; then
+            echo "::error::PLUGIN_SIGNING_KEY is not set. A v* tag release must sign its plugins (docs/vendor-plugins.md §5.4/§5.5)."
+            exit 1
+          fi
+          # Anchor on </Version> (lookahead) so a "<Version>" mention in a csproj comment can't be picked up
+          # instead — the same idiom as this job's tag guard above.
+          version=$(grep -oP '<Version>\K[^<]+(?=</Version>)' AcerHelper.csproj | head -1)
+          base="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          # minHost = 0.37.0, the app <Version> where plugin support first lands (AcerHelper.csproj:12), not the
+          # doc's hypothetical "0.38.0" sample — see the windows job's sign step for the full reasoning.
+          dotnet run --project tools/PluginSign/PluginSign.csproj --configuration Release -- sign \
+            --asset out/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so \
+            --out out/plugin-linux/vendor-plugins-fragment.json \
+            --sig-out out/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so.sig \
+            --id acer-nitro --vendor acer --os linux --arch x64 \
+            --version "$version" --api-major 1 --api-minor 0 --min-host 0.37.0 \
+            --hint-manufacturer Acer --hint-product Nitro --hint-product AN18 \
+            --base-url "$base" --key-id 2026-09-release
+
+      - name: Upload the signed linux-x64 plugin to the aggregate job
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux
+          path: |
+            out/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so
+            out/plugin-linux/vendor-plugins-fragment.json
+            out/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so.sig
+
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
           files: AcerHelper-x86_64.AppImage
+
+  # ================================ VENDOR PLUGIN MANIFEST (aggregate) ======================================
+  # docs/vendor-plugins.md §5.2 (the manifest), §5.5 (the aggregate job), task D3. A small job that `needs` both
+  # plugin builds, downloads their signed artefacts + one-entry fragments, merges them into the single
+  # `vendor-plugins.json` the host fetches (§5.2), and attaches the plugin assets, their `.sig` files and the
+  # manifest to the SAME release the two jobs above attach to.
+  #
+  # WHY A SEPARATE JOB AND NOT A STEP: writing one manifest needs BOTH OSes' output, which live in two different
+  # runners. The Actions artifact cache is the only correct way to move them (see the header). It runs ONLY on a
+  # v* tag, so `needs` never gates a branch dispatch — the plugin jobs skip there and this job is skipped too.
+  #
+  # THE DEPRECATED-MAJOR CI LEG (§5.5, §3.8.3) IS DELIBERATELY ABSENT. Only API major 1 exists today (the host's
+  # PluginApiVersion is 1.0, SupportedMajors = {1}), so there is no deprecated major to build a second leg for.
+  # Adding a second `publish -p:AcerNitroApiMajor=<deprecated>` leg and a second manifest entry per OS is owed
+  # to the PR that bumps the host's major (it makes the previous major deprecated); the same PR deletes the leg
+  # at the removal trigger. Leaving it out now avoids building an unused fixture. See also plugin-soak.yml's NOTE
+  # on its own omitted refusal leg — the same "do not build a fixture with no consumer" rule.
+  plugins-manifest:
+    name: vendor-plugins.json
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # attach the plugin assets + manifest to the GitHub Release on a version tag
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # Download each OS's artefact by its own artifact name. No merge-multiple: both fragments are named
+      # `vendor-plugins-fragment.json`, so merging would overwrite one with the other; the aggregate step below
+      # passes both explicit paths instead.
+      - name: Download the win-x64 plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-win
+          path: artifacts/plugin-win
+
+      - name: Download the linux-x64 plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-linux
+          path: artifacts/plugin-linux
+
+      # Merge the two one-entry fragments into one vendored manifest through the signer's `manifest` mode, which
+      # RE-VERIFIES every merged entry with the host's PluginSignature.Verify (fail-closed) before writing. The
+      # signer source-includes the host's PluginCatalog/PluginSignature, so the manifest is written and checked
+      # with the exact code the shipped host verifies with (§5.4) — no secret is needed here: verification uses
+      # the embedded public key.
+      - name: Merge the per-OS fragments into vendor-plugins.json
+        run: |
+          dotnet run --project tools/PluginSign/PluginSign.csproj --configuration Release -- manifest \
+            --fragment artifacts/plugin-win/vendor-plugins-fragment.json \
+            --fragment artifacts/plugin-linux/vendor-plugins-fragment.json \
+            --out vendor-plugins.json
+          test -s vendor-plugins.json || { echo "::error::the aggregate produced no vendor-plugins.json"; exit 1; }
+
+      # Attach the two plugin assets, their detached `.sig` files and the manifest to the SAME release the
+      # windows/linux jobs already attach to (softprops/action-gh-release@v3, matching their `contents: write`).
+      # The explicit file list — not a glob — so a missing artefact fails the release lookup rather than silently
+      # publishing a partial set.
+      - name: Release (on tag)
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            artifacts/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll
+            artifacts/plugin-win/AcerHelper.Vendor.acer-nitro-win-x64.dll.sig
+            artifacts/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so
+            artifacts/plugin-linux/AcerHelper.Vendor.acer-nitro-linux-x64.so.sig
+            vendor-plugins.json
