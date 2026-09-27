@@ -112,9 +112,10 @@ schedule** (mirror `BatteryPollSchedule`'s single-flight pattern). Whatever you 
   `Battery.PowerSource` AND the read is not `Unknown`.
 - `BatteryView.axaml`: add one row next to the existing Power/Health rows (same `Grid ColumnDefinitions="*,Auto"`
   + `Classes="muted"` label pattern; gate with `IsVisible="{Binding ShowSource}"`).
-- Strings go in `Localization/Strings.resx` + `Strings.ru.resx` (the repo uses `.resx`, not the old
-  `Strings.Ru.cs`): e.g. keys `"Power source"`, `"AC adapter"`, `"USB-C (PD)"`, `"Battery"`. Follow the
-  existing key style and add Russian translations.
+- Strings go in `Localization/Strings.resx` (neutral English) + `Strings.ru.resx` (Russian), keyed by a NEUTRAL
+  key, not the English text — e.g. `bat.power_source`, `bat.source_ac`, `bat.source_usbc`,
+  `bat.source_battery`. Add the key to BOTH files (English in one, Russian in the other) and resolve it with
+  `Loc.T(...)`.
 
 ## 3. Hard constraints (the architecture tests will fail you otherwise)
 

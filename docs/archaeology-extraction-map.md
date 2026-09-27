@@ -1174,7 +1174,7 @@ narrate a past refactor. Relocating these to `docs/` would create a document wit
 
 | location | what it is | suggested action |
 |---|---|---|
-| `Localization/Loc.cs:8-20` (13L) | Why the app uses built-in tables instead of `.resx` (satellite assemblies break Native AOT, dotnet/runtime#86651) | Compress to **one line + the issue link**. The rest is prose about a decision already made. |
+| `Localization/Loc.cs` (top summary) | Localization model + why `.resx` is safe under Native AOT (the dotnet/runtime#86651 assumption was re-measured by the probe, not trusted) | Keep: it is the one home of that decision. It is long by design. |
 | `UI/ViewModels/MainViewModel.cs:60-68` (9L) | Avalonia drawer re-hosting bug (pages were previously re-created; now each has its own host in `MainWindow.axaml`) | Compress to one line stating "each drawer page has its own host; do not re-create them", or delete — the reason is historical. |
 | `OptionsAssembler.cs` `PowerSourceProfiles` (9L) | Semantics of the per-power-source profile rows | Keep the invariant (one row per power source; the row's value is the profile), drop the narration. |
 | `UI/LightingCoordinator.cs:11-22` (12L) | Class summary describing which `AppController` members forward into it | Delete most of it: it is a call-graph description that `AppController` itself already shows. Keep the two real invariants (built before any UI exists; does no hardware reads of its own). |
