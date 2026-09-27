@@ -59,7 +59,7 @@ public sealed partial class LaptopService
     }
 
     /// <summary>Record the TYPED power source the device's EC channel reported (Barrel / USB-C / Battery), from
-    /// the slow <c>AcerPowerSourceSchedule</c> read. This is what separates USB-C Power Delivery from the barrel
+    /// the slow <c>PowerSourceSchedule</c> read. This is what separates USB-C Power Delivery from the barrel
     /// charger, which the OS alone cannot: on a machine whose EC channel said <see cref="PowerSource.UsbC"/> the
     /// effective source is forced to "battery-like" (see <see cref="RecomputeOnAc"/>), so the profile set is the
     /// battery one and the guided sweep is refused — the owner's rule. <see cref="PowerSource.Unknown"/> is

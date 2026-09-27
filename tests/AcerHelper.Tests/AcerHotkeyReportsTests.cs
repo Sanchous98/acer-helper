@@ -59,8 +59,8 @@ public class AcerHotkeyReportsTests
     /// <summary>Both halves must decode through the shared file. A half that spells the bytes itself would still
     /// work today and drift tomorrow, which is the failure this repo's guards exist for.</summary>
     [Theory]
-    [InlineData("Infrastructure/Vendors/Acer/AcerHotkeys.Windows.cs")]
-    [InlineData("Infrastructure/Vendors/Acer/AcerHotkeys.Linux.cs")]
+    [InlineData("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerHotkeys.Windows.cs")]
+    [InlineData("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerHotkeys.Linux.cs")]
     public void BothHalvesDecodeThroughTheSharedSignature(string file)
     {
         var source = Source(file);

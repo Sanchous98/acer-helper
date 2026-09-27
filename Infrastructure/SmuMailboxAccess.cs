@@ -5,7 +5,7 @@ namespace AcerHelper.Infrastructure;
 // tidy-up: the test project targets net10.0-windows while AcerHelper.csproj excludes **/*.Linux.cs from that TFM,
 // so any rule left in a Linux file cannot be reached by the suite at all. The rule is therefore here, the I/O
 // stays per-OS behind SmuMailboxAccessHost, and the two meet through delegates — the same shape
-// CardwireGpuAccess.cs and AcerProfilePorts.cs use.
+// CardwireGpuAccess.cs and (before P4) AcerProfilePorts.cs use.
 
 /// <summary>
 /// THE GRANT, ASKED AS A QUESTION NO FILE COMPARISON CAN ANSWER. The app offers "Grant hardware access" when an

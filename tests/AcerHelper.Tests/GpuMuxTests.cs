@@ -307,13 +307,13 @@ public class GpuMuxTests
     [Fact]
     public void TheAcerWindowsBackendBuildsThePortFromTheGamingHelpers()
     {
-        var windows = Source("Infrastructure/Vendors/Acer/AcerDevice.Windows.cs");
+        var windows = Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Windows.cs");
         Assert.Contains("AcerGpuMux.Create(", windows, StringComparison.Ordinal);
         Assert.Contains("\"GetGamingMiscSetting\"", windows, StringComparison.Ordinal);
         Assert.Contains("\"SetGamingMiscSetting\"", windows, StringComparison.Ordinal);
 
         Assert.Contains("GpuMux = AcerGpuMux.Unsupported;",
-                        Source("Infrastructure/Vendors/Acer/AcerDevice.cs"), StringComparison.Ordinal);
+                        Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.cs"), StringComparison.Ordinal);
     }
 
     /// <summary>THE LAYOUT GUARD (source-pinned like the other markup tests): the MUX card renders ONE stable

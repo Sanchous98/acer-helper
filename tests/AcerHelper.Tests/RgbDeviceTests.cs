@@ -70,7 +70,7 @@ public class RgbDeviceTests
     /// <summary>A count below one is not a state the zone can be in: <see cref="RgbZone.SubZones"/> is a number
     /// of individually-addressable regions, and the type's own doc already gives the answer for a zone that
     /// cannot be split — 1. The value genuinely arrives: the count is read from the user-editable model
-    /// descriptor (Infrastructure/Vendors/Acer/AcerModel.cs <c>Zones</c>), so a hand-written override can carry
+    /// descriptor (plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerModel.cs <c>Zones</c>), so a hand-written override can carry
     /// 0, and every consumer compensated for it by asking <c>&gt; 1</c> anyway. The correction is a CLAMP rather
     /// than a refusal, deliberately: refusing would take the app down at composition over a keyboard layout,
     /// while 1 is the reading the doc describes and the one the consumers already behaved as if they had.

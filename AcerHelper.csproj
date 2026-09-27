@@ -105,10 +105,10 @@
     </AssemblyAttribute>
   </ItemGroup>
 
-  <!-- Per-model Acer quirks DB (friendly name + RGB layout); loaded at runtime, user-overridable. -->
-  <ItemGroup>
-    <EmbeddedResource Include="acer-models.json" />
-  </ItemGroup>
+  <!-- Per-model Acer quirks DB (friendly name + RGB layout); loaded at runtime, user-overridable. It MOVED to
+       the acer-nitro plugin in Phase 1 (§1.4): the host no longer reads AcerModel, so embedding the DB here
+       would put Acer data in a build that carries no Acer code. The root file stays (the plugin embeds it from
+       ../../acer-models.json) and the test project embeds its own copy for the source-included AcerModel. -->
 
   <!-- PawnIO's RyzenSMU module (LGPL-2.1-or-later, © namazso) — the bytecode the CPU undervolt loads into the
        driver. Its author prescribes bundling it ("include its contents in your software") precisely because module

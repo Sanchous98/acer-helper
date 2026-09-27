@@ -203,7 +203,7 @@ public class AcerWindowsSensorsTests
     [Fact]
     public void TheWindowsBackendBuildsItsSnapshotThroughTheHold()
         => Assert.Contains("new SensorsPort(new AcerSysInfoSensors(Sensor).Read)",
-                           Source("Infrastructure/Vendors/Acer/AcerDevice.Windows.cs"), StringComparison.Ordinal);
+                           Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Windows.cs"), StringComparison.Ordinal);
 
     /// <summary>The repository root, taken from the COMPILER's path rather than the current directory: the test
     /// host runs with its working directory set to the output folder, where a relative path would find either

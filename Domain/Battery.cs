@@ -40,8 +40,9 @@ public sealed class Battery
 
     /// <summary>The live power source, when the firmware exposes one. Null on a machine whose OS/firmware
     /// reports only "AC vs battery" (the generic path) rather than the adapter TYPE — or whose EC channel is
-    /// absent. Read through this op on the slow pass only: the Acer EC read is a SEND-then-GET HID transaction,
-    /// not the cheap OS gauge <see cref="Telemetry"/> is (see Infrastructure/AcerPowerSourceSchedule). Returns
+    /// absent. Read through this op on the slow pass only: the read is a vendor transport transaction (an Acer EC
+    /// SEND-then-GET HID read, via the plugin), not the cheap OS gauge <see cref="Telemetry"/> is (see
+    /// Infrastructure/PowerSourceSchedule). Returns
     /// <see cref="PowerSource.Unknown"/> when the read fails, so a failed read hides the row rather than showing
     /// a made-up source.</summary>
     public Func<PowerSource>? PowerSource { get; internal set; }

@@ -83,9 +83,10 @@ public sealed partial class BatteryViewModel : SectionViewModel
 
     /// <summary>The power-source row: which source is powering the machine right now — the DC-in barrel/plaque
     /// charger, USB Power Delivery over Type-C, or the battery. Its label is fixed ("Power source") and its value
-    /// is the named source. This is a DIFFERENT, costlier transport from the live power rate above (an Acer EC
-    /// HID transaction, not the OS gauge), so it is fed by <see cref="SetPowerSource"/> on the slow
-    /// <c>AcerPowerSourceSchedule</c> rather than by <see cref="Update"/>. The row exists only when the device
+    /// is the named source. This is a DIFFERENT, costlier transport from the live power rate above (a vendor
+    /// transaction, e.g. an Acer EC HID read, not the OS gauge), and it is filled on its own slow schedule,
+    /// <c>PowerSourceSchedule</c>, through <see cref="SetPowerSource"/> rather than by <see cref="Update"/>.
+    /// The row exists only when the device
     /// exposes the property AND the read resolves to a named source; <see cref="PowerSource.Unknown"/> — a failed
     /// read, or an unmapped code — hides it rather than showing a made-up source.</summary>
     [ObservableProperty] private string _sourceLabel = "";
@@ -93,7 +94,7 @@ public sealed partial class BatteryViewModel : SectionViewModel
     [ObservableProperty] private bool _showSource;
 
     /// <summary>True when this machine exposes the power-source read at all (the device declared the property).
-    /// The app uses it to decide whether to build the slow <c>AcerPowerSourceSchedule</c> — a machine without the
+    /// The app uses it to decide whether to build the slow <c>PowerSourceSchedule</c> — a machine without the
     /// EC channel gets no schedule and never shows the row.</summary>
     public bool HasPowerSource => _powerSource != null;
 
@@ -150,7 +151,7 @@ public sealed partial class BatteryViewModel : SectionViewModel
         ReconcileCalibration();
     }
 
-    /// <summary>Apply one power-source reading to the row. Called from the slow <c>AcerPowerSourceSchedule</c>
+    /// <summary>Apply one power-source reading to the row. Called from the slow <c>PowerSourceSchedule</c>
     /// tick on the UI thread, with the value the op already read off the UI thread. <see cref="PowerSource.Unknown"/>
     /// and a machine with no op both leave the row hidden: a failed read must not invent a source. A mapped source
     /// sets the fixed label and the translated name.</summary>

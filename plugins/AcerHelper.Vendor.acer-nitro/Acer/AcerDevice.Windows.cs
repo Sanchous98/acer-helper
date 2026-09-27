@@ -56,7 +56,7 @@ public sealed partial class AcerDevice
         // The power source (barrel vs USB-C PD) rides the SAME EC channel, so it is declared only where that
         // channel exists — on a model without it the property stays null and the row never appears. The op maps
         // a failed read to Unknown (the row hides), never a guessed source. Read on a slow pool schedule, not
-        // the 1 Hz battery poll: see AcerPowerSourceSchedule and AcerEcHidController.ReadPowerSource.
+        // the 1 Hz battery poll: see PowerSourceSchedule and AcerEcHidController.ReadPowerSource.
         if (_ec != null) Battery.PowerSource = () => _ec.ReadPowerSource() ?? PowerSource.Unknown;
 
         // The GPU-mode (MUX) switch, over the SAME gaming-WMI helpers the profiles use. The recovered interface

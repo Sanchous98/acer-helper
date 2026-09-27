@@ -21,7 +21,7 @@ namespace AcerHelper.Domain;
 /// to give 0 the same answer as 1. A caller that said 0 was therefore understood as "this zone cannot be split",
 /// which is what the type's own doc says that state MEANS, so the reader's floor of 1 is stated here instead of
 /// being left to each consumer to reproduce. (It is reachable rather than theoretical: the number comes from the
-/// user-editable model descriptor, Infrastructure/Vendors/Acer/AcerModel.cs <c>Zones</c>, so a hand-edited
+/// user-editable model descriptor, plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerModel.cs <c>Zones</c>, so a hand-edited
 /// override could carry 0 — and refusing it would crash composition over a keyboard layout, while correcting it
 /// gives exactly the zone the doc describes.)
 ///

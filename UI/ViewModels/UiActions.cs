@@ -106,7 +106,7 @@ public sealed record BatterySection(
 
     /// <summary>The live power-source (barrel/USB-C/battery) read, when this machine exposes one. Null on a
     /// machine without the EC channel, which is what hides the source row and means the app builds no
-    /// <c>AcerPowerSourceSchedule</c>. Carried through to <c>BatteryViewModel</c>.</summary>
+    /// <c>PowerSourceSchedule</c>. Carried through to <c>BatteryViewModel</c>.</summary>
     public Func<PowerSource>? PowerSource => Battery.PowerSource;
 }
 

@@ -106,7 +106,8 @@ public class AcerPluginScaffoldTests
         // The SDK transport/ABI list, by Import (not one file at a time here — the list is the props' job).
         Assert.Contains("Import Project=\"..\\..\\Infrastructure\\Plugins\\Sdk\\PluginSdk.props\"", csproj);
 
-        // The Acer files are an EXPLICIT list, so what is in this slice (and what P3 defers) is obvious.
+        // The Acer files are an EXPLICIT list, so what is in this slice (and what P4 moved in) is obvious. The
+        // files now live in the plugin's own Acer/ folder, so the include paths are in-tree.
         foreach (var file in new[]
         {
             "AcerProfiles.cs", "AcerModel.cs", "AcerFanPort.cs", "AcerGpuMux.cs",
@@ -114,25 +115,25 @@ public class AcerPluginScaffoldTests
             "AcerHotkeys.Windows.cs", "AcerHotkeys.Linux.cs",
         })
         {
-            Assert.Contains($"Compile Include=\"..\\..\\Infrastructure\\Vendors\\Acer\\{file}\"", csproj);
+            Assert.Contains($"Compile Include=\"Acer\\{file}\"", csproj);
         }
 
         Assert.DoesNotContain("<ProjectReference", csproj);
     }
 
-    /// <summary>THE P3/P4 BOUNDARY, PINNED. <c>AcerDevice.cs</c> / <c>.Windows.cs</c> / <c>.Linux.cs</c> and
-    /// <c>AcerBattery.Windows.cs</c> extend the host-only <c>GenericDevice</c> and cannot compile standalone, so
-    /// this slice must not include them; if a later change adds one, the plugin has started swallowing the host's
-    /// wiring and the standalone-build property this slice exists to prove is gone. Checked against the Compile
-    /// items (not raw substrings) because the csproj's own comments deliberately NAME these files to explain the
-    /// exclusion.</summary>
+    /// <summary>THE P4 BOUNDARY, PINNED. <c>AcerDevice.cs</c> / <c>.Windows.cs</c> / <c>.Linux.cs</c> and
+    /// <c>AcerBattery.Windows.cs</c> extend the host-only <c>GenericDevice</c> and cannot compile standalone. P4
+    /// moved the whole Acer tree into <c>Acer/</c> for the diffable reference the session port cites, but the
+    /// csproj must not COMPILE them; a later change that adds one would mean the plugin swallowed the host's
+    /// wiring. Checked against the Compile items (not raw substrings) because the csproj's own comments
+    /// deliberately NAME these files to explain the exclusion.</summary>
     [Fact]
     public void AcerPluginDoesNotIncludeTheWiringFiles()
     {
         var csproj = Source(PluginCsproj);
 
         foreach (var wiring in new[] { "AcerDevice.cs", "AcerDevice.Windows.cs", "AcerDevice.Linux.cs", "AcerBattery.Windows.cs" })
-            Assert.DoesNotContain($"Compile Include=\"..\\..\\Infrastructure\\Vendors\\Acer\\{wiring}\"", csproj);
+            Assert.DoesNotContain($"Compile Include=\"Acer\\{wiring}\"", csproj);
     }
 
     /// <summary>The eight §3.2 entry points (kept as a named constant so the two guards that count them agree).</summary>

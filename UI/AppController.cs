@@ -34,8 +34,8 @@ internal sealed class AppController
     // The power-source row's own, SLOWER schedule (barrel vs USB-C PD vs battery). Null on a machine without the
     // EC channel — the device declares the property or it does not, and no property means no schedule and no row.
     // Deliberately not the 1 Hz battery poll: the read is an EC HID transaction, not an OS syscall — see
-    // Infrastructure/AcerPowerSourceSchedule.
-    private readonly AcerPowerSourceSchedule? _powerSourcePoll;
+    // Infrastructure/PowerSourceSchedule.
+    private readonly PowerSourceSchedule? _powerSourcePoll;
     // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Created before
     // the UI so the follows-profile toggle can reach it, then re-pointed at each fresh UI via Attach.
     private readonly LightingCoordinator _lightingCoord;
@@ -174,13 +174,14 @@ internal sealed class AppController
         // see RefreshBattery for the measurement — and this path is the ONLY writer of the battery card.
         _batteryPoll = new BatteryPollSchedule(RefreshBattery);
         _batteryPoll.Start();
-        // ...and the power-source row on its own, EVEN SLOWER schedule. The read is an Acer EC HID transaction
-        // (SEND-then-GET on the HID-over-I2C bus), not the cheap OS gauge the fast path is, so it must not ride
-        // the 1 Hz tick. Built ONLY when the device exposes the property (the EC channel is present); on any other
-        // machine there is no schedule and no row — see Infrastructure/AcerPowerSourceSchedule.
+        // ...and the power-source row on its own, EVEN SLOWER schedule. The read comes through the device's
+        // declared Battery.PowerSource (a vendor plugin answers it via Capability.ReadPowerSource), which is a
+        // heavier transport transaction than the cheap OS gauge the fast path is, so it must not ride the 1 Hz
+        // tick. Built ONLY when the device exposes the property; on any other machine there is no schedule and no
+        // row — see Infrastructure/PowerSourceSchedule.
         if (_vm.Battery is { HasPowerSource: true })
         {
-            _powerSourcePoll = new AcerPowerSourceSchedule(RefreshPowerSource);
+            _powerSourcePoll = new PowerSourceSchedule(RefreshPowerSource);
             _powerSourcePoll.Start();
             // Fill the row NOW rather than leaving it blank until the first five-second tick, off the UI thread
             // like every other hardware read. Wrapped the same way the battery's initial read is: a direct
@@ -837,8 +838,8 @@ internal sealed class AppController
         Dispatcher.UIThread.Post(() => _vm.Battery?.Update(battery), DispatcherPriority.Normal);
     }
 
-    // The power-source row's read, on the AcerPowerSourceSchedule's pool thread (five seconds). Like RefreshBattery
-    // it reads on the pool and posts on the UI thread; unlike it, the read is an Acer EC HID transaction, which is
+    // The power-source row's read, on the PowerSourceSchedule's pool thread (five seconds). Like RefreshBattery
+    // it reads on the pool and posts on the UI thread; unlike it, the read is a vendor transport transaction, which is
     // why it has its own slower schedule and does NOT run on the 1 Hz tick. The op is null on a machine without the
     // EC channel (then no schedule exists either). A failed read yields PowerSource.Unknown, which SetPowerSource
     // turns into "hide the row" — never a guessed value. Re-resolves _vm.Battery at POST time for the same

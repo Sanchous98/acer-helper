@@ -23,19 +23,51 @@
     <ProjectReference Include="..\..\AcerHelper.csproj" />
   </ItemGroup>
 
-  <!-- THE PLUGIN'S PURE BACKEND, COMPILED INTO THE TEST ASSEMBLY (docs/vendor-plugins.md §6 "Keeping the suite
-       green"). The plugin is a separate Native AOT shared library the test project must NOT reference, and its
-       ah_* thunks cannot be called from managed code ([UnmanagedCallersOnly], §2.1) — so the only way to
-       unit-test the manifest/match logic is to compile the PURE, hardware-free helpers into this assembly and
-       drive them directly.
-       ONLY THESE TWO FILES ARE INCLUDED, deliberately: AcerMatch.cs and AcerManifestBuilder.cs reference nothing
-       but the host's own types (AcerModels, AcerProfiles, Domain, the internal PluginManifest/PluginJsonContext,
-       reachable through the host's InternalsVisibleTo) and the plugin's own data records. Pulling the session or
-       the thunk files in would drag WmiInvoker/HidSharp/unsafe and would re-declare host types (AcerProfiles,
-       AcerFanPort, …) inside this assembly as CS0436 conflicts — the same reason those files are NOT here. -->
+  <!-- THE PLUGIN'S PURE CODE, COMPILED INTO THE TEST ASSEMBLY (docs/vendor-plugins.md §6 "Keeping the suite
+       green"). P4 moved the Acer sources out of the host into plugins/AcerHelper.Vendor.acer-nitro/Acer/, so the
+       host's InternalsVisibleTo no longer reaches them and the tests that exercise the PURE Acer policy/data/
+       codec (the profile table, the model DB, the fan encoding, the EC codec, the MUX protocol, the RGB effects,
+       the port decorators) must get that code by SOURCE-INCLUDE — the pattern this file already used for
+       AcerMatch.cs/AcerManifestBuilder.cs, widened to the whole pure tree.
+
+       WHY SOURCE-INCLUDE IS SAFE NOW AND WAS NOT BEFORE. The old comment warned that pulling more Acer files in
+       would "re-declare host types (AcerProfiles, AcerFanPort, …) inside this assembly as CS0436 conflicts" —
+       true while those files still compiled into the host. P4 deleted the host copy, so there is nothing to
+       collide with; the namespace AcerHelper.Infrastructure.Vendors.Acer now exists ONLY in the plugin and here.
+
+       WHAT IS DELIBERATELY NOT INCLUDED:
+         * the wiring partials AcerDevice.*, AcerBattery.Windows.cs and AcerProfilePorts' host-coupled half are
+           NOT here — AcerDevice extends the host GenericDevice and cannot be duplicated, AcerBattery is
+           superseded by the plugin's ported AcerBatteryWmi, and AcerProfilePorts.cs (Loc.T) is host-coupled.
+           Tests that used to reach AcerDevice's wiring by source-text now read the plugin path (re-pointed).
+         * the SDK transports (WmiSession, Hwmon, …) and Domain — the test project reaches the host's copies
+           through the ProjectReference; including them again would be CS0436.
+         * the session/thunk files (AcerSession.*, AcerPlugin.cs) — they are a separate AOT assembly's code and
+           the tests drive AcerMatch/AcerManifestBuilder instead. -->
   <ItemGroup>
     <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\AcerMatch.cs" Link="Plugin\AcerMatch.cs" />
     <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\AcerManifestBuilder.cs" Link="Plugin\AcerManifestBuilder.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerProfiles.cs" Link="Plugin\Acer\AcerProfiles.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerModel.cs" Link="Plugin\Acer\AcerModel.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerFanPort.cs" Link="Plugin\Acer\AcerFanPort.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerGpuMux.cs" Link="Plugin\Acer\AcerGpuMux.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerHotkeyReports.cs" Link="Plugin\Acer\AcerHotkeyReports.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\RgbEffects.cs" Link="Plugin\Acer\RgbEffects.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerEcHidController.cs" Link="Plugin\Acer\AcerEcHidController.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerEcHidController.Windows.cs" Link="Plugin\Acer\AcerEcHidController.Windows.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\EneHidController.cs" Link="Plugin\Acer\EneHidController.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\EneHidController.Windows.cs" Link="Plugin\Acer\EneHidController.Windows.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\Acer\AcerProfilePorts.cs" Link="Plugin\Acer\AcerProfilePorts.cs" />
+  </ItemGroup>
+
+  <!-- The per-model quirks DB, embedded into the TEST assembly because AcerModel.cs is source-included here and
+       its LoadEmbedded resolves the resource from Assembly.GetExecutingAssembly(). Before P4 AcerModel compiled
+       into the host and read the host's embed; now the type lives here, so the resource must too — otherwise
+       AcerModels.Detect(product) falls back to an empty default and the ah_matches confidence rows would read 50
+       where the DB says 80. LogicalName matches the host's/plugin's so AcerModel's suffix lookup is identical. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\acer-models.json" Link="acer-models.json"
+                      LogicalName="AcerHelper.acer-models.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -252,8 +252,17 @@ public class AcerPluginBackendTests
         var dir = Path.Combine(Root(), "plugins", "AcerHelper.Vendor.acer-nitro");
         Assert.True(Directory.Exists(dir), "the plugin tree is gone — this guard is looking at nothing");
         var sep = Path.DirectorySeparatorChar;
+        // EXCLUDE THE REFERENCE-ONLY WIRING FILES. P4 moved the whole Acer tree into Acer/ (so Infrastructure/
+        // Vendors/Acer/ is empty), but the csproj deliberately does NOT compile the host-coupled ones: AcerDevice.*
+        // extend the host GenericDevice, AcerBattery.Windows.cs is superseded by the ported AcerBatteryWmi, and
+        // AcerProfilePorts.cs uses Loc.T. They are kept in-tree only as the diffable reference the AcerSession.*
+        // port cites ("cites the host line it came from"), so they must not be read as part of the plugin's compiled
+        // surface — the guard is about what the plugin SHIPS, and the csproj proves they are not shipped.
+        string[] referenceOnly = ["AcerDevice.cs", "AcerDevice.Windows.cs", "AcerDevice.Linux.cs",
+                                  "AcerBattery.Windows.cs", "AcerProfilePorts.cs"];
         return Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Contains($"{sep}obj{sep}") && !p.Contains($"{sep}bin{sep}"))
+            .Where(p => !referenceOnly.Contains(Path.GetFileName(p), StringComparer.Ordinal))
             .ToList();
     }
 
@@ -295,9 +304,10 @@ public class AcerPluginBackendTests
             + string.Join("\n  ", offenders));
     }
 
-    /// <summary>The plugin csproj's explicit Acer include list carries the ENE codec (P3) but still NOT the wiring
+    /// <summary>The plugin csproj's explicit Acer include list carries the ENE codec but still NOT the wiring
     /// files or the host-coupled policy file — <c>AcerProfilePorts.cs</c> (Loc.T) and the <c>AcerDevice.*</c> /
-    /// <c>AcerBattery.Windows.cs</c> partials of <c>GenericDevice</c>. Re-asserted here because P3 changed the list.</summary>
+    /// <c>AcerBattery.Windows.cs</c> partials of <c>GenericDevice</c>. Re-asserted here because P4 moved the Acer
+    /// tree into the plugin and changed the include list to bare in-tree <c>Acer\*.cs</c> paths.</summary>
     [Fact]
     public void PluginStillExcludesHostCoupledAcerFiles()
     {
@@ -305,11 +315,11 @@ public class AcerPluginBackendTests
                                                    "AcerHelper.Vendor.acer-nitro.csproj"));
         foreach (var excluded in new[]
                  { "AcerDevice.cs", "AcerDevice.Windows.cs", "AcerDevice.Linux.cs", "AcerBattery.Windows.cs", "AcerProfilePorts.cs" })
-            Assert.DoesNotContain($"Compile Include=\"..\\..\\Infrastructure\\Vendors\\Acer\\{excluded}\"", csproj);
+            Assert.DoesNotContain($"Compile Include=\"Acer\\{excluded}\"", csproj);
 
         // ...and DOES include the ENE codec, which the RGB capability now uses.
-        Assert.Contains("EneHidController.cs", csproj);
-        Assert.Contains("EneHidController.Windows.cs", csproj);
-        Assert.Contains("EneHidController.Linux.cs", csproj);
+        Assert.Contains("Acer\\EneHidController.cs", csproj);
+        Assert.Contains("Acer\\EneHidController.Windows.cs", csproj);
+        Assert.Contains("Acer\\EneHidController.Linux.cs", csproj);
     }
 }

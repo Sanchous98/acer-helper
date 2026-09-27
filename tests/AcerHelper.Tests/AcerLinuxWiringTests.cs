@@ -59,15 +59,15 @@ public class AcerLinuxWiringTests
     [Fact]
     public void TheAcerBackendBindsTheProfilePortToItsOwnHandler()
         => Assert.Contains("SysfsPowerProfiles(\"acer-wmi\")",
-                           Source("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
+                           Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
 
     /// <summary>The fan port and the sensors both find the chip through the shared identity check — the name AND
     /// the driver behind the device path. Reading it here rather than looking for the string "acer" keeps the
     /// guard meaningful: a probe that went back to <c>Hwmon.BestFanSource</c> (the read-only telemetry heuristic,
     /// which would bind a CONTROL to whichever chip has the most fans) stops naming this and reddens.</summary>
     [Theory]
-    [InlineData("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs", "AcerHwmonChip.Matches")]
-    [InlineData("Infrastructure/Vendors/Acer/AcerFanPort.cs", "/sys/devices/platform/acer-wmi")]
+    [InlineData("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Linux.cs", "AcerHwmonChip.Matches")]
+    [InlineData("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerFanPort.cs", "/sys/devices/platform/acer-wmi")]
     public void TheAcerChipIsFoundByNameAndDriver(string relativePath, string required)
         => Assert.Contains(required, Source(relativePath), StringComparison.Ordinal);
 
@@ -94,7 +94,7 @@ public class AcerLinuxWiringTests
     [Fact]
     public void AnAcerChipNeverKeepsTheInheritedFanPort()
         => Assert.Contains("else if (AcerChip() != null) FanControl = null;",
-                           Source("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
+                           Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
 
     /// <summary>
     /// BOTH TEMPERATURE ROWS GO THROUGH THE HOLD, one row per channel, because either channel wired straight to
@@ -118,7 +118,7 @@ public class AcerLinuxWiringTests
     [InlineData("CpuTempC = _cpuTemp.Reading(")]
     [InlineData("GpuTempC = _gpuTemp.Reading(")]
     public void TheTemperatureRowsGoThroughTheHold(string required)
-        => Assert.Contains(required, Source("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
+        => Assert.Contains(required, Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
 
     /// <summary>
     /// THE STATUS LINE IS CHOSEN FROM WHAT THE WIRING BUILT, not asserted once for every machine.
@@ -142,7 +142,7 @@ public class AcerLinuxWiringTests
     [InlineData("if (_acerHwmon == null)")]
     [InlineData("status.fans_read_only")]
     public void TheStatusLineIsChosenFromWhatTheWiringBuilt(string required)
-        => Assert.Contains(required, Source("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
+        => Assert.Contains(required, Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
 
     /// <summary>
     /// THE POLICY FILE DOES NO I/O — and this is the structural half of the deletion pin above, because the
@@ -162,7 +162,7 @@ public class AcerLinuxWiringTests
     /// tripped on prose would be deleted by the first person it annoyed rather than obeyed.
     ///
     /// A mutation that reddens a row: put the AC walk (or any other filesystem read) back into
-    /// Infrastructure/Vendors/Acer/AcerProfilePorts.cs. The repair is to inject the input as a delegate.
+    /// plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerProfilePorts.cs. The repair is to inject the input as a delegate.
     /// </summary>
     [Theory]
     [InlineData("/sys/")]          // a node path
@@ -172,7 +172,7 @@ public class AcerLinuxWiringTests
     [InlineData("Path.Combine")]   // path arithmetic
     public void TheInjectablePolicyFileDoesNoIo(string forbidden)
     {
-        var source = Source("Infrastructure/Vendors/Acer/AcerProfilePorts.cs");
+        var source = Source("plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerProfilePorts.cs");
 
         Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }

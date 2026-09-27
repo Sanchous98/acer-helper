@@ -1,15 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- THE ACER NITRO VENDOR PLUGIN (docs/vendor-plugins.md §5.1 project layout, §6 Phase 1). A Native AOT
-       shared library that will own the Acer line's vendor code. THIS SLICE ONLY SCAFFOLDS IT: it makes the
-       existing Acer DATA/CODEC/PORT files COMPILE standalone inside the plugin assembly without touching the
-       host, so the later slices (P3 rewrites the backend to manifest/ops, P4 cuts the host over) start from a
-       green, self-contained build. The eight ah_* thunks exist and are exportable but are stubs (AcerPlugin.cs).
+       shared library that owns the Acer line's vendor code, and after P4 the WHOLE of it: the Acer sources were
+       moved out of the host into this project's Acer/ folder, so the host binary carries no Acer at all. The
+       backend answers ah_create/ah_matches/ah_invoke over the Acer data (AcerSession.*), and the eight ah_*
+       thunks in AcerPlugin.cs are the exports.
 
-       WHAT THIS PROJECT IS NOT YET. It is not wired into anything (the host references no plugin project and
-       ships none, §5), it does not implement the ABI behaviour, and it does not carry the Acer WIRING files
-       (AcerDevice.*, AcerBattery.Windows.cs) — those extend GenericDevice and are P3's rewrite. See the explicit
-       Compile list below for exactly what is in and what is deferred.
+       WHAT THIS PROJECT IS NOT. It is not referenced by the host and ships no in-app copy (§5): the host loads
+       it from the per-user cache at runtime via the loader (DeviceFactory). And it does not carry three
+       host-coupled Acer files — AcerDevice.* (extend the host GenericDevice), AcerBattery.Windows.cs
+       (superseded by the ported AcerBatteryWmi) and AcerProfilePorts.cs (Loc.T). They are kept in Acer/ only as
+       the diffable reference AcerSession.* cites, and the Compile list below proves they are not compiled.
 
        Layout/artefact rules cited throughout: §5.1 (project layout), §5.2 (asset naming), §3.1/§4.4
        (source-shared SDK), §3.2 (exports), §3.8 (API versioning). -->
@@ -66,41 +67,48 @@
        AccentColor, PerformanceProfile, Battery, …). Domain/ is dependency-free — every file uses only the BCL
        (verified: only Domain/Fan.cs has a using, System.Collections.Immutable) — so it source-includes cleanly.
 
-       ACER FILES: an EXPLICIT list, never a glob, so it is obvious at a glance what is IN this slice and what
-       is deferred to P3. Only the pure DATA / CODEC / PORT files are here; the wiring files are not (see the
-       comment above AcerPlugin.cs and the report). Each Link puts the file under an "Acer\" folder in the
-       compile item list, mirroring its origin, and keeps the filename so a reader can map it back. -->
+       ACER FILES: an EXPLICIT list, never a glob. The Acer tree now lives in this project's Acer/ folder, so
+       the implicit **/*.cs glob is first REMOVED for that folder and the compiling subset re-added one file at a
+       time — the three host-coupled files (AcerDevice.*, AcerBattery.Windows.cs, AcerProfilePorts.cs) are
+       deliberately absent. A new Acer file fails loudly (it is simply not compiled) rather than silently. -->
   <ItemGroup>
     <Compile Include="..\..\Domain\**\*.cs" Link="Domain\%(RecursiveDir)%(Filename)%(Extension)" />
 
+    <!-- THE MOVED ACER SOURCES (P4). The Acer vendor tree moved from Infrastructure/Vendors/Acer/ into this
+         project's own Acer/ folder, so the files are now IN-TREE and would be swept up by the SDK's implicit
+         **/*.cs glob. That glob is fine for what compiles here, but the tree also carries three host-coupling
+         files that must NOT compile into the plugin: AcerDevice.cs / .Windows.cs / .Linux.cs extend the host's
+         GenericDevice, AcerProfilePorts.cs uses Localization (Loc.T), and AcerBattery.Windows.cs is superseded by
+         the ported AcerBatteryWmi. So the whole in-tree Acer folder is removed from the glob and the compiling
+         subset is re-added explicitly — the same "an explicit list, never a glob" rule the P2 scaffold states. -->
+    <Compile Remove="Acer\**\*.cs" />
+
     <!-- Pure vendor data. -->
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerProfiles.cs" Link="Acer\AcerProfiles.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerModel.cs" Link="Acer\AcerModel.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerFanPort.cs" Link="Acer\AcerFanPort.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerGpuMux.cs" Link="Acer\AcerGpuMux.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeyReports.cs" Link="Acer\AcerHotkeyReports.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\RgbEffects.cs" Link="Acer\RgbEffects.cs" />
+    <Compile Include="Acer\AcerProfiles.cs" />
+    <Compile Include="Acer\AcerModel.cs" />
+    <Compile Include="Acer\AcerFanPort.cs" />
+    <Compile Include="Acer\AcerGpuMux.cs" />
+    <Compile Include="Acer\AcerHotkeyReports.cs" />
+    <Compile Include="Acer\RgbEffects.cs" />
 
     <!-- Codecs: the cross-platform EC HID codec + its per-OS transports. -->
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.cs" Link="Acer\AcerEcHidController.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Windows.cs" Link="Acer\AcerEcHidController.Windows.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Linux.cs" Link="Acer\AcerEcHidController.Linux.cs" />
+    <Compile Include="Acer\AcerEcHidController.cs" />
+    <Compile Include="Acer\AcerEcHidController.Windows.cs" />
+    <Compile Include="Acer\AcerEcHidController.Linux.cs" />
 
-    <!-- The ENE RGB codec + its per-OS transports (P3). EneHidController.cs's only outside-Domain dependency is
+    <!-- The ENE RGB codec + its per-OS transports. EneHidController.cs's only outside-Domain dependency is
          Infrastructure/Lighting's IRgbController/RgbDevice, which PluginSdk.props now source-includes, so the
          codec compiles standalone; the per-OS halves use HidSharp (Windows) and hidraw ioctl (Linux), both already
-         available here. NOTE: AcerProfilePorts.cs remains deliberately ABSENT — it is host-coupled by Loc.T and
-         its policy (the profile table's traits/availability) is carried directly from AcerProfiles instead. -->
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.cs" Link="Acer\EneHidController.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.Windows.cs" Link="Acer\EneHidController.Windows.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.Linux.cs" Link="Acer\EneHidController.Linux.cs" />
+         available here. AcerProfilePorts.cs stays excluded (Loc.T). -->
+    <Compile Include="Acer\EneHidController.cs" />
+    <Compile Include="Acer\EneHidController.Windows.cs" />
+    <Compile Include="Acer\EneHidController.Linux.cs" />
 
     <!-- OS key capture. Both halves compile standalone: AcerHotkeys.Linux.cs's only outside-Domain dependency is
          Hwmon, which the imported SDK props already source-includes; AcerHotkeys.Windows.cs uses only Domain and
-         Win32 P/Invoke. NOTE: EneHidController*.cs and AcerProfilePorts.cs are deliberately ABSENT — they depend
-         on host-only namespaces (Infrastructure/Lighting and Localization) and are P3 rewrite items. -->
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeys.Windows.cs" Link="Acer\AcerHotkeys.Windows.cs" />
-    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeys.Linux.cs" Link="Acer\AcerHotkeys.Linux.cs" />
+         Win32 P/Invoke. -->
+    <Compile Include="Acer\AcerHotkeys.Windows.cs" />
+    <Compile Include="Acer\AcerHotkeys.Linux.cs" />
   </ItemGroup>
 
   <!-- THE SAME FILE-NAME OS SPLIT THE HOST USES (AcerHelper.csproj:47-52). The portable TFM is "net10.0" (it does
@@ -119,10 +127,8 @@
     <Compile Remove="**/*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
     <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
     <Compile Remove="..\..\Infrastructure\Plugins\Sdk\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
-    <Compile Remove="..\..\Infrastructure\Vendors\Acer\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
     <Compile Remove="..\..\Infrastructure\Vendors\Generic\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
     <Compile Remove="..\..\Infrastructure\Plugins\Sdk\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
-    <Compile Remove="..\..\Infrastructure\Vendors\Acer\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
     <Compile Remove="..\..\Infrastructure\Vendors\Generic\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
   </ItemGroup>
 
@@ -144,7 +150,7 @@
                       LogicalName="AcerHelper.acer-models.json" />
   </ItemGroup>
 
-  <!-- Windows-only package. The Acer EC HID transport (AcerEcHidController.Windows.cs) and the (P3) ENE
+  <!-- Windows-only package. The Acer EC HID transport (AcerEcHidController.Windows.cs) and the ENE
        transport both go through HidSharp; it is the Windows RGB/EC HID transport exactly as the host uses it
        (AcerHelper.csproj:225). Pinned to the same version so the plugin and the host agree on the HID backend.
        Rooted whole under AOT for the reason the host states (AcerHelper.csproj:184-189): HidSharp reflects

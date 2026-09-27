@@ -205,22 +205,21 @@ public class PluginBoundaryGuardTests
     }
 
     /// <summary>
-    /// <c>DeviceFactory.cs</c> is the ONE documented Phase 0 exemption from the rule above, and this test is what
-    /// stops the exemption from being a loophole: it asserts the file names EXACTLY the two legacy branches
-    /// (<c>AcerDevice</c>, <c>DellDevice</c>) and their two namespaces — no third vendor — and that the plugin
-    /// path is still absent.
+    /// <c>DeviceFactory.cs</c> is the ONE documented exemption from the rule above, and this test is what stops
+    /// the exemption from being a loophole: after the Phase 1 cut-over it names EXACTLY the one remaining legacy
+    /// branch (<c>DellDevice</c>) and its namespace — no Acer (that branch is deleted, §4.1) and no third vendor.
+    /// The plugin path is now PRESENT by design (the factory loads the best-matching plugin), which is the
+    /// inverse of the Phase 0 assertion this replaces.
     ///
-    /// WHY: a new vendor added to the factory would otherwise pass <see cref="NoVendorTypeNameOutsideTheVendorPluginAndDeviceFactorySubtrees"/>
-    /// (the whole file is skipped), silently widening the hole §4.1 says Phase 1 closes. The final line is the §6
-    /// Phase 0 invariant "the adapters are not yet wired into <c>DeviceFactory</c>" — also pinned by
-    /// <c>PluginAdapterTests.DeviceFactoryDoesNotReferencePluginVendorDevice</c>, cited rather than duplicated; it
-    /// is kept here too because THIS test is the one that reasons about the exemption.
+    /// WHY: a new vendor added to the factory would otherwise pass
+    /// <see cref="NoVendorTypeNameOutsideTheVendorPluginAndDeviceFactorySubtrees"/> (the whole file is skipped),
+    /// silently widening the hole Phase 1 closes.
     ///
-    /// MUTATION that reddens it: add <c>AsusDevice</c> (or any third vendor) to <c>DeviceFactory.Create</c>, or
-    /// add the Phase 1 plugin branch prematurely.
+    /// MUTATION that reddens it: add <c>AsusDevice</c> (or any third in-host vendor) to
+    /// <c>DeviceFactory.Create</c>, or restore the Acer branch.
     /// </summary>
     [Fact]
-    public void DeviceFactorysVendorExemptionIsStillTheKnownPhase1Branches()
+    public void DeviceFactorysVendorExemptionIsTheRemainingDellBranchOnly()
     {
         var code = StripComments(Source("Infrastructure/Composition/DeviceFactory.cs"));
 
@@ -229,12 +228,73 @@ public class PluginBoundaryGuardTests
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { "AcerDevice", "DellDevice" }, found);
-        Assert.Contains("AcerHelper.Infrastructure.Vendors.Acer", code, StringComparison.Ordinal);
+        Assert.Equal(new[] { "DellDevice" }, found);
         Assert.Contains("AcerHelper.Infrastructure.Vendors.Dell", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("AcerHelper.Infrastructure.Vendors.Acer", code, StringComparison.Ordinal);
 
-        // §6 Phase 0: the plugin path is built but NOT composed. The factory must not name the plugin device.
-        Assert.DoesNotContain("PluginVendorDevice", code, StringComparison.Ordinal);
+        // The cut-over: the factory DOES compose the plugin device now (§4.1), the inverse of the Phase 0 pin.
+        Assert.Contains("PluginVendorDevice", code, StringComparison.Ordinal);
+    }
+
+    /// <summary>The Acer-specific type identifiers §6 forbids outside the plugin subtree, now that Phase 1 has
+    /// moved the whole Acer tree out. Distinct from <see cref="VendorTypeIdentifiers"/> (which also carries
+    /// <c>DellDevice</c>/<c>AsusDevice</c>, still legitimately in-host) because this rule is the Acer cut-over's
+    /// own and must not be satisfied by the Dell exemption.</summary>
+    private static readonly string[] AcerTypeIdentifiers =
+    [
+        "AcerDevice", "AcerEcHidController", "EneHidController", "AcerProfiles", "AcerProfilePorts",
+        "AcerFanPort", "AcerModel", "AcerModels", "AcerGpuMux", "AcerHotkeyReports", "AcerHotkeys",
+        "AcerBatteryWmi", "AcerSysInfoSensors", "AcerTemperatureHold", "AcerHwmonChip", "AcerFanChannels",
+        "AcerFanNodes", "AcerFanEnable", "AcerFanDuty", "AcerMappedProfiles", "EcSyncedProfiles",
+        "RgbEffects", "BatteryWmi",
+    ];
+
+    /// <summary>
+    /// THE PHASE 1 CUT-OVER INVARIANT (§0, §6): the host carries NO Acer (docs/vendor-plugins.md §6 Phase 1
+    /// step 4, "the Acer <c>if</c> is deleted" — and with it the whole in-host Acer backend). Two facts:
+    ///
+    ///   1. <c>Infrastructure/Vendors/Acer/</c> NO LONGER EXISTS. The tree moved to
+    ///      <c>plugins/AcerHelper.Vendor.acer-nitro/Acer/</c>, so a reappearing directory means Acer code started
+    ///      compiling back into the host binary.
+    ///   2. No host source under <c>Domain/</c>, <c>Application/</c>, <c>Infrastructure/</c>, <c>UI/</c> or
+    ///      <c>Bootstrap/</c> names an Acer vendor TYPE, a <c>Vendors.Acer</c> namespace, or the
+    ///      <c>RgbEffects</c>/<c>BatteryWmi</c> Acer types.
+    ///
+    /// WHY IT IS UNFILTERED FOR ACER where the general rule still exempts <c>Infrastructure/Vendors/</c>: that
+    /// exemption exists so Dell can stay until Phase 3; for Acer it would be the loophole this phase closes. A
+    /// comment is allowed (the guard strips comments — the tree's prose cites the moved files to explain WHY).
+    ///
+    /// MUTATION that reddens it: recreate <c>Infrastructure/Vendors/Acer/AcerProfiles.cs</c>, or add
+    /// <c>using AcerHelper.Infrastructure.Vendors.Acer;</c> / an <c>AcerDevice</c> reference to any host file.
+    /// </summary>
+    [Fact]
+    public void TheHostCarriesNoAcerOutsideThePluginSubtree()
+    {
+        var acerDir = Path.Combine(Root(), "Infrastructure", "Vendors", "Acer");
+        Assert.False(Directory.Exists(acerDir),
+            "Infrastructure/Vendors/Acer/ exists again — the Acer tree moved to "
+            + "plugins/AcerHelper.Vendor.acer-nitro/Acer/ and the host must carry no Acer code (docs/vendor-plugins.md §6).");
+
+        var offenders = new List<string>();
+        foreach (var layer in new[] { "Domain", "Application", "Infrastructure", "UI", "Bootstrap" })
+        {
+            foreach (var path in SourcesIn(layer))
+            {
+                var code = StripComments(File.ReadAllText(path));
+
+                offenders.AddRange(AcerTypeIdentifiers
+                    .Where(id => Regex.IsMatch(code, $@"\b{Regex.Escape(id)}\b"))
+                    .Select(id => $"{Relative(path)}: {id}"));
+
+                if (code.Contains("AcerHelper.Infrastructure.Vendors.Acer", StringComparison.Ordinal))
+                    offenders.Add($"{Relative(path)}: AcerHelper.Infrastructure.Vendors.Acer");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "the host binary must contain NO Acer code after the Phase 1 cut-over (§0, §6): the whole Acer tree "
+            + "lives in the plugin now, and a name here means Acer knowledge was re-acquired in the host:\n  "
+            + string.Join("\n  ", offenders));
     }
 
     // ==========================================================================================================
@@ -303,8 +363,11 @@ public class PluginBoundaryGuardTests
                 if (!text.Contains($"EntryPoint = \"{name}\"", StringComparison.Ordinal))
                     offenders.Add($"{Relative(dir)}: missing EntryPoint = \"{name}\"");
 
-            // And nothing EXTRA: a stray EntryPoint is dead surface, or a sign the ABI set drifted.
-            var declared = Regex.Matches(text, @"EntryPoint\s*=\s*""([a-zA-Z0-9_]+)""")
+            // And nothing EXTRA: a stray EntryPoint is dead surface, or a sign the ABI set drifted. Matched only
+            // inside an UnmanagedCallersOnly attribute, because the moved Acer sources carry unrelated
+            // DllImport/LibraryImport EntryPoint names (ioctl, RegisterClassExW) that are NOT AOT exports and
+            // would otherwise read as undeclared entry points.
+            var declared = Regex.Matches(text, @"UnmanagedCallersOnly\([^)]*EntryPoint\s*=\s*""([a-zA-Z0-9_]+)""")
                 .Select(m => m.Groups[1].Value)
                 .Distinct();
             foreach (var declaredName in declared)

@@ -475,20 +475,25 @@ public class PluginAdapterTests
         => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "..", ".."));
 
     /// <summary>
-    /// §6: Phase 0 builds the adapter path but does NOT compose with it. The invariant is enforced at the source
-    /// level — the repo's idiom (ArchitectureMapTests, DomainNeutralityTests) — by asserting the composition root
-    /// never names <see cref="PluginVendorDevice"/>. The mutation that reddens it is the one line this task must
-    /// not write: a <c>PluginVendorDevice.Create(...)</c> branch in <c>DeviceFactory.Create</c>.
+    /// §4.1: Phase 1 CUT OVER — the composition root now DOES compose the plugin path. This test is the inverse of
+    /// the Phase 0 guard it replaces: it asserts <c>DeviceFactory</c> names <see cref="PluginVendorDevice"/> and the
+    /// <c>Infrastructure.Plugins</c> namespace (it drives the loader), and that the Acer branch is GONE. The
+    /// remaining in-host vendor is Dell (Phase 3), pinned separately by
+    /// <c>PluginBoundaryGuardTests.DeviceFactorysVendorExemptionIsTheRemainingDellBranchOnly</c>.
+    ///
+    /// MUTATION that reddens it: remove the loader wiring from <c>DeviceFactory.Create</c>, or restore the Acer
+    /// branch.
     /// </summary>
     [Fact]
-    public void DeviceFactoryDoesNotReferencePluginVendorDevice()
+    public void DeviceFactoryComposesThePluginVendorDevice()
     {
         var path = Path.Combine(Root(), "Infrastructure", "Composition", "DeviceFactory.cs");
         Assert.True(File.Exists(path), $"the tree no longer has '{path}' — this guard is looking at nothing");
 
         var source = File.ReadAllText(path);
 
-        Assert.DoesNotContain("PluginVendorDevice", source);
-        Assert.DoesNotContain("AcerHelper.Infrastructure.Plugins", source);
+        Assert.Contains("PluginVendorDevice", source);
+        Assert.Contains("AcerHelper.Infrastructure.Plugins", source);
+        Assert.DoesNotContain("AcerHelper.Infrastructure.Vendors.Acer", source);
     }
 }

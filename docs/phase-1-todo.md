@@ -30,7 +30,7 @@ P1 extract SDK ──► P2 scaffold plugin (compiles standalone) ──► P3 b
 | P1 | Extract the source-shared transport SDK (`Infrastructure/Plugins/Sdk/`, namespace renamed, `PluginSdk.props`) | **done** (`3a337e7`) | — | 9 files moved; 37 files re-pointed; 1909 tests |
 | P2 | Scaffold `plugins/AcerHelper.Vendor.acer-nitro/` — existing Acer data/codec files compile standalone; `ah_*` thunks stubbed; **host untouched** | **done** | P1 | plugin 0/0 both TFMs; host 1913 tests |
 | P3 | Rewrite the Acer backend to manifest + ops: implement `ah_create`/`ah_matches`/`ah_invoke` over the Acer data; port the wiring (`AcerDevice.InitVendor`, `AcerBattery.Windows`, `EneHidController` RGB, `AcerProfilePorts`); drop the `GenericDevice`/`Localization`/`Lighting` dependencies | **done** | P2 | plugin 0/0 both TFMs; host 1929 tests |
-| P4 | Cut-over: `DeviceFactory` loads the best plugin (loader) and the Acer `if` is deleted; move/re-point Acer tests; the plugin is no longer compiled into the host | todo | P3 | host binary no longer carries Acer |
+| P4 | Cut-over: `DeviceFactory` loads the best plugin (loader) and the Acer `if` is deleted; move/re-point Acer tests; the plugin is no longer compiled into the host | **done** | P3 | host IL carries no Acer (verified); 1930 tests |
 
 ## P2 — what the scaffold exposed (P3 dependencies)
 

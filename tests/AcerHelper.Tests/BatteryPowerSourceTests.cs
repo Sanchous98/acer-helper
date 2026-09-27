@@ -186,21 +186,21 @@ public class AcerPowerSourceScheduleTests
     /// MUTATION THAT REDDENS IT: change the constant.</summary>
     [Fact]
     public void ThePeriodIsFiveSeconds()
-        => Assert.Equal(TimeSpan.FromSeconds(5), AcerPowerSourceSchedule.Period);
+        => Assert.Equal(TimeSpan.FromSeconds(5), PowerSourceSchedule.Period);
 
     /// <summary>THE WHOLE POINT: the power-source read must NOT run at the battery poll's 1 Hz. It is heavier
-    /// (a bus transaction) and its value changes only on a physical plug event, so a slower cadence is both
-    /// cheaper and sufficient. This also keeps it off the full pass's three-second grid, so the app does not
-    /// re-issue an EC burst at the profile envelope's own rate.
+    /// (a vendor transport transaction) and its value changes only on a physical plug event, so a slower cadence
+    /// is both cheaper and sufficient. This also keeps it off the full pass's three-second grid, so the app does
+    /// not re-issue a heavy read at the profile envelope's own rate.
     /// MUTATION THAT REDDENS IT: set the period to the battery poll's one second (or below the full pass's
     /// three).</summary>
     [Fact]
     public void ThePowerSourcePeriodIsSlowerThanTheBatteryPollAndTheFullPass()
     {
-        Assert.True(AcerPowerSourceSchedule.Period > BatteryPollSchedule.Period,
-            "the power-source EC read must not ride the 1 Hz OS battery poll");
-        Assert.True(AcerPowerSourceSchedule.Period > PollSchedule.Period,
-            "the power-source EC read must not ride the full three-second EC/WMI pass");
+        Assert.True(PowerSourceSchedule.Period > BatteryPollSchedule.Period,
+            "the power-source read must not ride the 1 Hz OS battery poll");
+        Assert.True(PowerSourceSchedule.Period > PollSchedule.Period,
+            "the power-source read must not ride the full three-second EC/WMI pass");
     }
 
     /// <summary>The read REPEATS — a one-shot startup read cannot track a later plug/unplug for a process that
@@ -210,7 +210,7 @@ public class AcerPowerSourceScheduleTests
     public void TheTimerKeepsTicking()
     {
         var calls = 0;
-        using var poll = new AcerPowerSourceSchedule(() => Interlocked.Increment(ref calls), TimeSpan.FromMilliseconds(20));
+        using var poll = new PowerSourceSchedule(() => Interlocked.Increment(ref calls), TimeSpan.FromMilliseconds(20));
 
         poll.Start();
 
@@ -226,7 +226,7 @@ public class AcerPowerSourceScheduleTests
     public void AFailingReadDoesNotStopTheSchedule()
     {
         var calls = 0;
-        using var poll = new AcerPowerSourceSchedule(() =>
+        using var poll = new PowerSourceSchedule(() =>
         {
             if (Interlocked.Increment(ref calls) <= 2) throw new InvalidOperationException("transient EC stall");
         }, TimeSpan.FromMilliseconds(20));

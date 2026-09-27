@@ -5,7 +5,7 @@ namespace AcerHelper.Infrastructure.Plugins;
 
 /// <summary>
 /// The AOT-safe serializer for the probe manifest (docs/vendor-plugins.md §3.3, §3.4), and the in-tree
-/// precedent to copy is <c>AcerModelJsonContext</c> (Infrastructure/Vendors/Acer/AcerModel.cs:34-37): a
+/// precedent to copy is <c>AcerModelJsonContext</c> (plugins/AcerHelper.Vendor.acer-nitro/Acer/AcerModel.cs:34-37): a
 /// <c>[JsonSourceGenerationOptions]</c>-annotated <c>partial class : JsonSerializerContext</c> with one
 /// <c>[JsonSerializable]</c> per wire type. Source generation is the ONLY serialization path used here —
 /// <c>JsonSerializer.Serialize(object)</c> is <c>RequiresDynamicCode</c> and is not AOT-safe (§2.2), whereas

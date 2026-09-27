@@ -8,6 +8,10 @@ public static partial class MachineInfo
     public static partial (string? Manufacturer, string? Product) Read()
         => (ReadFile("/sys/class/dmi/id/sys_vendor"), ReadFile("/sys/class/dmi/id/product_name"));
 
+    // The §3.2 board fields: board_vendor / board_name, the other cheap DMI pair the descriptor carries.
+    internal static partial (string? Board, string? BoardProduct) ReadBoard()
+        => (ReadFile("/sys/class/dmi/id/board_vendor"), ReadFile("/sys/class/dmi/id/board_name"));
+
     private static string? ReadFile(string path)
     {
         try

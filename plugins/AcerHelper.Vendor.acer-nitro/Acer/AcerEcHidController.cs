@@ -26,7 +26,7 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // ONE read exists: ReadPowerSource (feature 0x0000, cmd 0x03, reply byte 7 = source TYPE, the GetACStatus field
 // measured in docs/power-an18-61.md). It follows the SEND-then-GET order above, guards on the 0xE0 ACK, and
 // returns null on anything short of a clean read so the caller can hide the row rather than invent a value. It
-// is a synchronous HID-over-I2C transaction and runs on the caller's slow pool schedule (AcerPowerSourceSchedule,
+// is a synchronous HID-over-I2C transaction and runs on the caller's slow pool schedule (PowerSourceSchedule,
 // single-flight), NEVER on the writer thread and NEVER at the battery poll's 1 Hz — the battery gauge is an OS
 // syscall, this is a bus transaction, and the two must not share a cadence (Infrastructure/BatteryPollSchedule).
 //
@@ -128,7 +128,7 @@ internal sealed partial class AcerEcHidController : IDisposable
     ///
     /// NOT on the writer thread and NOT at 1 Hz: this is a synchronous HID-over-I2C transaction on the bus the
     /// RGB controller shares, so it can block. The caller runs it on a slow pool schedule (single-flight), never
-    /// on the UI thread — see <c>AcerPowerSourceSchedule</c> and the cadence note in the class header.</summary>
+    /// on the UI thread — see <c>PowerSourceSchedule</c> and the cadence note in the class header.</summary>
     public PowerSource? ReadPowerSource()
     {
         if (!Available) return null;
