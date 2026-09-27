@@ -98,9 +98,11 @@ public sealed partial class LaptopService
         // a stability verdict.
         if (OnAc != true)
             return SweepResult.NotOnAc(OnAc == false
-                ? "the guided sweep requires AC power; unplugged, the platform can accept a Curve-Optimizer write "
-                  + "without applying it, which would make a probe pass against an offset that was never set"
-                : "the power source is unknown, so AC cannot be proven; the guided sweep requires AC power");
+                ? "the guided sweep requires the original charger; on battery or USB-C PD the platform can accept "
+                  + "a Curve-Optimizer write without applying it, which would make a probe pass against an offset "
+                  + "that was never set"
+                : "the power source is unknown, so the original charger cannot be proven; the guided sweep "
+                  + "requires the original charger");
 
         // THE FLAG IS SET FIRST, in its own critical section. It used to be taken together with the base snapshot,
         // but the snapshot now depends on the domain projection, which reads the processor topology — and the gate

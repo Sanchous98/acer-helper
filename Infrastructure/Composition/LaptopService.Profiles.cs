@@ -82,9 +82,11 @@ public sealed partial class LaptopService
     /// <c>ApplyStoredMode</c> re-enter the lock, which C# locks allow.
     ///
     /// THE RULE: USB-C Power Delivery and the battery demote to "not AC"; everything else (the barrel, and any
-    /// machine without a typed read) keeps the OS answer. The demotion is one-way on purpose — the typed read
-    /// never PROMOTES to AC, so a contradictory reading cannot show the AC profile set on a discharging
-    /// machine.</summary>
+    /// machine without a typed read) keeps the OS answer. "AC" here therefore means the ORIGINAL barrel/DC-in
+    /// charger, not external power in general — USB-C PD IS external power, and folding it into the battery is
+    /// the owner's rule ("при питании от usb-c должны оставаться те же профили питания, что и от батареи").
+    /// The demotion is one-way on purpose — the typed read never PROMOTES to AC, so a contradictory reading
+    /// cannot show the AC profile set on a discharging machine.</summary>
     private void RecomputeOnAc()
     {
         bool? effective = _adapter is PowerSource.UsbC or PowerSource.Battery ? false : _osOnAc;

@@ -541,7 +541,7 @@ public class UndervoltSweepViewModelTests
     {
         var vm = Vm((_, _) => Task.FromResult(Result()));
 
-        Assert.Contains("AC power", vm.StartHint);   // WHY the button is greyed on battery — must stay visible
+        Assert.Contains("original charger", vm.StartHint);   // WHY the button is greyed on battery — must stay visible
         Assert.Contains("min", vm.StartHint);        // the ETA
         Assert.DoesNotContain("performance profile", vm.StartHint);   // the procedure lives in the confirmation
         Assert.False(string.IsNullOrWhiteSpace(vm.Caution));

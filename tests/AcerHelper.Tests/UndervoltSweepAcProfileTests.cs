@@ -373,7 +373,7 @@ public class UndervoltSweepViewModelAcGateTests
         Assert.False(confirmed);                             // the refusal is before the consent prompt
         Assert.False(vm.HasResult);
         Assert.False(vm.IsRunning);
-        Assert.Contains(reported, t => t.Contains("AC"));
+        Assert.Contains(reported, t => t.Contains("charger"));
     }
 
     [Fact]
@@ -419,11 +419,11 @@ public class UndervoltSweepViewModelAcGateTests
     {
         var vm = Vm(onAc: true);
 
-        Assert.Contains("AC power", vm.StartHint);
+        Assert.Contains("original charger", vm.StartHint);
         Assert.DoesNotContain("performance profile", vm.StartHint);
     }
 
-    /// <summary>The refusal stop is rendered as an AC message, never as a stability outcome.</summary>
+    /// <summary>The refusal stop is rendered as a charger message, never as a stability outcome.</summary>
     [Fact]
     public void TheRefusalStopTextIsTranslated()
         => Assert.True(Loc.Ru("uv.refused_ac") is not null);
