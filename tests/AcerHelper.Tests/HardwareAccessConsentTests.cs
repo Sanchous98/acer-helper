@@ -143,10 +143,10 @@ public class HardwareAccessConsentTests
     [InlineData(false)]
     public void EveryWordThePromptShowsIsTranslated(bool isAcer)
     {
-        var body = HardwareAccessConsent.Body(HardwareAccess.ConsentRows(isAcer));
-
-        var keys = new[] { HardwareAccessConsent.Title(), HardwareAccessConsent.ConfirmText() }
-            .Concat(FrameLines(body))
+        // The keys, not the rendered English: under English Loc.T(key) returns the neutral sentence, so a guard
+        // that wants to prove a Russian row exists must collect the keys themselves — the classes expose theirs
+        // (ShownKeys), and the installer's entries already carry theirs.
+        var keys = HardwareAccessConsent.ShownKeys
             .Concat(HardwareAccess.DescribedEntries(isAcer).Select(e => e.Description))
             .ToArray();
 
@@ -159,10 +159,9 @@ public class HardwareAccessConsentTests
 
         // The confirm button deliberately reuses the DRIVER prompt's word for "agree to install this" rather
         // than inventing a second one, so the key is the one that prompt's button already had translated —
-        // asserting the literal is what keeps the reuse a decision instead of a coincidence (in English, the
-        // source text IS the key, which is why this reads as the word itself).
-        Assert.Equal("Install", HardwareAccessConsent.ConfirmText());
-        Assert.Equal(Loc.Ru("Install"), Loc.Ru(HardwareAccessConsent.ConfirmText()));
+        // asserting the key is what keeps the reuse a decision instead of a coincidence.
+        Assert.Equal("uv.install", HardwareAccessConsent.ConfirmKey);
+        Assert.Equal(Loc.Ru("uv.install"), Loc.Ru(HardwareAccessConsent.ConfirmKey));
     }
 
     /// <summary>THE ROWS ARE THE ENTRY LIST, IN BOTH DIRECTIONS AND IN ORDER, for a machine of each kind. The

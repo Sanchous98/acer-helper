@@ -429,8 +429,8 @@ public class OptionsAssemblerPresenceTests
     {
         var h = new OptionsAssemblerHarness(declare: d => d.Declare(Keys.Timeout, new FakeChoicePort("5", "30", "60")));
 
-        Assert.Contains(Loc.T("Keyboard backlight timeout:"), AssemblerRows.Labels(h));
-        Assert.DoesNotContain(Loc.T("Keyboard backlight timeout"), AssemblerRows.Labels(h));
+        Assert.Contains(Loc.T("opt.kbd_timeout_label"), AssemblerRows.Labels(h));
+        Assert.DoesNotContain(Loc.T("opt.kbd_timeout"), AssemblerRows.Labels(h));
     }
 
     /// <summary>The blue-light row is suppressed when the tint port has no levels to offer — the presence
@@ -448,7 +448,7 @@ public class OptionsAssemblerPresenceTests
         var h = new OptionsAssemblerHarness();
         h.F.Device.DisplayTint = new FakeDisplayTint(levels);
 
-        var row = AssemblerRows.Choices(h).FirstOrDefault(c => c.Label == Loc.T("Blue-light filter:"));
+        var row = AssemblerRows.Choices(h).FirstOrDefault(c => c.Label == Loc.T("opt.blue_light_label"));
 
         Assert.Equal(present, row != null);
         Assert.Equal(options, row?.Options.Count ?? 0);
@@ -513,7 +513,7 @@ public class OptionsAssemblerPresenceTests
         Assert.True(h.F.Service.TintApplies.Drain(TimeSpan.FromSeconds(10)), "the apply never finished");
 
         Assert.Equal([1], tint.ApplyCalls);
-        Assert.Equal([Loc.T("{0} failed", Loc.T("Blue-light filter:"))], h.RunPosted());
+        Assert.Equal([Loc.T("opt.setting_failed", Loc.T("opt.blue_light_label"))], h.RunPosted());
     }
 
     /// <summary>
@@ -571,7 +571,7 @@ public class OptionsAssemblerPresenceTests
 
         var rows = h.Assembler.PowerSourceProfiles();
 
-        Assert.Equal([Loc.T("Profile on AC power:"), Loc.T("Profile on battery:")], rows.Select(r => r.Label));
+        Assert.Equal([Loc.T("opt.profile_ac_label"), Loc.T("opt.profile_battery_label")], rows.Select(r => r.Label));
         Assert.Equal(TestProfiles.All.Select(p => Loc.T(p.DisplayName)), rows[0].Options);
         Assert.Equal(TestProfiles.All.Select(p => Loc.T(p.DisplayName)), rows[1].Options);
     }
@@ -618,7 +618,7 @@ public class OptionsAssemblerConfirmTests
                                  .Where(t => t.ConfirmAsync != null || t.Confirm != null)
                                  .Select(t => t.Label);
 
-        Assert.Equal([Loc.T("Calibration (full cycle)")], gated);
+        Assert.Equal([Loc.T("bat.calibration")], gated);
     }
 }
 

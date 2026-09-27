@@ -4,6 +4,7 @@ using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Diagnostics;
+using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
@@ -30,6 +31,11 @@ internal sealed class AppController
     // through the cheap OS call and posted to the UI. Deliberately separate from _poll — see RefreshBattery and
     // Infrastructure/BatteryPollSchedule for why the heavy full pass must not run at this rate.
     private readonly BatteryPollSchedule _batteryPoll;
+    // The power-source row's own, SLOWER schedule (barrel vs USB-C PD vs battery). Null on a machine without the
+    // EC channel — the device declares the property or it does not, and no property means no schedule and no row.
+    // Deliberately not the 1 Hz battery poll: the read is an EC HID transaction, not an OS syscall — see
+    // Infrastructure/AcerPowerSourceSchedule.
+    private readonly AcerPowerSourceSchedule? _powerSourcePoll;
     // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Created before
     // the UI so the follows-profile toggle can reach it, then re-pointed at each fresh UI via Attach.
     private readonly LightingCoordinator _lightingCoord;
@@ -168,6 +174,20 @@ internal sealed class AppController
         // see RefreshBattery for the measurement — and this path is the ONLY writer of the battery card.
         _batteryPoll = new BatteryPollSchedule(RefreshBattery);
         _batteryPoll.Start();
+        // ...and the power-source row on its own, EVEN SLOWER schedule. The read is an Acer EC HID transaction
+        // (SEND-then-GET on the HID-over-I2C bus), not the cheap OS gauge the fast path is, so it must not ride
+        // the 1 Hz tick. Built ONLY when the device exposes the property (the EC channel is present); on any other
+        // machine there is no schedule and no row — see Infrastructure/AcerPowerSourceSchedule.
+        if (_vm.Battery is { HasPowerSource: true })
+        {
+            _powerSourcePoll = new AcerPowerSourceSchedule(RefreshPowerSource);
+            _powerSourcePoll.Start();
+            // Fill the row NOW rather than leaving it blank until the first five-second tick, off the UI thread
+            // like every other hardware read. Wrapped the same way the battery's initial read is: a direct
+            // Task.Run is not covered by PeriodicSchedule's try/catch, and an unobserved pool exception is still
+            // a fault.
+            _ = Task.Run(() => { try { RefreshPowerSource(); } catch { /* the 5 s tick is the retry */ } });
+        }
         // Fill the battery row NOW rather than leaving it on its constructor placeholder until the first one-second
         // tick, off the UI thread like every other hardware read. From here on this is the ONLY writer of the
         // battery card: the heavy pass no longer feeds it (see the Tick remark), so a snapshot it read at the
@@ -217,13 +237,13 @@ internal sealed class AppController
         if (_svc.GetDeviceFlag(askedFlag + setup.Name, false)) return;
 
         await Task.Delay(1500);   // let the flyout finish opening before stealing focus
-        var yes = await _windows.ConfirmDriverAsync(setup.Name, setup.Purpose, setup.SourceUrl);
+        var yes = await _windows.ConfirmDriverAsync(setup.Name, Loc.T(setup.Purpose), setup.SourceUrl);
         _svc.SetDeviceFlag(askedFlag + setup.Name, true);
         if (!yes) return;
 
         // The installer blocks for seconds and self-elevates; keep it off the dispatcher and report either way.
         var error = await Task.Run(setup.Install);
-        Notify(error ?? Loc.T("{0} installed — restart Acer Helper to use {1}", setup.Name, setup.Purpose));
+        Notify(error ?? Loc.T("uv.driver_installed", setup.Name, Loc.T(setup.Purpose)));
     }
 
     // Assemble the localized UI: the lighting view-model, the dashboard view-model (with its UiActions), the
@@ -295,7 +315,8 @@ internal sealed class AppController
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.TurboToggles, SetTurboToggles,
                 b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
-                _svc.Language, SetLanguage)),
+                _svc.Language, SetLanguage),
+            BuildSweepSection()),
             lighting, _notifications);   // the session's notifications: handed in, not built here — see the field
 
         var windows = new FlyoutCoordinator(vm);
@@ -367,7 +388,7 @@ internal sealed class AppController
     {
         if (_pendingUpdate is not { } u) return;
         _vm.SetUpdate(u.version, u.changelog, u.act);
-        _tray.SetUpdate(Loc.T("Update available: v{0}", u.version), () =>
+        _tray.SetUpdate(Loc.T("update.available", u.version), () =>
         {
             _windows.OpenMain();
             _vm.ShowUpdate();
@@ -449,7 +470,7 @@ internal sealed class AppController
             _ = Task.Run(async () =>
             {
                 try { await body().ConfigureAwait(false); }
-                catch (Exception ex) { PostNotify(() => Loc.T("Update failed") + Err(ex.Message)); }
+                catch (Exception ex) { PostNotify(() => Loc.T("update.failed") + Err(ex.Message)); }
                 finally { Dispatcher.UIThread.Post(() => _updating = false); }
             });
         }
@@ -457,15 +478,15 @@ internal sealed class AppController
         {
             // Scheduler refused (rare): release the guard here rather than wedge it, and say so off-blocking.
             _updating = false;
-            PostNotify(() => Loc.T("Update failed"));
+            PostNotify(() => Loc.T("update.failed"));
         }
     }
 
     private async Task SelfUpdateAsync(string assetUrl)
     {
-        PostNotify(() => Loc.T("Downloading update…"));
+        PostNotify(() => Loc.T("update.downloading"));
         var (ok, err) = await AppImageUpdater.ReplaceAsync(assetUrl).ConfigureAwait(false);
-        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(err)); return; }
+        if (!ok) { PostNotify(() => Loc.T("update.failed") + Err(err)); return; }
         // The AppImage is replaced in place; hand the relaunch + quit to the UI thread (the process tree and the
         // application lifetime belong there). Restart spawns the new binary detached, then we exit.
         Dispatcher.UIThread.Post(() => { AppImageUpdater.Restart(); ExitApp(); });
@@ -475,13 +496,13 @@ internal sealed class AppController
     // the helper upgrades in place and relaunches us.
     private async Task SelfUpdateWindowsAsync(string assetUrl)
     {
-        PostNotify(() => Loc.T("Downloading update…"));
+        PostNotify(() => Loc.T("update.downloading"));
         var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl).ConfigureAwait(false);
-        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(res)); return; }
+        if (!ok) { PostNotify(() => Loc.T("update.failed") + Err(res)); return; }
 
-        PostNotify(() => Loc.T("Installing update…"));
+        PostNotify(() => Loc.T("update.installing"));
         if (WindowsUpdater.InstallAndExit(res!)) Dispatcher.UIThread.Post(ExitApp);
-        else PostNotify(() => Loc.T("Update failed"));
+        else PostNotify(() => Loc.T("update.failed"));
     }
 
     // Portable/development Windows run: download the release MSI and launch the Windows Installer, which shows
@@ -489,12 +510,12 @@ internal sealed class AppController
     // and nothing to relaunch — the installer places the app under Program Files while this copy keeps running.
     private async Task InstallWindowsAsync(string assetUrl)
     {
-        PostNotify(() => Loc.T("Downloading update…"));
+        PostNotify(() => Loc.T("update.downloading"));
         var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl).ConfigureAwait(false);
-        if (!ok) { PostNotify(() => Loc.T("Update failed") + Err(res)); return; }
+        if (!ok) { PostNotify(() => Loc.T("update.failed") + Err(res)); return; }
 
-        PostNotify(() => Loc.T("Launching installer…"));
-        if (!WindowsUpdater.LaunchInstaller(res!)) PostNotify(() => Loc.T("Update failed"));
+        PostNotify(() => Loc.T("update.launching"));
+        if (!WindowsUpdater.LaunchInstaller(res!)) PostNotify(() => Loc.T("update.failed"));
     }
 
     private async Task GrantHardwareAccessAsync()
@@ -524,7 +545,7 @@ internal sealed class AppController
                 case HardwareAccess.AccessInstall.Applied:
                     _accessRebootPending = false;   // a retry that took clears the reboot state for good
                     _vm.ClearHardwareAccess();      // ...and takes the entry off the bell, whichever one it was
-                    Notify(Loc.T("Hardware access granted — restart to use the unlocked controls."));
+                    Notify(Loc.T("access.granted_restart"));
                     break;
                 // The files are in /etc but the parameters are not live: acer_wmi could not be reloaded (in use,
                 // or — worse — unloaded and then not loaded back, which leaves profiles, fans and temperatures
@@ -543,10 +564,10 @@ internal sealed class AppController
                 case HardwareAccess.AccessInstall.PendingReboot:
                     _accessRebootPending = true;   // remembered so a language rebuild re-states the condition
                     _vm.SetHardwareAccessRebootPending(RequestHardwareAccess);   // and the retry travels with it
-                    Notify(Loc.T("Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot."));
+                    Notify(Loc.T("access.granted_reboot"));
                     break;
                 default:
-                    Notify(Loc.T("Grant access failed") + Err(err));
+                    Notify(Loc.T("access.failed") + Err(err));
                     break;
             }
         });
@@ -592,7 +613,7 @@ internal sealed class AppController
     {
         var r = _svc.ApplyProfile(p);
         if (r.ok) _lightingCoord.OnProfileApplied(p);
-        else Notify(Loc.T("Failed to set {0}", Loc.T(p.DisplayName)) + Err(r.error));
+        else Notify(Loc.T("profile.set_failed", Loc.T(p.DisplayName)) + Err(r.error));
         Refresh();
         return r.ok;
     }
@@ -604,7 +625,7 @@ internal sealed class AppController
     {
         var r = _svc.SetTurbo(on);
         if (r.applied is { } applied) _lightingCoord.OnProfileApplied(applied);
-        else Notify(Loc.T("Turbo failed") + Err(r.error));
+        else Notify(Loc.T("profile.turbo_failed") + Err(r.error));
         Refresh();
         return r.applied != null;
     }
@@ -629,7 +650,7 @@ internal sealed class AppController
     private void SetGpuOc(int core, int mem)
     {
         var r = _svc.SetGpuOc(core, mem);
-        if (!r.ok) Notify(Loc.T("GPU overclock failed") + Err(r.error));
+        if (!r.ok) Notify(Loc.T("oc.gpu_overclock_failed") + Err(r.error));
     }
 
     // CPU power-mode overlay, applied + persisted per performance mode by the service. Like SetGpuOc: no
@@ -637,7 +658,7 @@ internal sealed class AppController
     private void SetCpuPower(string id)
     {
         var r = _svc.SetCpuPower(id);
-        if (!r.ok) Notify(Loc.T("Power mode failed") + Err(r.error));
+        if (!r.ok) Notify(Loc.T("oc.power_mode_failed") + Err(r.error));
     }
 
     // CPU undervolt (all-core Curve Optimizer), applied + persisted per performance mode by the service. Unlike
@@ -651,8 +672,32 @@ internal sealed class AppController
             var r = _svc.SetCoValues(counts);
             // The reason travels WITH the result, so there is nothing to capture before the post: reading a
             // shared field after handing the work off was a race on the error itself.
-            if (!r.ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("CPU undervolt failed") + Err(r.error)));
+            if (!r.ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("uv.failed") + Err(r.error)));
         });
+    }
+
+    // The guided sweep, built only where the service says this machine can run one (a Curve Optimizer, the load
+    // tool's affinity adapter, sensors, and at least one CPU cluster). The run and save bodies are pool tasks —
+    // the sweep blocks for minutes and the save is a mailbox transaction that can wait on the shared PCI lock —
+    // and the progress crosses as an IProgress captured on the UI thread below. The confirmation is the same
+    // modal-over-flyout idiom as every other dangerous write; _windows is assigned after BuildUi returns, and the
+    // lambda reads it at call time.
+    private SweepSection? BuildSweepSection()
+    {
+        if (!_svc.CanSweepUndervolt) return null;
+        var options = new SweepOptions();
+        return new SweepSection(
+            _svc.SweepDomains(),
+            _svc.UndervoltSweepEta(options),
+            () => _windows.ConfirmUndervoltSweepAsync(),
+            (progress, ct) => Task.Run(() => _svc.RunUndervoltSweep(options, p => progress?.Report(p), ct), ct),
+            result => Task.Run(() =>
+            {
+                var (ok, error) = _svc.SaveUndervoltSweep(result);
+                IReadOnlyList<int>? counts = ok ? _svc.CurrentCoDomains() : null;
+                return (ok, counts, error);
+            }),
+            _svc.OnAc);
     }
 
     private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
@@ -687,7 +732,7 @@ internal sealed class AppController
     private Task AskCardwireGpuAccessAsync() => Task.Run(() =>
     {
         var (ok, error) = _svc.ApplyCardwireGpuAccess();
-        if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("GPU access failed") + Err(error)));
+        if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("cardwire.failed") + Err(error)));
     });
 
     // ---- hotkeys ----
@@ -710,7 +755,7 @@ internal sealed class AppController
         var applied = _svc.TogglePerformance();
         if (applied != null)
         {
-            Notify(Loc.T("Profile: {0}", Loc.T(applied.DisplayName)));
+            Notify(Loc.T("profile.status", Loc.T(applied.DisplayName)));
             _lightingCoord.OnProfileApplied(applied);
         }
         Refresh();
@@ -742,7 +787,7 @@ internal sealed class AppController
         SensorSnapshot Sensors, string? Status, bool TurboToggles,
         bool ModeChanged, FanAxisState? Fan, GpuAxisState? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
-        ILightZoneMode? Lights);
+        ILightZoneMode? Lights, bool? OnAc);
 
     // Kick a refresh. All hardware I/O runs on a pool thread (BackgroundPass) so a stalled EC/WMI read can never
     // freeze the UI; the VM/tray updates are posted back to the UI thread (UiPass). Single-flight: if a pass is
@@ -790,6 +835,19 @@ internal sealed class AppController
         // Re-resolve _vm at POST time so a live language rebuild — which swaps the view-model on the UI thread —
         // is picked up. The UI thread owns _vm and the post runs there, so the read is race-free.
         Dispatcher.UIThread.Post(() => _vm.Battery?.Update(battery), DispatcherPriority.Normal);
+    }
+
+    // The power-source row's read, on the AcerPowerSourceSchedule's pool thread (five seconds). Like RefreshBattery
+    // it reads on the pool and posts on the UI thread; unlike it, the read is an Acer EC HID transaction, which is
+    // why it has its own slower schedule and does NOT run on the 1 Hz tick. The op is null on a machine without the
+    // EC channel (then no schedule exists either). A failed read yields PowerSource.Unknown, which SetPowerSource
+    // turns into "hide the row" — never a guessed value. Re-resolves _vm.Battery at POST time for the same
+    // live-language-rebuild reason as RefreshBattery.
+    private void RefreshPowerSource()
+    {
+        if (_svc.Device.Battery.PowerSource is not { } read) return;
+        var source = read();
+        Dispatcher.UIThread.Post(() => _vm.Battery?.SetPowerSource(source), DispatcherPriority.Normal);
     }
 
     // Pool thread: every blocking hardware read/write lives here. LaptopService guards its shared Settings state
@@ -868,7 +926,8 @@ internal sealed class AppController
             var baseP = _svc.BaseProfile(current);
 
             var t = new Tick(current, selectable, baseP, sensors, status, turbo,
-                             modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights);
+                             modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights,
+                             _svc.OnAc);
             // Posted at Normal, ABOVE the render priority (Default is below it on some backends): the reflected
             // values are applied before the next paint, so a continuously-rendering window cannot keep a stale
             // reading on screen behind a backlog of render jobs.
@@ -895,6 +954,10 @@ internal sealed class AppController
     // inline Refresh exactly. No hardware reads here — everything is pre-read in the Tick.
     private void UiPass(Tick t)
     {
+        // The guided sweep's AC gate needs the live source on the UI thread: the refresh pass reads it in the
+        // background and posts it here, so the Start button reflects a plug/unplug without a rebuild. It is
+        // pushed before anything else because the sweep section reads it when the user starts a run.
+        _vm.TuningPage?.SetOnAc(t.OnAc);
         if (t.ModeChanged)
         {
             if (t.Fan is { } fan) _vm.ReloadFans(fan);
@@ -932,6 +995,7 @@ internal sealed class AppController
         _exiting = true;
         _poll.Dispose();
         _batteryPoll.Dispose();
+        _powerSourcePoll?.Dispose();
         _updateSchedule.Dispose();   // stops the periodic check and unsubscribes the wake hook (its Linux half owns a gdbus child)
         GateStatsLog.Write();   // inline, not queued: a task started here might never get to run
         _lightingCoord.Dispose();

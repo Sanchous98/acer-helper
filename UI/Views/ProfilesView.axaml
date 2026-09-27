@@ -20,8 +20,8 @@
            when the option is off), so toggling the option never changes the section height. While the option is
            off, Turbo is instead one of the segment buttons below. -->
       <Grid ColumnDefinitions="*,Auto,Auto">
-        <TextBlock Classes="section" Text="{l:Tr PERFORMANCE}" VerticalAlignment="Center"/>
-        <TextBlock Grid.Column="1" Text="{l:Tr Turbo}" FontWeight="SemiBold" VerticalAlignment="Center"
+        <TextBlock Classes="section" Text="{l:Tr 'section.performance'}" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{l:Tr 'profile.turbo'}" FontWeight="SemiBold" VerticalAlignment="Center"
                    Margin="0,0,8,0" IsVisible="{Binding ShowTurboSwitch}"/>
         <ToggleSwitch Grid.Column="2" VerticalAlignment="Center" Classes.ghost="{Binding !ShowTurboSwitch}"
                       IsChecked="{Binding TurboOn, Mode=TwoWay}" IsEnabled="{Binding TurboEnabled}"/>

@@ -20,10 +20,10 @@ public sealed partial class DellDevice
 
     private static readonly ThermalRow[] ThermalRows =
     [
-        new("Quiet",            "Quiet",       ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
-        new("Cool",             "Cool",        ProfileKind.Quiet,       new AccentColor(0x00, 0x89, 0x7B)),
-        new("Optimized",        "Optimized",   ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-        new("UltraPerformance", "Performance", ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
+        new("Quiet",            "profile.quiet",       ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        new("Cool",             "power.profile_cool",  ProfileKind.Quiet,       new AccentColor(0x00, 0x89, 0x7B)),
+        new("Optimized",        "power.profile_optimized", ProfileKind.Balanced, new AccentColor(0x2E, 0x7D, 0x32)),
+        new("UltraPerformance", "profile.performance", ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
     ];
 
     private static readonly PerformanceProfile[] Thermal =
@@ -59,7 +59,7 @@ public sealed partial class DellDevice
         // rather than offer controls that always fail Access Denied. Mirrors the Linux RequiresPassword gate.
         if (bios.AdminPasswordSet())
         {
-            StatusMessage = "Dell BIOS controls are locked by a BIOS admin password and were hidden.";
+            StatusMessage = "status.dell_locked";
             return;
         }
 
@@ -71,7 +71,7 @@ public sealed partial class DellDevice
         if (bios.Get("FnLock") != null)
             Declare(_bios.Flag("FnLock"));
         if (bios.Get("UsbPowerShare") != null)
-            Declare(_bios.Choice("UsbPowerShare", [new("Disabled", "Off"), new("Enabled", "On")]));
+            Declare(_bios.Choice("UsbPowerShare", [new("Disabled", "level.off"), new("Enabled", "level.on")]));
         // Plain keyboard backlight (Disabled/Dim/Bright) as discrete brightness levels — shown in the
         // Lighting window, not Options. (On Linux the same knob is the kernel LED class, wired generically.)
         if (bios.Get("KeyboardIllumination") != null)

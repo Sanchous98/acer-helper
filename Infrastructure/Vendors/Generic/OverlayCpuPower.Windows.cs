@@ -34,9 +34,9 @@ internal sealed partial class OverlayCpuPower : ICpuPower
     // Display order: efficiency -> balanced -> performance (the OS slider's low-to-high spectrum).
     private static readonly ChoiceOption[] _modes =
     [
-        new(Efficiency.ToString(),  "Best power efficiency"),
-        new(Balanced.ToString(),    "Balanced"),
-        new(Performance.ToString(), "Best performance"),
+        new(Efficiency.ToString(),  "oc.best_power_efficiency"),
+        new(Balanced.ToString(),    "profile.balanced"),
+        new(Performance.ToString(), "power.profile_best_performance"),
     ];
 
     public IReadOnlyList<ChoiceOption> Modes => _modes;

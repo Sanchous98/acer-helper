@@ -13,8 +13,8 @@ public class NavigationLabelsTests
     [Fact]
     public void ThePerformanceDrawerIsNotSynonymousWithOptions()
     {
-        var performance = Loc.Ru("Overclocking and Power");
-        var options = Loc.Ru("Options");
+        var performance = Loc.Ru("oc.title");
+        var options = Loc.Ru("nav.options");
         Assert.NotNull(performance);
         Assert.NotNull(options);
 

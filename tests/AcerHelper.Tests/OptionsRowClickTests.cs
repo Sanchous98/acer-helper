@@ -149,8 +149,8 @@ public class OptionsRowClickTests
         public ToggleRowViewModel AutostartRow { get; } =
             vm.Rows.OfType<ToggleRowViewModel>().Single(r => r.Label == Loc.T(auto.Label));
         public ToggleRowViewModel TurboRow { get; } =
-            vm.Rows.OfType<ToggleRowViewModel>().Single(r => r.Label == Loc.T("Turbo key toggles Turbo"));
+            vm.Rows.OfType<ToggleRowViewModel>().Single(r => r.Label == Loc.T("profile.turbo_key_toggles"));
         public ChoiceRowViewModel LanguageRow { get; } =
-            vm.Rows.OfType<ChoiceRowViewModel>().Single(r => r.Label == Loc.T("Language"));
+            vm.Rows.OfType<ChoiceRowViewModel>().Single(r => r.Label == Loc.T("lang.label"));
     }
 }

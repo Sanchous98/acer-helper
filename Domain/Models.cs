@@ -96,6 +96,14 @@ public sealed record ChoiceOption(string Id, string DisplayName);
 /// <summary>Charge/discharge state of the battery.</summary>
 public enum BatteryState { Unknown, Charging, Discharging, Idle }
 
+/// <summary>Where the machine is drawing power from right now. The vendor-agnostic vocabulary for an adapter
+/// TYPE, which is a stronger fact than the "AC vs battery" most firmware reports: <see cref="Barrel"/> is the
+/// DC-in barrel/plaque charger and <see cref="UsbC"/> is USB Power Delivery over Type-C. <see cref="Unknown"/>
+/// is "the machine is on AC (or the read failed) but the source was not identified" — never a guess; the UI
+/// treats it as "do not show the row". The encoding (Acer EC HID feature 0x0000, cmd 0x03, reply byte 7) lives
+/// in Infrastructure only.</summary>
+public enum PowerSource { Unknown, Battery, Barrel, UsbC }
+
 /// <summary>Live battery readings. -1 means unknown/unsupported. <see cref="HealthPercent"/> is
 /// full-charge ÷ design capacity; <see cref="CycleCount"/> is often unsupported by the EC.
 ///

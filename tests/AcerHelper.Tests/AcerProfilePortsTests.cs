@@ -173,7 +173,7 @@ public class AcerProfilePortsTests
         var port = new AcerMappedProfiles(new FakePowerProfiles(Kernel.All));
 
         Assert.Equal(["6", "0", "1", "4", "5"], port.All.Select(p => p.Id));
-        Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"], port.All.Select(p => p.DisplayName));
+        Assert.Equal(["profile.eco", "profile.quiet", "profile.balanced", "profile.performance", "profile.turbo"], port.All.Select(p => p.DisplayName));
         Assert.Equal([ProfileKind.Eco, ProfileKind.Quiet, ProfileKind.Balanced, ProfileKind.Performance, ProfileKind.Turbo],
                      port.All.Select(p => port.Traits(p).Kind));
         // ...and NOT the source's reading of the very same token, which is the whole reason for the override: the
@@ -195,7 +195,7 @@ public class AcerProfilePortsTests
         var reversed = Kernel.All.Reverse().ToList();
         var port = new AcerMappedProfiles(new FakePowerProfiles(reversed));
 
-        Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"], port.All.Select(p => p.DisplayName));
+        Assert.Equal(["profile.eco", "profile.quiet", "profile.balanced", "profile.performance", "profile.turbo"], port.All.Select(p => p.DisplayName));
     }
 
     /// <summary>A source offering only some of the five yields exactly its Acer subset — the subset is a hardware
@@ -208,7 +208,7 @@ public class AcerProfilePortsTests
         var port = new AcerMappedProfiles(new FakePowerProfiles([Kernel.Performance, Kernel.Quiet, Kernel.Balanced]));
 
         Assert.Equal(["0", "1", "5"], port.All.Select(p => p.Id));            // Quiet, Balanced, Turbo
-        Assert.Equal(["Quiet", "Balanced", "Turbo"], port.All.Select(p => p.DisplayName));
+        Assert.Equal(["profile.quiet", "profile.balanced", "profile.turbo"], port.All.Select(p => p.DisplayName));
     }
 
     /// <summary>A token the table cannot name is dropped from the list rather than guessed at. <c>"cool"</c> is a
@@ -223,7 +223,7 @@ public class AcerProfilePortsTests
         var cool = new PerformanceProfile("cool", "Cool");
 
         var mixed = new AcerMappedProfiles(new FakePowerProfiles([Kernel.Quiet, cool]));
-        Assert.Equal(["Quiet"], mixed.All.Select(p => p.DisplayName));
+        Assert.Equal(["profile.quiet"], mixed.All.Select(p => p.DisplayName));
 
         var only = new AcerMappedProfiles(new FakePowerProfiles([cool]));
         Assert.Empty(only.All);
@@ -239,11 +239,11 @@ public class AcerProfilePortsTests
     /// The whole table is exercised rather than the one risky row, because a table with a single transposed pair
     /// would pass a single-case test.</summary>
     [Theory]
-    [InlineData("low-power", "6", "Eco")]
-    [InlineData("quiet", "0", "Quiet")]
-    [InlineData("balanced", "1", "Balanced")]
-    [InlineData("balanced-performance", "4", "Performance")]
-    [InlineData("performance", "5", "Turbo")]
+    [InlineData("low-power", "6", "profile.eco")]
+    [InlineData("quiet", "0", "profile.quiet")]
+    [InlineData("balanced", "1", "profile.balanced")]
+    [InlineData("balanced-performance", "4", "profile.performance")]
+    [InlineData("performance", "5", "profile.turbo")]
     public void CurrentIsTheAcerProfileTheSourcesTokenStandsFor(string token, string id, string name)
     {
         var inner = new FakePowerProfiles(Kernel.All, current: new PerformanceProfile(token, token));
@@ -284,11 +284,11 @@ public class AcerProfilePortsTests
     /// second identity for a mode that already has one is how a port ends up being "fixed" later to accept both.
     /// The trap row is explicit: Turbo is written as <c>"performance"</c>.</summary>
     [Theory]
-    [InlineData("Eco", "low-power")]
-    [InlineData("Quiet", "quiet")]
-    [InlineData("Balanced", "balanced")]
-    [InlineData("Performance", "balanced-performance")]
-    [InlineData("Turbo", "performance")]
+    [InlineData("profile.eco", "low-power")]
+    [InlineData("profile.quiet", "quiet")]
+    [InlineData("profile.balanced", "balanced")]
+    [InlineData("profile.performance", "balanced-performance")]
+    [InlineData("profile.turbo", "performance")]
     public void SetHandsTheInnerPortItsOwnObjectForThatToken(string acerName, string token)
     {
         var inner = new FakePowerProfiles(Kernel.All);
@@ -333,13 +333,13 @@ public class AcerProfilePortsTests
         var inner = new FakePowerProfiles([Kernel.Quiet, Kernel.Balanced]);
         var port = new AcerMappedProfiles(inner);
 
-        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Turbo")));
+        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "profile.turbo")));
 
         Assert.Empty(inner.SetCallIds);
         Assert.Contains("\"performance\"", port.LastError);
 
         // A refusal is not sticky: the next successful write must not report the earlier one's reason.
-        Assert.True(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Balanced")));
+        Assert.True(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "profile.balanced")));
         Assert.Null(port.LastError);
     }
 
@@ -354,7 +354,7 @@ public class AcerProfilePortsTests
         var inner = new FakePowerProfiles(Kernel.All) { SetResult = false };
         var port = new AcerMappedProfiles(inner);
 
-        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "Turbo")));
+        Assert.False(port.Set(AcerProfiles.All.Single(p => p.DisplayName == "profile.turbo")));
 
         Assert.Equal(["performance"], inner.SetCallIds);
         Assert.Null(port.LastError);
@@ -398,9 +398,9 @@ public class AcerProfilePortsTests
         Assert.Equal(port.All.Select(p => p.Id), port.Selectable().Select(p => p.Id));
 
         // The declared policy, both sources, by display name so the mapping is readable.
-        Assert.Equal(["Eco", "Balanced"],
+        Assert.Equal(["profile.eco", "profile.balanced"],
                      port.AvailableOn(onAc: false).Select(p => p.DisplayName));
-        Assert.Equal(["Quiet", "Balanced", "Performance", "Turbo"],
+        Assert.Equal(["profile.quiet", "profile.balanced", "profile.performance", "profile.turbo"],
                      port.AvailableOn(onAc: true).Select(p => p.DisplayName));
 
         var ctor = Assert.Single(typeof(AcerMappedProfiles).GetConstructors());
@@ -415,6 +415,6 @@ public class AcerProfilePortsTests
     {
         var port = new EcSyncedProfiles(new AcerMappedProfiles(new FakePowerProfiles(Kernel.All)), _ => true);
 
-        Assert.Equal(["Eco", "Balanced"], port.AvailableOn(onAc: false).Select(p => p.DisplayName));
+        Assert.Equal(["profile.eco", "profile.balanced"], port.AvailableOn(onAc: false).Select(p => p.DisplayName));
     }
 }

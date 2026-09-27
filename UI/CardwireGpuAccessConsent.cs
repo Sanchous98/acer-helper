@@ -31,37 +31,35 @@ public static class CardwireGpuAccessConsent
 {
     /// <summary>The dialog's heading. A question, like the driver prompt's and the install prompt's, because the
     /// dialog asks rather than announces and the confirm button is the answer to it.</summary>
-    private const string TitleKey = "Let Acer Helper use the discrete GPU?";
+    private const string TitleKey = "cardwire.title";
 
     /// <summary>The confirm button's word. NOT "Install" (the other two prompts' word): nothing is installed here,
     /// and reusing it would promise a change to the machine that this prompt has just finished saying does not
     /// happen.</summary>
-    private const string ConfirmKey = "Allow";
+    private const string ConfirmKey = "cardwire.allow";
 
     /// <summary>WHO IS ASKED, AND FOR WHOM — said first, because it is the part that is easy to get wrong from the
     /// outside: the app is not asking for the machine's GPU or for the user's account, it is asking a daemon to
     /// stop hiding one device from one already-running process. The last clause is the honest contrast with the
     /// install prompt next door: nothing is written, and no file permission moves.</summary>
-    private const string AskKey =
-        "Acer Helper will ask cardwire — the daemon that hides the discrete GPU from programs it has not allowed "
-        + "to use it — to let THIS process see that GPU. Nothing is written to disk and no file permission "
-        + "changes: the request is a D-Bus call, made while the app is running.";
+    private const string AskKey = "cardwire.ask";
 
     /// <summary>THE LIMITS, and the first two are the reason this prompt exists rather than a tooltip. The grant
     /// belongs to this process and ends with it (so "off" is not what ends it), and cardwire offers no revoke at
     /// all — so the switch turns off the NEXT start, and quitting the app is the only thing that ends the grant
     /// that is in force now. A user who reads neither of those would reasonably believe the toggle takes it back.
     /// </summary>
-    private const string LimitsKey =
-        "The grant belongs to this one process and disappears the moment Acer Helper exits. cardwire has no way "
-        + "to take it back, so it cannot be revoked while the app runs — turning this option off stops the next "
-        + "start, not this one, and quitting the app is what ends it.";
+    private const string LimitsKey = "cardwire.limits";
 
     /// <summary>THE OTHERS, said last so it is what the user is left with: the block is per-CLIENT, so nothing
     /// about any other program changes. And once per run is worth stating plainly, because it is the behaviour
     /// that follows from the grant's lifetime (see the second sentence above).</summary>
-    private const string AfterwardsKey =
-        "Every other application stays blocked. While this option stays on, Acer Helper asks again on each start.";
+    private const string AfterwardsKey = "cardwire.afterwards";
+
+    /// <summary>Every neutral key this prompt shows. FOR THE LOCALIZATION GUARD (see
+    /// <c>CardwireGpuAccessTests</c>): the rendered body is the neutral English, so proving a Russian row
+    /// exists needs the keys.</summary>
+    internal static readonly string[] ShownKeys = [TitleKey, ConfirmKey, AskKey, LimitsKey, AfterwardsKey];
 
     /// <summary>The dialog's heading, localized.</summary>
     public static string Title() => Loc.T(TitleKey);

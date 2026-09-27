@@ -32,7 +32,7 @@ public class AcerProfilesTests
     [Fact]
     public void TheDisplayOrderIsTheTableOrder()
     {
-        Assert.Equal(["Eco", "Quiet", "Balanced", "Performance", "Turbo"],
+        Assert.Equal(["profile.eco", "profile.quiet", "profile.balanced", "profile.performance", "profile.turbo"],
             AcerProfiles.All.Select(p => p.DisplayName));
     }
 
@@ -54,11 +54,11 @@ public class AcerProfilesTests
     /// comment in the source says these are the only colours the firmware accepts on that write — sending
     /// anything else reverts to amber, which is why they are worth freezing exactly.</summary>
     [Theory]
-    [InlineData(0x06, "Eco", ProfileKind.Eco, 0x43A047, 0x00DC10)]
-    [InlineData(0x00, "Quiet", ProfileKind.Quiet, 0x1B5E20, 0xFFFFFF)]
-    [InlineData(0x01, "Balanced", ProfileKind.Balanced, 0xF57C00, 0xC7AE00)]
-    [InlineData(0x04, "Performance", ProfileKind.Performance, 0xD32F2F, 0xC7092E)]
-    [InlineData(0x05, "Turbo", ProfileKind.Turbo, 0x9C27B0, 0xFF00C7)]
+    [InlineData(0x06, "profile.eco", ProfileKind.Eco, 0x43A047, 0x00DC10)]
+    [InlineData(0x00, "profile.quiet", ProfileKind.Quiet, 0x1B5E20, 0xFFFFFF)]
+    [InlineData(0x01, "profile.balanced", ProfileKind.Balanced, 0xF57C00, 0xC7AE00)]
+    [InlineData(0x04, "profile.performance", ProfileKind.Performance, 0xD32F2F, 0xC7092E)]
+    [InlineData(0x05, "profile.turbo", ProfileKind.Turbo, 0x9C27B0, 0xFF00C7)]
     public void EachProfileCarriesItsKindAccentAndFlash(int b, string name, ProfileKind kind, int accent, int flash)
     {
         var fromTable = AcerProfiles.All.Single(p => p.Id == b.ToString());
@@ -154,13 +154,13 @@ public class AcerProfilesTests
     /// display order. The 0x53 row is the real supported-mask this hardware reports: bits 0, 1, 4 and 6, i.e.
     /// everything except Turbo — and the result is in DISPLAY order, not mask order.</summary>
     [Theory]
-    [InlineData(0x00, "Eco,Quiet,Balanced,Performance,Turbo")]   // 0 = unknown → all
-    [InlineData(0x01, "Quiet")]                                  // bit 0 → byte 0x00
-    [InlineData(0x02, "Balanced")]                               // bit 1 → byte 0x01
-    [InlineData(0x10, "Performance")]                            // bit 4 → byte 0x04
-    [InlineData(0x20, "Turbo")]                                  // bit 5 → byte 0x05
-    [InlineData(0x40, "Eco")]                                    // bit 6 → byte 0x06
-    [InlineData(0x53, "Eco,Quiet,Balanced,Performance")]         // the real machine
+    [InlineData(0x00, "profile.eco,profile.quiet,profile.balanced,profile.performance,profile.turbo")]   // 0 = unknown → all
+    [InlineData(0x01, "profile.quiet")]                                  // bit 0 → byte 0x00
+    [InlineData(0x02, "profile.balanced")]                               // bit 1 → byte 0x01
+    [InlineData(0x10, "profile.performance")]                            // bit 4 → byte 0x04
+    [InlineData(0x20, "profile.turbo")]                                  // bit 5 → byte 0x05
+    [InlineData(0x40, "profile.eco")]                                    // bit 6 → byte 0x06
+    [InlineData(0x53, "profile.eco,profile.quiet,profile.balanced,profile.performance")]         // the real machine
     [InlineData(0x80, "")]                                       // no known bit → nothing at all
     public void TheMaskBitForAProfileIsItsEcByte(int mask, string expected)
     {
@@ -209,14 +209,14 @@ public class AcerProfilesTests
 
         Assert.NotNull(turbo);
         Assert.Equal("5", turbo.Id);                       // 0x05, the EC's Turbo byte
-        Assert.Equal("Turbo", turbo.DisplayName);
+        Assert.Equal("profile.turbo", turbo.DisplayName);
         Assert.Equal(ProfileKind.Turbo, AcerProfiles.TraitsOf(turbo).Kind);   // NOT ProfileKind.Performance
 
         var performance = AcerProfiles.FromChoiceName("balanced-performance");
 
         Assert.NotNull(performance);
         Assert.Equal("4", performance.Id);                 // 0x04
-        Assert.Equal("Performance", performance.DisplayName);
+        Assert.Equal("profile.performance", performance.DisplayName);
         Assert.Equal(ProfileKind.Performance, AcerProfiles.TraitsOf(performance).Kind);
     }
 

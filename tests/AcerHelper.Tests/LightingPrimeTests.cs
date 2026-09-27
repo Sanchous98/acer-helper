@@ -150,7 +150,7 @@ public class LightingPrimeTests
 
         Assert.Equal(0, vm.Level);                       // placeholder: what a failed read would give
         Assert.Equal(0, port.GetCount);                  // ...and the build cost no read at all
-        Assert.Equal(Loc.T("Off"), vm.LevelName);
+        Assert.Equal(Loc.T("level.off"), vm.LevelName);
 
         vm.SyncFromHardware();                           // the prime
 
@@ -189,7 +189,7 @@ public class LightingPrimeTests
         // 50 ms of wall clock — the read and its post are one unit apart, and that unit is the whole race.
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the prime's correction was never delivered");
         Assert.Equal(1, vm.Level);
-        Assert.Equal(Loc.T("Dim"), vm.LevelName);
+        Assert.Equal(Loc.T("level.dim"), vm.LevelName);
 
         // The other half is a non-event, so it needs a signal of its own or it is decided by elapsed time. The
         // control's worker is FIFO, so a write the snap-back had wrongly queued would run BEFORE whatever is

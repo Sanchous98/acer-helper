@@ -106,7 +106,7 @@ public sealed partial class FansViewModel : SectionViewModel
     [RelayCommand]
     private async Task OpenCpuCurve()
     {
-        var dlg = new FanCurveDialogViewModel(Loc.T("CPU fan curve"), CpuCurve, CpuUseCurve, u => CpuUseCurve = u);
+        var dlg = new FanCurveDialogViewModel(Loc.T("fan.cpu_curve"), CpuCurve, CpuUseCurve, u => CpuUseCurve = u);
         _cpuDialog = dlg;
         try { await _showCurve(dlg); } finally { _cpuDialog = null; }
     }
@@ -114,7 +114,7 @@ public sealed partial class FansViewModel : SectionViewModel
     [RelayCommand]
     private async Task OpenGpuCurve()
     {
-        var dlg = new FanCurveDialogViewModel(Loc.T("GPU fan curve"), GpuCurve, GpuUseCurve, u => GpuUseCurve = u);
+        var dlg = new FanCurveDialogViewModel(Loc.T("fan.gpu_curve"), GpuCurve, GpuUseCurve, u => GpuUseCurve = u);
         _gpuDialog = dlg;
         try { await _showCurve(dlg); } finally { _gpuDialog = null; }
     }

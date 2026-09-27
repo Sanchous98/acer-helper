@@ -29,7 +29,7 @@ public sealed partial class AcerDevice
         Own(_gaming = new WmiInvoker("AcerGamingFunction"));
         if (!_gaming.Available)
         {
-            StatusMessage = _gaming.LastError ?? "Acer WMI unavailable — run as administrator.";
+            StatusMessage = _gaming.LastError ?? "status.acer_wmi_unavailable";
             return;   // keep the inherited generic ports only
         }
 
@@ -51,6 +51,12 @@ public sealed partial class AcerDevice
         // restore, producing a visible Balanced->Turbo->Eco cascade at every boot. This write is invisible: no
         // WMI write, no palette flash, and it cannot disagree with what the UI shows. See docs/power-an18-61.md.
         if (_ec != null && CurrentProfile() is { } cur) _ec.Apply(AcerProfiles.TraitsOf(cur).Kind);
+
+        // The power source (barrel vs USB-C PD) rides the SAME EC channel, so it is declared only where that
+        // channel exists — on a model without it the property stays null and the row never appears. The op maps
+        // a failed read to Unknown (the row hides), never a guessed source. Read on a slow pool schedule, not
+        // the 1 Hz battery poll: see AcerPowerSourceSchedule and AcerEcHidController.ReadPowerSource.
+        if (_ec != null) Battery.PowerSource = () => _ec.ReadPowerSource() ?? PowerSource.Unknown;
 
         // The GPU-mode (MUX) switch, over the SAME gaming-WMI helpers the profiles use. The recovered interface
         // is selector 9 = capability, selector 2 = read, `(mode << 8) | 2` = write (see AcerGpuMux.cs for the

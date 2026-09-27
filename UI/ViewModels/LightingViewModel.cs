@@ -238,8 +238,15 @@ public sealed partial class LightViewModel : ObservableObject
     /// panel matching, so it stays English. Bind the tab header to <see cref="DisplayName"/> instead.</summary>
     public string Title { get; }
 
-    /// <summary>The localized tab header for this zone (translation of <see cref="Title"/>).</summary>
-    public string DisplayName => Loc.T(Title);
+    /// <summary>The localized tab header for this zone. The zone NAME is the settings key and for the shipped
+    /// Acer zones ("Keyboard"/"Lightbar") maps to a neutral display key; an unknown zone falls back to the raw
+    /// name (a key with no entry returns itself, so the tab still renders something honest).</summary>
+    public string DisplayName => Loc.T(Title switch
+    {
+        "Keyboard" => "light.zone_keyboard",
+        "Lightbar" => "light.zone_lightbar",
+        _          => Title,
+    });
 
     public IReadOnlyList<string> EffectNames { get; }
     public ObservableCollection<ZoneColorViewModel> Zones { get; } = [];
@@ -312,7 +319,7 @@ public sealed partial class LightViewModel : ObservableObject
             for (var i = 0; i < zones; i++)
             {
                 var c = i < state.ZoneColors.Length ? FromPacked(state.ZoneColors[i]) : def[i % def.Length];
-                var z = new ZoneColorViewModel(Loc.T("Zone {0}", i + 1), c);
+                var z = new ZoneColorViewModel(Loc.T("light.zone", i + 1), c);
                 z.PropertyChanged += OnZoneChanged;
                 Zones.Add(z);
             }
@@ -591,9 +598,9 @@ public sealed partial class BacklightViewModel : ObservableObject
 
     private static IReadOnlyList<string> NamesFor(int max) => max switch
     {
-        1 => [Loc.T("Off"), Loc.T("On")],
-        2 => [Loc.T("Off"), Loc.T("Dim"), Loc.T("Bright")],
-        3 => [Loc.T("Off"), Loc.T("Low"), Loc.T("Medium"), Loc.T("High")],
-        _ => [.. Enumerable.Range(0, max + 1).Select(i => i == 0 ? Loc.T("Off") : i.ToString())],
+        1 => [Loc.T("level.off"), Loc.T("level.on")],
+        2 => [Loc.T("level.off"), Loc.T("level.dim"), Loc.T("level.bright")],
+        3 => [Loc.T("level.off"), Loc.T("level.low"), Loc.T("level.medium"), Loc.T("level.high")],
+        _ => [.. Enumerable.Range(0, max + 1).Select(i => i == 0 ? Loc.T("level.off") : i.ToString())],
     };
 }

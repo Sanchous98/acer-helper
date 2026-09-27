@@ -17,6 +17,57 @@ per-mode presets and the lightbar palette, and the EC does report it back as "cu
 Consequence before this was fixed: the app could show (and the EC could report) "Turbo" while the dGPU ran
 the lowest power row — 70 W base TGP plus whatever Dynamic Boost granted, ~78 W sustained instead of ~108 W.
 
+## Power source (AC / USB-C PD) on the same channel — investigation 2026-09-27
+
+Acer's own Windows service (`AcerSysHardwareService.exe`, the `sysmonitorservice` package behind
+"Acer System Monitor Service") reads the power source over this SAME EC HID channel, not through any
+Windows API. Its binary carries:
+
+```
+acer::KYD100::EcHID::GetPDAdaptorCap      ← PD adaptor capability
+acer::KYD100::EcHID::GetACStatus          ← AC status
+acer::KYD100::EcHID::GetDeviceStatus / GetSystemStatus / GetSystemHealthInformation
+isAuto=%d acStatus=%X pdStatus=%X isECHID=%d
+PD_Support
+PD only device: Insufficient PD Power
+```
+
+NitroSense itself only talks to that service over TCP `127.0.0.1:46933` (`SET_DEVICE_DATA: …`); the EC
+work is the service's. So "does NitroSense know how it is being powered" is answerable, and the answer is
+the EC HID channel this app already opens (`AcerEcHidController`, VID `0x1025`/PID `0x174B`, usage page
+`0xFF05`, 65-byte reports).
+
+**Full feature-id sweep (cmd `0x02`, ids 0..255, read-only) reproduced the earlier reconnaissance:**
+exactly 8 live feature groups — `0x0000, 0x0001, 0x0002, 0x0005, 0x0008, 0x0009, 0x000A, 0x000B`; every
+other id answers the rejection marker (`A0 FF FF …`, reply byte 2 = `0xFF`). A command sweep on each live
+group (cmd 0..0x20, read-only) found the useful reads:
+
+| read | meaning |
+|---|---|
+| `0x0000` cmd `0x00`..`0x08` | a block of status scalars. `cmd 0x05 → 5` matches Acer's log `System usage mode capability: 5`; `cmd 0x03/0x04 → 4` matches `OC profile capability: 4`; `cmd 0x08 → 2`; `cmd 0x06 → 1` |
+| `0x0002` cmd `0x02` | the OC profile table row (22 bytes; four rows) |
+| `0x0008` cmd `0x01` | fan rpm (mirrors the measured state) |
+
+**The power-source field is now pinned and measured** (differential reads with the Type-C source, the barrel
+charger and nothing attached, cross-checked against `BatteryStatus` in `tools/echid-powerlog.ps1`):
+
+```
+GetACStatus = EC HID feature 0x0000, command 0x03, reply byte[7]
+    0x00 = no external power
+    0x01 = barrel (DC-in) charger      // charged at ~43-48 W in the measurement
+    0x04 = USB-C / Power Delivery      // charged at ~18 W in the measurement
+```
+
+Neighbours in the same `0x0000` status block also track the barrel: `cmd 0x02` byte[7] = `0x01` only with the
+barrel, `cmd 0x06` byte[7] = `0x00` only with the barrel (`cmd 0x03` is the full source enum and the one to
+use). So the app can show **plaque vs USB-C PD vs unplugged** on Windows straight from the channel it already
+has open, exactly as Acer's own service does — no Windows API, no wattage heuristic.
+
+This read needs a `ReadFeature` on `AcerEcHidController` (today the class only writes the usage mode; a read on
+this channel is SEND-then-read, see the wire-format note above). The reconnaissance tools
+(`tools/echid-probe.ps1`, `echid-cmd-sweep.ps1`, `echid-snapshot.ps1`, `echid-watch.ps1`, `echid-powerlog.ps1`)
+are read-only (`SetFeature(get)` + `GetFeature`).
+
 ## Device and wire format
 
 | | |

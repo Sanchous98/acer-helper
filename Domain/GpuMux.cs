@@ -72,8 +72,8 @@ public interface IGpuMux
 }
 
 /// <summary>The shared MUX vocabulary: the mode display names and the sentences the UI and the adapters share.
-/// The warning is the SAME sentence as the AsusArmouryMessages.GpuRebootWarning the armoury port uses, so one
-/// Russian entry covers both (Localization/Strings.ru.resx is keyed by the English text).</summary>
+/// Each member is a neutral localization key; the UI resolves it with <c>Loc.T</c> and the Russian sentence lives
+/// under the same key in Localization/Strings.ru.resx.</summary>
 public static class GpuMuxMessages
 {
     /// <summary>The generic mode labels. Each backend maps its own wire values onto these. The labels are kept
@@ -81,29 +81,23 @@ public static class GpuMuxMessages
     /// line (~400px inside the 468px flyout), so a long label would be clipped. The vendor brand words
     /// ("Optimus"/"Ultimate") are dropped from the label, not from the backend's own comments. <see
     /// cref="AutoMode"/> is the Acer-only third wire value (Auto Select / DDS).</summary>
-    public const string HybridMode = "Hybrid";
-    public const string DiscreteMode = "Discrete";
-    public const string AutoMode = "Auto (DDS)";
+    public const string HybridMode = "gpu.mode_hybrid";
+    public const string DiscreteMode = "gpu.mode_discrete";
+    public const string AutoMode = "gpu.mode_auto";
 
     /// <summary>The short note shown NEXT TO THE MUX SWITCHER while the requested/pending value differs from the
     /// original value the card first showed. It explains the trailing <c>*</c> on the current-mode line: the
     /// marked value is applied after a reboot. Kept short so it sits on the switcher's row and does not add a
     /// full-width caption row.</summary>
-    public const string AfterRebootNote = "* Will be applied after a reboot.";
+    public const string AfterRebootNote = "gpu.after_reboot";
 
-    public const string Warning =
-        "Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the "
-        + "screen black — if that happens, force a shutdown by holding the power button, then start the machine "
-        + "and change the mode back from a console or another display. See docs/gpu-mux.md.";
+    public const string Warning = "gpu.reboot_warning";
 
-    public const string Unsupported =
-        "This machine's GPU mode cannot be switched from the app: the vendor's MUX/GPU-mode interface is not "
-        + "publicly documented, and writing an unknown value can leave the screen black. Use the vendor tool "
-        + "(NitroSense/PredatorSense) or the BIOS instead.";
+    public const string Unsupported = "gpu.unsupported";
 
-    public const string UnknownMode = "That is not one of the GPU modes this machine offers.";
+    public const string UnknownMode = "gpu.unknown_mode";
 
     /// <summary>The no-op outcome: the requested mode is the one the device already reports, so there is
     /// nothing to queue and no restart. The UI shows this instead of the "restart to apply" sentence.</summary>
-    public const string AlreadyCurrent = "This is already the current GPU mode.";
+    public const string AlreadyCurrent = "gpu.already_current";
 }

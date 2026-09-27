@@ -20,9 +20,10 @@ namespace AcerHelper.UI.ViewModels;
 public sealed partial class BatteryViewModel : SectionViewModel
 {
     public BatteryViewModel(bool hasInfo, OptionToggle? limit, OptionToggle? calibration, OptionChoice? chargeMode,
-                            Action<Action>? post = null)
+                            Action<Action>? post = null, Func<PowerSource>? powerSource = null)
     {
         ShowInfo = hasInfo;
+        _powerSource = powerSource;
         // The limit row is built FIRST so the calibration row can re-read it. Enabling calibration clears the
         // firmware's ~80% cap (calibration wants a full 100% charge), but the two are SEPARATE flags on the SAME
         // WMI control (Domain/Battery.cs): the calibration write changes hardware the limit row is showing, and
@@ -50,6 +51,10 @@ public sealed partial class BatteryViewModel : SectionViewModel
 
     public bool ShowInfo { get; }
 
+    // The power-source read op, carried from the device when it exposes one (Battery.PowerSource), null
+    // otherwise — a machine without the EC channel therefore has no schedule behind this row and never shows it.
+    private readonly Func<PowerSource>? _powerSource;
+
     public ToggleRowViewModel? Limit { get; }
     public ToggleRowViewModel? Calibration { get; }
     public ChoiceRowViewModel? Mode { get; }
@@ -76,6 +81,22 @@ public sealed partial class BatteryViewModel : SectionViewModel
     [ObservableProperty] private string _powerLabel = "";
     [ObservableProperty] private bool _showPower;
 
+    /// <summary>The power-source row: which source is powering the machine right now — the DC-in barrel/plaque
+    /// charger, USB Power Delivery over Type-C, or the battery. Its label is fixed ("Power source") and its value
+    /// is the named source. This is a DIFFERENT, costlier transport from the live power rate above (an Acer EC
+    /// HID transaction, not the OS gauge), so it is fed by <see cref="SetPowerSource"/> on the slow
+    /// <c>AcerPowerSourceSchedule</c> rather than by <see cref="Update"/>. The row exists only when the device
+    /// exposes the property AND the read resolves to a named source; <see cref="PowerSource.Unknown"/> — a failed
+    /// read, or an unmapped code — hides it rather than showing a made-up source.</summary>
+    [ObservableProperty] private string _sourceLabel = "";
+    [ObservableProperty] private string _source = "";
+    [ObservableProperty] private bool _showSource;
+
+    /// <summary>True when this machine exposes the power-source read at all (the device declared the property).
+    /// The app uses it to decide whether to build the slow <c>AcerPowerSourceSchedule</c> — a machine without the
+    /// EC channel gets no schedule and never shows the row.</summary>
+    public bool HasPowerSource => _powerSource != null;
+
     /// <summary>Replace the three charging rows' construction-time placeholders with the real hardware values,
     /// once, right after the UI is built — off the UI thread, on each row's own serial worker. Mirrors
     /// <see cref="OptionsViewModel.Prime"/>, and is called from <c>AppController</c> rather than from this
@@ -100,9 +121,9 @@ public sealed partial class BatteryViewModel : SectionViewModel
         Charge = s.Percent < 0 ? "—" : $"{s.Percent}%";
         State = s.State switch
         {
-            BatteryState.Charging    => Loc.T("Charging"),
-            BatteryState.Discharging => Loc.T("On battery"),
-            BatteryState.Idle        => Loc.T("Plugged in"),
+            BatteryState.Charging    => Loc.T("bat.charging"),
+            BatteryState.Discharging => Loc.T("bat.on_battery"),
+            BatteryState.Idle        => Loc.T("bat.plugged_in"),
             _                        => "",
         };
         Health = s.HealthPercent < 0 ? "" : $"{s.HealthPercent}%";
@@ -115,8 +136,8 @@ public sealed partial class BatteryViewModel : SectionViewModel
         // "nothing to report" and hide the row, which is the one case where the two are the same answer.
         if (s.PowerWatts is { } w && w != 0)
         {
-            PowerLabel = Loc.T(w < 0 ? "Power draw" : "Charging power");
-            Power = Loc.T("{0:0.0} W", Math.Abs(w));
+            PowerLabel = Loc.T(w < 0 ? "bat.power_draw" : "bat.charging_power");
+            Power = Loc.T("bat.watts", Math.Abs(w));
             ShowPower = true;
         }
         else
@@ -127,6 +148,34 @@ public sealed partial class BatteryViewModel : SectionViewModel
         }
 
         ReconcileCalibration();
+    }
+
+    /// <summary>Apply one power-source reading to the row. Called from the slow <c>AcerPowerSourceSchedule</c>
+    /// tick on the UI thread, with the value the op already read off the UI thread. <see cref="PowerSource.Unknown"/>
+    /// and a machine with no op both leave the row hidden: a failed read must not invent a source. A mapped source
+    /// sets the fixed label and the translated name.</summary>
+    public void SetPowerSource(PowerSource source)
+    {
+        // Gate on the OP, not just the value: a machine without the property must never show the row, even if
+        // some caller hands a value in. The app also never builds the schedule for such a machine, so this is the
+        // second half of the same "presence is the property" rule.
+        if (_powerSource == null || source == PowerSource.Unknown)
+        {
+            SourceLabel = "";
+            Source = "";
+            ShowSource = false;
+            return;
+        }
+
+        SourceLabel = Loc.T("bat.power_source");
+        Source = Loc.T(source switch
+        {
+            PowerSource.Barrel => "bat.source_ac",
+            PowerSource.UsbC   => "bat.source_usbc",
+            PowerSource.Battery => "bat.source_battery",
+            _                  => "",   // unreachable: Unknown returned above
+        });
+        ShowSource = true;
     }
 
     /// <summary>Re-read the calibration row from the firmware on the periodic refresh, so the switch tracks

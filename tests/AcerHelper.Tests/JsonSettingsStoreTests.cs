@@ -115,6 +115,35 @@ public class JsonSettingsStoreTests
                      JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.Settings));
     }
 
+    /// <summary>A stale member the current build no longer has must be IGNORED, not treated as corruption. The
+    /// watchdog's <c>CoPreset.Suspect</c> was removed on 2026-09-27, but a settings.json written by a build that
+    /// had it still carries <c>"Suspect": true</c>. The source-generated context uses
+    /// <see cref="JsonUnmappedMemberHandling.Skip"/> (the default, pinned explicitly), so the unknown member is
+    /// skipped and the rest of the file loads — the alternative would be a <c>JsonException</c> into the
+    /// corrupt-file rescue, i.e. factory defaults and a <c>.bad</c> file for a merely outdated setting.
+    ///
+    /// Mutation that reddens it: setting <c>UnmappedMemberHandling = Disallow</c> on
+    /// <c>SettingsJsonContext</c>.</summary>
+    [Fact]
+    public void AStaleMemberTheBuildNoLongerHasIsIgnored()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(dir.SettingsPath, """
+            {
+              "CoPresets": {
+                "balanced": { "AllCore": -30, "Domains": { "ccd:0": -20 }, "Suspect": true }
+              }
+            }
+            """);
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+
+        var co = Present(loaded.CoPresets, "balanced");
+        Assert.Equal(-30, co.AllCore);
+        Assert.Equal(-20, Present(co.Domains, "ccd:0"));
+        Assert.False(File.Exists(dir.SettingsPath + ".bad"));   // ignored, not rescued
+    }
+
     /// <summary>The store's half of the hand-off: <see cref="JsonSettingsStore.Load"/> builds the session's
     /// model WITH the set it is handed, the same way the test fake does — the real path, not only the fake's.
     /// Both halves are asserted: the model holds the declarations, and the file's values still came through, so

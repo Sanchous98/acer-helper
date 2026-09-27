@@ -1,5 +1,6 @@
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Generic;
+using AcerHelper.Localization;
 
 namespace AcerHelper.Infrastructure.Vendors.Acer;
 
@@ -143,7 +144,7 @@ internal sealed class AcerMappedProfiles(IPowerProfiles inner)
         if (target == null)
         {
             _refusal = choice == null
-                ? $"\"{profile.DisplayName}\" is not one of the machine's performance profiles"
+                ? $"\"{Loc.T(profile.DisplayName)}\" is not one of the machine's performance profiles"
                 : $"this machine's profile source does not offer \"{choice}\"";
             return false;
         }

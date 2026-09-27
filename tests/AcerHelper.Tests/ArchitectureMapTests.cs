@@ -180,10 +180,12 @@ public class ArchitectureMapTests
     /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
     /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
-    /// already reads the preset. Application is NINE files today — the four this docstring used to name, plus the
+    /// already reads the preset. Application is TEN files today — the four this docstring used to name, plus the
     /// family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
-    /// Undervolt, DeclaredSetting, each one contract plus its use cases) — and the rule is
-    /// the reason for every boundary in each of them, not an accident of the moves.
+    /// Undervolt, DeclaredSetting, each one contract plus its use cases); the automatic-undervolt wrapper
+    /// (CpuLoadTest, UndervoltSweep) was among them until it left for Infrastructure on 2026-09-27 (see the
+    /// paragraph below), which is why the count is what it is and not larger — and the rule is the reason for
+    /// every boundary in each of them, not an accident of the moves.
     ///
     /// WHAT IT STILL FORBIDS, so nobody mistakes the above for a relaxation: a use case that needs the STORED
     /// CONTAINER (the per-mode presets and the graph they live in) or a vendor port by name still cannot live
@@ -208,6 +210,18 @@ public class ArchitectureMapTests
     /// reason, and dropping it here would be a rule change smuggled into a move. The UI may still reach
     /// Infrastructure (it does, by design; see the file's own docstring); this rule fences Application, which
     /// has no such need.
+    ///
+    /// WHAT LEFT APPLICATION 2026-09-27, AND WHY THE RULE GOT SMALLER RATHER THAN LOOSER. The owner ruled that
+    /// the automatic undervolt is in substance a WRAPPER over the manual voltage change
+    /// (<c>Application/Undervolt.cs</c>) and carries no independent domain logic — it is UI + Infrastructure
+    /// only. So the whole feature moved out of Application into <c>Infrastructure/Vendors/Generic/</c>:
+    /// <c>CpuLoadTest.cs</c> (the load runner) and <c>UndervoltSweep.cs</c>, plus <c>Domain/CpuStress.cs</c> (the
+    /// kernel) into the same folder. (The compute-error canary and the startup watchdog — <c>UndervoltCanary.cs</c>,
+    /// <c>UndervoltWatchdog.cs</c> — were removed outright on 2026-09-27; see docs/auto-undervolt.md.) The
+    /// manual undervolt's own contract pair (<c>Application/Undervolt.cs</c>: <c>IUndervoltTarget</c>/
+    /// <c>ApplyUndervolt</c>) — a genuine use case over the domain port — STAYS, which is exactly the point:
+    /// Application shed the wrapper, not the operation. The rule below is unchanged and no exception was added;
+    /// the move only makes the enumerated set smaller.
     ///
     /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Composition;</c> added to
     /// <c>Application/LightZone.cs</c> reddens this test and no other in the file.</summary>

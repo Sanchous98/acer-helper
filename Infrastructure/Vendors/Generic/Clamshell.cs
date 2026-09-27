@@ -20,7 +20,7 @@ public sealed partial class Clamshell : IClamshell
 
     public Clamshell() => Subscribe();
 
-    public string Label => "Stay awake when lid closed (docked, on AC)";
+    public string Label => "power.clamshell";
     public bool Enabled { get; private set; }
 
     public bool Supported => CanManageLidAction();

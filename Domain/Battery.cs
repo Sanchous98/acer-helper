@@ -38,6 +38,14 @@ public sealed class Battery
     /// Standard/Custom). Null when this machine advertises no such set.</summary>
     public BatteryChoice? ChargeMode { get; internal set; }
 
+    /// <summary>The live power source, when the firmware exposes one. Null on a machine whose OS/firmware
+    /// reports only "AC vs battery" (the generic path) rather than the adapter TYPE — or whose EC channel is
+    /// absent. Read through this op on the slow pass only: the Acer EC read is a SEND-then-GET HID transaction,
+    /// not the cheap OS gauge <see cref="Telemetry"/> is (see Infrastructure/AcerPowerSourceSchedule). Returns
+    /// <see cref="PowerSource.Unknown"/> when the read fails, so a failed read hides the row rather than showing
+    /// a made-up source.</summary>
+    public Func<PowerSource>? PowerSource { get; internal set; }
+
     /// <summary>Live telemetry, or the "unknown" snapshot every field of which is -1 — the same answer the
     /// service gave while the telemetry port could be absent (it defaulted to exactly this record). A machine
     /// with no battery therefore still reads, it just has nothing to report.</summary>

@@ -146,9 +146,9 @@ public class BatteryRowPresenceTests
 
         var labels = AssemblerRows.Labels(h).ToList();
 
-        Assert.Equal(limit, labels.Contains(Loc.T("Charge limit (~80%)")));
-        Assert.Equal(calibration, labels.Contains(Loc.T("Calibration (full cycle)")));
-        Assert.Equal(mode, labels.Contains(Loc.T("Charge mode")));
+        Assert.Equal(limit, labels.Contains(Loc.T("bat.charge_limit")));
+        Assert.Equal(calibration, labels.Contains(Loc.T("bat.calibration")));
+        Assert.Equal(mode, labels.Contains(Loc.T("bat.charge_mode")));
     }
 
     /// <summary>The write path is the one it was: the value reaches the property, and a refused write reports
@@ -262,8 +262,8 @@ public class BatteryPowerTests
         vm.Update(new BatteryInfoSnapshot { State = BatteryState.Discharging, PowerWatts = -12.3 });
 
         Assert.True(vm.ShowPower);
-        Assert.Equal(Loc.T("Power draw"), vm.PowerLabel);
-        Assert.Equal(Loc.T("{0:0.0} W", 12.3), vm.Power);
+        Assert.Equal(Loc.T("bat.power_draw"), vm.PowerLabel);
+        Assert.Equal(Loc.T("bat.watts", 12.3), vm.Power);
     }
 
     /// <summary>On AC the value is positive, and the same row names the charge rate.</summary>
@@ -275,8 +275,8 @@ public class BatteryPowerTests
         vm.Update(new BatteryInfoSnapshot { State = BatteryState.Charging, PowerWatts = 45.0 });
 
         Assert.True(vm.ShowPower);
-        Assert.Equal(Loc.T("Charging power"), vm.PowerLabel);
-        Assert.Equal(Loc.T("{0:0.0} W", 45.0), vm.Power);
+        Assert.Equal(Loc.T("bat.charging_power"), vm.PowerLabel);
+        Assert.Equal(Loc.T("bat.watts", 45.0), vm.Power);
     }
 
     /// <summary>No rate (null) hides the row rather than showing 0 W, and a later reading puts it back — the

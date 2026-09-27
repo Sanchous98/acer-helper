@@ -15,20 +15,37 @@ public sealed class TuningViewModel : ObservableObject
     public CoViewModel? Co { get; }
     public GpuMuxViewModel? GpuMux { get; }
 
+    /// <summary>The guided-undervolt card, built beside the manual sliders it disables while it runs. Optional so
+    /// a machine (or a test) without the sweep keeps the drawer exactly as it was.</summary>
+    public UndervoltSweepViewModel? Sweep { get; }
+
     public bool HasGpu => Gpu != null;
     public bool HasCpu => Cpu != null;
     public bool HasCo => Co != null;
     public bool HasGpuMux => GpuMux != null;
+    public bool HasSweep => Sweep != null;
 
-    /// <summary>Whether the shared "CPU" card should exist at all — the power-mode picker and the undervolt slider
-    /// are independent capabilities that share one header.</summary>
-    public bool HasCpuCard => HasCpu || HasCo;
+    /// <summary>The one "GPU" card hosts BOTH the clock offsets AND the GPU-mode/MUX switch (TuningView merged the
+    /// two GPU cards so the fixed frame fits without a scrollbar), so the card exists while EITHER capability
+    /// does. Each half keeps its own <see cref="HasGpu"/>/<see cref="HasGpuMux"/> visibility inside, so a
+    /// MUX-only machine still shows the switch.</summary>
+    public bool HasGpuOrMux => HasGpu || HasGpuMux;
 
-    public TuningViewModel(GpuViewModel? gpu, CpuViewModel? cpu, CoViewModel? co, GpuMuxViewModel? gpuMux)
+    /// <summary>Whether the shared "CPU" card should exist at all — the power-mode picker and the undervolt
+    /// controls are independent capabilities that share one header.</summary>
+    public bool HasCpuCard => HasCpu || HasCo || HasSweep;
+
+    /// <summary>Push the live power source to whichever child cares (only the guided sweep does today): it is
+    /// refused unless the source is exactly AC. A no-op through a child that does not exist.</summary>
+    public void SetOnAc(bool? onAc) => Sweep?.SetOnAc(onAc);
+
+    public TuningViewModel(GpuViewModel? gpu, CpuViewModel? cpu, CoViewModel? co, GpuMuxViewModel? gpuMux,
+                           UndervoltSweepViewModel? sweep = null)
     {
         Gpu = gpu;
         Cpu = cpu;
         Co = co;
         GpuMux = gpuMux;
+        Sweep = sweep;
     }
 }

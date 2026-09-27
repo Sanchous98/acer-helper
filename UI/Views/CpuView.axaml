@@ -9,8 +9,8 @@
        power-mode overlay mapped to the current performance profile. Laid out like the Options-drawer choices
        (label fills the left, a content-sized dropdown sits on the right) so the select isn't stretched to the
        full card width. -->
-  <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
-    <TextBlock Classes="muted" VerticalAlignment="Center" Margin="0,0,10,0" Text="{l:Tr 'Power mode'}"/>
+  <Grid ColumnDefinitions="*,Auto">
+    <TextBlock Classes="muted" VerticalAlignment="Center" Margin="0,0,10,0" Text="{l:Tr 'oc.power_mode'}"/>
     <ComboBox Grid.Column="1" MinWidth="160" VerticalAlignment="Center"
               ItemsSource="{Binding ModeNames}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"/>
   </Grid>

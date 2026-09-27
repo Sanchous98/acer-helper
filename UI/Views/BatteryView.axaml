@@ -6,7 +6,7 @@
              x:DataType="vm:BatteryViewModel">
   <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}">
     <StackPanel Spacing="10">
-      <TextBlock Classes="section" Text="{l:Tr BATTERY}"/>
+      <TextBlock Classes="section" Text="{l:Tr 'section.battery'}"/>
 
       <!-- Live: big charge %, state, then health / cycles as labelled rows -->
       <StackPanel Spacing="6" IsVisible="{Binding ShowInfo}">
@@ -19,12 +19,18 @@
           <TextBlock Classes="muted" Text="{Binding PowerLabel}"/>
           <TextBlock Grid.Column="1" Text="{Binding Power}"/>
         </Grid>
+        <!-- Power source (barrel vs USB-C PD vs battery): an EC read, shown only when it resolves to a named
+             source. The label is localized in the view-model (SourceLabel), so no literal lives here. -->
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowSource}">
+          <TextBlock Classes="muted" Text="{Binding SourceLabel}"/>
+          <TextBlock Grid.Column="1" Text="{Binding Source}"/>
+        </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowHealth}">
-          <TextBlock Classes="muted" Text="{l:Tr Health}"/>
+          <TextBlock Classes="muted" Text="{l:Tr 'bat.health'}"/>
           <TextBlock Grid.Column="1" Text="{Binding Health}"/>
         </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowCycles}">
-          <TextBlock Classes="muted" Text="{l:Tr 'Charge cycles'}"/>
+          <TextBlock Classes="muted" Text="{l:Tr 'bat.charge_cycles'}"/>
           <TextBlock Grid.Column="1" Text="{Binding Cycles}"/>
         </Grid>
       </StackPanel>

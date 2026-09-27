@@ -14,7 +14,7 @@
       <TextBlock x:Name="TitleText" Classes="h1" TextWrapping="Wrap"/>
       <TextBlock x:Name="MessageText" Classes="muted" TextWrapping="Wrap"/>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
-        <Button x:Name="CancelButton" Content="{l:Tr Cancel}" Padding="16,5"/>
+        <Button x:Name="CancelButton" Content="{l:Tr 'nav.cancel'}" Padding="16,5"/>
         <Button x:Name="ConfirmButton" Classes="accent" Padding="16,5"/>
       </StackPanel>
     </StackPanel>

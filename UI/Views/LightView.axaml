@@ -28,13 +28,13 @@
 
     <!-- Single colour — breathing, or static on a single-zone light (e.g. the lightbar). -->
     <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ShowSingleColor}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Width="64" Text="{l:Tr Colour}"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="64" Text="{l:Tr 'light.colour'}"/>
       <ColorPicker Color="{Binding Color, Mode=TwoWay}"/>
     </StackPanel>
 
     <!-- Brightness (always) -->
     <Grid ColumnDefinitions="64,*,44">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Brightness}"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr 'light.brightness'}"/>
       <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" VerticalAlignment="Center"
               Value="{Binding Brightness, Mode=TwoWay}"/>
       <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
@@ -43,7 +43,7 @@
 
     <!-- Speed — only for effects that have a speed -->
     <Grid ColumnDefinitions="64,*,44" IsVisible="{Binding HasSpeed}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Speed}"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr 'light.speed'}"/>
       <Slider Grid.Column="1" Minimum="0" Maximum="9" VerticalAlignment="Center"
               Value="{Binding Speed, Mode=TwoWay}"/>
       <TextBlock Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right"
@@ -52,10 +52,10 @@
 
     <!-- Direction — only for directional effects (e.g. Wave) -->
     <Grid ColumnDefinitions="64,*" IsVisible="{Binding HasDirection}">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr Direction}"/>
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr 'light.direction'}"/>
       <ToggleSwitch Grid.Column="1" HorizontalAlignment="Left"
                     IsChecked="{Binding ReverseDirection, Mode=TwoWay}"
-                    OffContent="{l:Tr Normal}" OnContent="{l:Tr Reversed}"/>
+                    OffContent="{l:Tr 'light.direction_normal'}" OnContent="{l:Tr 'light.direction_reversed'}"/>
     </Grid>
 
   </StackPanel>

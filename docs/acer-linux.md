@@ -36,6 +36,7 @@ module-free **по построению**, поэтому машина со шт
 | Тип/акцент/вспышка профиля | `AcerProfiles` | `AcerProfiles` (un-suffixed, общий файл) |
 | Гейт по питанию | нет | нет: декоратор удалён 2026-09-20, все пять профилей пишутся на батарее |
 | Конверт мощности | EC HID, отчёт `0xA0`, mode byte | тот же кодек через hidraw; **путь записи на Linux end-to-end не прогонялся** |
+| Источник питания (порт/адаптер vs USB-C PD vs батарея) | EC HID feature `0x0000`, cmd `0x03`, reply byte `7` (`GetACStatus`) | тот же кодек через hidraw (`Battery.PowerSource` → `AcerEcHidController.ReadPowerSource`); **не проверено на Linux**; маршрут `/sys/class/typec/*` + `/sys/class/power_supply/*` рассмотрен и отклонён — см. раздел ниже |
 | Обороты | `GetGamingSysInfo` 0x02/0x06, подписи CPU/GPU | hwmon `fan1_input`/`fan2_input` чипа `acer`, те же подписи |
 | Запись в вентиляторы | `SetGamingFanSpeed` (id 0x01/0x04) + `SetGamingFanBehavior` | hwmon `pwmN`/`pwmN_enable`; ядро внутри зовёт те же gaming-WMI методы |
 | Режим вентиляторов | `FanMode` = 1/2/3 | `pwm_enable` = 2/0/1 — см. отдельную таблицу ниже |
@@ -605,6 +606,34 @@ KWin убрал тинт сам.
 длине от 5 до 65, а ядро пишет `device returned incorrect report (63 vs 164 expected)`. Читаются
 только `0xA1` и `0x00`, и коррелировать их не с чем. Значит чтение яркости этим путём недостижимо
 — что совпадает с уже записанным в `Infrastructure/Vendors/Acer/EneHidController.cs`.
+
+## Источник питания (порт/адаптер vs USB-C PD vs батарея): почему выбран EC-кодек
+
+Задача `docs/task-power-source.md` выводит в карточке батареи, **чем питается машина сейчас**: DC-in порт
+(`Barrel`), USB Power Delivery по Type-C (`UsbC`) или батарея. Windows берёт это из того же EC HID-канала
+(фича `0x0000`, cmd `0x03`, reply byte `7` = `GetACStatus`), что и конверт мощности, — доказано диффом
+`0x04 → 0x00 → 0x01 → 0x00 → 0x04 → 0x00` при `USB-C → батарея → AC → батарея → USB-C → батарея`
+(`docs/power-an18-61.md`).
+
+**На Linux выбран тот же EC-кодек через hidraw, а не `/sys`.** План (§5) предлагал предпочесть mainline
+`/sys/class/typec/*` (`power_role`, PD) и `/sys/class/power_supply/*` (`usb_type`), если они дают то же
+различие. Причины отказа от `/sys`:
+
+1. **Их никто не мерил на этой машине.** Соответствие `usb_type`/`power_role` трём состояниям Acer
+   (`0x00`/`0x01`/`0x04`) не подтверждено замером, а `task-power-source.md` §5 прямо запрещает заявлять
+   это без измерения. Механизм же EC-кодека измерен и уже разобран в этом дереве.
+2. **Он недоступен на моделях без EC HID-канала** — там `Battery.PowerSource` остаётся `null`, и строка
+   просто не появляется. Это и есть правило «не выдумывать значение».
+3. **Кодек общий с Windows** (`AcerEcHidController.ReadPowerSource`): одна реализация, один уже
+   закреплённый тестами разбор ответа (`DecodePowerSource`), никакого второго, Linux-only источника, у
+   которого своя семантика. `/sys/class/typec` вдобавок может отсутствовать вовсе (нет Typec-порта в
+   ядре или конфигурации), и тогда маршрут деградировал бы в дополнительную ветку.
+
+**Что НЕ проверено.** Linux-половина `ReadFeature` (`HIDIOCSFEATURE` + `HIDIOCGFEATURE`) на этой машине не
+прогонялась: как и путь записи конверта, она **untested on Linux hardware**. При любой ошибке
+`ReadFeature` возвращает `false`, `ReadPowerSource` — `null`, а порт — `PowerSource.Unknown`, и строка
+прячется. То есть неправильная догадка здесь означает «строки источника нет», а не неверный источник, —
+это деградация fail-closed, а не отказ.
 
 ## Замеры конверта мощности
 

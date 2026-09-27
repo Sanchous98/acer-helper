@@ -44,8 +44,8 @@ public sealed partial class MonitorViewModel : SectionViewModel
 
         ShowCpuFan = cpu is { Rpm: >= 0 };
         ShowGpuFan = gpu is { Rpm: >= 0 };
-        CpuFan = ShowCpuFan ? Loc.T("{0} rpm", cpu!.Value.Rpm) : "—";
-        GpuFan = ShowGpuFan ? Loc.T("{0} rpm", gpu!.Value.Rpm) : "—";
+        CpuFan = ShowCpuFan ? Loc.T("fan.rpm", cpu!.Value.Rpm) : "—";
+        GpuFan = ShowGpuFan ? Loc.T("fan.rpm", gpu!.Value.Rpm) : "—";
         CpuFanRpm = ShowCpuFan ? cpu!.Value.Rpm : 0;
         GpuFanRpm = ShowGpuFan ? gpu!.Value.Rpm : 0;
     }

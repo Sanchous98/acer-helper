@@ -39,11 +39,11 @@ public static class AcerProfiles
         // per-profile lightbar colours (verified on Nitro AN18-61 via the OPMODE HID report; see
         // docs/lighting-an18-61.md). Given as true RGB — EneHidController.SetProfileFlash serialises these to the
         // OPMODE wire order (B,G,R), which differs from the R,G,B order of the arbitrary-colour writes.
-        new(0x06, "low-power",            "Eco",         ProfileKind.Eco,         new AccentColor(0x43, 0xA0, 0x47), new AccentColor(0x00, 0xDC, 0x10)),
-        new(0x00, "quiet",                "Quiet",       ProfileKind.Quiet,       new AccentColor(0x1B, 0x5E, 0x20), new AccentColor(0xFF, 0xFF, 0xFF)),
-        new(0x01, "balanced",             "Balanced",    ProfileKind.Balanced,    new AccentColor(0xF5, 0x7C, 0x00), new AccentColor(0xC7, 0xAE, 0x00)),
-        new(0x04, "balanced-performance", "Performance", ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F), new AccentColor(0xC7, 0x09, 0x2E)),
-        new(0x05, "performance",          "Turbo",       ProfileKind.Turbo,       new AccentColor(0x9C, 0x27, 0xB0), new AccentColor(0xFF, 0x00, 0xC7))
+        new(0x06, "low-power",            "profile.eco",         ProfileKind.Eco,         new AccentColor(0x43, 0xA0, 0x47), new AccentColor(0x00, 0xDC, 0x10)),
+        new(0x00, "quiet",                "profile.quiet",       ProfileKind.Quiet,       new AccentColor(0x1B, 0x5E, 0x20), new AccentColor(0xFF, 0xFF, 0xFF)),
+        new(0x01, "balanced",             "profile.balanced",    ProfileKind.Balanced,    new AccentColor(0xF5, 0x7C, 0x00), new AccentColor(0xC7, 0xAE, 0x00)),
+        new(0x04, "balanced-performance", "profile.performance", ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F), new AccentColor(0xC7, 0x09, 0x2E)),
+        new(0x05, "performance",          "profile.turbo",       ProfileKind.Turbo,       new AccentColor(0x9C, 0x27, 0xB0), new AccentColor(0xFF, 0x00, 0xC7))
     ];
 
     /// <summary>All standard profiles, display order.</summary>

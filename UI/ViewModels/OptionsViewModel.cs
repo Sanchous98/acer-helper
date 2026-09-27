@@ -109,9 +109,9 @@ public sealed class OptionsViewModel : SectionViewModel
         // now). Endonyms stay in their own language; only "System" is translated. Picking one rebuilds the
         // whole UI live in the new language (see AppController.SetLanguage).
         AppLanguage[] langValues = [AppLanguage.System, AppLanguage.English, AppLanguage.Russian];
-        string[] langNames = [Loc.T("System"), "English", "Русский"];
+        string[] langNames = [Loc.T("lang.system"), "English", "Русский"];
         var langIndex = Math.Max(0, Array.IndexOf(langValues, o.Language));
-        vm.Rows.Add(new ChoiceRowViewModel(new OptionChoice(Loc.T("Language"), true, langNames, langIndex,
+        vm.Rows.Add(new ChoiceRowViewModel(new OptionChoice(Loc.T("lang.label"), true, langNames, langIndex,
             i => o.SetLanguage(langValues[i])), post));
 
         foreach (var t in o.HwToggles) vm.Rows.Add(new ToggleRowViewModel(t, post));
@@ -128,8 +128,8 @@ public sealed class OptionsViewModel : SectionViewModel
         // The row exists when the machine HAS a Turbo profile, and which modes those are is the offering port's
         // own reading (ProfileTraits) — the profile record stopped carrying the class on 2026-09-22.
         if (device.PowerProfiles is { } tpp && tpp.All.Any(p => ProfileTraits.Of(tpp, p).Kind == ProfileKind.Turbo))
-            vm.Rows.Add(new ToggleRowViewModel(Loc.T("Turbo key toggles Turbo"), o.TurboToggles, true, o.SetTurboToggles,
-                tip: Loc.T("Otherwise the Turbo key cycles through profiles."), post: post));
+            vm.Rows.Add(new ToggleRowViewModel(Loc.T("profile.turbo_key_toggles"), o.TurboToggles, true, o.SetTurboToggles,
+                tip: Loc.T("profile.turbo_key_cycles"), post: post));
 
         if (device.Autostart is { } auto)
             // Placeholder + a deferred read: IsEnabled() shells out to schtasks.exe and waits up to 5 s, so on

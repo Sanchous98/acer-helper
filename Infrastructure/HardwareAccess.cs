@@ -70,31 +70,19 @@ public static class HardwareAccess
         new("60-acer-helper.rules",
             ["/etc/udev/rules.d/60-acer-helper.rules", "/usr/lib/udev/rules.d/60-acer-helper.rules"],
             false,
-            "Write access for the {0} group to the nodes the app drives: the performance/thermal profile, "
-            + "the keyboard-backlight brightness and timeout, the Acer fan-speed controls, the battery charge mode "
-            + "and thresholds, and the Dell BIOS attributes — plus session access to the two Acer HID interfaces "
-            + "(RGB keyboard/lightbar and the power-envelope channel) and to the keyboard that carries the Nitro key. "
-            + "It also covers the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, "
-            + "rsmu_cmd and smn), which is how the Curve Optimizer undervolt reaches the processor without the app "
-            + "ever running as root."),
+            "consent.write_access_group"),
         new("acer-helper-smu-perms.service",
             ["/etc/systemd/system/acer-helper-smu-perms.service"],
             false,
-            "Write access for the {0} group to the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd and smn), re-applied at every boot by a systemd unit: the udev rule above can only grant them when the driver's bind event reaches a running udev, which is not what happens on a machine whose ryzen_smu module is loaded from the initramfs. This is what keeps the CPU undervolt working after a restart."),
+            "consent.write_access_smu_unit"),
         new("acer-helper.conf",
             ["/etc/tmpfiles.d/acer-helper.conf"],
             false,
-            "The same file permissions re-applied at every boot by systemd-tmpfiles, for the nodes that exist at "
-            + "boot: the legacy platform-profile alias, the battery thresholds, the keyboard backlight and the "
-            + "Dell BIOS attributes."),
+            "consent.tmpfiles"),
         new("acer-helper-modprobe.conf",
             ["/etc/modprobe.d/acer-helper.conf"],
             true,
-            "An options line for the acer-wmi kernel driver: it is loaded with predator_v4=1 and force_caps=7200, "
-            + "which is what enables the five Acer performance profiles, the fan telemetry and the fan-speed "
-            + "control (PWM) on a model the driver's own device table does not know. This changes how the driver "
-            + "behaves at load rather than granting a file permission, and if the module is in use it takes effect "
-            + "only after you restart the computer."),
+            "consent.acer_wmi_options"),
     ];
 
     /// <summary>One bundled file, everything an install of it needs to know. A type rather than a tuple for one
@@ -103,9 +91,10 @@ public static class HardwareAccess
     /// <param name="Bundled">The file's name in the publish output / AppImage, read from <c>AppContext.BaseDirectory</c>.</param>
     /// <param name="Installed">Every location an installed copy can occupy, the first being where this install writes.</param>
     /// <param name="AcerOnly">Whether the file applies to Acer machines alone — see the table's remarks.</param>
-    /// <param name="Description">What installing this file grants, in the words the user consents to. An English
-    /// localisation key (gettext-style, see <see cref="Loc"/>) and a format string with one placeholder, the group
-    /// the permissions are handed to — not every entry uses it (a driver parameter is granted to nobody).</param>
+    /// <param name="Description">What installing this file grants, in the words the user consents to. A neutral
+    /// localization key (see <see cref="Loc"/>) whose English sentence is a format string with one placeholder,
+    /// the group the permissions are handed to — not every entry uses it (a driver parameter is granted to
+    /// nobody).</param>
     private sealed record InstallerFile(string Bundled, string[] Installed, bool AcerOnly, string Description);
 
     /// <summary>The group the installed files hand the controls to, as a constant because the consent prompt has to

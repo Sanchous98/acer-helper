@@ -1,4 +1,5 @@
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure.Vendors.Generic;
 
 namespace AcerHelper.Infrastructure.Composition;
 
@@ -53,6 +54,13 @@ public class Device : IDisposable
     public IDriverSetup?        DriverSetup        { get; set; }
     public IAutostart?          Autostart          { get; set; }
     public IClamshell?          Clamshell          { get; set; }
+
+    /// <summary>The per-OS thread-affinity/topology adapter for the CPU load tool (the automatic undervolt's
+    /// load generator). Wired exactly like the other OS facilities — the generic backend builds it in its
+    /// constructor and the OS half is selected by file-name suffix — and always present, because thread affinity
+    /// is a universal OS capability the way autostart is. It is an Infrastructure contract rather than a Domain
+    /// port because it models an OS technology; see Infrastructure/Vendors/Generic/CpuLoadTest.cs.</summary>
+    public ICoreAffinity?      CoreAffinity       { get; set; }
 
     /// <summary>The settings this machine declares — this backend's own list, and the source of the set the
     /// settings MODEL holds (Infrastructure/Composition/Settings.cs). A LIST rather than a slot per capability,

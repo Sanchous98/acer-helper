@@ -16,13 +16,13 @@
       <TextBlock Classes="h1" Text="{Binding Title}"/>
 
       <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr 'Follow curve'}"/>
+        <TextBlock Classes="muted" VerticalAlignment="Center" Text="{l:Tr 'fan.follow_curve'}"/>
         <ToggleSwitch Grid.Column="1" IsChecked="{Binding UseCurve, Mode=TwoWay}"/>
       </Grid>
 
       <views:FanCurveEditor Height="200" Points="{Binding Points}"/>
 
-      <Button x:Name="CloseButton" Classes="accent" Content="{l:Tr Done}" Padding="16,5" HorizontalAlignment="Right"/>
+      <Button x:Name="CloseButton" Classes="accent" Content="{l:Tr 'nav.done'}" Padding="16,5" HorizontalAlignment="Right"/>
     </StackPanel>
   </Border>
 </Window>

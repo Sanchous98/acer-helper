@@ -36,7 +36,8 @@ There is **no Apply button**: the ComboBox selector IS the switch, and choosing 
 flow (below). There is no inline suffix and no bottom caption. The mode labels drop the vendor brand words
 ("Optimus"/"Ultimate" live on in the backend comments) and are kept short, so the sentence fits the ~400px card
 interior on one line even in Russian; the line is `TextWrapping="NoWrap"`, so the single marker cannot wrap onto a
-second row or resize the `SizeToContent` flyout. The note shares the selector's row and is conditional, so it
+second row or resize the fixed-frame flyout (its height is pinned to the Home page). The note shares the
+selector's row and is conditional, so it
 neither reserves an always-present blank nor adds a full-width caption. (The no-MUX refusal is a separate
 wrapping `TextBlock`, visible only when the port is unsupported, so the one-line rule applies to the mode
 sentence.) Outcomes that are not a queued change (asking for the mode the machine is already in, a vendor
@@ -155,14 +156,15 @@ baseline, that the labels are compact, and that `Note` explains the mark. The sa
 apply: changing the selector runs the confirmation and queues (with no command invoked), cancelling reverts the
 selection and queues nothing, a refused write reverts the selection, the port's NoOp queues nothing, and a
 programmatic `Refresh` selection is not treated as a request. The source guard in
-`GpuMuxTests.TheMuxCardHasOneStableLineAndTheFlyoutIsSizeToContentAgain` pins that `TuningView.axaml`'s
+`GpuMuxTests.TheMuxCardHasOneStableLineAndTheFlyoutHasAFixedFrame` pins that `TuningView.axaml`'s
 `GpuMuxState` line is `TextWrapping="NoWrap"` with no `MinHeight`/`MaxHeight`, that there is no
 `GpuMux.ApplyCommand`/`{l:Tr Change}` button, that `GpuMuxNote` sits NEXT TO the selector (same Grid row,
 `IsVisible` bound to `GpuMux.NoteVisible`, muted) with no always-present
 `GpuMuxFootnote` caption, that the (separate, wrapping) `GpuMuxUnsupported` refusal is the only wrapping block,
-and that there is no `PendingText`/`Message` line; it also pins that `MainWindow.axaml` is back to its normal
-`SizeToContent="WidthAndHeight"` flyout — no hard-coded 468x860 frame and no cap-to-Home, so a short Home page
-shows no empty gap and a queued MUX change cannot resize the flyout.
+and that there is no `PendingText`/`Message` line; it also pins that `MainWindow.axaml` is a fixed-width
+flyout (`SizeToContent="Width"`) whose HEIGHT is locked to the Home page in code — no hard-coded 468x860
+frame and no cap-to-Home, so a short Home page shows no empty gap and a queued MUX change cannot resize the
+flyout.
 
 **Unverifiable** (flagged, not hidden): the Acer selector numbers/packing (from the binary) and especially the
 actual effect of a `SetGamingMiscSetting(selector 2)` write on a real panel; and whether any given Acer model's

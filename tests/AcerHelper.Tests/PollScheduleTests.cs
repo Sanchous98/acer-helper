@@ -109,8 +109,8 @@ public class PollScheduleTests
 
         poll.PollNow();                 // the next refresh reads through and lands
         Assert.True(vm.ShowPower);
-        Assert.Equal(Loc.T("Power draw"), vm.PowerLabel);
-        Assert.Equal(Loc.T("{0:0.0} W", 10.0), vm.Power);
+        Assert.Equal(Loc.T("bat.power_draw"), vm.PowerLabel);
+        Assert.Equal(Loc.T("bat.watts", 10.0), vm.Power);
         Assert.Equal(1, telemetry.ReadCount);
     }
 
@@ -129,13 +129,13 @@ public class PollScheduleTests
         telemetry.Snapshot = new BatteryInfoSnapshot { State = BatteryState.Discharging, PowerWatts = -12.3 };
         poll.PollNow();
         Assert.True(vm.ShowPower);
-        Assert.Equal(Loc.T("Power draw"), vm.PowerLabel);
-        Assert.Equal(Loc.T("{0:0.0} W", 12.3), vm.Power);
+        Assert.Equal(Loc.T("bat.power_draw"), vm.PowerLabel);
+        Assert.Equal(Loc.T("bat.watts", 12.3), vm.Power);
 
         telemetry.Snapshot = new BatteryInfoSnapshot { State = BatteryState.Charging, PowerWatts = 45.0 };
         poll.PollNow();
-        Assert.Equal(Loc.T("Charging power"), vm.PowerLabel);
-        Assert.Equal(Loc.T("{0:0.0} W", 45.0), vm.Power);
+        Assert.Equal(Loc.T("bat.charging_power"), vm.PowerLabel);
+        Assert.Equal(Loc.T("bat.watts", 45.0), vm.Power);
 
         telemetry.Snapshot = new BatteryInfoSnapshot { State = BatteryState.Unknown };   // no rate
         poll.PollNow();
@@ -145,7 +145,7 @@ public class PollScheduleTests
         telemetry.Snapshot = new BatteryInfoSnapshot { State = BatteryState.Charging, PowerWatts = 30.0 };
         poll.PollNow();
         Assert.True(vm.ShowPower);
-        Assert.Equal(Loc.T("{0:0.0} W", 30.0), vm.Power);
+        Assert.Equal(Loc.T("bat.watts", 30.0), vm.Power);
     }
 
     /// <summary>Teardown: after <see cref="PollSchedule.Dispose"/> nothing ticks, on the timer path or a manual

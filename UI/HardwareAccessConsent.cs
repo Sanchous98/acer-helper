@@ -24,31 +24,33 @@ public static class HardwareAccessConsent
 {
     /// <summary>The dialog's heading. A question, like the driver prompt's ("Install {0}?"), because the dialog
     /// asks rather than announces and the confirm button is the answer to it.</summary>
-    private const string TitleKey = "Install hardware access?";
+    private const string TitleKey = "consent.title";
 
     /// <summary>The confirm button's word — the same one the driver prompt's button uses, so "agreeing to install
-    /// something" reads the same wherever it is asked. The cancel button is the dialog's own (<c>Cancel</c>).</summary>
-    private const string ConfirmKey = "Install";
-
+    /// something" reads the same wherever it is asked. The cancel button is the dialog's own (<c>Cancel</c>).
+    /// Internal so the localization guard can assert the reuse by KEY rather than by rendered text.</summary>
+    internal const string ConfirmKey = "uv.install";
     /// <summary>What the administrator prompt is FOR, said before the rows: the user is about to be asked for
     /// their password by a program whose title bar they have never seen, and this is the only sentence that
     /// explains it.</summary>
-    private const string AskKey =
-        "Acer Helper asks for administrator rights once (pkexec) to copy the following into /etc:";
+    private const string AskKey = "consent.ask";
 
     /// <summary>THE HONEST LIMITS, said after the rows and not left implied: the files are the ones this app
     /// already ships (no download, no network), the list above is the WHOLE of what the install adds, and
     /// walking away costs nothing — which is the point of asking rather than telling.</summary>
-    private const string LimitsKey =
-        "The files come from this app's own copy — nothing is downloaded, no other permission is added, and "
-        + "cancelling changes nothing.";
+    private const string LimitsKey = "consent.limits";
+
+    /// <summary>Every neutral key this prompt shows, in the order it shows them. FOR THE LOCALIZATION GUARD:
+    /// the rendered body is English (the neutral sentence), so a guard that wants to assert "each has a Russian
+    /// row" needs the keys, not the rendered text.</summary>
+    internal static readonly string[] ShownKeys = [TitleKey, ConfirmKey, AskKey, LimitsKey, AfterwardsKey];
 
     /// <summary>What to do when it is done. Deliberately does NOT promise an immediate effect: three of the
     /// installed things can need a restart of the app, and the module parameters can need a full reboot when
     /// acer_wmi is in use — the entry that installs them says so in its own row (see
     /// <see cref="HardwareAccess.ConsentRows"/>), which is where the "could not be reloaded" outcome of the
     /// install finally lands.</summary>
-    private const string AfterwardsKey = "Restart Acer Helper afterwards to use the new controls.";
+    private const string AfterwardsKey = "consent.afterwards";
 
     /// <summary>The dialog's heading, localized.</summary>
     public static string Title() => Loc.T(TitleKey);

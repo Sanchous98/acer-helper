@@ -109,8 +109,10 @@ public sealed partial class MainViewModel : ObservableObject
             Sections.Add(_fans = new FansViewModel(fc.Capability, a.Fans.Initial,
                 a.Fans.SetFan, a.Fans.SetFanCurve, a.Fans.ShowCurve));
         var bat = a.Battery;
-        if (bat.HasInfo || bat.Limit != null || bat.Calibration != null || bat.ChargeMode != null)
-            Sections.Add(_battery = new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode));
+        if (bat.HasInfo || bat.Limit != null || bat.Calibration != null || bat.ChargeMode != null
+            || bat.PowerSource != null)
+            Sections.Add(_battery = new BatteryViewModel(bat.HasInfo, bat.Limit, bat.Calibration, bat.ChargeMode,
+                                                         powerSource: bat.PowerSource));
 
         // Options live in the drawer, not the main column.
         _options = OptionsViewModel.TryCreate(device, a.Options);
@@ -131,8 +133,15 @@ public sealed partial class MainViewModel : ObservableObject
         // card itself renders only the one stable current-mode sentence (see GpuMuxViewModel).
         var muxVm = device.GpuMux is { } mux
             ? new GpuMuxViewModel(mux, a.GpuMux.Confirm, a.GpuMux.Request, ReportGpuMuxOutcome) : null;
-        if (gpuVm != null || cpuVm != null || coVm != null || muxVm != null)
-            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm, muxVm);
+        // The guided undervolt needs the manual rows to disable and reload, so it is built only beside them (the
+        // section is null when the service says the machine cannot sweep, e.g. no affinity/sensors/CPU clusters).
+        var sweepVm = a.Sweep is { } sweep && coVm != null
+            ? new UndervoltSweepViewModel(sweep.Domains, sweep.Eta, sweep.Confirm, sweep.Run, sweep.Save,
+                                          coVm.SetSweepRunning, coVm.Load, coVm.Preview, coVm.DiscardPreview,
+                                          ReportSweepOutcome, UiSchedule.Normal, sweep.OnAc)
+            : null;
+        if (gpuVm != null || cpuVm != null || coVm != null || muxVm != null || sweepVm != null)
+            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm, muxVm, sweepVm);
     }
 
     /// <summary>The bell: show the list, or put it away again. A toggle, like the drawer buttons, so the one
@@ -170,7 +179,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var id = NotificationCenter.UpdateId(version);
         Notifications.RetireFamilyExcept(NotificationCenter.UpdateIdPrefix, id);
-        Notifications.Raise(id, () => Loc.T("Update available: v{0}", version), install, () => changelog ?? "");
+        Notifications.Raise(id, () => Loc.T("update.available", version), install, () => changelog ?? "");
     }
 
     /// <summary>Bring the update to the user from the TRAY item: open the bell's list and expand the update entry
@@ -186,7 +195,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The Linux permission files are not installed, so the root-only controls are out of reach: offer
     /// the one-click pkexec install, whose click runs it (via the caller's callback).</summary>
     public void SetHardwareAccessNeeded(Action grant)
-        => Notifications.Raise(NotificationCenter.HardwareAccessNeeded, () => Loc.T("Grant hardware access…"), grant);
+        => Notifications.Raise(NotificationCenter.HardwareAccessNeeded, () => Loc.T("nav.grant_hardware_access"), grant);
 
     /// <summary>An install could not make the module parameters live, so what is missing now is a REBOOT. This is
     /// the one message with nowhere else to live: <c>Status</c> is rewritten from the device's own status message
@@ -207,7 +216,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Notifications.Ignore(NotificationCenter.HardwareAccessNeeded);
         Notifications.Raise(NotificationCenter.HardwareAccessRebootPending,
-                            () => Loc.T("Restart your computer to finish enabling the unlocked controls (click to retry)."),
+                            () => Loc.T("access.reboot_pending"),
                             grant);
     }
 
@@ -225,7 +234,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void OpenOptions()
     {
         _options?.Sync();   // re-read the rows' real state (hardware toggles, per-source profiles) before showing
-        OpenDrawer(Loc.T("Options"), _options);
+        OpenDrawer(Loc.T("nav.options"), _options);
     }
 
     [RelayCommand] private void OpenTuning()
@@ -233,7 +242,7 @@ public sealed partial class MainViewModel : ObservableObject
         // Read the MUX state only when the drawer opens: the read reaches vendor hardware (a busctl get-property
         // on ASUS), so it must not run on the UI thread merely because the dashboard was built.
         _tuning?.GpuMux?.Refresh();
-        OpenDrawer(Loc.T("Overclocking and Power"), _tuning);
+        OpenDrawer(Loc.T("oc.title"), _tuning);
     }
 
     [RelayCommand]
@@ -249,7 +258,7 @@ public sealed partial class MainViewModel : ObservableObject
         // worker that does NOT coalesce — so every toggle click would queue one more of them, unlike the event
         // path's read, which keeps one in flight plus one pending for exactly this reason (VerifiedHwValue).
         if (_lighting != null && !IsShowing(_lighting)) _lighting.Reapply();
-        OpenDrawer(Loc.T("Lighting"), _lighting);
+        OpenDrawer(Loc.T("nav.lighting"), _lighting);
     }
 
     /// <summary>Surface a non-queued MUX outcome (asking for the mode the machine is already in, a refusal) on the
@@ -257,6 +266,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// card line and NOT a notification: the MUX card renders only its one stable current-mode sentence, and the
     /// status line is rewritten by the refresh pass like every other transient message in the app.</summary>
     private void ReportGpuMuxOutcome(string text) => Status = text;
+
+    /// <summary>Surface a guided-sweep outcome (finished, saved, refused) on the app's existing transient status
+    /// line, the same surface every other control report uses — the sweep's own card carries the proposal.</summary>
+    private void ReportSweepOutcome(string text) => Status = text;
 
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 

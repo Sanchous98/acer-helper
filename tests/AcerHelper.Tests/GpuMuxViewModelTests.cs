@@ -63,7 +63,7 @@ public class GpuMuxViewModelTests
 
         vm.Refresh();
 
-        Assert.Equal(Loc.T("GPU mode: {0}", Loc.T(GpuMuxMessages.HybridMode)) + "*", vm.CurrentText);
+        Assert.Equal(Loc.T("gpu.current", Loc.T(GpuMuxMessages.HybridMode)) + "*", vm.CurrentText);
         Assert.Equal(0, vm.SelectedIndex);   // the pending mode (Discrete) is preselected
         Assert.DoesNotContain('\n', vm.CurrentText);   // the mark is on the same line, never a second row
         Assert.DoesNotContain('\r', vm.CurrentText);
@@ -81,7 +81,7 @@ public class GpuMuxViewModelTests
 
         vm.Refresh();
 
-        Assert.Equal(Loc.T("GPU mode: {0}", Loc.T(GpuMuxMessages.HybridMode)), vm.CurrentText);
+        Assert.Equal(Loc.T("gpu.current", Loc.T(GpuMuxMessages.HybridMode)), vm.CurrentText);
         Assert.DoesNotContain("*", vm.CurrentText);
         Assert.Equal(1, vm.SelectedIndex);
         Assert.False(vm.NoteVisible);
@@ -100,9 +100,9 @@ public class GpuMuxViewModelTests
 
         vm.Refresh();
 
-        Assert.Equal("Hybrid", GpuMuxMessages.HybridMode);
-        Assert.Equal("Discrete", GpuMuxMessages.DiscreteMode);
-        Assert.Equal(Loc.T("GPU mode: {0}", Loc.T(GpuMuxMessages.HybridMode)) + "*", vm.CurrentText);
+        Assert.Equal("gpu.mode_hybrid", GpuMuxMessages.HybridMode);
+        Assert.Equal("gpu.mode_discrete", GpuMuxMessages.DiscreteMode);
+        Assert.Equal(Loc.T("gpu.current", Loc.T(GpuMuxMessages.HybridMode)) + "*", vm.CurrentText);
         Assert.DoesNotContain("(Optimus)", vm.CurrentText);
         Assert.DoesNotContain("dGPU only", vm.CurrentText);
         Assert.DoesNotContain('\n', vm.CurrentText);
@@ -120,7 +120,7 @@ public class GpuMuxViewModelTests
 
         vm.Refresh();
 
-        Assert.Equal(Loc.T("GPU mode: {0}", Loc.T(GpuMuxMessages.HybridMode)), vm.CurrentText);
+        Assert.Equal(Loc.T("gpu.current", Loc.T(GpuMuxMessages.HybridMode)), vm.CurrentText);
         Assert.DoesNotContain("*", vm.CurrentText);
         Assert.False(vm.NoteVisible);
     }
@@ -191,7 +191,7 @@ public class GpuMuxViewModelTests
         vm.SelectedIndex = 1;                      // a selection change the port proves is a no-op
 
         Assert.Equal([Loc.T(GpuMuxMessages.AlreadyCurrent)], reported);
-        Assert.Equal(Loc.T("GPU mode: unknown"), vm.CurrentText);
+        Assert.Equal(Loc.T("gpu.current_unknown"), vm.CurrentText);
         Assert.DoesNotContain("*", vm.CurrentText);
         Assert.False(vm.NoteVisible);
     }

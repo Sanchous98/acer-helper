@@ -5,48 +5,69 @@
              x:Class="AcerHelper.UI.Views.TuningView"
              x:DataType="vm:TuningViewModel">
 
-  <!-- The Tuning drawer body: each present child (GPU clock offsets / CPU power mode) in its own acrylic card
-       with a section header — the SAME frosted, borderless card as the main-page sections (Monitor/Fans/…).
-       The child views (GpuView/CpuView) are bare and rendered via their DataTemplates. Cards carry their own
-       bottom margin (see the .card style), so no outer spacing. -->
+  <!-- The Tuning page's sliders take their compact geometry (SliderPreContentMargin/PostContentMargin = 6)
+       from the APPLICATION resource dictionary (see App.axaml), so this drawer and the fan rows on Home read
+       alike. Nothing is overridden locally here; a view-local override would be what makes them differ. -->
+
+  <!-- Tuning-only section-header tightening: the shared TextBlock.section reserves a 10 DIP bottom margin, and
+       this page carries two headers (GPU / CPU). Six reads the same and gives the fixed frame back 4 DIP per
+       header. Scoped here so Home's section headers keep the shared spacing. -->
+  <UserControl.Styles>
+    <Style Selector="TextBlock.section">
+      <Setter Property="Margin" Value="2,0,0,6"/>
+    </Style>
+  </UserControl.Styles>
+
+  <!-- The Tuning drawer body: the GPU axis (clock offsets + the GPU-mode/MUX switch) in ONE acrylic card and the
+       CPU axis (power mode + undervolt + the guided sweep) in another, each with a section header — the SAME
+       frosted, borderless card as the main-page sections (Monitor/Fans/…). The child views (GpuView/CpuView/…) are
+       bare and rendered via their DataTemplates. Cards carry their own bottom margin (see the .card style), so no
+       outer spacing. TWO cards, not four: the fixed frame is exactly Home's height, so grouping by subject (GPU,
+       CPU) and tightening the intra-card spacing is what keeps the page inside it without a scrollbar. -->
   <StackPanel>
 
-    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasGpu}">
-      <StackPanel Spacing="8">
+    <!-- ONE "GPU" CARD for both GPU axes. The clocks and the GPU-mode/MUX switch are the same subject, so they
+         share one header and one card surface instead of producing two cards both titled for the GPU; merging
+         also removes a whole card's padding + section title + bottom margin from the fixed frame (the owner's
+         "нужно организовать элементы по-другому"). Either capability may be absent, so each half keeps its own
+         IsVisible and the card itself lives while either exists. -->
+    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}"
+                               IsVisible="{Binding HasGpuOrMux}">
+      <StackPanel Spacing="5">
         <TextBlock Classes="section" Text="{l:Tr GPU}"/>
-        <ContentControl Content="{Binding Gpu}"/>
-      </StackPanel>
-    </ExperimentalAcrylicBorder>
+        <ContentControl Content="{Binding Gpu}" IsVisible="{Binding HasGpu}"/>
 
-    <!-- GPU mode (MUX): the shared IGpuMux card. It shows ONE stable line — the mode the firmware is in NOW —
-         and, while the value that will apply after a reboot differs from the ORIGINAL value the card first
-         showed, marks that value with a trailing '*' and shows a short muted note NEXT TO THE SELECTOR. There is
-         NO Apply button: choosing a different mode in the ComboBox runs the change flow (confirm, then queue;
-         cancel/revert snaps the selection back), so the selector IS the switch. There is no inline suffix, no
-         second line and no always-present caption: the note is conditional (GpuMux.NoteVisible) and shares the
-         selector's row, so it neither reserves a blank nor adds a full-width caption. The line is explicitly
-         NoWrap with compact labels, so the mark can never wrap to a second row. The no-MUX refusal is prose and
-         may still wrap (Supported never changes at runtime, so exactly one of the two state TextBlocks is ever
-         visible). Rendered inline (not a separate view) because it has no children. -->
-    <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasGpuMux}">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="section" Text="{l:Tr GPU mode}"/>
-        <TextBlock x:Name="GpuMuxState" Text="{Binding GpuMux.CurrentText}" TextWrapping="NoWrap"
-                   IsVisible="{Binding GpuMux.Supported}"/>
-        <TextBlock x:Name="GpuMuxUnsupported" Text="{Binding GpuMux.CurrentText}" TextWrapping="Wrap"
-                   IsVisible="{Binding !GpuMux.Supported}"/>
-        <!-- The selector IS the switch (no Apply button): a selection change runs the ViewModel's confirm/queue
-             flow, and cancelling snaps the selection back. The conditional note sits immediately next to the
-             selector, so it never reserves an always-present blank. -->
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
-          <ComboBox Grid.Column="0" MinWidth="160" HorizontalAlignment="Left"
-                    ItemsSource="{Binding GpuMux.Modes}"
-                    SelectedIndex="{Binding GpuMux.SelectedIndex, Mode=TwoWay}"
-                    IsEnabled="{Binding GpuMux.Supported}"/>
-          <TextBlock x:Name="GpuMuxNote" Grid.Column="1" Classes="muted" FontSize="11"
-                     VerticalAlignment="Center" TextWrapping="Wrap"
-                     IsVisible="{Binding GpuMux.NoteVisible}" Text="{Binding GpuMux.Note}"/>
-        </Grid>
+        <!-- GPU mode (MUX): the shared IGpuMux card. It shows ONE stable line — the mode the firmware is in NOW
+             — and, while the value that will apply after a reboot differs from the ORIGINAL value the card first
+             showed, marks that value with a trailing '*' and shows a short muted note NEXT TO THE SELECTOR.
+             There is NO Apply button: choosing a different mode in the ComboBox runs the change flow (confirm,
+             then queue; cancel/revert snaps the selection back), so the selector IS the switch. There is no
+             inline suffix, no second line and no always-present caption: the note is conditional
+             (GpuMux.NoteVisible) and shares the selector's row, so it neither reserves a blank nor adds a
+             full-width caption. The line is explicitly NoWrap with compact labels, so the mark can never wrap
+             to a second row. The no-MUX refusal is prose and may still wrap (Supported never changes at
+             runtime, so exactly one of the two state TextBlocks is ever visible). Rendered inline (not a
+             separate view) because it has no children. -->
+        <StackPanel Spacing="4" IsVisible="{Binding HasGpuMux}">
+          <!-- No subsection label: the state line below already reads "GPU mode: …", so a second caption would
+               only repeat it and cost a row the fixed frame cannot spare. -->
+          <TextBlock x:Name="GpuMuxState" Text="{Binding GpuMux.CurrentText}" TextWrapping="NoWrap"
+                     IsVisible="{Binding GpuMux.Supported}"/>
+          <TextBlock x:Name="GpuMuxUnsupported" Text="{Binding GpuMux.CurrentText}" TextWrapping="Wrap"
+                     IsVisible="{Binding !GpuMux.Supported}"/>
+          <!-- The selector IS the switch (no Apply button): a selection change runs the ViewModel's
+               confirm/queue flow, and cancelling snaps the selection back. The conditional note sits
+               immediately next to the selector, so it never reserves an always-present blank. -->
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+            <ComboBox Grid.Column="0" MinWidth="160" HorizontalAlignment="Left"
+                      ItemsSource="{Binding GpuMux.Modes}"
+                      SelectedIndex="{Binding GpuMux.SelectedIndex, Mode=TwoWay}"
+                      IsEnabled="{Binding GpuMux.Supported}"/>
+            <TextBlock x:Name="GpuMuxNote" Grid.Column="1" Classes="muted" FontSize="11"
+                       VerticalAlignment="Center" TextWrapping="Wrap"
+                       IsVisible="{Binding GpuMux.NoteVisible}" Text="{Binding GpuMux.Note}"/>
+          </Grid>
+        </StackPanel>
       </StackPanel>
     </ExperimentalAcrylicBorder>
 
@@ -54,10 +75,13 @@
          capabilities (either can be absent) but they are the same subject, so they share a header instead of
          producing two cards both titled "CPU". -->
     <ExperimentalAcrylicBorder Classes="card" Material="{DynamicResource CardMaterial}" IsVisible="{Binding HasCpuCard}">
-      <StackPanel Spacing="8">
+      <StackPanel Spacing="5">
         <TextBlock Classes="section" Text="{l:Tr CPU}"/>
         <ContentControl Content="{Binding Cpu}" IsVisible="{Binding HasCpu}"/>
         <ContentControl Content="{Binding Co}" IsVisible="{Binding HasCo}"/>
+        <!-- The guided sweep sits under the manual sliders it disables while it runs: same capability, and the
+             result panel's proposals are the same offsets the sliders show. -->
+        <ContentControl Content="{Binding Sweep}" IsVisible="{Binding HasSweep}"/>
       </StackPanel>
     </ExperimentalAcrylicBorder>
 

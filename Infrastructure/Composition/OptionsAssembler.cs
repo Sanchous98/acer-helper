@@ -68,7 +68,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         // never from the refresh loop, so it cannot become traffic.
         if (svc.CardwireGpuAccess.RowBelongs(svc.CardwireGpuAccessEnabled))
         {
-            var label = Loc.T("Use the discrete GPU");
+            var label = Loc.T("cardwire.enable");
             list.Add(new OptionToggle(label, true, svc.CardwireGpuAccessEnabled,
                 v => RunSet(() => svc.SetCardwireGpuAccess(v), label),
                 Read: () => svc.CardwireGpuAccessEnabled,
@@ -108,10 +108,10 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         // row stays silent), and a superseded one reports nothing at all (TintApplyPolicy's third rule).
         if (svc.Device.DisplayTint is { } tint && tint.Levels > 0)
         {
-            string[] all = ["Off", "Low", "Medium", "High", "Long-use"];
+            string[] all = ["level.off", "level.low", "level.medium", "level.high", "level.long_use"];
             var names = all.Take(tint.Levels).Select(n => Loc.T(n)).ToList();
             int idx = Math.Clamp(svc.Bluelight, 0, names.Count - 1);
-            var label = Loc.T("Blue-light filter:");
+            var label = Loc.T("opt.blue_light_label");
             list.Add(new OptionChoice(label, true, names, idx,
                 i => svc.SetBlueLight(i, ok => { if (!ok) Fail(label, null); })));
         }
@@ -133,7 +133,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (svc.Device.PowerProfiles is not { } pp || pp.All.Count == 0) return [];
         var profiles = pp.All;
         var names = profiles.Select(p => Loc.T(p.DisplayName)).ToList();
-        return [Row(onAc: true, "Profile on AC power:"), Row(onAc: false, "Profile on battery:")];
+        return [Row(onAc: true, "opt.profile_ac_label"), Row(onAc: false, "opt.profile_battery_label")];
 
         OptionChoice Row(bool onAc, string label)
         {
@@ -154,7 +154,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (svc.Device.Battery.ChargeMode is not { } mode) return null;
         var modes = mode.Options;
         var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
-        var label = Loc.T("Charge mode");
+        var label = Loc.T("bat.charge_mode");
         return new OptionChoice(label, true, names, 0,
             i => RunSet(() => svc.SetBatteryChoice(mode, modes[i].Id), label),
             Read: () => IndexOf(modes, mode.Read()));
@@ -163,7 +163,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public OptionToggle? BatteryLimit()
     {
         if (svc.Device.Battery.ChargeLimit is not { } limit) return null;
-        var label = Loc.T("Charge limit (~80%)");
+        var label = Loc.T("bat.charge_limit");
         return new OptionToggle(label, true, false,
             v => RunSet(() => svc.SetBatteryToggle(limit, v), label), Read: limit.Read);
     }
@@ -172,7 +172,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     public OptionToggle? BatteryCalibration()
     {
         if (svc.Device.Battery.Calibration is not { } cal) return null;
-        var label = Loc.T("Calibration (full cycle)");
+        var label = Loc.T("bat.calibration");
         return new OptionToggle(label, true, false,
             v => RunSet(() => svc.SetBatteryToggle(cal, v), label),
             Read: cal.Read, ConfirmAsync: confirmCalibration);
@@ -212,7 +212,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     // One post, and it is a post — not a direct call: the message is built on the UI thread, which is where the
     // notify delegate expects to be handed a string.
     private void Fail(string label, string? reason)
-        => post(() => notify(Loc.T("{0} failed", label) + (reason != null ? $": {reason}" : "")));
+        => post(() => notify(Loc.T("opt.setting_failed", label) + (reason != null ? $": {reason}" : "")));
 
     /// <summary>The UI's own name for a setting the backend declares, by the backend's own key. This is the ONLY
     /// place that turns a setting into words, and it sits here because naming and localization belong to the UI:
@@ -225,12 +225,12 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     /// never two rows on one.</summary>
     private static string LabelFor(string key) => key switch
     {
-        "lcd_override"      => "LCD overdrive",                  // Acer (both bindings)
-        "backlight_timeout" => "Keyboard backlight timeout",     // Acer: the on/off flag
-        "usb_charging"      => "USB charging when off:",         // Acer: battery thresholds
-        "stop_timeout"      => "Keyboard backlight timeout:",    // Dell: a duration from a fixed set
-        "FnLock"            => "Fn lock",                        // Dell: the BIOS attribute's own name
-        "UsbPowerShare"     => "USB charging when off:",         // Dell
+        "lcd_override"      => "opt.lcd_overdrive",       // Acer (both bindings)
+        "backlight_timeout" => "opt.kbd_timeout",         // Acer: the on/off flag
+        "usb_charging"      => "opt.usb_charging_label",  // Acer: battery thresholds
+        "stop_timeout"      => "opt.kbd_timeout_label",   // Dell: a duration from a fixed set
+        "FnLock"            => "opt.fn_lock",             // Dell: the BIOS attribute's own name
+        "UsbPowerShare"     => "opt.usb_charging_label",  // Dell
         _                   => key,
     };
 

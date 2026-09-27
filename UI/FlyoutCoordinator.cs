@@ -93,10 +93,9 @@ internal sealed class FlyoutCoordinator : IDisposable
     {
         _main.SuppressDismiss = true;
         return Views.ConfirmDialog.ShowAsync(_main,
-            Loc.T("Start battery calibration?"),
-            Loc.T("This runs a full charge then a full discharge cycle and can take several hours. Keep the "
-            + "laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop."),
-            Loc.T("Start"));
+            Loc.T("bat.calibration_confirm"),
+            Loc.T("bat.calibration_body"),
+            Loc.T("nav.start"));
     }
 
     /// <summary>Shown over the flyout before the installer writes anything into /etc. The install is not one
@@ -142,9 +141,24 @@ internal sealed class FlyoutCoordinator : IDisposable
     {
         _main.SuppressDismiss = true;
         return Views.ConfirmDialog.ShowAsync(_main,
-            Loc.T("Change the GPU mode?"),
+            Loc.T("gpu.change_confirm"),
             Loc.T(warning),
-            Loc.T("Change"));
+            Loc.T("gpu.change"));
+    }
+
+    /// <summary>Shown over the flyout before the guided undervolt sweep starts. The sweep is long, invasive and
+    /// can destabilise the machine or force a reboot, and it shares the SMU/PCI lock with other tuning tools, so
+    /// the prompt says all of that once — and says the two conditions that are not negotiable: it requires AC
+    /// power, and it will temporarily switch to a performance profile (Turbo where available), restoring the
+    /// previous profile afterwards. It also says that nothing is saved automatically and a reboot restores stock.
+    /// Same modal-over-flyout idiom as the prompts above.</summary>
+    public Task<bool> ConfirmUndervoltSweepAsync()
+    {
+        _main.SuppressDismiss = true;
+        return Views.ConfirmDialog.ShowAsync(_main,
+            Loc.T("uv.confirm_title"),
+            Loc.T("uv.confirm_body"),
+            Loc.T("uv.sweep_start"));
     }
 
     /// <summary>Shown over the flyout to ask before installing a third-party driver. Names the driver and where it
@@ -154,11 +168,9 @@ internal sealed class FlyoutCoordinator : IDisposable
     {
         _main.SuppressDismiss = true;
         return Views.ConfirmDialog.ShowAsync(_main,
-            Loc.T("Install {0}?", name),
-            Loc.T("{0} needs the {1} kernel driver from {2}. It is third-party software, shared with other tuning "
-            + "tools, and Acer Helper will never update or remove it. You can install it yourself instead.",
-                purpose, name, sourceUrl),
-            Loc.T("Install"));
+            Loc.T("uv.install_prompt", name),
+            Loc.T("uv.driver_consent", purpose, name, sourceUrl),
+            Loc.T("uv.install"));
     }
 
     /// <summary>Light-dismiss: if focus left the flyout, the user clicked outside the app, so hide it.

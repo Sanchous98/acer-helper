@@ -31,6 +31,23 @@ internal sealed partial class AcerEcHidController
         catch { _stream?.Dispose(); _stream = null; return false; }
     }
 
+    // SEND-then-GET: SetFeature pushes the request, GetFeature reads the reply back. Called from the caller's
+    // slow pool schedule (inside the controller's _ioGate), never the UI thread and never the writer thread's
+    // cadence — SetFeature/GetFeature are synchronous on the shared HID-over-I2C bus and can block. On any
+    // failure drop the stream so the next call re-opens a fresh handle, exactly as WriteFeature does.
+    private partial bool ReadFeature(byte[] send, byte[] reply)
+    {
+        if (_device == null) return false;
+        try
+        {
+            var stream = _stream ??= _device.Open();
+            stream.SetFeature(send);
+            stream.GetFeature(reply);
+            return true;
+        }
+        catch { _stream?.Dispose(); _stream = null; return false; }
+    }
+
     private static HidDevice? FindDevice()
     {
         try

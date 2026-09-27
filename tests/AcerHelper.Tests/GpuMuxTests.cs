@@ -345,7 +345,7 @@ public class GpuMuxTests
 
         // NO Apply button: the selector IS the switch, so the old button and its command are gone.
         Assert.DoesNotContain("GpuMux.ApplyCommand", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("{l:Tr Change}", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("{l:Tr 'gpu.change'}", xaml, StringComparison.Ordinal);
 
         // The note sits NEXT TO the SELECTOR: the same Grid row (Column 1) as the ComboBox (Column 0),
         // conditional on GpuMux.NoteVisible. Sharing the row means it never reserves an always-present blank and

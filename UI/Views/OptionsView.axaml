@@ -6,10 +6,16 @@
 
   <!-- Bare list of option rows; the side drawer supplies the surrounding panel and title. The per-row
        item templates (ToggleRowViewModel / ChoiceRowViewModel) live in App.axaml at application scope so
-       they resolve reliably — a control-level ItemsControl.DataTemplates copy left the rows unrendered. -->
+       they resolve reliably — a control-level ItemsControl.DataTemplates copy left the rows unrendered.
+
+       THE ROWS KEEP THEIR OWN SPACING, they do not fill the frame. A one-column UniformGrid was tried to
+       fill the taller fixed frame, but it divides the frame between the rows and so stretches the gaps
+       between them — the owner's "надо вернуть небольшие отступы у параметров" (the rows drifted apart).
+       A plain Spacing panel keeps every gap the same small size, and the page simply ends after the last
+       row. The frame is tall enough for the rows at this spacing, so nothing clips and nothing scrolls. -->
   <ItemsControl ItemsSource="{Binding Rows}">
     <ItemsControl.ItemsPanel>
-      <ItemsPanelTemplate><StackPanel Spacing="14"/></ItemsPanelTemplate>
+      <ItemsPanelTemplate><StackPanel Spacing="12"/></ItemsPanelTemplate>
     </ItemsControl.ItemsPanel>
   </ItemsControl>
 </UserControl>

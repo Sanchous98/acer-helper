@@ -16,12 +16,18 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 //
 // WIRE FORMAT: A0 00 A0 <featureId:LE16> <cmdId> <params…>, zero-padded to 65. A reply takes TWO calls, in
 // this order: SEND the request frame, then read the answer back. A get with no preceding send delivers nothing
-// to the device and hands back whatever frame the handle last held — measured. Nothing in this class reads
-// today (the mode byte is written, never queried), but that order is the channel's rather than this class's, so
-// a future read has to keep it.
+// to the device and hands back whatever frame the handle last held — measured. The one read in this class
+// (ReadPowerSource, below) keeps that order.
 //
 // The reply carries byte[2] = 0xE0 when the EC accepted the FRAME — but that is frame-level only: an
 // out-of-range mode is acknowledged the same way and then silently ignored, so the MODE stays write-only.
+//
+// ONE read exists: ReadPowerSource (feature 0x0000, cmd 0x03, reply byte 7 = source TYPE, the GetACStatus field
+// measured in docs/power-an18-61.md). It follows the SEND-then-GET order above, guards on the 0xE0 ACK, and
+// returns null on anything short of a clean read so the caller can hide the row rather than invent a value. It
+// is a synchronous HID-over-I2C transaction and runs on the caller's slow pool schedule (AcerPowerSourceSchedule,
+// single-flight), NEVER on the writer thread and NEVER at the battery poll's 1 Hz — the battery gauge is an OS
+// syscall, this is a bus transaction, and the two must not share a cadence (Infrastructure/BatteryPollSchedule).
 //
 // The EC LATCHES the mode: it survives this app exiting and needs no resident daemon. It does NOT necessarily
 // survive a reboot, which is why LaptopService re-asserts the profile at startup (EC-only — a full profile
@@ -47,6 +53,15 @@ internal sealed partial class AcerEcHidController : IDisposable
     // little-endian feature id, the command id, and the parameters. FeatureUsageMode is 0x0001, so its high
     // byte (report[4]) stays 0.
     private const byte Frame = 0xA0, FeatureUsageMode = 0x01, CmdSet = 0x01;
+
+    // The power-source read: Acer's own GetACStatus is feature 0x0000, command 0x03, and the source TYPE is
+    // reply byte 7 (measured by differential read, see docs/power-an18-61.md §"Power source …"). The reply is
+    // trusted only when byte 2 is the accepted marker 0xE0, exactly as a write's ACK is. This is the ONE place
+    // the encoding is spelled; the domain enum it maps to is vendor-agnostic.
+    internal const ushort FeaturePowerStatus = 0x0000;
+    internal const byte CmdPowerStatus = 0x03;
+    private const byte ReplyAccepted = 0xE0;
+    private const int PowerSourceByte = 7;
 
     /// <summary>True when the EC HID interface was found — i.e. this model routes its performance envelope
     /// through the EC. False on models without it, where the caller keeps its previous behaviour.</summary>
@@ -103,6 +118,47 @@ internal sealed partial class AcerEcHidController : IDisposable
         return true;
     }
 
+    /// <summary>Read the live power source over the EC HID channel. A read here is SEND-then-GET: the request
+    /// frame goes out first (<c>FrameFor(0x0000, 0x03, 0x00)</c>) and only then is the reply fetched — a get
+    /// with no preceding send hands back whatever frame the handle last held (measured; see the class header).
+    /// Returns null when there is no device or on any transport failure, and when the reply is not the accepted
+    /// marker (<c>reply[2] != 0xE0</c>) or too short to hold byte 7. Never a guessed value: null is "could not
+    /// measure", which the caller maps to <see cref="PowerSource.Unknown"/> and the UI hides.
+    ///
+    /// NOT on the writer thread and NOT at 1 Hz: this is a synchronous HID-over-I2C transaction on the bus the
+    /// RGB controller shares, so it can block. The caller runs it on a slow pool schedule (single-flight), never
+    /// on the UI thread — see <c>AcerPowerSourceSchedule</c> and the cadence note in the class header.</summary>
+    public PowerSource? ReadPowerSource()
+    {
+        if (!Available) return null;
+        try
+        {
+            var send = FrameFor(FeaturePowerStatus, CmdPowerStatus, param6: 0x00);
+            var reply = new byte[FeatureLen];
+            reply[0] = Frame;   // the report id the GET must name; the rest is overwritten by the reply
+            lock (_ioGate) { if (!ReadFeature(send, reply)) return null; }
+            return DecodePowerSource(reply);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The reply decoder, split out pure and static so a test can pin it without opening the device
+    /// (constructing this class probes the hardware — the same reason <see cref="ModeFor"/> is static). Returns
+    /// null when the reply is too short to hold byte 7 or byte 2 is not the accepted marker <c>0xE0</c>; maps
+    /// byte 7 to the source TYPE; an unmapped non-zero code is <see cref="PowerSource.Unknown"/> ("on a source,
+    /// not one we can name"), never a guess.</summary>
+    internal static PowerSource? DecodePowerSource(byte[] reply)
+    {
+        if (reply.Length <= PowerSourceByte || reply[2] != ReplyAccepted) return null;
+        return reply[PowerSourceByte] switch
+        {
+            0x00 => PowerSource.Battery,
+            0x01 => PowerSource.Barrel,
+            0x04 => PowerSource.UsbC,
+            _    => PowerSource.Unknown,
+        };
+    }
+
     // ---- single-slot coalescing writer ----
     // A plain object, NOT System.Threading.Lock: the worker parks on Monitor.Wait/Pulse, which Lock does not
     // support (it would silently fall back to monitor-based locking on a converted reference — CS9216).
@@ -110,6 +166,13 @@ internal sealed partial class AcerEcHidController : IDisposable
     private byte? _pending;
     private readonly Thread? _worker;
     private bool _stopping;
+
+    // Serialises the TRANSPORT, not the request: a read runs on a caller's pool thread while the writer thread
+    // may be sending a mode. Both touch the same lazily-opened handle and both drop it on failure, so an
+    // unguarded read could close the stream under a write or vice-versa. This is a plain mutual-exclusion lock
+    // around WriteFeature/ReadFeature only — never held while parked, so it cannot delay a mode write behind a
+    // blocked read beyond the one bus transaction that read already owns.
+    private readonly object _ioGate = new();
 
     private void WorkerLoop()
     {
@@ -135,7 +198,7 @@ internal sealed partial class AcerEcHidController : IDisposable
             // that an EC write failure is surfaced — it is not. Apply() reports "accepted for sending", not "the
             // EC applied it", and its bool is about the queue, not the write. Recorded as an open gap in
             // docs/open-decisions.md §5 rather than papered over with a field nobody reads.
-            try { WriteFeature(report); }
+            try { lock (_ioGate) WriteFeature(report); }
             catch { /* keep the worker alive */ }
         }
     }
@@ -150,8 +213,14 @@ internal sealed partial class AcerEcHidController : IDisposable
         CloseTransport();
     }
 
-    // ---- transport, per-OS (found device? / send one feature report / release) ----
+    // ---- transport, per-OS (found device? / send one feature report / send-then-get / release) ----
     private partial bool OpenTransport();
     private partial bool WriteFeature(byte[] report);
+
+    /// <summary>SEND-then-GET one feature report: <paramref name="send"/> goes out, then the reply fills
+    /// <paramref name="reply"/> (whose byte 0 names the report id). Called inside <c>_ioGate</c> only. False on
+    /// any transport failure; the per-OS half drops the handle exactly as <see cref="WriteFeature"/> does.</summary>
+    private partial bool ReadFeature(byte[] send, byte[] reply);
+
     private partial void CloseTransport();
 }

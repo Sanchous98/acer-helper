@@ -91,17 +91,17 @@ public sealed partial class AcerDevice
     {
         if (_fanPortBuilt)
         {
-            StatusMessage = "Linux: profiles, fans and temperatures come from the mainline acer-wmi driver (the installer's module parameters enable them) — it has no interface for LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging or the keyboard-brightness read-back, so those stay unavailable.";
+            StatusMessage = "status.linux_mainline_full";
             return;
         }
 
         if (_acerHwmon == null)
         {
-            StatusMessage = "Linux: the five Acer profiles, fan control and the Acer temperature chip need the installer's module parameters — until they are in place the profile set is the generic one; LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging and the keyboard-brightness read-back have no mainline interface at all.";
+            StatusMessage = "status.linux_mainline_limited";
             return;
         }
 
-        StatusMessage = "The fans are read-only — fan control needs the hardware-access grant and the driver's PWM interface; grant access from the app and restart.";
+        StatusMessage = "status.fans_read_only";
     }
 
     private void WireMainline()
@@ -117,6 +117,14 @@ public sealed partial class AcerDevice
         // as it did before.
         var ec = new AcerEcHidController();
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
+
+        // The power source (barrel vs USB-C PD) is read over the SAME channel, with the SAME codec and the SAME
+        // SEND-then-GET frame as Windows — chosen over the /sys/class/typec + power_supply route because that
+        // route's `usb_type`/`power_role` were NOT measured to reproduce Acer's 0x00/0x01/0x04 distinction on
+        // this machine, whereas the EC read is the identical already-decoded codec (see docs/acer-linux.md §5).
+        // Declared ONLY where the channel exists; on any failure the op returns Unknown and the row hides. It is
+        // UNTESTED on Linux hardware like the write path, and can only ever fail closed.
+        if (_ec != null) Battery.PowerSource = () => _ec.ReadPowerSource() ?? PowerSource.Unknown;
 
         // Nitro key -> toggle the window (evdev; needs the udev "uaccess" rule, otherwise stays hidden), and the
         // Turbo key -> HotkeyAction.TogglePerformance, decoded by THIS port from the vendor HID input report the

@@ -79,9 +79,9 @@ internal sealed class TrayController : IDisposable
             menu.Items.Add(item);
         }
         if (profiles.Count > 0) menu.Items.Add(new NativeMenuItemSeparator());
-        var show = new NativeMenuItem { Header = Loc.T("Show") }; show.Click += (_, _) => openMain(); menu.Items.Add(show);
-        if (device.Lighting != null || device.KeyboardBrightness != null) { var light = new NativeMenuItem { Header = Loc.T("Lighting…") }; light.Click += (_, _) => showLighting(); menu.Items.Add(light); }
-        var ex = new NativeMenuItem { Header = Loc.T("Exit") }; ex.Click += (_, _) => exit(); menu.Items.Add(ex);
+        var show = new NativeMenuItem { Header = Loc.T("nav.show") }; show.Click += (_, _) => openMain(); menu.Items.Add(show);
+        if (device.Lighting != null || device.KeyboardBrightness != null) { var light = new NativeMenuItem { Header = Loc.T("nav.lighting_ellipsis") }; light.Click += (_, _) => showLighting(); menu.Items.Add(light); }
+        var ex = new NativeMenuItem { Header = Loc.T("nav.exit") }; ex.Click += (_, _) => exit(); menu.Items.Add(ex);
         return menu;
     }
 

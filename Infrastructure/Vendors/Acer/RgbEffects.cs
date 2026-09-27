@@ -38,22 +38,22 @@ public static class RgbEffects
     // colour then switching, all still cycle), so Breathing is hasColor:false — no colour picker that does nothing.
     public static readonly RgbEffect[] Keyboard =
     [
-        new("Static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
-        new("Breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Wave",      WAVE,      isEffect: true,  hasColor: false, hasSpeed: true, hasDirection: true),
-        new("Shifting",  SHIFTING,  isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Zoom",      ZOOM,      isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Meteor",    METEOR,    isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Twinkling", TWINKLING, isEffect: true,  hasColor: false, hasSpeed: true)
+        new("light.effect_static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
+        new("light.effect_breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_wave",      WAVE,      isEffect: true,  hasColor: false, hasSpeed: true, hasDirection: true),
+        new("light.effect_shifting",  SHIFTING,  isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_zoom",      ZOOM,      isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_meteor",    METEOR,    isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_twinkling", TWINKLING, isEffect: true,  hasColor: false, hasSpeed: true)
     ];
 
     // Lightbar (single zone): only Static honours the chosen colour. Breathing (mode 0x04, see Keyboard) and
     // Neon cycle the built-in palette. Spatial effects do nothing.
     public static readonly RgbEffect[] Lightbar =
     [
-        new("Static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
-        new("Breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
-        new("Neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true)
+        new("light.effect_static",    STATIC,    isEffect: false, hasColor: true,  hasSpeed: false),
+        new("light.effect_breathing", BREATHING, isEffect: true,  hasColor: false, hasSpeed: true),
+        new("light.effect_neon",      NEON,      isEffect: true,  hasColor: false, hasSpeed: true)
     ];
 }

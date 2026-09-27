@@ -1,3 +1,4 @@
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Vendors.Generic;
@@ -16,7 +17,8 @@ public sealed record UiActions(
     CpuSection Cpu,
     CoSection Co,
     BatterySection Battery,
-    OptionsSection Options);
+    OptionsSection Options,
+    SweepSection? Sweep = null);
 
 /// <summary>Performance section: apply a profile, and (in "Turbo toggles" mode) flip Turbo over the base.
 /// <c>Traits</c> is the backend's own reading of a profile it offers — its class and its colours
@@ -75,6 +77,22 @@ public sealed record CoSection(
     IReadOnlyList<int> Initial,
     Action<int[]> SetCo);
 
+/// <summary>Guided-undervolt section: the CPU clusters the sweep may walk (projected with their index in the
+/// port's domain array, so the iGPU is carried and never swept), the explicit-confirmation prompt, the long
+/// blocking run handed to the pool, and the explicit save. Built only where the device exposes a Curve Optimizer
+/// AND the load tool's affinity adapter AND sensors — <c>LaptopService.CanSweepUndervolt</c>. The RUN delegate
+/// must already marshal progress (the view-model passes an <see cref="IProgress{T}"/> captured on the UI thread)
+/// and must be awaited off the UI thread; the save returns the full index-aligned counts on success so the slider
+/// rows can reload. <see cref="OnAc"/> is the live power source at build time (null = unknown); the refresh pass
+/// keeps it current, because the sweep is refused unless it is exactly AC.</summary>
+public sealed record SweepSection(
+    IReadOnlyList<SweepDomain> Domains,
+    TimeSpan Eta,
+    Func<Task<bool>> Confirm,
+    Func<IProgress<SweepProgress>?, CancellationToken, Task<SweepResult>> Run,
+    Func<SweepResult, Task<(bool ok, IReadOnlyList<int>? counts, string? error)>> Save,
+    bool? OnAc = null);
+
 /// <summary>Battery section: the battery object — which declares for itself whether there is telemetry and
 /// which charging controls exist — plus the pre-built option rows for those controls. The object is carried
 /// rather than a <c>bool</c> copied out of it, so "the readings are shown exactly when this machine reports a
@@ -84,6 +102,11 @@ public sealed record BatterySection(
 {
     /// <summary>Whether the live readings (charge %, state, health, cycles) are shown at all.</summary>
     public bool HasInfo => Battery.Telemetry != null;
+
+    /// <summary>The live power-source (barrel/USB-C/battery) read, when this machine exposes one. Null on a
+    /// machine without the EC channel, which is what hides the source row and means the app builds no
+    /// <c>AcerPowerSourceSchedule</c>. Carried through to <c>BatteryViewModel</c>.</summary>
+    public Func<PowerSource>? PowerSource => Battery.PowerSource;
 }
 
 /// <summary>Options drawer: the generic hardware toggles/choices plus the app-level rows (Turbo-key

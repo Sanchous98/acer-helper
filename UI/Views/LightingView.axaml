@@ -6,13 +6,17 @@
              x:Class="AcerHelper.UI.Views.LightingView"
              x:DataType="vm:LightingViewModel">
 
-  <StackPanel Spacing="12">
+  <!-- DOCKED, NOT STACKED. The window's height is fixed to the Home page, so a top-aligned stack would leave
+       a blank band under the tab body. The controls that are always one line (the plain backlight, the
+       follows-profile switch) dock to the top; the TabControl — whose body (effect, colours, brightness,
+       speed) is the variable-height part — takes the remaining height. -->
+  <DockPanel>
 
     <!-- Plain (non-RGB) keyboard backlight: brightness is the ONLY control. The levels are discrete hardware
          steps, so the slider snaps to tick stops (Off/Dim/Bright) rather than a free 0-100 range. Its level is
          settled by a read when the drawer opens rather than only at startup — see LightingViewModel.Reapply. -->
-    <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasBacklight}" Margin="0,4,0,0">
-      <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="{l:Tr Brightness}"/>
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding HasBacklight}" Margin="0,4,0,12">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Width="80" Text="{l:Tr 'light.brightness'}"/>
       <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding Backlight.MaxLevel}"
               TickFrequency="1" IsSnapToTickEnabled="True" TickPlacement="BottomRight"
               Value="{Binding Backlight.Level, Mode=TwoWay}"/>
@@ -24,14 +28,16 @@
          performance profile's palette on every switch. On (default) = leave it to the firmware, so it shows its
          per-profile colour seamlessly (no flash) and gets no tab; off = it becomes a normal zone (custom
          colour/effects) at the cost of that brief palette flash on each profile switch. -->
-    <CheckBox Content="{l:Tr 'Lightbar follows performance profile'}"
+    <CheckBox DockPanel.Dock="Top" Margin="0,0,0,12"
+              Content="{l:Tr 'light.lightbar_follows_profile'}"
               IsChecked="{Binding FollowsProfile, Mode=TwoWay}"
               IsVisible="{Binding ShowFollowsProfile}"/>
 
     <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
          adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
          content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so
-         an arbitrary zone count never clips. -->
+         an arbitrary zone count never clips. Stretching (no VerticalAlignment override) lets its body take
+         the frame's remaining height. -->
     <TabControl ItemsSource="{Binding Panels}" Padding="0" IsVisible="{Binding HasZones}">
       <TabControl.ItemsPanel>
         <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
@@ -48,5 +54,5 @@
       </TabControl.ContentTemplate>
     </TabControl>
 
-  </StackPanel>
+  </DockPanel>
 </UserControl>

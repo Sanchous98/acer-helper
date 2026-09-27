@@ -226,6 +226,12 @@ public sealed partial class LaptopService : IDisposable,
         // stall the background refresh pass and, through it, the UI. The schedule and the per-axis threads are
         // the reconciler's; this site names only the moment.
         //
+        // THE COMMITTED UNDERVOLT IS RE-APPLIED AS IT STANDS. There is no startup auto-revert: an offset is
+        // committed only when the user moves the manual sliders or confirms a guided-sweep proposal, so on restart
+        // the app re-applies exactly the last committed value (stock, 0, for a mode never committed) and never
+        // silently steps it back. The removed watchdog/canary is recorded in docs/auto-undervolt.md and
+        // docs/open-decisions.md.
+
         // A throw from either synchronous axis escapes this method to its caller, which is the AppController
         // constructor. That gap is old — it used to be the same two writes by hand — and it is recorded rather
         // than closed: docs/domain-refactoring-plan.md §7 (see also §5, wave 2).

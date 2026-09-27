@@ -225,7 +225,28 @@ public sealed record VoltageDomain(
     string Label,
     string Key,
     (int Min, int Max)? Range = null,
-    double? MillivoltsPerCount = null);
+    double? MillivoltsPerCount = null)
+{
+    /// <summary>Which CPU cluster this rail is, on a hybrid part where the cores sit on two rails — the port's
+    /// declaration of the rail's IDENTITY, so a consumer can attribute a probe to the right physical cores
+    /// WITHOUT parsing the rail's <see cref="Key"/> or trusting the list's order (the port is free to change
+    /// either, which is exactly why <see cref="Key"/> exists rather than a position). Null on a non-core rail
+    /// (the integrated GPU) and on a homogeneous CPU that exposes rails for some other reason; a consumer that
+    /// needs a cluster must then say it could not identify one rather than guess.
+    /// <para>WHY PERFORMANCE/EFICIENCY RATHER THAN A CCD NUMBER. The OS reports the physical cores' hybrid class
+    /// directly (Windows' <c>PROCESSOR_RELATIONSHIP.EfficiencyClass</c>, Linux's <c>cpu_capacity</c>), both with
+    /// a HIGHER value meaning the faster, less power-efficient core, so the cluster this names is what a probe
+    /// can actually select. A raw CCD number would be a second, vendor-specific vocabulary to reconcile against
+    /// the same OS report.</para></summary>
+    public CpuClusterKind? Cluster { get; init; }
+}
+
+/// <summary>Which of a hybrid processor's two CPU clusters a <see cref="VoltageDomain"/> is. On this part the
+/// Zen 5 cores are the <see cref="Performance"/> cluster and the Zen 5c cores the <see cref="Efficiency"/>
+/// one — separate rails at different voltages (measured near 1.17 V and 1.02 V under load). The OS-neutral
+/// counterpart is the per-physical-core class the topology carries (<c>LogicalCore.EfficiencyClass</c>), where
+/// a higher value is the performance core on BOTH platforms.</summary>
+public enum CpuClusterKind { Performance, Efficiency }
 
 /// <summary>A third-party driver some feature needs, which the app can offer to install. Present only when that
 /// driver is relevant to THIS machine and this build actually carries its installer — so a machine that can never

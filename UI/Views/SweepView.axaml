@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AcerHelper.UI.ViewModels"
+             xmlns:l="clr-namespace:AcerHelper.Localization"
+             x:Class="AcerHelper.UI.Views.SweepView"
+             x:DataType="vm:UndervoltSweepViewModel">
+
+  <!-- Bare drawer content; TuningView supplies the surrounding "CPU" card. The guided sweep is a long, invasive
+       run, so the start is behind the confirmation in the view-model, the progress can always be cancelled, and
+       its result is PREVIEWED on the manual sliders as a PROPOSAL with an explicit Save / Discard — never an
+       auto-persist. -->
+  <StackPanel Spacing="6">
+
+    <!-- Before a run: the AC requirement (why the button is greyed on battery) and a realistic ETA, and the
+         explicit start (disabled unless the source is a confirmed AC). The procedure itself is in the
+         confirmation. -->
+    <StackPanel Spacing="6" IsVisible="{Binding ShowStart}">
+      <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding StartHint}"/>
+      <Button Classes="accent" HorizontalAlignment="Left" Padding="12,5"
+              IsEnabled="{Binding CanStart}"
+              Content="{l:Tr 'uv.start'}" Command="{Binding StartCommand}"/>
+    </StackPanel>
+
+    <!-- While a run is going: current phase/domain/offset/core/temperature, the elapsed clock (ticked by the
+         shared periodic schedule), and Cancel. -->
+    <StackPanel Spacing="6" IsVisible="{Binding IsRunning}">
+      <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding StatusText}"/>
+      <TextBlock Classes="muted" Text="{Binding ElapsedText}"/>
+      <Button HorizontalAlignment="Left" Padding="12,5"
+              Content="{l:Tr 'uv.sweep_cancel'}" Command="{Binding CancelCommand}"/>
+    </StackPanel>
+
+    <!-- The result: the proposal is shown ON the manual sliders above (each moved thumb accented), so this panel
+         is only the explicit Save / Discard and the caution. -->
+    <StackPanel Spacing="6" IsVisible="{Binding HasResult}">
+      <TextBlock Classes="muted" TextWrapping="Wrap" Text="{l:Tr 'uv.result_hint'}"/>
+      <TextBlock Classes="muted" FontSize="11" TextWrapping="Wrap" Text="{Binding Caution}"/>
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Classes="accent" Padding="12,5"
+                Content="{l:Tr 'uv.save'}" Command="{Binding SaveCommand}"/>
+        <Button Padding="12,5" Content="{l:Tr 'uv.discard'}" Command="{Binding DiscardCommand}"/>
+      </StackPanel>
+    </StackPanel>
+
+  </StackPanel>
+</UserControl>

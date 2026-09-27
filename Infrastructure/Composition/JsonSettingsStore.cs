@@ -111,6 +111,7 @@ public sealed class JsonSettingsStore : ISettingsStore
     }
 }
 
-[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSourceGenerationOptions(WriteIndented = true,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip)]
 [JsonSerializable(typeof(Settings))]
 internal partial class SettingsJsonContext : JsonSerializerContext;

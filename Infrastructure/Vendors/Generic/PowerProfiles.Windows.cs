@@ -17,9 +17,9 @@ public sealed class OverlayPowerProfiles : IPowerProfiles, IProfileTraits
 
     private static readonly (Guid g, string name, ProfileKind kind, AccentColor accent)[] Table =
     [
-        (Efficiency,  "Best efficiency",  ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
-        (Balanced,    "Balanced",         ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-        (Performance, "Best performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00))
+        (Efficiency,  "power.profile_best_efficiency",  ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        (Balanced,    "profile.balanced",               ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        (Performance, "power.profile_best_performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00))
     ];
 
     [DllImport("powrprof.dll")] private static extern uint PowerGetEffectiveOverlayScheme(out Guid scheme);

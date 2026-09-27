@@ -68,8 +68,33 @@ internal sealed partial class AcerEcHidController
         return false;
     }
 
+    // SEND-then-GET, the same order the codec requires: HIDIOCSFEATURE pushes the request, then
+    // HIDIOCGFEATURE(len) = _IOC(WRITE|READ, 'H', 0x07, len) reads the reply back into the buffer (byte 0 is
+    // the report id on the way in and on the way out). Called from the caller's slow pool schedule (inside the
+    // controller's _ioGate), never the UI thread. On any failure drop the node so the next call re-opens.
+    //
+    // UNTESTED ON LINUX HARDWARE (the codec is verified on Windows — see docs/power-an18-61.md). A failure
+    // here returns false and the caller hides the row; it can never fabricate a source.
+    private partial bool ReadFeature(byte[] send, byte[] reply)
+    {
+        if (_dev == null && !OpenTransport()) return false;
+        try
+        {
+            var set = 0xC0000000u | ((uint)send.Length << 16) | ('H' << 8) | 0x06;
+            if (Ioctl(_dev!.SafeFileHandle, set, send) < 0) { _dev?.Dispose(); _dev = null; return false; }
+            var get = 0xC0000000u | ((uint)reply.Length << 16) | ('H' << 8) | 0x07;
+            if (IoctlGet(_dev.SafeFileHandle, get, reply) >= 0) return true;
+        }
+        catch { /* fall through to drop the node */ }
+        _dev?.Dispose(); _dev = null;
+        return false;
+    }
+
     private partial void CloseTransport() => _dev?.Dispose();
 
     [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
     private static partial int Ioctl(SafeFileHandle fd, nuint request, [In] byte[] data);
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int IoctlGet(SafeFileHandle fd, nuint request, [In, Out] byte[] data);
 }

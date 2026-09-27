@@ -37,6 +37,34 @@ public sealed partial class LaptopService
     private bool? _onAc;
     private ProfileMemory Slot => _onAc == false ? Settings.OnBattery : Settings.OnAc;
 
+    /// <summary>The live power source as last seen: true on AC, false on battery, null before any reading (no
+    /// battery, or a desktop). Set by <see cref="SyncPowerSource"/> from the refresh pass. Null is deliberately
+    /// distinct from false: it means "we do not know", and a caller that must fail closed — the guided undervolt
+    /// sweep, which is long and invasive and must not run on an unproven source — treats null exactly as "not
+    /// AC". This is a read only; nothing here changes the source or applies a mode.</summary>
+    public bool? OnAc
+    {
+        get { lock (_state) return _onAc; }
+    }
+
+    /// <summary>Apply <paramref name="profile"/> to the port for a TRANSIENT, in-app purpose only, WITHOUT
+    /// touching the remembered per-source slot or Settings. Used by the guided sweep to sit in a performance
+    /// profile for the run and then restore the previous one (LaptopService.UndervoltSweep.cs): a plain
+    /// <see cref="ApplyProfile"/> would persist <c>Slot.BaseId</c> and clear the Turbo flag, leaking the forced
+    /// profile into the user's chosen mode, which the owner ruled must never happen. The write is to the same
+    /// port <see cref="ApplyProfile"/> uses, so the machine really switches; only the memory is skipped. No
+    /// availability check: the caller picked the profile from what the live source offers.</summary>
+    internal bool ApplyProfileTransient(PerformanceProfile profile)
+    {
+        var pp = device.PowerProfiles;
+        if (pp == null) return false;
+        lock (_state)
+        {
+            try { return pp.Set(profile); }
+            catch { return false; }   // a throwing port is a failed switch, not a reason to abort the restore
+        }
+    }
+
     /// <summary>Key identifying the current performance "mode" for per-mode presets: the profile id, except
     /// Turbo used as a switch shares its base profile's key (Turbo isn't a standalone mode then). "default"
     /// when the device has no profiles.</summary>

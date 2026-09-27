@@ -19,7 +19,7 @@ public partial class GenericDevice
         else { var sysfs = new SysfsPowerProfiles(); if (sysfs.Available) profiles = sysfs; }
         PowerProfiles = profiles;
         if (profiles == null && StatusMessage == null)
-            StatusMessage = "No power-profile interface found — limited controls.";
+            StatusMessage = "status.no_power_profile";
 
         Sensors = HwmonSensors.TryCreate();        // RPM + temps (read-only, universal)
 

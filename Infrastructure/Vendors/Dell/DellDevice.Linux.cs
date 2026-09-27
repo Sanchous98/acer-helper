@@ -20,8 +20,8 @@ public sealed partial class DellDevice
     // on this hardware, so there's no disable option.
     private static readonly ChoiceOption[] KbdTimeouts =
     [
-        new("5s", "5 s"), new("10s", "10 s"), new("30s", "30 s"),
-        new("1m", "1 min"), new("5m", "5 min"), new("15m", "15 min"), new("1h", "1 h"),
+        new("5s", "power.duration_5s"), new("10s", "power.duration_10s"), new("30s", "power.duration_30s"),
+        new("1m", "power.duration_1m"), new("5m", "power.duration_5m"), new("15m", "power.duration_15m"), new("1h", "power.duration_1h"),
     ];
 
     private SysfsInvoker _bat = null!;
@@ -88,11 +88,11 @@ public sealed partial class DellDevice
             if (_fw.CanRead("FnLock")) Declare(_fw.Flag("FnLock"));
             if (_fw.CanRead("UsbPowerShare"))
                 Declare(_fw.Choice("UsbPowerShare",
-                    [new ChoiceOption("Disabled", "Off"), new ChoiceOption("Enabled", "On")]));
+                    [new ChoiceOption("Disabled", "level.off"), new ChoiceOption("Enabled", "level.on")]));
         }
 
         if (locked)
-            StatusMessage ??= "Some Dell controls are locked by the firmware (BIOS admin password, or the model rejects writes) and were hidden.";
+            StatusMessage ??= "status.dell_partially_locked";
     }
 
     // ---- battery charge modes (power_supply charge_types) ----

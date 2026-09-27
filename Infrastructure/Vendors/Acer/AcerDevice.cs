@@ -41,7 +41,7 @@ public sealed partial class AcerDevice : GenericDevice
     // USB-charging levels (ids = battery-threshold percentages, "0" = off). OS-agnostic — the same choices
     // on both backends — so it lives here rather than duplicated in each InitVendor.
     private static readonly ChoiceOption[] UsbLevels =
-        [new("0", "Off"), new("10", "10%"), new("20", "20%"), new("30", "30%")];
+        [new("0", "level.off"), new("10", "10%"), new("20", "20%"), new("30", "30%")];
 
     /// <summary>Assemble the RGB device from the ENE HID controller and adopt it if it has any zones. The
     /// controller is the same brick on both OSes (same device + packets); only the keyboard-brightness

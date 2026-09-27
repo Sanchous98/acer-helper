@@ -133,15 +133,14 @@ public class AcerLinuxWiringTests
     /// Three rows, and each fails on its own kind of loss: the flag disappears (the line stops depending on what
     /// was built), the chip-absent condition disappears (the "parameters not installed" state inherits the
     /// promise that Acer features are live), or the actionable sentence disappears (the read-only case falls back
-    /// to the generic line, which is the original lie). The third row pins a FRAGMENT of the English key rather
-    /// than the whole sentence: rewording the tail should not redden anything, but replacing the sentence with a
-    /// different one is the change this row exists to make visible — and it is the string the localization entry
-    /// is keyed by, so the two must be updated together.
+    /// to the generic line, which is the original lie). The third row pins the KEY of the actionable sentence: its
+    /// Russian row must be deleted together with the constant, or the read-only case would show an untranslated
+    /// key.
     /// </summary>
     [Theory]
     [InlineData("_fanPortBuilt")]
     [InlineData("if (_acerHwmon == null)")]
-    [InlineData("The fans are read-only")]
+    [InlineData("status.fans_read_only")]
     public void TheStatusLineIsChosenFromWhatTheWiringBuilt(string required)
         => Assert.Contains(required, Source("Infrastructure/Vendors/Acer/AcerDevice.Linux.cs"), StringComparison.Ordinal);
 

@@ -398,8 +398,12 @@ internal sealed class CurveOptimizerPolicy : ICurveOptimizer
         // Set(), and a domain list containing only the iGPU would quietly turn the CPU slider into a GPU one.
         Domains =
         [
-            new VoltageDomain($"Zen 5", $"ccd:{Zen5Ccd}", MillivoltsPerCount: MvPerCount),
-            new VoltageDomain($"Zen 5c", $"ccd:{Zen5cCcd}", MillivoltsPerCount: MvPerCount),
+            // The performance flag is the rail's IDENTITY for the sweep: the Zen 5 core cluster is the
+            // high-efficiency-class cluster, Zen 5c the low. See VoltageDomain.Cluster.
+            new VoltageDomain($"Zen 5", $"ccd:{Zen5Ccd}", MillivoltsPerCount: MvPerCount)
+            { Cluster = CpuClusterKind.Performance },
+            new VoltageDomain($"Zen 5c", $"ccd:{Zen5cCcd}", MillivoltsPerCount: MvPerCount)
+            { Cluster = CpuClusterKind.Efficiency },
             // Its own scale, not the cores': 5 mV a count against their 2.5 (see GpuMvPerCount), and its own range,
             // because the floor is a property of the rail.
             new VoltageDomain(GpuDomainLabel, GpuDomainKey, (GpuMinCounts, 0), GpuMvPerCount),

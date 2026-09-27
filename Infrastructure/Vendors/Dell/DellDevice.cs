@@ -23,16 +23,17 @@ public sealed partial class DellDevice : GenericDevice
 
     partial void InitVendor();
 
-    /// <summary>Display name for a charge-mode id. Handles BOTH bindings' ids: the kernel power_supply
+    /// <summary>Display key for a charge-mode id. Handles BOTH bindings' ids: the kernel power_supply
     /// strings (Trickle/Fast/Standard/Adaptive/Custom) and the BIOS-attribute values
-    /// (PrimAcUse/Express/Standard/Adaptive/Custom) — same five EC modes, two namings.</summary>
+    /// (PrimAcUse/Express/Standard/Adaptive/Custom) — same five EC modes, two namings. The return value is a
+    /// neutral localization key; the id itself stays the wire token.</summary>
     internal static string ChargeModeName(string id) => id switch
     {
-        "Trickle" or "PrimAcUse" => "Primarily AC use",
-        "Fast" or "Express"      => "Express charge",
-        "Standard"               => "Standard",
-        "Adaptive"               => "Adaptive",
-        "Custom"                 => "Custom",
+        "Trickle" or "PrimAcUse" => "power.dell_primarily_ac",
+        "Fast" or "Express"      => "bat.charge_express",
+        "Standard"               => "bat.charge_standard",
+        "Adaptive"               => "bat.charge_adaptive",
+        "Custom"                 => "fan.mode_custom",
         _                        => id,
     };
 }

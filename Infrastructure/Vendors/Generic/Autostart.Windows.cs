@@ -18,7 +18,7 @@ public sealed partial class Autostart
 {
     private const string TaskName = "AcerHelperAutostart";
 
-    public partial string Label => "Start with Windows";
+    public partial string Label => "power.autostart_windows";
 
     public partial bool IsEnabled() => Run($"/query /tn \"{TaskName}\"").exit == 0;
 

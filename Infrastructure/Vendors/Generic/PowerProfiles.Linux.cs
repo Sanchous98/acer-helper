@@ -56,10 +56,10 @@ public sealed partial class PpdPowerProfiles : IPowerProfiles, IProfileTraits
     /// being one this table cannot classify.</summary>
     private static (string Name, ProfileKind Kind, AccentColor Accent) Describe(string id) => id switch
     {
-        "power-saver" => ("Power saver", ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
-        "balanced"    => ("Balanced",    ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-        "performance" => ("Performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
-        _             => (id,            ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
+        "power-saver" => ("power.profile_power_saver", ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        "balanced"    => ("profile.balanced",          ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        "performance" => ("profile.performance",       ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
+        _             => (id,                          ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
     };
 
     private static PerformanceProfile ToProfile(string id)
@@ -260,13 +260,13 @@ public sealed class SysfsPowerProfiles : IPowerProfiles, IProfileTraits
     /// may assume the two agree.</summary>
     private static (string Name, ProfileKind Kind, AccentColor Accent) Describe(string choice) => choice switch
     {
-        "low-power"            => ("Low power",            ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
-        "quiet"                => ("Quiet",                ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
-        "cool"                 => ("Cool",                 ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
-        "balanced"             => ("Balanced",             ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
-        "balanced-performance" => ("Balanced performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
-        "performance"          => ("Performance",          ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
-        _                      => (choice,                 ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
+        "low-power"            => ("power.profile_low_power",            ProfileKind.Eco,         new AccentColor(0x00, 0x89, 0x7B)),
+        "quiet"                => ("profile.quiet",                      ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        "cool"                 => ("power.profile_cool",                 ProfileKind.Quiet,       new AccentColor(0x42, 0x85, 0xF4)),
+        "balanced"             => ("profile.balanced",                   ProfileKind.Balanced,    new AccentColor(0x2E, 0x7D, 0x32)),
+        "balanced-performance" => ("power.profile_balanced_performance", ProfileKind.Performance, new AccentColor(0xF5, 0x7C, 0x00)),
+        "performance"          => ("profile.performance",                ProfileKind.Performance, new AccentColor(0xD3, 0x2F, 0x2F)),
+        _                      => (choice,                               ProfileKind.Other,       new AccentColor(0x80, 0x80, 0x80)),
     };
 
     private static PerformanceProfile ToProfile(string choice)

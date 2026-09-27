@@ -1,15 +1,636 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
-  <!--
-    NEUTRAL resource file for the app's translations. IT IS DELIBERATELY EMPTY.
-
-    The English source text is the lookup key (gettext-style; see Localization/Loc.cs), so English needs no
-    resource at all — a key that resolves to nothing already IS its English value. This file exists only so the
-    ResourceManager has a neutral base name to hang the `ru` satellite off (ru/AcerHelper.resources.dll), and
-    the SDK emits it as the neutral AcerHelper.resources in the main assembly. An absent key returns null, and
-    Loc returns the English text unchanged — which is exactly the fallback the app wants.
-
-    Do not add entries here: an entry would shadow the English key with a second copy of the same sentence and
-    silently defeat the "English is the key" contract the call sites and the localisation guards rely on.
-  -->
+  <data name="nav.options" xml:space="preserve">
+    <value>Options</value>
+  </data>
+  <data name="nav.lighting" xml:space="preserve">
+    <value>Lighting</value>
+  </data>
+  <data name="nav.lighting_ellipsis" xml:space="preserve">
+    <value>Lighting…</value>
+  </data>
+  <data name="nav.grant_hardware_access" xml:space="preserve">
+    <value>Grant hardware access…</value>
+  </data>
+  <data name="nav.show" xml:space="preserve">
+    <value>Show</value>
+  </data>
+  <data name="nav.exit" xml:space="preserve">
+    <value>Exit</value>
+  </data>
+  <data name="nav.cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="nav.done" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="nav.start" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="notif.title" xml:space="preserve">
+    <value>Notifications</value>
+  </data>
+  <data name="notif.empty" xml:space="preserve">
+    <value>No notifications.</value>
+  </data>
+  <data name="notif.ignore" xml:space="preserve">
+    <value>Ignore</value>
+  </data>
+  <data name="section.performance" xml:space="preserve">
+    <value>PERFORMANCE</value>
+  </data>
+  <data name="section.fans" xml:space="preserve">
+    <value>FANS</value>
+  </data>
+  <data name="section.battery" xml:space="preserve">
+    <value>BATTERY</value>
+  </data>
+  <data name="profile.eco" xml:space="preserve">
+    <value>Eco</value>
+  </data>
+  <data name="profile.quiet" xml:space="preserve">
+    <value>Quiet</value>
+  </data>
+  <data name="profile.balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="profile.performance" xml:space="preserve">
+    <value>Performance</value>
+  </data>
+  <data name="profile.turbo" xml:space="preserve">
+    <value>Turbo</value>
+  </data>
+  <data name="profile.turbo_key_toggles" xml:space="preserve">
+    <value>Turbo key toggles Turbo</value>
+  </data>
+  <data name="profile.turbo_key_cycles" xml:space="preserve">
+    <value>Otherwise the Turbo key cycles through profiles.</value>
+  </data>
+  <data name="profile.status" xml:space="preserve">
+    <value>Profile: {0}</value>
+  </data>
+  <data name="profile.set_failed" xml:space="preserve">
+    <value>Failed to set {0}</value>
+  </data>
+  <data name="profile.turbo_failed" xml:space="preserve">
+    <value>Turbo failed</value>
+  </data>
+  <data name="fan.mode_auto" xml:space="preserve">
+    <value>Auto</value>
+  </data>
+  <data name="fan.mode_max" xml:space="preserve">
+    <value>Max</value>
+  </data>
+  <data name="fan.mode_custom" xml:space="preserve">
+    <value>Custom</value>
+  </data>
+  <data name="fan.mode_curve" xml:space="preserve">
+    <value>Curve</value>
+  </data>
+  <data name="fan.follow_curve" xml:space="preserve">
+    <value>Follow curve</value>
+  </data>
+  <data name="fan.cpu_curve" xml:space="preserve">
+    <value>CPU fan curve</value>
+  </data>
+  <data name="fan.gpu_curve" xml:space="preserve">
+    <value>GPU fan curve</value>
+  </data>
+  <data name="fan.rpm" xml:space="preserve">
+    <value>{0} rpm</value>
+  </data>
+  <data name="oc.title" xml:space="preserve">
+    <value>Overclocking and Power</value>
+  </data>
+  <data name="oc.gpu_core" xml:space="preserve">
+    <value>Core</value>
+  </data>
+  <data name="oc.gpu_memory" xml:space="preserve">
+    <value>Memory</value>
+  </data>
+  <data name="oc.reset" xml:space="preserve">
+    <value>Reset</value>
+  </data>
+  <data name="oc.gpu_overclock_failed" xml:space="preserve">
+    <value>GPU overclock failed</value>
+  </data>
+  <data name="oc.power_mode" xml:space="preserve">
+    <value>Power mode</value>
+  </data>
+  <data name="oc.best_power_efficiency" xml:space="preserve">
+    <value>Best power efficiency</value>
+  </data>
+  <data name="oc.power_mode_failed" xml:space="preserve">
+    <value>Power mode failed</value>
+  </data>
+  <data name="uv.title" xml:space="preserve">
+    <value>Undervolt</value>
+  </data>
+  <data name="uv.failed" xml:space="preserve">
+    <value>CPU undervolt failed</value>
+  </data>
+  <data name="uv.cpu_undervolt" xml:space="preserve">
+    <value>CPU undervolt</value>
+  </data>
+  <data name="uv.install_prompt" xml:space="preserve">
+    <value>Install {0}?</value>
+  </data>
+  <data name="uv.install" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="uv.driver_consent" xml:space="preserve">
+    <value>{0} needs the {1} kernel driver from {2}. It is third-party software, shared with other tuning tools, and Acer Helper will never update or remove it. You can install it yourself instead.</value>
+  </data>
+  <data name="uv.driver_installed" xml:space="preserve">
+    <value>{0} installed — restart Acer Helper to use {1}</value>
+  </data>
+  <data name="uv.hint" xml:space="preserve">
+    <value>Lower voltage at the same clocks, in AVFS steps. Too much is unstable — test for hours, and reset if anything crashes.</value>
+  </data>
+  <data name="uv.start" xml:space="preserve">
+    <value>Start guided undervolt</value>
+  </data>
+  <data name="uv.confirm_title" xml:space="preserve">
+    <value>Guided undervolt sweep?</value>
+  </data>
+  <data name="uv.confirm_body" xml:space="preserve">
+    <value>The sweep tries deeper CPU offsets and load-tests each one, one core at a time. It is long and invasive and can make the machine unstable or reboot it. It REQUIRES AC power: on battery the platform can accept a Curve-Optimizer write without applying it, so a probe could pass against an offset that was never set. During the run the app temporarily switches to a performance profile (Turbo where available) and restores your previous profile when the sweep ends. Keep the laptop plugged in and close other tuning tools (Ryzen Master, RyzenAdj, HWiNFO) — they share the SMU/PCI lock. Offsets are never saved automatically, and a reboot always restores stock.</value>
+  </data>
+  <data name="uv.sweep_start" xml:space="preserve">
+    <value>Start sweep</value>
+  </data>
+  <data name="uv.sweep_cancel" xml:space="preserve">
+    <value>Cancel sweep</value>
+  </data>
+  <data name="uv.result_hint" xml:space="preserve">
+    <value>Result on the sliders above — save to keep it or discard.</value>
+  </data>
+  <data name="uv.save" xml:space="preserve">
+    <value>Save to this mode</value>
+  </data>
+  <data name="uv.discard" xml:space="preserve">
+    <value>Discard</value>
+  </data>
+  <data name="uv.caution" xml:space="preserve">
+    <value>Best offsets under this test only — idle and short-transient stability are NOT proven. Test for hours, and reset if anything crashes.</value>
+  </data>
+  <data name="uv.sweep_failed" xml:space="preserve">
+    <value>Guided undervolt failed</value>
+  </data>
+  <data name="uv.phase_first" xml:space="preserve">
+    <value>Applying the first offset…</value>
+  </data>
+  <data name="uv.phase_applying" xml:space="preserve">
+    <value>Applying</value>
+  </data>
+  <data name="uv.phase_testing" xml:space="preserve">
+    <value>Testing</value>
+  </data>
+  <data name="uv.phase_backing_off" xml:space="preserve">
+    <value>Backing off</value>
+  </data>
+  <data name="uv.phase_restoring" xml:space="preserve">
+    <value>Returning to stock</value>
+  </data>
+  <data name="uv.temp_unreadable" xml:space="preserve">
+    <value>temperature unreadable</value>
+  </data>
+  <data name="uv.temp_c" xml:space="preserve">
+    <value>{0} °C</value>
+  </data>
+  <data name="uv.stage" xml:space="preserve">
+    <value>stage {0}/{1}</value>
+  </data>
+  <data name="uv.cluster" xml:space="preserve">
+    <value>cluster {0}</value>
+  </data>
+  <data name="uv.all_cores" xml:space="preserve">
+    <value>all cores (cluster not identified)</value>
+  </data>
+  <data name="uv.telemetry" xml:space="preserve">
+    <value>{0} — {1} — {2} {3} — {4}</value>
+  </data>
+  <data name="uv.telemetry_core" xml:space="preserve">
+    <value>{0} — {1} — {2} {3} — core {4}/{5}, {6}</value>
+  </data>
+  <data name="uv.elapsed" xml:space="preserve">
+    <value>Elapsed {0}</value>
+  </data>
+  <data name="uv.finished" xml:space="preserve">
+    <value>Finished — review the proposal.</value>
+  </data>
+  <data name="uv.stop_thermal" xml:space="preserve">
+    <value>Stopped: the CPU reached the thermal limit.</value>
+  </data>
+  <data name="uv.stop_cancelled" xml:space="preserve">
+    <value>Stopped: cancelled.</value>
+  </data>
+  <data name="uv.stop_smu" xml:space="preserve">
+    <value>Stopped: the SMU refused a write.</value>
+  </data>
+  <data name="uv.refused_ac" xml:space="preserve">
+    <value>Refused: the guided sweep requires AC power.</value>
+  </data>
+  <data name="uv.connect_ac" xml:space="preserve">
+    <value>Connect AC power first — the guided sweep does not run on battery.</value>
+  </data>
+  <data name="uv.waiting_power" xml:space="preserve">
+    <value>Waiting for the power source; the guided sweep requires AC power.</value>
+  </data>
+  <data name="uv.requires_ac" xml:space="preserve">
+    <value>Requires AC power. Estimated {0}.</value>
+  </data>
+  <data name="uv.stopped" xml:space="preserve">
+    <value>Stopped.</value>
+  </data>
+  <data name="uv.eta_hours" xml:space="preserve">
+    <value>{0:0.#} h</value>
+  </data>
+  <data name="uv.eta_minutes" xml:space="preserve">
+    <value>{0:0.#} min</value>
+  </data>
+  <data name="uv.eta_seconds" xml:space="preserve">
+    <value>{0:0.#} s</value>
+  </data>
+  <data name="bat.health" xml:space="preserve">
+    <value>Health</value>
+  </data>
+  <data name="bat.charge_cycles" xml:space="preserve">
+    <value>Charge cycles</value>
+  </data>
+  <data name="bat.charge_mode" xml:space="preserve">
+    <value>Charge mode</value>
+  </data>
+  <data name="bat.charge_limit" xml:space="preserve">
+    <value>Charge limit (~80%)</value>
+  </data>
+  <data name="bat.calibration" xml:space="preserve">
+    <value>Calibration (full cycle)</value>
+  </data>
+  <data name="bat.charging" xml:space="preserve">
+    <value>Charging</value>
+  </data>
+  <data name="bat.on_battery" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="bat.plugged_in" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="bat.power_draw" xml:space="preserve">
+    <value>Power draw</value>
+  </data>
+  <data name="bat.charging_power" xml:space="preserve">
+    <value>Charging power</value>
+  </data>
+  <data name="bat.power_source" xml:space="preserve">
+    <value>Power source</value>
+  </data>
+  <data name="bat.source_ac" xml:space="preserve">
+    <value>AC adapter</value>
+  </data>
+  <data name="bat.source_usbc" xml:space="preserve">
+    <value>USB-C (PD)</value>
+  </data>
+  <data name="bat.source_battery" xml:space="preserve">
+    <value>Internal battery</value>
+  </data>
+  <data name="bat.watts" xml:space="preserve">
+    <value>{0:0.0} W</value>
+  </data>
+  <data name="bat.charge_express" xml:space="preserve">
+    <value>Express charge</value>
+  </data>
+  <data name="bat.charge_standard" xml:space="preserve">
+    <value>Standard</value>
+  </data>
+  <data name="bat.charge_adaptive" xml:space="preserve">
+    <value>Adaptive</value>
+  </data>
+  <data name="bat.calibration_confirm" xml:space="preserve">
+    <value>Start battery calibration?</value>
+  </data>
+  <data name="bat.calibration_body" xml:space="preserve">
+    <value>This runs a full charge then a full discharge cycle and can take several hours. Keep the laptop plugged in and don't depend on it meanwhile. Turn the switch back off to stop.</value>
+  </data>
+  <data name="opt.lcd_overdrive" xml:space="preserve">
+    <value>LCD overdrive</value>
+  </data>
+  <data name="opt.kbd_timeout" xml:space="preserve">
+    <value>Keyboard backlight timeout</value>
+  </data>
+  <data name="opt.kbd_timeout_label" xml:space="preserve">
+    <value>Keyboard backlight timeout:</value>
+  </data>
+  <data name="opt.backlight_timeout" xml:space="preserve">
+    <value>Backlight timeout</value>
+  </data>
+  <data name="opt.fn_lock" xml:space="preserve">
+    <value>Fn lock</value>
+  </data>
+  <data name="opt.usb_charging_label" xml:space="preserve">
+    <value>USB charging when off:</value>
+  </data>
+  <data name="opt.usb_charging" xml:space="preserve">
+    <value>USB charging</value>
+  </data>
+  <data name="opt.battery_limit" xml:space="preserve">
+    <value>Battery limit</value>
+  </data>
+  <data name="opt.battery_calibration" xml:space="preserve">
+    <value>Battery calibration</value>
+  </data>
+  <data name="opt.blue_light_label" xml:space="preserve">
+    <value>Blue-light filter:</value>
+  </data>
+  <data name="opt.profile_ac_label" xml:space="preserve">
+    <value>Profile on AC power:</value>
+  </data>
+  <data name="opt.profile_battery_label" xml:space="preserve">
+    <value>Profile on battery:</value>
+  </data>
+  <data name="opt.power_source_profile" xml:space="preserve">
+    <value>Power-source profile</value>
+  </data>
+  <data name="opt.setting_failed" xml:space="preserve">
+    <value>{0} failed</value>
+  </data>
+  <data name="level.off" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="level.on" xml:space="preserve">
+    <value>On</value>
+  </data>
+  <data name="level.low" xml:space="preserve">
+    <value>Low</value>
+  </data>
+  <data name="level.medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+  <data name="level.high" xml:space="preserve">
+    <value>High</value>
+  </data>
+  <data name="level.long_use" xml:space="preserve">
+    <value>Long-use</value>
+  </data>
+  <data name="level.dim" xml:space="preserve">
+    <value>Dim</value>
+  </data>
+  <data name="level.bright" xml:space="preserve">
+    <value>Bright</value>
+  </data>
+  <data name="light.brightness" xml:space="preserve">
+    <value>Brightness</value>
+  </data>
+  <data name="light.speed" xml:space="preserve">
+    <value>Speed</value>
+  </data>
+  <data name="light.direction" xml:space="preserve">
+    <value>Direction</value>
+  </data>
+  <data name="light.colour" xml:space="preserve">
+    <value>Colour</value>
+  </data>
+  <data name="light.direction_normal" xml:space="preserve">
+    <value>Normal</value>
+  </data>
+  <data name="light.direction_reversed" xml:space="preserve">
+    <value>Reversed</value>
+  </data>
+  <data name="light.lightbar_follows_profile" xml:space="preserve">
+    <value>Lightbar follows performance profile</value>
+  </data>
+  <data name="light.zone" xml:space="preserve">
+    <value>Zone {0}</value>
+  </data>
+  <data name="light.zone_keyboard" xml:space="preserve">
+    <value>Keyboard</value>
+  </data>
+  <data name="light.zone_lightbar" xml:space="preserve">
+    <value>Lightbar</value>
+  </data>
+  <data name="light.effect_static" xml:space="preserve">
+    <value>Static</value>
+  </data>
+  <data name="light.effect_breathing" xml:space="preserve">
+    <value>Breathing</value>
+  </data>
+  <data name="light.effect_neon" xml:space="preserve">
+    <value>Neon</value>
+  </data>
+  <data name="light.effect_wave" xml:space="preserve">
+    <value>Wave</value>
+  </data>
+  <data name="light.effect_shifting" xml:space="preserve">
+    <value>Shifting</value>
+  </data>
+  <data name="light.effect_zoom" xml:space="preserve">
+    <value>Zoom</value>
+  </data>
+  <data name="light.effect_meteor" xml:space="preserve">
+    <value>Meteor</value>
+  </data>
+  <data name="light.effect_twinkling" xml:space="preserve">
+    <value>Twinkling</value>
+  </data>
+  <data name="power.clamshell" xml:space="preserve">
+    <value>Stay awake when lid closed (docked, on AC)</value>
+  </data>
+  <data name="power.autostart_windows" xml:space="preserve">
+    <value>Start with Windows</value>
+  </data>
+  <data name="power.autostart_linux" xml:space="preserve">
+    <value>Start at login</value>
+  </data>
+  <data name="update.available" xml:space="preserve">
+    <value>Update available: v{0}</value>
+  </data>
+  <data name="update.changelog" xml:space="preserve">
+    <value>Changelog</value>
+  </data>
+  <data name="update.downloading" xml:space="preserve">
+    <value>Downloading update…</value>
+  </data>
+  <data name="update.installing" xml:space="preserve">
+    <value>Installing update…</value>
+  </data>
+  <data name="update.launching" xml:space="preserve">
+    <value>Launching installer…</value>
+  </data>
+  <data name="update.failed" xml:space="preserve">
+    <value>Update failed</value>
+  </data>
+  <data name="access.granted_restart" xml:space="preserve">
+    <value>Hardware access granted — restart to use the unlocked controls.</value>
+  </data>
+  <data name="access.granted_reboot" xml:space="preserve">
+    <value>Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot.</value>
+  </data>
+  <data name="access.reboot_pending" xml:space="preserve">
+    <value>Restart your computer to finish enabling the unlocked controls (click to retry).</value>
+  </data>
+  <data name="access.failed" xml:space="preserve">
+    <value>Grant access failed</value>
+  </data>
+  <data name="consent.title" xml:space="preserve">
+    <value>Install hardware access?</value>
+  </data>
+  <data name="consent.ask" xml:space="preserve">
+    <value>Acer Helper asks for administrator rights once (pkexec) to copy the following into /etc:</value>
+  </data>
+  <data name="consent.limits" xml:space="preserve">
+    <value>The files come from this app's own copy — nothing is downloaded, no other permission is added, and cancelling changes nothing.</value>
+  </data>
+  <data name="consent.afterwards" xml:space="preserve">
+    <value>Restart Acer Helper afterwards to use the new controls.</value>
+  </data>
+  <data name="consent.write_access_group" xml:space="preserve">
+    <value>Write access for the {0} group to the nodes the app drives: the performance/thermal profile, the keyboard-backlight brightness and timeout, the Acer fan-speed controls, the battery charge mode and thresholds, and the Dell BIOS attributes — plus session access to the two Acer HID interfaces (RGB keyboard/lightbar and the power-envelope channel) and to the keyboard that carries the Nitro key. It also covers the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd and smn), which is how the Curve Optimizer undervolt reaches the processor without the app ever running as root.</value>
+  </data>
+  <data name="consent.write_access_smu_unit" xml:space="preserve">
+    <value>Write access for the {0} group to the CPU's SMU mailbox attributes in /sys/kernel/ryzen_smu_drv (smu_args, mp1_smu_cmd, rsmu_cmd and smn), re-applied at every boot by a systemd unit: the udev rule above can only grant them when the driver's bind event reaches a running udev, which is not what happens on a machine whose ryzen_smu module is loaded from the initramfs. This is what keeps the CPU undervolt working after a restart.</value>
+  </data>
+  <data name="consent.tmpfiles" xml:space="preserve">
+    <value>The same file permissions re-applied at every boot by systemd-tmpfiles, for the nodes that exist at boot: the legacy platform-profile alias, the battery thresholds, the keyboard backlight and the Dell BIOS attributes.</value>
+  </data>
+  <data name="consent.acer_wmi_options" xml:space="preserve">
+    <value>An options line for the acer-wmi kernel driver: it is loaded with predator_v4=1 and force_caps=7200, which is what enables the five Acer performance profiles, the fan telemetry and the fan-speed control (PWM) on a model the driver's own device table does not know. This changes how the driver behaves at load rather than granting a file permission, and if the module is in use it takes effect only after you restart the computer.</value>
+  </data>
+  <data name="cardwire.enable" xml:space="preserve">
+    <value>Use the discrete GPU</value>
+  </data>
+  <data name="cardwire.failed" xml:space="preserve">
+    <value>GPU access failed</value>
+  </data>
+  <data name="cardwire.title" xml:space="preserve">
+    <value>Let Acer Helper use the discrete GPU?</value>
+  </data>
+  <data name="cardwire.allow" xml:space="preserve">
+    <value>Allow</value>
+  </data>
+  <data name="cardwire.ask" xml:space="preserve">
+    <value>Acer Helper will ask cardwire — the daemon that hides the discrete GPU from programs it has not allowed to use it — to let THIS process see that GPU. Nothing is written to disk and no file permission changes: the request is a D-Bus call, made while the app is running.</value>
+  </data>
+  <data name="cardwire.limits" xml:space="preserve">
+    <value>The grant belongs to this one process and disappears the moment Acer Helper exits. cardwire has no way to take it back, so it cannot be revoked while the app runs — turning this option off stops the next start, not this one, and quitting the app is what ends it.</value>
+  </data>
+  <data name="cardwire.afterwards" xml:space="preserve">
+    <value>Every other application stays blocked. While this option stays on, Acer Helper asks again on each start.</value>
+  </data>
+  <data name="status.acer_wmi_unavailable" xml:space="preserve">
+    <value>Acer WMI unavailable — run as administrator.</value>
+  </data>
+  <data name="status.linux_mainline_full" xml:space="preserve">
+    <value>Linux: profiles, fans and temperatures come from the mainline acer-wmi driver (the installer's module parameters enable them) — it has no interface for LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging or the keyboard-brightness read-back, so those stay unavailable.</value>
+  </data>
+  <data name="status.linux_mainline_limited" xml:space="preserve">
+    <value>Linux: the five Acer profiles, fan control and the Acer temperature chip need the installer's module parameters — until they are in place the profile set is the generic one; LCD overdrive, the battery limiter/calibration, the keyboard-backlight timeout, USB charging and the keyboard-brightness read-back have no mainline interface at all.</value>
+  </data>
+  <data name="status.fans_read_only" xml:space="preserve">
+    <value>The fans are read-only — fan control needs the hardware-access grant and the driver's PWM interface; grant access from the app and restart.</value>
+  </data>
+  <data name="status.dell_locked" xml:space="preserve">
+    <value>Dell BIOS controls are locked by a BIOS admin password and were hidden.</value>
+  </data>
+  <data name="status.dell_partially_locked" xml:space="preserve">
+    <value>Some Dell controls are locked by the firmware (BIOS admin password, or the model rejects writes) and were hidden.</value>
+  </data>
+  <data name="status.no_power_profile" xml:space="preserve">
+    <value>No power-profile interface found — limited controls.</value>
+  </data>
+  <data name="power.profile_best_efficiency" xml:space="preserve">
+    <value>Best efficiency</value>
+  </data>
+  <data name="power.profile_best_performance" xml:space="preserve">
+    <value>Best performance</value>
+  </data>
+  <data name="power.profile_power_saver" xml:space="preserve">
+    <value>Power saver</value>
+  </data>
+  <data name="power.profile_low_power" xml:space="preserve">
+    <value>Low power</value>
+  </data>
+  <data name="power.profile_balanced_performance" xml:space="preserve">
+    <value>Balanced performance</value>
+  </data>
+  <data name="power.profile_cool" xml:space="preserve">
+    <value>Cool</value>
+  </data>
+  <data name="power.profile_optimized" xml:space="preserve">
+    <value>Optimized</value>
+  </data>
+  <data name="power.dell_primarily_ac" xml:space="preserve">
+    <value>Primarily AC use</value>
+  </data>
+  <data name="power.duration_5s" xml:space="preserve">
+    <value>5 s</value>
+  </data>
+  <data name="power.duration_10s" xml:space="preserve">
+    <value>10 s</value>
+  </data>
+  <data name="power.duration_30s" xml:space="preserve">
+    <value>30 s</value>
+  </data>
+  <data name="power.duration_1m" xml:space="preserve">
+    <value>1 min</value>
+  </data>
+  <data name="power.duration_5m" xml:space="preserve">
+    <value>5 min</value>
+  </data>
+  <data name="power.duration_15m" xml:space="preserve">
+    <value>15 min</value>
+  </data>
+  <data name="power.duration_1h" xml:space="preserve">
+    <value>1 h</value>
+  </data>
+  <data name="gpu.title" xml:space="preserve">
+    <value>GPU mode</value>
+  </data>
+  <data name="gpu.change" xml:space="preserve">
+    <value>Change</value>
+  </data>
+  <data name="gpu.change_confirm" xml:space="preserve">
+    <value>Change the GPU mode?</value>
+  </data>
+  <data name="gpu.current" xml:space="preserve">
+    <value>GPU mode: {0}</value>
+  </data>
+  <data name="gpu.current_unknown" xml:space="preserve">
+    <value>GPU mode: unknown</value>
+  </data>
+  <data name="gpu.after_reboot" xml:space="preserve">
+    <value>* Will be applied after a reboot.</value>
+  </data>
+  <data name="gpu.changed" xml:space="preserve">
+    <value>GPU mode changed.</value>
+  </data>
+  <data name="gpu.change_failed" xml:space="preserve">
+    <value>GPU mode change failed.</value>
+  </data>
+  <data name="gpu.already_current" xml:space="preserve">
+    <value>This is already the current GPU mode.</value>
+  </data>
+  <data name="gpu.mode_hybrid" xml:space="preserve">
+    <value>Hybrid</value>
+  </data>
+  <data name="gpu.mode_discrete" xml:space="preserve">
+    <value>Discrete</value>
+  </data>
+  <data name="gpu.mode_auto" xml:space="preserve">
+    <value>Auto (DDS)</value>
+  </data>
+  <data name="gpu.unsupported" xml:space="preserve">
+    <value>This machine's GPU mode cannot be switched from the app: the vendor's MUX/GPU-mode interface is not publicly documented, and writing an unknown value can leave the screen black. Use the vendor tool (NitroSense/PredatorSense) or the BIOS instead.</value>
+  </data>
+  <data name="gpu.unknown_mode" xml:space="preserve">
+    <value>That is not one of the GPU modes this machine offers.</value>
+  </data>
+  <data name="gpu.reboot_warning" xml:space="preserve">
+    <value>Changing the GPU mode is queued and only takes effect on the next restart. A wrong value can leave the screen black — if that happens, force a shutdown by holding the power button, then start the machine and change the mode back from a console or another display. See docs/gpu-mux.md.</value>
+  </data>
+  <data name="lang.label" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="lang.system" xml:space="preserve">
+    <value>System</value>
+  </data>
 </root>

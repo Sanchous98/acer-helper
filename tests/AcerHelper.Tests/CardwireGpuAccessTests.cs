@@ -354,7 +354,7 @@ public class CardwireGpuAccessTests
             new LaptopServiceFixture(cardwireGpuAccess: visible))));
 
         static bool HasRow(OptionsAssemblerHarness h)
-            => AssemblerRows.Toggles(h).Any(t => t.Label == Loc.T("Use the discrete GPU"));
+            => AssemblerRows.Toggles(h).Any(t => t.Label == Loc.T("cardwire.enable"));
     }
 
     /// <summary>THE ROW SURVIVES ITS OWN OFFER, so a choice made while the GPU was hidden can be turned off
@@ -365,7 +365,7 @@ public class CardwireGpuAccessTests
         var (port, _) = Port(Hidden with { DgpuVisible = true });   // the offer is gone
         var fixture = new LaptopServiceFixture(new Settings { CardwireGpuAccess = true }, cardwireGpuAccess: port);
 
-        Assert.Contains(Loc.T("Use the discrete GPU"), AssemblerRows.Labels(new OptionsAssemblerHarness(fixture)));
+        Assert.Contains(Loc.T("cardwire.enable"), AssemblerRows.Labels(new OptionsAssemblerHarness(fixture)));
     }
 
     /// <summary>THE ROW CARRIES THE CONSENT PROMPT — the same delegate the AppController hands in, not a second
@@ -423,11 +423,9 @@ public class CardwireGpuAccessTests
         var paragraphs = CardwireGpuAccessConsent.Message()
             .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var keys = new[] { CardwireGpuAccessConsent.Title(), CardwireGpuAccessConsent.ConfirmText(),
-                           "Use the discrete GPU", "GPU access failed" }
-            .Concat(paragraphs)
+        var keys = CardwireGpuAccessConsent.ShownKeys
+            .Concat(new[] { "cardwire.enable", "cardwire.failed" })
             .ToArray();
-
         Assert.Equal(3, paragraphs.Length);   // the three sentences, none silently dropped by a bad join
         Assert.True(keys.Length >= 6, $"only {keys.Length} keys were collected — the extraction is probably broken");
 
@@ -459,6 +457,6 @@ public class CardwireGpuAccessTests
     public void TheConfirmWordIsNotInstall()
     {
         Assert.Equal("Allow", CardwireGpuAccessConsent.ConfirmText());
-        Assert.NotEqual(Loc.T("Install"), CardwireGpuAccessConsent.ConfirmText());
+        Assert.NotEqual(Loc.T("uv.install"), CardwireGpuAccessConsent.ConfirmText());
     }
 }

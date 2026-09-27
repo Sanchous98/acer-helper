@@ -10,7 +10,7 @@ public sealed partial class Autostart
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),  // ~/.config
         "autostart", "acer-helper.desktop");
 
-    public partial string Label => "Start at login";
+    public partial string Label => "power.autostart_linux";
 
     public partial bool IsEnabled() => File.Exists(DesktopFile);
 

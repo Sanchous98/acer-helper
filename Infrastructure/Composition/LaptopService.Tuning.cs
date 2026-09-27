@@ -137,7 +137,13 @@ public sealed partial class LaptopService
 
     /// <summary>The stored Curve-Optimizer preset for the current mode, created on first write (user is
     /// configuring it). Caller holds _state.</summary>
-    private CoPreset StoredCo() => GetOrAdd(Settings.CoPresets, CurrentModeKey());
+    private CoPreset StoredCo() => StoredCo(CurrentModeKey());
+
+    /// <summary>As <see cref="StoredCo()"/> but filed under an EXPLICIT mode key. The only extra caller is the
+    /// guided sweep's save, which must write the proposal to the mode the USER was in — not the temporary
+    /// performance profile it forced for the run (see <c>LaptopService.UndervoltSweep.SaveUndervoltSweep</c>).
+    /// Caller holds _state.</summary>
+    private CoPreset StoredCo(string modeKey) => GetOrAdd(Settings.CoPresets, modeKey);
 
     /// <summary>The Curve-Optimizer preset for the current mode, or stock (0) if none is saved yet (not stored).
     /// A SNAPSHOT — the caller cannot reach the stored instance through it.</summary>
@@ -166,19 +172,45 @@ public sealed partial class LaptopService
     /// to clamp against, and that behaviour is pinned by LaptopServiceCoTests), while the per-rail one cannot know
     /// whether it has a right to store until it has the port's domain list.</summary>
     public (bool ok, string? error) SetCo(int allCore)
-        => WriteAllCore(RememberAllCore(allCore));
+    {
+        // A guided sweep owns the SMU while it runs: a manual edit must not land between two of its probes. The
+        // gate makes the flag check and the write atomic (LaptopService.UndervoltSweep.cs explains the rule).
+        (bool ok, string? error) result;
+        lock (_tuningGate)
+        {
+            if (_sweepActive != 0) return (false, SweepBusyReason);
+            result = WriteAllCore(RememberAllCore(allCore));
+        }
+        return result;
+    }
 
     /// <summary>Set the per-domain Curve-Optimizer offsets (index-aligned with the port's domains) for the CURRENT
     /// mode, persist, and apply now. Call this OFF the UI thread — it is one SMU transaction per core slot.</summary>
     public (bool ok, string? error) SetCoDomains(IReadOnlyList<int> counts)
-        => RememberRails(counts) is { } clamped ? WriteRails(clamped) : (false, null);
+    {
+        (bool ok, string? error) result;
+        lock (_tuningGate)
+        {
+            if (_sweepActive != 0) return (false, SweepBusyReason);
+            result = RememberRails(counts) is { } clamped ? WriteRails(clamped) : (false, null);
+        }
+        return result;
+    }
 
     /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
     /// all-core value — so the UI has a single entry point. Call OFF the UI thread. The fork itself is the DOMAIN's
     /// rule (Infrastructure/Vendors/Generic/CoAxis.cs, <c>UsesRails</c>), asked by the members below rather than restated here, so the same
     /// fork decides what a mode change sends and two sites cannot come to disagree.</summary>
     public (bool ok, string? error) SetCoValues(IReadOnlyList<int> counts)
-        => ApplyUndervolt.Run(counts, this);
+    {
+        (bool ok, string? error) result;
+        lock (_tuningGate)
+        {
+            if (_sweepActive != 0) return (false, SweepBusyReason);
+            result = ApplyUndervolt.Run(counts, this);
+        }
+        return result;
+    }
 
     // ---- the undervolt edit contract (Application/Undervolt.cs) ----
 
@@ -243,6 +275,40 @@ public sealed partial class LaptopService
         return clamped;
     }
 
+    /// <summary>Remember the per-rail offsets under an EXPLICIT mode key — the guided sweep's save path,
+    /// which targets the mode the USER was in rather than the temporary performance profile it forced for the
+    /// run. Same clamp-and-file rule as <see cref="RememberRails"/>, only the dictionary key differs; null
+    /// still means "nothing remembered, nothing may be written".</summary>
+    private int[]? RememberRails(string modeKey, IReadOnlyList<int> counts)
+    {
+        var co = device.CurveOptimizer;
+        if (co == null || co.Domains.Count != counts.Count) return null;
+        var axis = new CoAxis(co.Domains, co.Range);
+        var clamped = axis.ClampEach(counts);
+        lock (_state)
+        {
+            axis.File(StoredCo(modeKey), clamped);
+            Save();
+        }
+        return clamped;
+    }
+
+    /// <summary>The guided sweep's explicit save: persist the proposal as the given mode's offsets, through
+    /// the same per-mode path the manual edit uses (remembered before written, clamped per rail), and write
+    /// it now. The key is the SWEEP's snapshot of the user's real mode, not the current (possibly
+    /// force-applied) profile — see <c>LaptopService.UndervoltSweep.SaveUndervoltSweep</c>. Call OFF the UI
+    /// thread like every SMU writer.</summary>
+    private (bool ok, string? error) SaveCoValues(string modeKey, IReadOnlyList<int> counts)
+    {
+        (bool ok, string? error) result;
+        lock (_tuningGate)
+        {
+            if (_sweepActive != 0) return (false, SweepBusyReason);
+            result = RememberRails(modeKey, counts) is { } clamped ? WriteRails(clamped) : (false, null);
+        }
+        return result;
+    }
+
     /// <summary>Push one all-core offset. A machine with no Curve-Optimizer port reports the same
     /// <c>(false, null)</c> every caller of this axis has always received.</summary>
     private (bool ok, string? error) WriteAllCore(int counts)
@@ -299,6 +365,11 @@ public sealed partial class LaptopService
     /// because the mailbox transaction can wait seconds on the shared PCI lock.</summary>
     public CoPreset ApplyModeCo()
     {
+        return ApplyModeCoCore();
+    }
+
+    private CoPreset ApplyModeCoCore()
+    {
         var co = device.CurveOptimizer;
         var axis = co == null ? null : new CoAxis(co.Domains, co.Range);
         CoPreset c;
@@ -321,13 +392,22 @@ public sealed partial class LaptopService
             write = axis?.Reapply(c, Settings.CoPresets.Count == 0);
         }
         if (co == null || write == null) return c;
-        // Per-domain wins where the CPU has separate rails: one number for both clusters is pinned by whichever gives
-        // out first, so the per-domain values are the real setting and AllCore is only the single-domain fallback.
-        if (axis!.UsesRails)
+        // A guided sweep owns the SMU: a re-apply (startup, resume or mode switch) must not stomp one of its
+        // probes. Skipping the write here keeps the sweep's whole run attributable; the next trigger after the
+        // sweep re-asserts whatever is stored. The gate makes the flag check and the write atomic with the
+        // manual edit paths (LaptopService.UndervoltSweep.cs).
+        lock (_tuningGate)
         {
-            co.SetDomains(write);   // silent on purpose: no caller of ApplyModeCo reads a failure
+            if (_sweepActive != 0) return c;
+            // Per-domain wins where the CPU has separate rails: one number for both clusters is pinned by whichever
+            // gives out first, so the per-domain values are the real setting and AllCore is only the single-domain
+            // fallback.
+            if (axis!.UsesRails)
+            {
+                co.SetDomains(write);   // silent on purpose: no caller of ApplyModeCo reads a failure
+            }
+            else co.Set(write[0]);
         }
-        else co.Set(write[0]);
         return c;
     }
 

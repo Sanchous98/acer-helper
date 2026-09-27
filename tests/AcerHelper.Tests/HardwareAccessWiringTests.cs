@@ -198,13 +198,13 @@ public class HardwareAccessWiringTests
     public void ThePendingRebootOutcomeIsDecidedBranchedAndTranslated(string relativePath, string required)
         => Assert.Contains(required, Source(relativePath), StringComparison.Ordinal);
 
-    /// <summary>The English keys, spelled ONCE here so the UI and the translation table are compared against one
+    /// <summary>The neutral keys, spelled ONCE here so the UI and the translation table are compared against one
     /// literal rather than against a copy of each other.</summary>
     private const string PendingRebootMessage =
-        "Hardware access granted — the acer-wmi driver could not be reloaded, so the new module settings take effect after a reboot.";
+        "access.granted_reboot";
 
     private const string RebootMessage =
-        "Restart your computer to finish enabling the unlocked controls (click to retry).";
+        "access.reboot_pending";
 
     /// <summary>THE MESSAGE'S CLICK MUST BE WIRED BY WHOEVER RAISES IT, in BOTH ways the hardware-access condition
     /// is raised — and the reboot one is raised a SECOND time, by <c>ApplyHardwareAccess</c> after a language

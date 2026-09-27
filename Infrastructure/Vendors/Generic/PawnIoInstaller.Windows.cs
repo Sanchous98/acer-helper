@@ -118,7 +118,7 @@ internal sealed class PawnIoSetup : IDriverSetup
 {
     public string Name => "PawnIO";
     public string SourceUrl => PawnIoInstaller.SourceUrl;
-    public string Purpose => "CPU undervolt";
+    public string Purpose => "uv.cpu_undervolt";
     public bool Installed => PawnIoInstaller.Installed;
     public string? Install() => PawnIoInstaller.Install();
 

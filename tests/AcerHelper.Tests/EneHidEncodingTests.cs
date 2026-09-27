@@ -37,8 +37,8 @@ public class EneHidEncodingTests
 
     // The real effects, not hand-built stand-ins: the flags they carry are what Dir() branches on, and
     // RgbEffectsTests already pins them, so this file tests the encoder against the shipped catalogue.
-    private static RgbEffect Effect(string name) => RgbEffects.Keyboard.Single(e => e.Name == name);
-
+    // The catalogue's Names are neutral keys now; the call sites below pass the key.
+    private static RgbEffect Effect(string key) => RgbEffects.Keyboard.Single(e => e.Name == key);
     // ================= Scale — the lightbar's brightness emulation =================
 
     /// <summary>Brightness is emulated by scaling the colour, because the lightbar's firmware ignores the HID
@@ -89,7 +89,7 @@ public class EneHidEncodingTests
     [InlineData(2, 0x02)]
     public void ADirectionalEffectReportsTheUsersDirection(byte direction, byte expected)
     {
-        Assert.Equal(expected, EneHidController.Dir(Effect("Wave"), direction));
+        Assert.Equal(expected, EneHidController.Dir(Effect("light.effect_wave"), direction));
     }
 
     /// <summary>OBSERVED CURRENT behaviour — a guard, not a live path, and NOT obviously intended.
@@ -113,7 +113,7 @@ public class EneHidEncodingTests
     [InlineData(255)]
     public void ADirectionalEffectWithAnUnusableDirection_FallsBackToTheStaticFlag(byte direction)
     {
-        Assert.Equal(FlagStatic, EneHidController.Dir(Effect("Wave"), direction));
+        Assert.Equal(FlagStatic, EneHidController.Dir(Effect("light.effect_wave"), direction));
     }
 
     /// <summary>Every other animated effect reports the EFFECT flag whatever the direction byte says — the
@@ -126,8 +126,8 @@ public class EneHidEncodingTests
     [InlineData(255)]
     public void AnAnimatedEffectThatIsNotDirectionalReportsTheEffectFlag(byte direction)
     {
-        Assert.Equal(FlagEffect, EneHidController.Dir(Effect("Breathing"), direction));
-        Assert.Equal(FlagEffect, EneHidController.Dir(Effect("Neon"), direction));
+        Assert.Equal(FlagEffect, EneHidController.Dir(Effect("light.effect_breathing"), direction));
+        Assert.Equal(FlagEffect, EneHidController.Dir(Effect("light.effect_neon"), direction));
     }
 
     /// <summary>The static write reports the static flag, which is what makes an arbitrary-colour write stay
@@ -138,7 +138,7 @@ public class EneHidEncodingTests
     [InlineData(2)]
     public void AStaticEffectReportsTheStaticFlag(byte direction)
     {
-        Assert.Equal(FlagStatic, EneHidController.Dir(Effect("Static"), direction));
+        Assert.Equal(FlagStatic, EneHidController.Dir(Effect("light.effect_static"), direction));
     }
 
     // ================= SameRegion — the writer queue's coalescing key =================

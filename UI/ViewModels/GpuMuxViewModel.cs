@@ -124,8 +124,8 @@ public sealed partial class GpuMuxViewModel : ObservableObject
         }
 
         var current = state.Current != null
-            ? Loc.T("GPU mode: {0}", Loc.T(state.Current.DisplayName))
-            : Loc.T("GPU mode: unknown");
+            ? Loc.T("gpu.current", Loc.T(state.Current.DisplayName))
+            : Loc.T("gpu.current_unknown");
         // Only a pending that ACTUALLY DIFFERS from the current mode is a queued change: a pending equal to the
         // current one is effectively already applied (a stale read, or firmware that already reports the
         // request), so it earns no mark. An unknown current keeps the pending — equality may not be guessed.
@@ -191,7 +191,7 @@ public sealed partial class GpuMuxViewModel : ObservableObject
             var change = _request(mode.Id);
             if (!change.Ok)
             {
-                _report(Loc.T(change.Error ?? "GPU mode change failed."));
+                _report(Loc.T(change.Error ?? "gpu.change_failed"));
                 RevertSelection();
                 return;
             }
@@ -206,13 +206,13 @@ public sealed partial class GpuMuxViewModel : ObservableObject
             }
             _requestedModeId = mode.Id;   // queued: this is the value that will apply after the reboot
             Refresh();
-            if (!change.Queued) _report(Loc.T("GPU mode changed."));
+            if (!change.Queued) _report(Loc.T("gpu.changed"));
         }
         catch (Exception)
         {
             // The flow runs off a property setter (fire-and-forget), so a throwing vendor/UI delegate must not
             // surface as an unobserved task: report it and put the selector back on the mode in effect.
-            _report(Loc.T("GPU mode change failed."));
+            _report(Loc.T("gpu.change_failed"));
             RevertSelection();
         }
         finally

@@ -27,7 +27,7 @@ public class RgbEffectsTests
     [Fact]
     public void TheKeyboardEffectsAreInTheirPersistedOrderWithTheirWireBytes()
     {
-        Assert.Equal("Static,Breathing,Neon,Wave,Shifting,Zoom,Meteor,Twinkling", Names(RgbEffects.Keyboard));
+        Assert.Equal("light.effect_static,light.effect_breathing,light.effect_neon,light.effect_wave,light.effect_shifting,light.effect_zoom,light.effect_meteor,light.effect_twinkling", Names(RgbEffects.Keyboard));
         Assert.Equal("2,4,5,7,8,9,10,11", Bytes(RgbEffects.Keyboard));
     }
 
@@ -36,7 +36,7 @@ public class RgbEffectsTests
     [Fact]
     public void TheLightbarOffersOnlyTheEffectsItCanRender()
     {
-        Assert.Equal("Static,Breathing,Neon", Names(RgbEffects.Lightbar));
+        Assert.Equal("light.effect_static,light.effect_breathing,light.effect_neon", Names(RgbEffects.Lightbar));
         Assert.Equal("2,4,5", Bytes(RgbEffects.Lightbar));
     }
 
@@ -85,9 +85,9 @@ public class RgbEffectsTests
     [Fact]
     public void OnlyStaticHonoursTheChosenColour()
     {
-        Assert.Equal("Static", RgbEffects.Keyboard.Single(e => e.HasColor).Name);
-        Assert.Equal("Static", RgbEffects.Lightbar.Single(e => e.HasColor).Name);
-        Assert.False(RgbEffects.Keyboard.Single(e => e.Name == "Breathing").HasColor);
+        Assert.Equal("light.effect_static", RgbEffects.Keyboard.Single(e => e.HasColor).Name);
+        Assert.Equal("light.effect_static", RgbEffects.Lightbar.Single(e => e.HasColor).Name);
+        Assert.False(RgbEffects.Keyboard.Single(e => e.Name == "light.effect_breathing").HasColor);
     }
 
     /// <summary>The static/effect flag is what tells the controller which packet shape to build
@@ -112,8 +112,8 @@ public class RgbEffectsTests
     [Fact]
     public void OnlyWaveIsDirectional()
     {
-        Assert.Equal("Wave", RgbEffects.Keyboard.Single(e => e.HasDirection).Name);
-        Assert.All(RgbEffects.Keyboard.Where(e => e.Name != "Wave"), e => Assert.False(e.HasDirection));
+        Assert.Equal("light.effect_wave", RgbEffects.Keyboard.Single(e => e.HasDirection).Name);
+        Assert.All(RgbEffects.Keyboard.Where(e => e.Name != "light.effect_wave"), e => Assert.False(e.HasDirection));
         Assert.All(RgbEffects.Lightbar, e => Assert.False(e.HasDirection));
     }
 
@@ -166,11 +166,13 @@ public class RgbEffectsTests
         }
     }
 
-    /// <summary>The name is what the UI shows, so it must not silently fall back to the type name.</summary>
+    /// <summary>The name IS the neutral localization key the UI looks up (<c>LightingViewModel</c> does
+    /// <c>Loc.T(e.Name)</c>), and <c>ToString</c> returns it verbatim, so a debug dump can never fall back to the
+    /// type name.</summary>
     [Fact]
     public void AnEffectDisplaysAsItsName()
     {
-        Assert.Equal("Static", RgbEffects.Keyboard[0].ToString());
-        Assert.Equal("Twinkling", RgbEffects.Keyboard[^1].ToString());
+        Assert.Equal("light.effect_static", RgbEffects.Keyboard[0].ToString());
+        Assert.Equal("light.effect_twinkling", RgbEffects.Keyboard[^1].ToString());
     }
 }

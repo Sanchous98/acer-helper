@@ -12,8 +12,11 @@ namespace AcerHelper.UI;
 /// <summary>The one flyout window — a fixed-size "phone frame" holding an in-window navigation stack
 /// (Home / Options / Lighting push over each other; see MainWindow.axaml). It never resizes at runtime
 /// (resizing on X11 is async and races with repositioning => sideways jitter), so its anchored corner is
-/// set once on open. This holds the window behaviour: tray placement and foregrounding; light-dismiss is
-/// coordinated by <see cref="FlyoutCoordinator"/>.
+/// set once on open. That "never resizes" is now literal: the HEIGHT is locked to the Home page's natural
+/// height on the first layout pass (see <see cref="LockFrameHeight"/>), so navigating to a shorter drawer
+/// page can no longer shrink the frame — which is the owner's rule ("разницы по высоте быть не должно").
+/// This holds the window behaviour: tray placement and foregrounding; light-dismiss is coordinated by
+/// <see cref="FlyoutCoordinator"/>.
 ///
 /// Open/close = plain <see cref="Window.Show"/>/<see cref="Window.Hide"/> (instant — no app-level reveal).
 /// The in-window Home <-> drawer swap DOES animate (a 0.24 s push), and this class makes that motion cheap:
@@ -24,6 +27,9 @@ public partial class MainWindow : Window
     public bool IsOpen { get; private set; }
 
     private bool _destroying;   // set by Destroy() so the Closing handler lets a real close through (see below)
+    private bool _frameHeightLocked;   // the fixed height has been measured and applied (see LockFrameHeight)
+    private double _heightCandidate;   // last candidate this pass (see LockFrameHeight's stability rule)
+    private int _stablePasses;         // consecutive passes that agreed on the candidate
 
     // ---- the push slide's render cache (see ArmSlideCache) ----
     // A shared BitmapCache instance is fine: BitmapCache caches per-compositor internally and the two page
@@ -45,6 +51,18 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // THE FRAME'S HEIGHT IS FIXED TO THE HOME PAGE'S CONTENT HEIGHT. The two page grids live in the one
+        // card panel and are swapped by RenderTransform only, so BOTH stay in layout. While the window was
+        // SizeToContent="WidthAndHeight" it measured the taller page, and a collapse-on-disarm fix made it
+        // measure the ACTIVE one — which removed the blank bottom but made the window resize on every
+        // navigation (Home is taller than Options), the owner's "разницы по высоте быть не должно". Height is
+        // now locked to Home's own natural CONTENT height (its body's extent plus the chrome around it) once
+        // that reading is stable, and then the window stops sizing to content (SizeToContent="Width"), so
+        // nothing can change the height again. See LockFrameHeight — and note WHY it is the extent, not
+        // HomePage.DesiredSize: Home's body is a ScrollViewer, whose reported height is a viewport, which is
+        // the trap that made the drawer scroll.
+        LayoutUpdated += LockFrameHeight;
 
         // The push slide's render cache (see ArmSlideCache): a one-shot timer that clears the cache once
         // the 0.24 s slide has settled. A hair longer than the transition plus a frame of slack.
@@ -79,9 +97,11 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() => SessionEnding?.Invoke());
         };
 
-        // The window is SizeToContent, so switching to a taller page (e.g. the fan Curve editor) grows it.
-        // It's anchored by its top-left, so growth would push the bottom off-screen — re-anchor on every size
-        // change while open so the bottom-right corner stays put (the window grows upward instead).
+        // The window's width is fixed and its height is locked to Home (LockFrameHeight), so its own size does
+        // not change on navigation. The re-anchor on a size change is kept for the one genuine resize path —
+        // the fan-curve editor is a separate window, but a future taller content (or the notification overlay's
+        // own growth) must still keep the bottom-right corner put: the window is anchored by its top-left, so
+        // growth would push the bottom off-screen and it grows upward instead.
         SizeChanged += (_, _) => { if (IsOpen) Reanchor(); };
 
         // A click on the transparent shadow margin around the card (the Backdrop itself, not the card) is
@@ -208,6 +228,48 @@ public partial class MainWindow : Window
         _slideCache.Stop();              // one shot: the first tick is the whole job
         HomePage.CacheMode = null;
         DrawerPage.CacheMode = null;
+    }
+
+    /// <summary>Locks the window's height to the HOME page's own CONTENT height, once that reading is stable, and
+    /// then stops content-sizing the height so navigation can never change it. The frame is therefore exactly as
+    /// tall as the main screen needs for the rest of the session — the owner's rule ("высота осталась как на
+    /// главном экране") — and the drawer pages are laid out to fill or fit it.
+    ///
+    /// WHY NOT <c>HomePage.DesiredSize</c>. Home's BODY is a <c>ScrollViewer</c>, and a scroll-viewer reports the
+    /// VIEWPORT it was handed, not the content it wants: the first version of this fix pinned one viewport short,
+    /// so BOTH pages scrolled — measured on the owner's box, Home clipped ~87 px and the undervolt/Tuning drawer
+    /// ~154 px (the owner's "у тебя скролл на экране с даунвольтом"). Home's natural height is its body's
+    /// scrollable content EXTENT (<c>HomeScroll.Extent.Height</c>) plus the chrome around that body, and the
+    /// chrome is exactly what the window adds beyond the body's viewport (<c>Bounds.Height − viewport</c>).
+    ///
+    /// WHY STABLE. The sections are built and populated over the first passes and the extent grows with them, so
+    /// an early reading is undercounted. The candidate must hold for two consecutive passes before it is pinned;
+    /// a window whose content never settles simply never locks and keeps sizing to content (the old behaviour).
+    ///
+    /// WHY LayoutUpdated. Home must be laid out at least once for the reading to be real (the constructor reads
+    /// (0,0)). The hook is unhooked the first time the reading is usable; a rebuild for a live language switch
+    /// builds a new window (see FlyoutCoordinator/RebuildForLanguage), so there is no second measurement.</summary>
+    private void LockFrameHeight(object? sender, EventArgs e)
+    {
+        if (_frameHeightLocked) return;
+        var extent = HomeScroll.Extent.Height;       // Home's body content — what it actually wants to show
+        var viewport = HomeScroll.Viewport.Height;   // how much of that body the frame currently shows
+        var frame = Bounds.Height;                   // window height this pass (still content-sized)
+        if (extent <= 0 || viewport <= 0 || frame <= 0) return;   // no real measurement yet
+        var candidate = frame - viewport + extent;   // Home's natural height = content + the chrome around it
+        if (Math.Abs(candidate - _heightCandidate) > 0.5)
+        {
+            _heightCandidate = candidate;   // still growing (sections loading): restart the agreement count
+            _stablePasses = 0;
+            return;
+        }
+        if (++_stablePasses < 2) return;
+
+        _frameHeightLocked = true;
+        LayoutUpdated -= LockFrameHeight;
+        Height = _heightCandidate;
+        SizeToContent = SizeToContent.Width; // stop content-sizing HEIGHT: it can never change again
+        if (IsOpen) Reanchor();              // the pinned size is what the corner should be measured against
     }
 
     private void Reanchor()
