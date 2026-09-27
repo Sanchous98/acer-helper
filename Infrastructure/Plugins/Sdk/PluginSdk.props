@@ -70,6 +70,24 @@
     <Compile Include="$(MSBuildThisFileDirectory)..\Abi\AbiStatus.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\Abi\Capability.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\Abi\Operation.cs" />
+
+    <!-- The §3.4 probe-manifest wire contract and its AOT-safe source-generated serializer. P3 added these to the
+         shared SDK because EVERY vendor plugin must build a manifest of exactly this shape and emit it through
+         this context (§3.3, §3.4), and a plugin carrying its own private copy of the DTOs is the same drift the
+         ABI share exists to prevent. Both files are dependency-free (they reference only each other and
+         System.Text.Json's source generator), so they compile into any plugin TFM; the proof plugin still lists
+         them itself because it predates this entry and does not import the props. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\PluginManifest.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\PluginJsonContext.cs" />
+
+    <!-- The vendor-agnostic RGB FRAMEWORK (Infrastructure/Lighting/RgbController.cs). It is the transport half of
+         the zone model whose model half is Domain/Rgb.cs: RgbDevice assembles an IRgbDevice from one or more
+         IRgbController bricks, and it references NOTHING but AcerHelper.Domain (verified — its only `using`).
+         Any line's keyboard codec (Acer's ENE here, future vendors') produces zones through it, so it is shared
+         the same way the transports are: one source compiled into the host and every plugin, not a per-plugin
+         copy. Listed here rather than moved for the reason the MachineInfo lines above give — the host still
+         compiles its own copy today, and a future move is an obvious edit here. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\Lighting\RgbController.cs" />
   </ItemGroup>
 
 </Project>

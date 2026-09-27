@@ -23,6 +23,21 @@
     <ProjectReference Include="..\..\AcerHelper.csproj" />
   </ItemGroup>
 
+  <!-- THE PLUGIN'S PURE BACKEND, COMPILED INTO THE TEST ASSEMBLY (docs/vendor-plugins.md §6 "Keeping the suite
+       green"). The plugin is a separate Native AOT shared library the test project must NOT reference, and its
+       ah_* thunks cannot be called from managed code ([UnmanagedCallersOnly], §2.1) — so the only way to
+       unit-test the manifest/match logic is to compile the PURE, hardware-free helpers into this assembly and
+       drive them directly.
+       ONLY THESE TWO FILES ARE INCLUDED, deliberately: AcerMatch.cs and AcerManifestBuilder.cs reference nothing
+       but the host's own types (AcerModels, AcerProfiles, Domain, the internal PluginManifest/PluginJsonContext,
+       reachable through the host's InternalsVisibleTo) and the plugin's own data records. Pulling the session or
+       the thunk files in would drag WmiInvoker/HidSharp/unsafe and would re-declare host types (AcerProfiles,
+       AcerFanPort, …) inside this assembly as CS0436 conflicts — the same reason those files are NOT here. -->
+  <ItemGroup>
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\AcerMatch.cs" Link="Plugin\AcerMatch.cs" />
+    <Compile Include="..\..\plugins\AcerHelper.Vendor.acer-nitro\AcerManifestBuilder.cs" Link="Plugin\AcerManifestBuilder.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>

@@ -86,6 +86,15 @@
     <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Windows.cs" Link="Acer\AcerEcHidController.Windows.cs" />
     <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Linux.cs" Link="Acer\AcerEcHidController.Linux.cs" />
 
+    <!-- The ENE RGB codec + its per-OS transports (P3). EneHidController.cs's only outside-Domain dependency is
+         Infrastructure/Lighting's IRgbController/RgbDevice, which PluginSdk.props now source-includes, so the
+         codec compiles standalone; the per-OS halves use HidSharp (Windows) and hidraw ioctl (Linux), both already
+         available here. NOTE: AcerProfilePorts.cs remains deliberately ABSENT — it is host-coupled by Loc.T and
+         its policy (the profile table's traits/availability) is carried directly from AcerProfiles instead. -->
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.cs" Link="Acer\EneHidController.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.Windows.cs" Link="Acer\EneHidController.Windows.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\EneHidController.Linux.cs" Link="Acer\EneHidController.Linux.cs" />
+
     <!-- OS key capture. Both halves compile standalone: AcerHotkeys.Linux.cs's only outside-Domain dependency is
          Hwmon, which the imported SDK props already source-includes; AcerHotkeys.Windows.cs uses only Domain and
          Win32 P/Invoke. NOTE: EneHidController*.cs and AcerProfilePorts.cs are deliberately ABSENT — they depend
