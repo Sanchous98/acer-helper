@@ -459,6 +459,9 @@
   <data name="update.failed" xml:space="preserve">
     <value>Не удалось обновить</value>
   </data>
+  <data name="plugin.installed_restart" xml:space="preserve">
+    <value>Установлен плагин для этого ноутбука ({0}). Перезапустите Acer Helper, чтобы его использовать.</value>
+  </data>
   <data name="access.granted_restart" xml:space="preserve">
     <value>Доступ к оборудованию предоставлен — перезапустите приложение, чтобы использовать разблокированные функции.</value>
   </data>

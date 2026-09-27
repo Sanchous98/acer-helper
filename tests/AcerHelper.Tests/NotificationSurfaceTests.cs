@@ -375,6 +375,42 @@ public class NotificationSurfaceTests
         Assert.Equal(1, retries);
     }
 
+    /// <summary>THE PLUGIN-INSTALLED NOTICE IS A RESTART OFFER: one entry keyed by the plugin id, whose text is
+    /// the localized restart sentence naming the plugin and whose click runs the restart action the app hands in
+    /// — the same "a message whose words promise an action carries it" rule the reboot row pins
+    /// (docs/vendor-plugins.md §5.3 step 5). A second raise of the same plugin refreshes rather than stacks.
+    ///
+    /// The RAISE lives in AppController (it needs the per-OS restart primitive), so it is driven here exactly as
+    /// AppController performs it — through the session list — to pin the shape; the source guard in
+    /// <c>PluginUpdateWiringTests</c> pins that AppController is the caller.
+    ///
+    /// MUTATION: drop the action argument from the raise — the click assert goes red (and the entry would be a
+    /// restart offer that does not restart).</summary>
+    [Fact]
+    public void ThePluginInstalledNoticeCarriesItsRestartActionAndIsKeyedByThePlugin()
+    {
+        var vm = Dashboard(new NotificationCenter());
+        var restarts = 0;
+
+        // The exact raise AppController performs (id via the helper, localized sentence, restart action).
+        vm.Notifications.Raise(NotificationCenter.PluginId("acer-nitro"),
+                               () => Loc.T("plugin.installed_restart", "acer-nitro"),
+                               () => restarts++);
+
+        var entry = Assert.Single(vm.Notifications.Items);
+        Assert.Equal(NotificationCenter.PluginId("acer-nitro"), entry.Id);
+        Assert.False(entry.HasDetails);              // no body: the click IS the restart
+        Assert.Contains("acer-nitro", entry.Text);   // the message names the plugin
+
+        entry.ActivateCommand.Execute(null);
+        Assert.Equal(1, restarts);
+
+        vm.Notifications.Raise(NotificationCenter.PluginId("acer-nitro"),
+                               () => Loc.T("plugin.installed_restart", "acer-nitro"),
+                               () => restarts++);    // a re-check
+        Assert.Single(vm.Notifications.Items);       // refreshed, not stacked
+    }
+
     /// <summary>THE APP HANDS THE NOTICE ITS CHANGELOG AND ITS INSTALL ACTION, and the TRAY OPENS THE NOTICE
     /// rather than installing — the two halves of "only the Install button installs" that a view-model test
     /// cannot reach (<c>AppController</c> is not constructible here, so the wiring is read out of the source).

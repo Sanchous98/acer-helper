@@ -56,6 +56,18 @@ public sealed class NotificationCenter : ObservableObject
     /// one was ignored.</summary>
     public static string UpdateId(string version) => UpdateIdPrefix + version;
 
+    /// <summary>The id of "a plugin was installed and a restart is needed to use it" (docs/vendor-plugins.md
+    /// §5.3 step 5). The family prefix mirrors <see cref="UpdateIdPrefix"/>; the member is keyed by the PLUGIN
+    /// id, because that is the condition — "this laptop now has a plugin that is not live yet". A second check
+    /// of the same installed plugin refreshes the entry (its restart is still the recovery the user has not
+    /// taken), while a different plugin is a different condition and gets its own entry.</summary>
+    public const string PluginIdPrefix = "plugin:";
+
+    /// <summary>The plugin-installed condition's id, keyed by the plugin id. Stable, so the periodic re-check
+    /// (which re-runs the plugin update flow on the same schedule, §5.3) refreshes this entry rather than
+    /// stacking a second copy of the same "restart to enable it" message.</summary>
+    public static string PluginId(string id) => PluginIdPrefix + id;
+
     private readonly ObservableCollection<NotificationViewModel> _items = [];
     // The ids the user has ignored this session. A re-raise is what a still-true condition does — the update
     // check runs again, the access offer is re-stated after a UI rebuild — so without this an ignored message

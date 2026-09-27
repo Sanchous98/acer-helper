@@ -1,9 +1,13 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure;
 using AcerHelper.Infrastructure.Composition;
 using AcerHelper.Infrastructure.Diagnostics;
+using AcerHelper.Infrastructure.Plugins;
+using AcerHelper.Infrastructure.Plugins.Abi;
+using AcerHelper.Infrastructure.Plugins.Distribution;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -41,6 +45,17 @@ internal sealed class AppController
     private readonly LightingCoordinator _lightingCoord;
     private LightingViewModel? _lighting;              // current lighting VM (rebuilt per language); handed to _lightingCoord
     private readonly UpdateChecker _updates = new();
+    // The runtime vendor-plugin update flow (docs/vendor-plugins.md §5.3, task D2b), built ONCE over the
+    // production seams: the real cache root, the BCL HTTP downloader, and NativePluginBinding.TryLoad for the
+    // pre-install ah_matches confirmation. It owns no schedule of its own — it is run from the SAME
+    // UpdateSchedule tick as the app check (CheckForUpdatesAsync), and under the SAME _updating single-flight
+    // guard (see RunPluginUpdateAsync), so a plugin download can never race an app update and no second timer
+    // exists (§5.3 reuse table).
+    //
+    // Null when the OS exposes no per-user data folder (PluginCache.DefaultRoot returns null): there is no
+    // writable cache to install into, so the plugin path is off rather than writing to a blank root. The same
+    // null means the loader (DeviceFactory.PerUserPluginCacheDir) has nothing to enumerate, so the two agree.
+    private readonly PluginUpdateService? _pluginUpdates;
     // WHEN the check runs, and what has already been announced; the check and the announcement are injected
     // (Infrastructure/UpdateSchedule.cs). Started in the ctor — see the note there for why it is a schedule
     // rather than a single call.
@@ -207,6 +222,17 @@ internal sealed class AppController
         // whenever the window is brought up onto the screen (see OnWindowShown) — the owner suspends the laptop
         // rather than shutting it down, so a start-only check could go weeks without firing. The announcement path
         // is unchanged (a notification + the tray item, see AnnounceUpdate).
+        //
+        // Build the plugin update service first — the SAME schedule below drives BOTH checks (§5.3: "no second
+        // timer"). Its seams are the production ones; the cache root is the shared DefaultRoot(), and null (no
+        // per-user data dir) turns the whole plugin path off, which the tick handles (RunPluginUpdateAsync).
+        var pluginRoot = PluginCache.DefaultRoot();
+        _pluginUpdates = pluginRoot is null
+            ? null
+            : new PluginUpdateService(
+                new PluginCache(pluginRoot),
+                PluginManifestFetcher.HttpDownloader(),
+                path => NativePluginBinding.TryLoad(path, out var b) ? b : null);
         (_updateSchedule = new UpdateSchedule(CheckForUpdatesAsync, AnnounceUpdate)).Start();
         // The show/restore trigger: hooked BEFORE the launch OpenMain below, so the first bringing-up is covered
         // by the same path as every later tray/hotkey one. Start() above already ran the startup check, so on a
@@ -423,9 +449,135 @@ internal sealed class AppController
 
     private async Task CheckForUpdatesAsync()
     {
-        var info = await _updates.CheckAsync();
-        if (info == null) return;   // current / offline / no releases -> nothing shown
-        _updateSchedule.Announce(info);   // the schedule decides whether this release is news (see its docstring)
+        // ONE GitHub call drives BOTH halves (§5.2: the plugin path "simply asks for vendor-plugins.json among
+        // those assets instead of adding a second GitHub API call"). CheckDetailedAsync fetches the latest
+        // release once and returns the app's newer release (Info, null when the app is current — the unchanged
+        // CheckAsync contract) AND the release's un-gated assets. The plugin check must NOT be gated on Info: a
+        // current app still needs the release's assets so its laptop plugin can be fetched (§5.2/§5.3).
+        var check = await _updates.CheckDetailedAsync();
+        if (check.Info is { } info) _updateSchedule.Announce(info);   // the schedule decides if this release is news
+
+        await RunPluginUpdateAsync(check.Assets);
+    }
+
+    // ---- plugin update (docs/vendor-plugins.md §5.3, task D2b) ----
+
+    /// <summary>
+    /// The plugin half of the update tick. Given the latest release's UN-GATED assets (from the same
+    /// <c>CheckDetailedAsync</c> call the app check made — see <see cref="CheckForUpdatesAsync"/>), it runs
+    /// <see cref="PluginUpdateService.RunAsync"/> over the production seams under the SAME <c>_updating</c>
+    /// single-flight guard the app updater uses, so a plugin download can never race an app update (§5.3
+    /// single-flight row).
+    ///
+    /// OFF THE UI THREAD AND NEVER THROWS INTO THE SCHEDULE. <see cref="UpdateSchedule.RunAsync"/> already
+    /// swallows a throw, but the service is fail-closed by design (§5.3/§5.4) and this wrapper keeps that posture
+    /// visible: a null asset list or a thrown service is a silent no-op, and the next tick is the retry. Nothing
+    /// is surfaced to the user on any failure (only <see cref="PluginUpdateReason.Installed"/> raises).
+    /// </summary>
+    private async Task RunPluginUpdateAsync(IReadOnlyList<ReleaseAsset>? assets)
+    {
+        if (_pluginUpdates is not { } service) return;   // no per-user cache root: plugin path is off
+        if (assets is null) return;                      // release unavailable this tick
+        if (_updating) return;   // an app update (or a previous plugin run) is in flight — never overlap (§5.3)
+
+        try
+        {
+            // The host facts of §5.3 steps 2-3, from the same sources DeviceFactory uses: the OS/arch tokens,
+            // the GENERATED plugin API version (PluginApi, §3.8.1), the app <Version> the minHost gate reads,
+            // the four-field DMI descriptor (§3.2) and the supported majors (the adapter registry, §3.8.2).
+            var host = new PluginUpdateHost(
+                Os: RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win" : "linux",
+                Arch: ArchitectureToken(),
+                HostApiMajor: PluginApi.Major,
+                HostApiMinor: PluginApi.Minor,
+                HostAppVersion: AppInfo.Version,
+                Machine: DescriptorFrom(MachineInfo.ReadIdentity()),
+                SupportedMajors: PluginAbiRegistry.CreateDefault().SupportedMajors.ToHashSet());
+
+            await RunGuardedAsync(async () =>
+            {
+                var result = await service.RunAsync(host, assets).ConfigureAwait(false);
+                if (result.Reason == PluginUpdateReason.Installed)
+                    Dispatcher.UIThread.Post(() => AnnouncePluginInstalled(result.PluginId));
+            }).ConfigureAwait(false);
+        }
+        catch { /* fail-closed: a plugin-shaped fault is silence, the next tick retries (§5.3, §4.3) */ }
+    }
+
+    /// <summary>The §5.2 arch token the manifest is matched on. x64 is the only target today; the mapping exists
+    /// (rather than a hard-coded "x64") so an arm64 build reports honestly rather than claiming x64 and matching
+    /// a build it cannot load — the selector's exact-match rule then yields no candidate rather than a wrong one.
+    /// </summary>
+    private static string ArchitectureToken() => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "x64",
+        Architecture.Arm64 => "arm64",
+        var other => other.ToString().ToLowerInvariant(),
+    };
+
+    /// <summary>
+    /// Run <paramref name="body"/> under the SAME <c>_updating</c> guard <see cref="StartUpdate"/> takes, from a
+    /// non-UI-thread caller (the update schedule's pool thread). <see cref="StartUpdate"/> itself takes the guard
+    /// synchronously on the UI thread before dispatching, and its body reports through <see cref="PostNotify"/>;
+    /// here the caller is already off the UI thread and the body is silent, so this takes the guard on this
+    /// thread and runs inline. The guard is released on the UI thread in a <c>finally</c> (matching StartUpdate's
+    /// release hop), so a UI-thread click and this path agree on the one flag.
+    ///
+    /// The guard is a plain field, but the plugin run is the only non-UI taker and the schedule's own
+    /// single-flight means two plugin runs cannot overlap, so the worst a race with a UI click can do is skip one
+    /// — never overlap a download.
+    /// </summary>
+    private async Task RunGuardedAsync(Func<Task> body)
+    {
+        if (_updating) return;
+        _updating = true;
+        try { await body().ConfigureAwait(false); }
+        finally { Dispatcher.UIThread.Post(() => _updating = false); }
+    }
+
+    /// <summary>The §3.2 four-field descriptor for the plugin's <c>ah_matches</c>, built from
+    /// <see cref="MachineIdentity"/> — the same DMI read <c>DeviceFactory</c> uses, handed to the update
+    /// service's pre-install confirmation (steps 2/4).</summary>
+    private static MachineDescriptor DescriptorFrom(MachineIdentity id) =>
+        new(id.Manufacturer, id.Product, id.Board, id.BoardProduct);
+
+    /// <summary>Raise the §5.3 step-5 restart notification for a freshly installed plugin, over the EXISTING
+    /// notification surface (<see cref="NotificationCenter.Raise"/> — no new surface). UI thread only (it touches
+    /// the session view model/list), and the id is keyed by the plugin id via
+    /// <see cref="NotificationCenter.PluginId"/> so a re-check refreshes one entry rather than stacking a copy.
+    /// The click restarts the app through <see cref="RestartApp"/>, the per-OS path the self-update uses.</summary>
+    private void AnnouncePluginInstalled(string? pluginId)
+    {
+        if (pluginId is null) return;   // no id, no stable entry to key on (never in practice: Installed carries one)
+        _notifications.Raise(NotificationCenter.PluginId(pluginId),
+                             () => Loc.T("plugin.installed_restart", pluginId),
+                             RestartApp);
+    }
+
+    /// <summary>
+    /// Restart the app to pick up a freshly downloaded plugin (§5.3 step 5 — a downloaded AOT plugin cannot take
+    /// effect until the process is relaunched). The mechanism is the one the self-updater already uses, so there
+    /// is no second restart primitive:
+    ///   * Linux/AppImage: <see cref="AppImageUpdater.Restart"/> spawns the running AppImage detached; the
+    ///     caller exits right after. For a non-AppImage Linux install there is no in-place relaunch, so this is
+    ///     a no-op and the user restarts however they normally do (the notification's words still stand).
+    ///   * Windows: the process cannot overwrite/relaunch itself in place beyond what the MSI helper does, and
+    ///     there is no MSI to run for a plugin, so the honest in-place relaunch is spawning the current
+    ///     executable detached and exiting — the process-restart idiom. <c>Environment.ProcessPath</c> is the
+    ///     running exe (AppController/WindowsUpdater both use it). The single-instance mutex in Bootstrap/Program
+    ///     waits up to 5 s for the outgoing instance to release it, so the new process takes over rather than
+    ///     bailing, exactly as it does across an AppImage self-update restart (Program.cs:19-24).
+    /// </summary>
+    private void RestartApp()
+    {
+        if (AppImageUpdater.IsAppImage) { AppImageUpdater.Restart(); ExitApp(); return; }
+
+        if (OperatingSystem.IsWindows() && Environment.ProcessPath is { } exe)
+        {
+            try { using (Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true })) { } }
+            catch { /* no relaunch: the user can start it again; nothing to report here */ }
+        }
+        ExitApp();
     }
 
     /// <summary>Announce a found release. This is the schedule's callback and therefore the ONLY path to the

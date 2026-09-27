@@ -459,6 +459,9 @@
   <data name="update.failed" xml:space="preserve">
     <value>Update failed</value>
   </data>
+  <data name="plugin.installed_restart" xml:space="preserve">
+    <value>A plugin for this laptop was installed ({0}). Restart Acer Helper to use it.</value>
+  </data>
   <data name="access.granted_restart" xml:space="preserve">
     <value>Hardware access granted — restart to use the unlocked controls.</value>
   </data>

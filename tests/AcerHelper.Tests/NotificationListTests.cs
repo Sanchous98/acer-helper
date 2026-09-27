@@ -152,6 +152,27 @@ public class NotificationListTests
         Assert.Equal(0, list.UnreadCount);
     }
 
+    /// <summary>The plugin-installed condition's id: the family prefix mirrors the update family, and the member
+    /// is the PLUGIN id, so two different plugins are two different conditions. This is the id the restart
+    /// notification is keyed on (docs/vendor-plugins.md §5.3 step 5), and getting it stable is what lets the
+    /// periodic re-check refresh one entry instead of stacking a copy.
+    ///
+    /// MUTATION: make <see cref="NotificationCenter.PluginId"/> return a fresh value per call (e.g. a GUID) —
+    /// the two raises below leave two entries and the single assert goes red.</summary>
+    [Fact]
+    public void ThePluginIdIsStableAndKeyedByThePlugin()
+    {
+        Assert.Equal("plugin:acer-nitro", NotificationCenter.PluginId("acer-nitro"));
+        Assert.Equal(NotificationCenter.PluginId("a"), NotificationCenter.PluginId("a"));
+        Assert.NotEqual(NotificationCenter.PluginId("a"), NotificationCenter.PluginId("b"));
+
+        var list = new NotificationCenter();
+        list.Raise(NotificationCenter.PluginId("acer-nitro"), () => "restart to enable it");
+        list.Raise(NotificationCenter.PluginId("acer-nitro"), () => "restart to enable it");
+
+        Assert.Single(list.Items);   // a re-check refreshes, it does not stack
+    }
+
     /// <summary>A CONDITION THE USER IGNORED IS NOT RAISED AGAIN THIS SESSION, and that is the decision this row
     /// pins. Ignoring is a decision, not a delay: a still-true condition is re-stated by its source as a matter
     /// of course (the update check runs again on its timer, the access offer is re-stated after a UI rebuild), so
