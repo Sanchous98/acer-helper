@@ -30,12 +30,40 @@
     <Compile Include="$(MSBuildThisFileDirectory)WmiSession.Windows.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)WbemInterop.Windows.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)WmiInvoker.Windows.cs" />
+    <!-- GateStats is pulled in because WmiSession.Windows.cs (above) depends on it: the WMI COM layer times every
+         EC transaction it serialises and feeds these always-on counters (Infrastructure/Diagnostics/GateStats.cs).
+         It is vendor-agnostic, dependency-free (System.Diagnostics + Interlocked only) and portable, so it
+         compiles into every plugin TFM; only the Windows half actually calls it, which is why it is listed beside
+         the transport that uses it rather than as one more "Generic" file. It has NOT moved from Diagnostics, so
+         the path reaches back there; the host still compiles its own copy (the same source-include-not-move rule
+         as MachineInfo below). -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\Diagnostics\GateStats.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SysfsInvoker.Linux.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FirmwareAttributes.Linux.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hwmon.Linux.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SysfsLink.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DelegatePorts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ProfileKind.cs" />
+
+    <!-- MachineInfo is the ONE remaining vendor-agnostic Generic file the Acer code needs (docs/vendor-plugins.md
+         §4.4, §3.2). The included Acer data/codec files carry a `using AcerHelper.Infrastructure.Vendors.Generic;`
+         that is now DEAD in each of them (verified: no included file references a Generic member), but the C#
+         compiler still requires the namespace to exist, and in a plugin it does not unless a type declares it.
+         MachineInfo is the vendible, host-only-free member that supplies it: it reads the DMI manufacturer/product
+         pair (`Win32_ComputerSystemProduct` on Windows, `/sys/class/dmi/id/{sys_vendor,product_name}` on Linux) —
+         vendor-agnostic machine identity, the exact source §3.2 builds the `ah_matches` descriptor from. It is
+         dependency-free in the plugin: MachineInfo.Windows.cs uses only WmiSession (already in this file) and
+         MachineInfo.Linux.cs only System.IO.
+
+         WHY LISTED HERE RATHER THAN MOVED. §4.4's rule is the SDK is the home for shared transports, but the task
+         also forbids moving anything out of Vendors/Generic (the host still compiles it there). A source-include
+         list is not a move: the host keeps compiling its own copy today, and when P4 imports this props into the
+         host it must reconcile the duplicate exactly as it does for the transports it relocated to this folder.
+         The paths reach back into Vendors/Generic because the props lives in Plugins/Sdk and the file has NOT
+         moved; that is deliberate, so a future move is an obvious edit here and not a silent second copy. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\Vendors\Generic\MachineInfo.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\Vendors\Generic\MachineInfo.Windows.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\Vendors\Generic\MachineInfo.Linux.cs" />
 
     <!-- The ABI envelope, shared verbatim with every plugin. -->
     <Compile Include="$(MSBuildThisFileDirectory)..\Abi\VendorAbi.cs" />

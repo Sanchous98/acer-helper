@@ -326,17 +326,25 @@ public class PluginBoundaryGuardTests
     /// the plugin by <c>&lt;Compile Include=…&gt;</c> — a <c>ProjectReference</c> to the host would both fail to
     /// export (§2.1) and drag the whole host into the plugin.
     ///
+    /// THE ABI MAY BE SOURCE-INCLUDED EITHER DIRECTLY OR THROUGH THE SDK PROPS (§4.4). P1 made the
+    /// <c>Infrastructure/Plugins/Sdk/PluginSdk.props</c> the source-shared home of the ABI AND the transports, and
+    /// a plugin that imports it (like <c>acer-nitro</c>) gets the four <c>Abi/*.cs</c> from there. So the check
+    /// accepts a csproj that lists the four files itself (the proof plugin's shape) OR imports the props — and in
+    /// the props case it opens the props and asserts the four ARE listed, so the import cannot hide a dropped ABI.
+    ///
     /// Same overlap note as above: this is the general form of
     /// <c>ProofPluginSourceTests.PluginProjectDeclaresNativeAotSharedLibrarySettings</c>/
     /// <c>…SourceIncludesTheAbiFilesAndDoesNotReferenceTheHost</c>.
     ///
-    /// MUTATION that reddens it: delete <c>&lt;PublishAot&gt;true&lt;/PublishAot&gt;</c> or an ABI
-    /// <c>&lt;Compile Include&gt;</c> from a plugin csproj, or add a <c>&lt;ProjectReference&gt;</c>.
+    /// MUTATION that reddens it: delete <c>&lt;PublishAot&gt;true&lt;/PublishAot&gt;</c>, or drop an ABI
+    /// <c>&lt;Compile Include&gt;</c> from BOTH the csproj and the imported props, or add a
+    /// <c>&lt;ProjectReference&gt;</c>.
     /// </summary>
     [Fact]
     public void EveryPluginProjectDeclaresNativeAotSharedAndSourceIncludesTheAbi()
     {
         string[] abiFiles = ["VendorAbi.cs", "AbiStatus.cs", "Capability.cs", "Operation.cs"];
+        const string SdkPropsImport = "Import Project=\"..\\..\\Infrastructure\\Plugins\\Sdk\\PluginSdk.props\"";
         var offenders = new List<string>();
 
         foreach (var dir in PluginProjectDirs())
@@ -355,10 +363,22 @@ public class PluginBoundaryGuardTests
                 if (!text.Contains("<IsAotCompatible>true</IsAotCompatible>", StringComparison.Ordinal))
                     offenders.Add($"{rel}: missing <IsAotCompatible>true</IsAotCompatible> (AOT analyzers off, §7.1)");
 
-                foreach (var file in abiFiles)
-                    if (!text.Contains($"Compile Include=\"..\\..\\Infrastructure\\Plugins\\Abi\\{file}\"",
-                                       StringComparison.Ordinal))
-                        offenders.Add($"{rel}: does not source-include Abi/{file} (§3.1/§4.4)");
+                // Either the csproj lists the four ABI files directly, or it imports the SDK props that lists them.
+                // The props path is asserted to actually carry them, so the import is not a way to hide a dropped ABI.
+                if (text.Contains(SdkPropsImport, StringComparison.Ordinal))
+                {
+                    var props = Source("Infrastructure/Plugins/Sdk/PluginSdk.props");
+                    foreach (var file in abiFiles)
+                        if (!props.Contains(file, StringComparison.Ordinal))
+                            offenders.Add($"{rel}: imports the SDK props, but the props omits Abi/{file} (§4.4)");
+                }
+                else
+                {
+                    foreach (var file in abiFiles)
+                        if (!text.Contains($"Compile Include=\"..\\..\\Infrastructure\\Plugins\\Abi\\{file}\"",
+                                           StringComparison.Ordinal))
+                            offenders.Add($"{rel}: does not source-include Abi/{file} (§3.1/§4.4)");
+                }
 
                 if (text.Contains("<ProjectReference", StringComparison.Ordinal))
                     offenders.Add($"{rel}: has a <ProjectReference> — the ABI must be source-included, and the host "

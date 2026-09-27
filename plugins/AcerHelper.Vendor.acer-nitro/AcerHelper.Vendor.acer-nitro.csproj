@@ -1,0 +1,174 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE ACER NITRO VENDOR PLUGIN (docs/vendor-plugins.md §5.1 project layout, §6 Phase 1). A Native AOT
+       shared library that will own the Acer line's vendor code. THIS SLICE ONLY SCAFFOLDS IT: it makes the
+       existing Acer DATA/CODEC/PORT files COMPILE standalone inside the plugin assembly without touching the
+       host, so the later slices (P3 rewrites the backend to manifest/ops, P4 cuts the host over) start from a
+       green, self-contained build. The eight ah_* thunks exist and are exportable but are stubs (AcerPlugin.cs).
+
+       WHAT THIS PROJECT IS NOT YET. It is not wired into anything (the host references no plugin project and
+       ships none, §5), it does not implement the ABI behaviour, and it does not carry the Acer WIRING files
+       (AcerDevice.*, AcerBattery.Windows.cs) — those extend GenericDevice and are P3's rewrite. See the explicit
+       Compile list below for exactly what is in and what is deferred.
+
+       Layout/artefact rules cited throughout: §5.1 (project layout), §5.2 (asset naming), §3.1/§4.4
+       (source-shared SDK), §3.2 (exports), §3.8 (API versioning). -->
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- A classlib with PublishAot is a SHARED library by default (Microsoft.NETCore.Native.targets:
+         NativeLib=Shared when OutputType=Library), but it is spelled out because "class library published as a
+         shared library" is the whole artefact (§2.1). Static libraries are not supported by Native AOT. -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <!-- Turns on the AOT/trim/single-file analyzers for the plugin, which the host build would not show for the
+         same code (§7.1 risk 5). -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <AssemblyName>AcerHelper.Vendor.acer-nitro</AssemblyName>
+    <!-- The id the manifest and the cache folder use; must equal ah_plugin_id()'s string (§5.1). -->
+    <PluginId>acer-nitro</PluginId>
+    <!-- CS0649 ("field is never assigned") fires on the eight function-pointer fields of the HOST-SIDE
+         VendorAbiExports struct in the source-included VendorAbi.cs (via PluginSdk.props): a plugin uses only
+         the export NAME constants from that file and never the host's call-through struct, so the struct's
+         fields are legitimately never assigned here. The file is mandated by the source-include contract
+         (§3.1/§4.4) and its other half (the eight names) is exactly what the plugin must have, so the file
+         cannot simply be excluded in favour of a local copy without re-introducing the drift the source-share
+         exists to prevent; this narrow NoWarn is therefore scoped to the one host-side type. The host build is
+         unaffected (it assigns those fields in the loader, so it never warns). Same rationale as the proof
+         plugin's NoWarn. -->
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
+  </PropertyGroup>
+
+  <!-- THE SDK (docs/vendor-plugins.md §4.4): the ONE source of truth for the vendor-agnostic transports (WMI COM
+       layer, sysfs/hwmon layer, neutral port helpers) and the C ABI envelope itself. Both the host and every
+       plugin <Import> it, so the two sides cannot compile two drifting copies of the same transport. Imported
+       HERE with a relative path into Infrastructure/Plugins/Sdk, exactly as §4.4 and the props header prescribe. -->
+  <Import Project="..\..\Infrastructure\Plugins\Sdk\PluginSdk.props" />
+
+  <!-- THE ABI BUILD VERSION OF THIS PLUGIN, baked into a const exactly as the host bakes PluginApiVersion
+       (§3.8.1): a const is plain IL and survives Native AOT stripping, where assembly-version reflection would
+       lie. The shipped host's supported set is { 1 } today (AcerHelper.csproj <PluginApiVersion>1.0</...>), so
+       this slice pins the scaffold to 1.0 and ah_abi_version() reports 0x00010000. -->
+  <PropertyGroup>
+    <AcerNitroApiMajor Condition="'$(AcerNitroApiMajor)' == ''">1</AcerNitroApiMajor>
+    <AcerNitroApiMinor Condition="'$(AcerNitroApiMinor)' == ''">0</AcerNitroApiMinor>
+  </PropertyGroup>
+
+  <!-- SOURCE-INCLUDE, NOT ProjectReference. The plugin is its own assembly compiled into its own binary: a
+       ProjectReference to AcerHelper.csproj would drag the whole host (Avalonia, UI, Composition) into the
+       plugin and would export nothing (Native AOT exports only [UnmanagedCallersOnly] methods in the PUBLISHED
+       assembly, §2.1). All shared code therefore arrives by <Compile Include=... Link=... /> — the §4.4 pattern.
+
+       DOMAIN (Domain/**): pure value/logic types the Acer code implements against (IPowerProfiles, FanMode,
+       AccentColor, PerformanceProfile, Battery, …). Domain/ is dependency-free — every file uses only the BCL
+       (verified: only Domain/Fan.cs has a using, System.Collections.Immutable) — so it source-includes cleanly.
+
+       ACER FILES: an EXPLICIT list, never a glob, so it is obvious at a glance what is IN this slice and what
+       is deferred to P3. Only the pure DATA / CODEC / PORT files are here; the wiring files are not (see the
+       comment above AcerPlugin.cs and the report). Each Link puts the file under an "Acer\" folder in the
+       compile item list, mirroring its origin, and keeps the filename so a reader can map it back. -->
+  <ItemGroup>
+    <Compile Include="..\..\Domain\**\*.cs" Link="Domain\%(RecursiveDir)%(Filename)%(Extension)" />
+
+    <!-- Pure vendor data. -->
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerProfiles.cs" Link="Acer\AcerProfiles.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerModel.cs" Link="Acer\AcerModel.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerFanPort.cs" Link="Acer\AcerFanPort.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerGpuMux.cs" Link="Acer\AcerGpuMux.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeyReports.cs" Link="Acer\AcerHotkeyReports.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\RgbEffects.cs" Link="Acer\RgbEffects.cs" />
+
+    <!-- Codecs: the cross-platform EC HID codec + its per-OS transports. -->
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.cs" Link="Acer\AcerEcHidController.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Windows.cs" Link="Acer\AcerEcHidController.Windows.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerEcHidController.Linux.cs" Link="Acer\AcerEcHidController.Linux.cs" />
+
+    <!-- OS key capture. Both halves compile standalone: AcerHotkeys.Linux.cs's only outside-Domain dependency is
+         Hwmon, which the imported SDK props already source-includes; AcerHotkeys.Windows.cs uses only Domain and
+         Win32 P/Invoke. NOTE: EneHidController*.cs and AcerProfilePorts.cs are deliberately ABSENT — they depend
+         on host-only namespaces (Infrastructure/Lighting and Localization) and are P3 rewrite items. -->
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeys.Windows.cs" Link="Acer\AcerHotkeys.Windows.cs" />
+    <Compile Include="..\..\Infrastructure\Vendors\Acer\AcerHotkeys.Linux.cs" Link="Acer\AcerHotkeys.Linux.cs" />
+  </ItemGroup>
+
+  <!-- THE SAME FILE-NAME OS SPLIT THE HOST USES (AcerHelper.csproj:47-52). The portable TFM is "net10.0" (it does
+       NOT contain "linux"), so the non-Windows case is "not windows".
+
+       IT MUST COME AFTER THE INCLUDES: MSBuild evaluates items in document order, so a Remove before the Include
+       removes nothing (the build compiled both OS halves until this was moved here).
+
+       WHY THE EXPLICIT PER-TREE LINES AND NOT ONLY THE HOST'S PLAIN GLOB. A project-relative glob (`**/*.cs`)
+       only matches items whose declared identity is under the project directory. The imported SDK props declares
+       its items with ABSOLUTE paths ($(MSBuildThisFileDirectory)...), and the Acer/Domain includes here are
+       `..\..\`-relative, so neither is reached by `**/...`. The two explicit patterns therefore re-state the
+       same file-name selection for the trees that live outside the project directory; without them both OS
+       halves of the EC controller and hotkeys compile at once (duplicate partials, CS0757/CS0111). -->
+  <ItemGroup>
+    <Compile Remove="**/*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Plugins\Sdk\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Vendors\Acer\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Vendors\Generic\*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Plugins\Sdk\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Vendors\Acer\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="..\..\Infrastructure\Vendors\Generic\*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+  </ItemGroup>
+
+  <!-- PER-MODEL ACER QUIRKS (§1.4). The resource MOVES with the code: it is keyed on DMI product substrings and
+       carries vendor vocabulary, and its only consumer is the plugin's ENE/RGB composition. Embedded from the
+       repo-root file (the host still embeds its own copy; this slice does not move or delete anything) with an
+       EXPLICIT LogicalName equal to the host's ("AcerHelper.acer-models.json") so the lookup is byte-identical.
+
+       WHY THE LOGICAL NAME MATTERS AND WHY THIS IS SAFE. AcerModel.LoadEmbedded (AcerModel.cs:76-83) resolves
+       the resource by SUFFIX — GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("acer-models.json")) —
+       rather than by a hard-coded name. Left to the SDK default, the plugin's name would be
+       "AcerHelper.Vendor.acer-nitro.acer-models.json", which the suffix test would also match; pinning
+       LogicalName to the host's exact value removes the dependence on the assembly name and makes the two sides
+       resolve the SAME logical name, so a future change of AssemblyName cannot silently break the model DB. The
+       user override at %AppData%/AcerHelper/acer-models.json / ~/.config/AcerHelper/acer-models.json keeps
+       working unchanged because AcerModel reads it in-process (AcerModel.cs:94-105). -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\acer-models.json" Link="acer-models.json"
+                      LogicalName="AcerHelper.acer-models.json" />
+  </ItemGroup>
+
+  <!-- Windows-only package. The Acer EC HID transport (AcerEcHidController.Windows.cs) and the (P3) ENE
+       transport both go through HidSharp; it is the Windows RGB/EC HID transport exactly as the host uses it
+       (AcerHelper.csproj:225). Pinned to the same version so the plugin and the host agree on the HID backend.
+       Rooted whole under AOT for the reason the host states (AcerHelper.csproj:184-189): HidSharp reflects
+       internally and is not trim-annotated, so trimming would strip its Win32 backend. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <PackageReference Include="HidSharp" Version="2.6.4" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true' And '$(TargetFramework)' == 'net10.0-windows'">
+    <TrimmerRootAssembly Include="HidSharp" />
+  </ItemGroup>
+
+  <!-- Bake <AcerNitroApiMajor>.<AcerNitroApiMinor> into a compile-time const (AcerPluginApi, generated), a
+       sibling of the proof plugin's GenerateProofApiVersion and the host's GeneratePluginApiVersion (§3.8.1).
+       Runs per-TFM so each target writes into its own obj/ intermediate. -->
+  <Target Name="GenerateAcerNitroApiVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_AcerNitroApiVersionFile>$(IntermediateOutputPath)AcerPluginApi.g.cs</_AcerNitroApiVersionFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_AcerNitroApiVersionLine Include="// &lt;auto-generated /&gt; Generated from &lt;AcerNitroApiMajor&gt;/&lt;AcerNitroApiMinor&gt; in AcerHelper.Vendor.acer-nitro.csproj. Do not edit." />
+      <_AcerNitroApiVersionLine Include="namespace AcerHelper.Vendor.AcerNitro%3B" />
+      <_AcerNitroApiVersionLine Include="internal static class AcerPluginApi" />
+      <_AcerNitroApiVersionLine Include="{" />
+      <_AcerNitroApiVersionLine Include="    public const int Major = $(AcerNitroApiMajor)%3B" />
+      <_AcerNitroApiVersionLine Include="    public const int Minor = $(AcerNitroApiMinor)%3B" />
+      <_AcerNitroApiVersionLine Include="    public const int Encoded = (Major &lt;&lt; 16) | Minor%3B" />
+      <_AcerNitroApiVersionLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_AcerNitroApiVersionFile)" Lines="@(_AcerNitroApiVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_AcerNitroApiVersionFile)" />
+      <FileWrites Include="$(_AcerNitroApiVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
