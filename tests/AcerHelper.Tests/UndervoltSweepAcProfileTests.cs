@@ -164,6 +164,44 @@ public class LaptopServiceUndervoltSweepAcGateTests
         Assert.True(Setup(onAc: true).Service.OnAc);
     }
 
+    /// <summary>ON USB-C PD THE SWEEP IS REFUSED, exactly as on the battery. The OS reports "AC" (it is
+    /// charging), so the refusal can only come from the typed EC adapter reading demoting the source — the
+    /// owner's rule ("заблокировать автодаунвольт" on USB-C). Nothing is written and no profile is changed.
+    /// MUTATION: drop the USB-C demotion in RecomputeOnAc and this runs.</summary>
+    [Fact]
+    public void OnUsbCTheSweepIsRefusedBeforeAnyWriteOrProfileChange()
+    {
+        var f = Setup(onAc: true);                      // the OS says AC...
+        var co = (FakeCurveOptimizer)f.Device.CurveOptimizer!;
+        f.Service.SetPowerAdapter(PowerSource.UsbC);    // ...but the EC channel types it as USB-C PD
+
+        Assert.False(f.Service.OnAc);                   // the effective source is battery-like
+
+        var result = f.Service.RunUndervoltSweep(Fast(), null, CancellationToken.None);
+
+        Assert.Equal(SweepStop.NotOnAc, result.Stop);
+        Assert.False(result.HasProposal);
+        Assert.Empty(result.Domains);
+        Assert.Empty(co.SetDomainsCalls);
+        Assert.Empty(co.SetCalls);
+        Assert.Empty(f.Pp!.SetCalls);
+        Assert.False(f.Service.TuningInProgress);
+    }
+
+    /// <summary>The barrel charger still runs the sweep, even after a USB-C reading — the demotion is not
+    /// sticky.</summary>
+    [Fact]
+    public void OnBarrelTheSweepRuns_EvenAfterAUsbCReading()
+    {
+        var f = Setup(onAc: true);
+        f.Service.SetPowerAdapter(PowerSource.UsbC);
+        f.Service.SetPowerAdapter(PowerSource.Barrel);
+
+        Assert.True(f.Service.OnAc);
+        Assert.NotEqual(SweepStop.NotOnAc,
+            f.Service.RunUndervoltSweep(Fast(), null, CancellationToken.None).Stop);
+    }
+
     // ---- the transient performance profile ----
 
     /// <summary>ON SUCCESS: Turbo is applied BEFORE the first probe and the PREVIOUS profile is restored after.

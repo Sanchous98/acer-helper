@@ -234,4 +234,69 @@ public class ProfilePowerSourceTests
         f.Service.SyncPowerSource(OnAc);
         Assert.Equal(TestProfiles.All.Select(p => p.Id), Selectable(f));
     }
+
+    // ---- USB-C Power Delivery is treated as the battery ----
+
+    /// <summary>USB-C PD IS THE BATTERY, not AC. The OS calls it "AC" (it is charging), so the typed EC reading
+    /// is what demotes it: the offered set is the BATTERY one (Eco and Balanced), the same as unplugged — the
+    /// owner's rule ("при питании от usb-c должны оставаться те же профили питания, что и от батареи").
+    /// MUTATION: drop the USB-C demotion in RecomputeOnAc and this shows the AC set instead.</summary>
+    [Fact]
+    public void OnUsbC_TheBatteryProfileSetIsOffered_EvenThoughTheOsSaysAc()
+    {
+        var f = Gated(current: TestProfiles.Balanced);
+
+        f.Service.SyncPowerSource(OnAc);              // the OS reports external power (charging)...
+        f.Service.SetPowerAdapter(PowerSource.UsbC);  // ...but the EC channel types it as USB-C PD
+
+        Assert.Equal(["eco", "balanced"], Selectable(f));
+    }
+
+    /// <summary>Going back to the BARREL restores the AC set, and so does unplugging to the battery. The demotion
+    /// is per-reading, never sticky.</summary>
+    [Fact]
+    public void OnBarrelOrBattery_TheSourceFollowsTheReading()
+    {
+        var f = Gated(current: TestProfiles.Balanced);
+
+        f.Service.SyncPowerSource(OnAc);
+        f.Service.SetPowerAdapter(PowerSource.UsbC);
+        Assert.Equal(["eco", "balanced"], Selectable(f));
+
+        f.Service.SetPowerAdapter(PowerSource.Barrel);   // back on the DC-in charger
+        Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
+
+        f.Service.SetPowerAdapter(PowerSource.UsbC);
+        f.Service.SyncPowerSource(OnBattery);            // and unplugged is the battery set regardless
+        Assert.Equal(["eco", "balanced"], Selectable(f));
+    }
+
+    /// <summary>An UNKNOWN adapter reading is ignored — it does not demote (nor promote) the source, so a
+    /// transient failed EC read cannot flap the profile set. The OS answer stands.</summary>
+    [Fact]
+    public void AnUnknownAdapterReadingDoesNotChangeTheSource()
+    {
+        var f = Gated(current: TestProfiles.Balanced);
+
+        f.Service.SyncPowerSource(OnAc);
+        f.Service.SetPowerAdapter(PowerSource.Unknown);
+
+        Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
+    }
+
+    /// <summary>The source change that USB-C forces is the SAME machinery as a plug/unplug: it applies the
+    /// remembered (or seeded) mode for the now-battery-like source, not just narrows the list.</summary>
+    [Fact]
+    public void OnUsbC_TheSourceSlotIsRestoredOrSeeded_LikeUnplugging()
+    {
+        var f = Gated(new Settings { OnBattery = new ProfileMemory { BaseId = "eco" } },
+                      current: TestProfiles.Balanced);
+
+        f.Service.SyncPowerSource(OnAc);
+        f.Service.SetPowerAdapter(PowerSource.UsbC);
+
+        // The remembered battery mode (Eco) is applied, exactly as if the barrel had been unplugged.
+        Assert.Contains("eco", f.Pp!.SetCallIds);
+        Assert.Equal("eco", f.Store.Settings.OnBattery.BaseId);
+    }
 }

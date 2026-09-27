@@ -200,6 +200,12 @@ this hardware is the payoff there.
 > per-core/thermal limits and cancellation — **NOT by time**; the stop is the first oracle error (or a completed
 > walk to the rail's floor). The core attribution and the all-cores fallback are the parts added after the first
 > cut, whose progress read a bare "core x/10" that did not match the two stages.
+>
+> **The source gate is the BARREL, not "the OS says AC" (2026-09-27).** The sweep is refused unless the
+> effective source is AC — and USB-C Power Delivery is treated as the battery (`LaptopService.RecomputeOnAc`),
+> so it is refused there too. Windows reports USB-C PD as plain "AC" (it is charging), so the distinction comes
+> from the typed EC reading (`Battery.PowerSource` → `SetPowerAdapter`); a machine with no EC channel keeps the
+> OS answer, and an `Unknown` reading is ignored so a failed poll cannot flap the gate.
 
 **Why it is fundamentally unreliable on this hardware.** Each reason is a measured fact from the curve
 documents, not a preference:

@@ -843,10 +843,17 @@ internal sealed class AppController
     // EC channel (then no schedule exists either). A failed read yields PowerSource.Unknown, which SetPowerSource
     // turns into "hide the row" — never a guessed value. Re-resolves _vm.Battery at POST time for the same
     // live-language-rebuild reason as RefreshBattery.
+    //
+    // THE SAME READING ALSO TYPES THE SOURCE FOR THE REST OF THE APP. The OS alone calls USB-C Power Delivery
+    // "AC"; this is the one place the app learns it is really USB-C, so it is handed to the service
+    // (SetPowerAdapter) as well as to the card. That is what makes a USB-C machine show the battery profile set
+    // and refuse the guided sweep (see LaptopService.RecomputeOnAc). SetPowerAdapter ignores Unknown, so a
+    // transient failed read neither flaps the profiles nor hides a last-good type.
     private void RefreshPowerSource()
     {
         if (_svc.Device.Battery.PowerSource is not { } read) return;
         var source = read();
+        _svc.SetPowerAdapter(source);
         Dispatcher.UIThread.Post(() => _vm.Battery?.SetPowerSource(source), DispatcherPriority.Normal);
     }
 

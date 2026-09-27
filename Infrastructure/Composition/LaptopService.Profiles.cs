@@ -32,19 +32,67 @@ public sealed partial class LaptopService
     public AccentColor? FlashColorOf(PerformanceProfile? profile)
         => profile is { } p ? TraitsOf(p).FlashColor : null;
 
-    // Which power source we last saw, and its remembered mode slot. Null = unknown (no reading yet). Access
-    // under _state (touched by the background SyncPowerSource and UI-thread profile actions).
+    // Which power source we last saw, and its remembered mode slot. Access under _state (touched by the
+    // background SyncPowerSource / SetPowerAdapter and UI-thread profile actions).
+    //
+    // TWO INPUTS, ONE EFFECTIVE ANSWER. _osOnAc is the OS's "is external power connected" (charging/idle =>
+    // true), which is ALL Windows reports — and it reports USB-C Power Delivery as plain "AC". _adapter is the
+    // TYPED source the Acer EC channel exposes (Barrel / USB-C / Battery), which distinguishes them. _onAc is
+    // the EFFECTIVE answer the rest of this file reads, derived from both: USB-C PD is a limited source and is
+    // treated exactly like the battery (same profile set, and the guided sweep is refused on it), while the
+    // barrel charger and machines with no EC channel keep the OS answer. See RecomputeOnAc.
+    private bool? _osOnAc;
+    private PowerSource? _adapter;
     private bool? _onAc;
     private ProfileMemory Slot => _onAc == false ? Settings.OnBattery : Settings.OnAc;
 
-    /// <summary>The live power source as last seen: true on AC, false on battery, null before any reading (no
-    /// battery, or a desktop). Set by <see cref="SyncPowerSource"/> from the refresh pass. Null is deliberately
-    /// distinct from false: it means "we do not know", and a caller that must fail closed — the guided undervolt
-    /// sweep, which is long and invasive and must not run on an unproven source — treats null exactly as "not
-    /// AC". This is a read only; nothing here changes the source or applies a mode.</summary>
+    /// <summary>The live power source as last seen, EFFECTIVE: true on the barrel/DC-in charger, false on the
+    /// battery OR on USB-C Power Delivery, null before any reading (no battery, or a desktop). Derived by
+    /// <see cref="RecomputeOnAc"/> from the OS state and the typed EC adapter. Null is deliberately distinct
+    /// from false: it means "we do not know", and a caller that must fail closed — the guided undervolt sweep,
+    /// which is long and invasive and must not run on an unproven source — treats null exactly as "not AC".
+    /// This is a read only; nothing here changes the source or applies a mode.</summary>
     public bool? OnAc
     {
         get { lock (_state) return _onAc; }
+    }
+
+    /// <summary>Record the TYPED power source the device's EC channel reported (Barrel / USB-C / Battery), from
+    /// the slow <c>AcerPowerSourceSchedule</c> read. This is what separates USB-C Power Delivery from the barrel
+    /// charger, which the OS alone cannot: on a machine whose EC channel said <see cref="PowerSource.UsbC"/> the
+    /// effective source is forced to "battery-like" (see <see cref="RecomputeOnAc"/>), so the profile set is the
+    /// battery one and the guided sweep is refused — the owner's rule. <see cref="PowerSource.Unknown"/> is
+    /// IGNORED (the last named reading is kept): a transient failed read must not flap the profiles, and the
+    /// battery card hides the row for it. On a machine with no EC channel this is never called (the adapter stays
+    /// null) and the OS answer stands. Runs OFF the UI thread, like <see cref="SyncPowerSource"/>.</summary>
+    public void SetPowerAdapter(PowerSource source)
+    {
+        if (source is not (PowerSource.Barrel or PowerSource.UsbC or PowerSource.Battery)) return;
+        lock (_state)
+        {
+            if (_adapter == source) return;
+            _adapter = source;
+            RecomputeOnAc();
+        }
+    }
+
+    /// <summary>Fold the two inputs into the effective <see cref="_onAc"/>, and — when the effective source
+    /// actually changes — seed or restore that source's remembered mode, exactly as the old single-input
+    /// <see cref="SyncPowerSource"/> did. Held under <c>_state</c>; <c>SeedSlotFromHardware</c> and
+    /// <c>ApplyStoredMode</c> re-enter the lock, which C# locks allow.
+    ///
+    /// THE RULE: USB-C Power Delivery and the battery demote to "not AC"; everything else (the barrel, and any
+    /// machine without a typed read) keeps the OS answer. The demotion is one-way on purpose — the typed read
+    /// never PROMOTES to AC, so a contradictory reading cannot show the AC profile set on a discharging
+    /// machine.</summary>
+    private void RecomputeOnAc()
+    {
+        bool? effective = _adapter is PowerSource.UsbC or PowerSource.Battery ? false : _osOnAc;
+        if (effective == _onAc) return;                                  // no effective change
+        _onAc = effective;
+        if (effective == null) return;                                  // unknown: nothing to apply
+        if (string.IsNullOrEmpty(Slot.BaseId)) SeedSlotFromHardware();  // first time on this source
+        else ApplyStoredMode();                                         // restore what we remembered
     }
 
     /// <summary>Apply <paramref name="profile"/> to the port for a TRANSIENT, in-app purpose only, WITHOUT
@@ -300,18 +348,18 @@ public sealed partial class LaptopService
     /// change (and on the first reading, i.e. startup): if this source already has a remembered mode, re-apply
     /// it; if not (fresh install), seed the slot from whatever the hardware is currently set to — never force
     /// a change on a source we've not seen before. A no-op while the source is unchanged or unknown
-    /// (desktop / no battery). Called from the refresh loop.</summary>
+    /// (desktop / no battery). Called from the refresh loop.
+    ///
+    /// This feeds the OS half only; the typed EC adapter (USB-C vs barrel) is folded in by
+    /// <see cref="RecomputeOnAc"/>, so a USB-C-powered machine is treated as "not AC" even though the OS says
+    /// "charging".</summary>
     public void SyncPowerSource(BatteryInfoSnapshot battery)
     {
         if (battery.State == BatteryState.Unknown) return;            // no battery/source info
-        bool onAc = battery.State != BatteryState.Discharging;        // Charging/Idle => on AC
         lock (_state)
         {
-            if (_onAc == onAc) return;                                    // no change
-            _onAc = onAc;
-
-            if (string.IsNullOrEmpty(Slot.BaseId)) SeedSlotFromHardware();   // first time on this source
-            else ApplyStoredMode();                                          // restore what we remembered
+            _osOnAc = battery.State != BatteryState.Discharging;      // Charging/Idle => OS sees external power
+            RecomputeOnAc();
         }
     }
 
