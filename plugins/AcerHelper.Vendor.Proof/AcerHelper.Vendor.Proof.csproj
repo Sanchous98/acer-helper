@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THE PHASE 0 PROOF PLUGIN (docs/vendor-plugins.md §6 Phase 0 item 4). A trivial Native AOT shared library
+       that exports the eight ah_* entry points of §3.2 and returns a fixed manifest. It is deliberately NOT
+       wired into anything: the host references no plugin project and ships none (§5). It exists to measure load
+       latency, binary size and the two-AOT-runtimes-in-one-process signal hazard (§2.4, §7.1 risk 1), and to
+       exercise the loader's scan/score/select path later.
+       Layout/artefact rules cited throughout: §5.1 (project layout), §5.2 (asset naming), §3.2 (exports),
+       §3.4 (probe manifest). -->
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- A classlib with PublishAot is a SHARED library by default (Microsoft.NETCore.Native.targets:
+         NativeLib=Shared when OutputType=Library), but it is spelled out because "class library published as a
+         shared library" is the whole artefact (§2.1). Static libraries are not supported by Native AOT. -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <!-- Turns on the AOT/trim/single-file analyzers for the plugin, which the host build would not show for the
+         same code (§7.1 risk 5). -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <AssemblyName>AcerHelper.Vendor.Proof</AssemblyName>
+    <!-- The id the manifest and the cache folder use; must equal ah_plugin_id()'s string (§5.1). -->
+    <PluginId>proof</PluginId>
+    <!-- CS0649 ("field is never assigned") fires on the eight function-pointer fields of the HOST-SIDE
+         VendorAbiExports struct in the source-included VendorAbi.cs: a plugin uses only the export NAME constants
+         from that file and never the host's call-through struct, so the struct's fields are legitimately never
+         assigned here. The file is mandated by the source-include contract (§3.1/§4.4) and its other half (the
+         eight names) is exactly what the plugin must have, so the file cannot simply be excluded in favour of a
+         local copy without re-introducing the drift the source-share exists to prevent; this narrow NoWarn is
+         therefore scoped to the one host-side type. The host build is unaffected (it assigns those fields in the
+         loader, so it never warns). -->
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
+  </PropertyGroup>
+
+  <!-- THE ABI BUILD VERSION OF THIS PLUGIN, baked into a const exactly as the host bakes PluginApiVersion
+       (§3.8.1): a const is plain IL and survives Native AOT stripping, where assembly-version reflection would
+       lie. The shipped host's supported set is { 1 } today (AcerHelper.csproj <PluginApiVersion>1.0</...>), so a
+       build pinned to any other major is a REFUSAL fixture: major 0 (the "synthetic previous ABI" of §6 Phase 0
+       item 4) and major 2 (a newer-than-host ABI) both fall outside SupportedMajors and must be refused by the
+       §3.8.4 gate-2 / gate-3 checks.
+         Default build:            dotnet build ...                        -> ah_abi_version() = 1.0 (0x00010000)
+         Deprecated-major fixture: dotnet build ... -p:ProofApiMajor=0     -> ah_abi_version() = 0.0 (0x00000000) -->
+  <PropertyGroup>
+    <ProofApiMajor Condition="'$(ProofApiMajor)' == ''">1</ProofApiMajor>
+    <ProofApiMinor Condition="'$(ProofApiMinor)' == ''">0</ProofApiMinor>
+  </PropertyGroup>
+
+  <!-- SOURCE-INCLUDE, NOT ProjectReference. Native AOT exports only methods marked [UnmanagedCallersOnly] in the
+       PUBLISHED assembly — "methods in project references or NuGet packages won't be exported" (§2.1). The
+       shared ABI file therefore cannot be a referenced library whose exports get re-exported; it is compiled
+       INTO this plugin (the §4.4/§3.1 SDK pattern), while the host compiles the same file normally. One source of
+       truth, one binary per side, and the host is untouched by this tree (AcerHelper.csproj excludes plugins/**).
+       PluginManifest.cs / PluginJsonContext.cs are included with the ABI files because they are DEPENDENCY-FREE:
+       they reference only each other and the BCL (System.Text.Json source generation), so the plugin can build
+       its fixed manifest through the same generated context the host uses (§3.3, §3.4) rather than a hand-typed
+       literal that could drift from the wire shape. -->
+  <ItemGroup>
+    <Compile Remove="**/*.Linux.cs" Condition="$(TargetFramework.Contains('windows'))" />
+    <Compile Remove="**/*.Windows.cs" Condition="!$(TargetFramework.Contains('windows'))" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\VendorAbi.cs" Link="Abi\VendorAbi.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\AbiStatus.cs" Link="Abi\AbiStatus.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\Capability.cs" Link="Abi\Capability.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\Abi\Operation.cs" Link="Abi\Operation.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\PluginManifest.cs" Link="Shared\PluginManifest.cs" />
+    <Compile Include="..\..\Infrastructure\Plugins\PluginJsonContext.cs" Link="Shared\PluginJsonContext.cs" />
+  </ItemGroup>
+
+  <!-- Bake <ProofApiMajor>.<ProofApiMinor> into a compile-time const (ProofApi, generated), a sibling of the
+       host's GeneratePluginApiVersion target (§3.8.1). Runs per-TFM so each target writes into its own obj/
+       intermediate. -->
+  <Target Name="GenerateProofApiVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_ProofApiVersionFile>$(IntermediateOutputPath)ProofApi.g.cs</_ProofApiVersionFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ProofApiVersionLine Include="// &lt;auto-generated /&gt; Generated from &lt;ProofApiMajor&gt;/&lt;ProofApiMinor&gt; in AcerHelper.Vendor.Proof.csproj. Do not edit." />
+      <_ProofApiVersionLine Include="namespace AcerHelper.Vendor.Proof%3B" />
+      <_ProofApiVersionLine Include="internal static class ProofApi" />
+      <_ProofApiVersionLine Include="{" />
+      <_ProofApiVersionLine Include="    public const int Major = $(ProofApiMajor)%3B" />
+      <_ProofApiVersionLine Include="    public const int Minor = $(ProofApiMinor)%3B" />
+      <_ProofApiVersionLine Include="    public const int Encoded = (Major &lt;&lt; 16) | Minor%3B" />
+      <_ProofApiVersionLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_ProofApiVersionFile)" Lines="@(_ProofApiVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_ProofApiVersionFile)" />
+      <FileWrites Include="$(_ProofApiVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
