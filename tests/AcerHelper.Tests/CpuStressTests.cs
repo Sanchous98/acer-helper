@@ -747,6 +747,26 @@ public class CpuStressTests
         Assert.Contains("TopologyWithClusters", source, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// THE SAMPLER NEVER CALLS <c>Thread.Interrupt</c>. It is unreservedly
+    /// <see cref="PlatformNotSupportedException"/> on Windows under Native AOT — the shipped build — so calling it
+    /// to "cut the sleep short" on Dispose made EVERY guided sweep fail with "Operation is not supported on this
+    /// platform." before a single probe ran. The shutdown is a cooperative <c>_stop</c> flag plus a bounded
+    /// <c>Join</c>, and the loop re-checks the flag after each short sleep, so nothing needs interrupting.
+    ///
+    /// A source guard rather than a behavioural one because the suite runs under the JIT (where <c>Interrupt</c>
+    /// works) and can never reproduce the AOT-only throw: the regression is exactly the call coming back, and that
+    /// is what this pins. Scope is the load tool's file, which owns the sampler.
+    /// </summary>
+    [Fact]
+    public void TheTemperatureSamplerDoesNotCallThreadInterrupt()
+    {
+        var source = File.ReadAllText(Path.Combine(Root(), "Infrastructure", "Vendors", "Generic", "CpuLoadTest.cs"));
+
+        Assert.DoesNotContain(".Interrupt(", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ThreadInterruptedException", source, StringComparison.Ordinal);
+    }
+
     /// <summary>The Windows half carries the efficiency class out of the PROCESSOR_RELATIONSHIP buffer, which is
     /// the byte that makes the cluster split possible — pinned by source because the parse cannot run offline.</summary>
     [Fact]

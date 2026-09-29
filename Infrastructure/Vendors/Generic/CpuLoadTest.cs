@@ -213,13 +213,20 @@ public static class CpuLoadPolicy
 /// stale/default value, and <see cref="SampleNow"/> forces a fresh synchronous read (used after a cool-down, so
 /// the load thread re-reads a fresh reading rather than the one that sent it to cool down). A <c>-1</c> is only
 /// ever published before the first successful sample or while the provider is genuinely unreadable.
-/// </summary>
+///
+/// DISPOSE DOES NOT INTERRUPT THE THREAD, deliberately. <c>Thread.Interrupt</c> is unconditionally
+/// <see cref="PlatformNotSupportedException"/> on Windows under Native AOT (the shipped build), so calling it to
+/// "cut the sleep short" made every sweep fail with "Operation is not supported on this platform." — the bug this
+/// class now avoids rather than triggers. The sleep is instead a WAIT ON A STOP EVENT with the interval as its
+/// timeout, so <see cref="Dispose"/> waking the sampler is what cuts the wait short — no <c>Interrupt</c> and no
+/// wasted interval per run (a plain <c>Thread.Sleep</c> here would make every dispose block for up to one
+/// interval, which is a measurable slowdown across a sweep's many probes).</summary>
 internal sealed class CpuTemperatureSampler : IDisposable
 {
     private readonly Func<int>? _provider;
+    private readonly ManualResetEventSlim _stopped = new(false);
     private int _value;
     private Thread? _thread;
-    private volatile bool _stop;
 
     /// <summary>Publishes a first sample synchronously (fail closed), then starts the background sampler.</summary>
     internal CpuTemperatureSampler(Func<int>? provider, TimeSpan interval)
@@ -250,12 +257,10 @@ internal sealed class CpuTemperatureSampler : IDisposable
 
     private void Loop(TimeSpan period)
     {
-        while (!_stop)
-        {
-            try { Thread.Sleep(period); } catch (ThreadInterruptedException) { return; }
-            if (_stop) return;
+        // Wait returns true when Dispose sets the event, so the shutdown is immediate rather than up to one
+        // interval late — and it is AOT-safe, unlike Thread.Interrupt.
+        while (!_stopped.Wait(period))
             Volatile.Write(ref _value, ReadOnce());
-        }
     }
 
     /// <summary>Read fail-closed: no provider, a thrown provider or a negative reading all become -1.</summary>
@@ -268,16 +273,18 @@ internal sealed class CpuTemperatureSampler : IDisposable
 
     public void Dispose()
     {
-        _stop = true;
+        _stopped.Set();                            // wake the loop out of its wait, now
         var thread = _thread;
-        if (thread is null) return;
-        thread.Interrupt();                        // cut a long Sleep short so the run does not linger
+        if (thread is null) { _stopped.Dispose(); return; }
+        // The loop observes the set event and returns at once; the bound covers a provider that is itself blocked
+        // mid-read, which is abandoned rather than waited on (it is a background thread carrying no run state).
         if (!thread.Join(TimeSpan.FromSeconds(2)))
         {
-            // The sampler is blocked in a provider that ignores interruption; it is a background thread and
-            // carries no state the run needs, so abandon it rather than block the run's completion.
+            // The sampler is blocked in a provider and carries no state the run needs, so abandon it rather than
+            // block the run's completion.
         }
         _thread = null;
+        _stopped.Dispose();
     }
 }
 
