@@ -158,8 +158,10 @@ selection and queues nothing, a refused write reverts the selection, the port's 
 programmatic `Refresh` selection is not treated as a request. The source guard in
 `GpuMuxTests.TheMuxCardHasOneStableLineAndTheFlyoutHasAFixedFrame` pins that `TuningView.axaml`'s
 `GpuMuxState` line is `TextWrapping="NoWrap"` with no `MinHeight`/`MaxHeight`, that there is no
-`GpuMux.ApplyCommand`/`{l:Tr Change}` button, that `GpuMuxNote` sits NEXT TO the selector (same Grid row,
-`IsVisible` bound to `GpuMux.NoteVisible`, muted) with no always-present
+`GpuMux.ApplyCommand`/`{l:Tr Change}` button, that the current-mode line is a MUTED label on the selector's
+ROW (the selector is on the RIGHT, content-sized, like the GPU power and CPU power-mode rows; the muted label
+and the conditional after-reboot note share the LEFT cell, `IsVisible` bound to `GpuMux.NoteVisible`) with no
+always-present
 `GpuMuxFootnote` caption, that the (separate, wrapping) `GpuMuxUnsupported` refusal is the only wrapping block,
 and that there is no `PendingText`/`Message` line; it also pins that `MainWindow.axaml` is a fixed-width
 flyout (`SizeToContent="Width"`) whose HEIGHT is locked to the Home page in code — no hard-coded 468x860

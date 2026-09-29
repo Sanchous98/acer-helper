@@ -347,17 +347,24 @@ public class GpuMuxTests
         Assert.DoesNotContain("GpuMux.ApplyCommand", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{l:Tr 'gpu.change'}", xaml, StringComparison.Ordinal);
 
-        // The note sits NEXT TO the SELECTOR: the same Grid row (Column 1) as the ComboBox (Column 0),
-        // conditional on GpuMux.NoteVisible. Sharing the row means it never reserves an always-present blank and
-        // never becomes a full-width bottom caption; the old permanent caption is gone.
-        Assert.Contains("<Grid ColumnDefinitions=\"Auto,*\" ColumnSpacing=\"8\">", xaml, StringComparison.Ordinal);
-        Assert.Contains("<ComboBox Grid.Column=\"0\"", xaml, StringComparison.Ordinal);
+        // The row follows the SAME label-left / content-sized-selector-right geometry as the GPU power and CPU
+        // power-mode rows: a MUTED current-mode label on the LEFT (column 0) — matching those labels' muted
+        // style, which is exactly what the owner asked for — and the selector on the RIGHT (column 1,
+        // content-sized). The current-mode label and the conditional note share the left cell as a small muted
+        // stack, so a hidden note reserves no blank.
+        Assert.Contains("<Grid ColumnDefinitions=\"*,Auto\" ColumnSpacing=\"8\" IsVisible=\"{Binding GpuMux.Supported}\">",
+                        xaml, StringComparison.Ordinal);
+        Assert.Contains("<ComboBox Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
+        var stateStart = xaml.IndexOf("x:Name=\"GpuMuxState\"", StringComparison.Ordinal);
+        Assert.True(stateStart >= 0, "the current-mode line is gone from TuningView.axaml");
+        var stateEnd = xaml.IndexOf("/>", stateStart, StringComparison.Ordinal);
+        Assert.True(stateEnd > stateStart, "the current-mode element is not closed");
+        Assert.Contains("Classes=\"muted\"", xaml[stateStart..stateEnd], StringComparison.Ordinal);   // a muted label
         var noteStart = xaml.IndexOf("x:Name=\"GpuMuxNote\"", StringComparison.Ordinal);
         Assert.True(noteStart >= 0, "the MUX selector note is gone from TuningView.axaml");
         var noteEnd = xaml.IndexOf("/>", noteStart, StringComparison.Ordinal);
         Assert.True(noteEnd > noteStart, "the MUX note element is not closed");
         var note = xaml[noteStart..noteEnd];
-        Assert.Contains("Grid.Column=\"1\"", note, StringComparison.Ordinal);          // on the selector row
         Assert.Contains("Classes=\"muted\"", note, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding GpuMux.Note}\"", note, StringComparison.Ordinal);
         Assert.Contains("IsVisible=\"{Binding GpuMux.NoteVisible}\"", note, StringComparison.Ordinal);
