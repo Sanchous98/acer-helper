@@ -15,8 +15,9 @@ namespace AcerHelper.Infrastructure.Composition;
 /// what it is — a service over hardware and the form settings are kept in, not a use case — and it is also what
 /// names the persisted container (FanPreset, CoPreset, …) and calls the store that builds it. Application holds
 /// the re-apply use case (<c>Application/ReapplyPlan.cs</c>: the plan and, since the outcome stopped being built
-/// out of the container, the loop that walks it), and this class's <see cref="Reconciler"/> implements the
-/// contract that loop drives — it is where the axis writes and the preset translation live. The other contracts
+/// out of the container, the loop that walks it), and this class's executor — the <c>HardwareReconciler</c> it
+/// builds and hands to that use case — implements the contract the loop drives: it is where the axis writes and
+/// the preset translation live. The other contracts
 /// Application declares live in <c>Application/</c> beside it, one per applied axis plus the lighting door and
 /// the declared-setting shapes (<c>FanAxis.cs</c>, <c>GpuOffsets.cs</c>, <c>CpuPowerOverlay.cs</c>,
 /// <c>Undervolt.cs</c>, <c>DeclaredSetting.cs</c>, <c>LightZone.cs</c>).
@@ -24,8 +25,9 @@ namespace AcerHelper.Infrastructure.Composition;
 /// Split across partial files by feature, because one 814-line file was the only place this
 /// layer could be read. This part holds identity and the shared infrastructure every other
 /// part depends on — the fields, the <c>_state</c> lock and its <see cref="Save"/> companion,
-/// the scalar accessors the UI is allowed to read, <see cref="ApplyStartupState"/>, the
-/// per-mode preset helper, and teardown. The rest:
+/// the scalar accessors the UI is allowed to read, the startup-state contract (driven by
+/// Application's <see cref="Application.ApplyStartupState"/>), the per-mode preset helper,
+/// and teardown. The rest:
 /// <list type="bullet">
 /// <item><c>LaptopService.Lighting.cs</c> — the per-mode light zones and the door the UI edits them through.</item>
 /// <item><c>LaptopService.Profiles.cs</c> — performance profiles, Turbo, power source.</item>
@@ -41,23 +43,37 @@ namespace AcerHelper.Infrastructure.Composition;
 /// the build already selects files by suffix (<c>*.Windows.cs</c>/<c>*.Linux.cs</c> in
 /// AcerHelper.csproj) — none of these collide with that, and none may ever be renamed into it.
 ///
-/// WHAT IT IMPLEMENTS. Five of Application's contracts, one per thing the owner's model applies
-/// (Application/FanAxis.cs, GpuOffsets.cs, CpuPowerOverlay.cs, Undervolt.cs, DeclaredSetting.cs), plus the
-/// re-apply's (<see cref="HardwareReconciler"/>, which is this class's own executor). All five are implemented
-/// EXPLICITLY, so not one member is added to this class's public surface — the surface the retired analysis
-/// measured as too wide, 62 members plus a constructor, a count kept in docs/open-decisions.md's note on that
-/// retirement — and a caller reaches them only by naming the use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
-/// is remembered before it is written); this class owns the graph and the ports, which is why the rules could move
-/// and the graph could not.
+/// WHAT IT IMPLEMENTS. The applied-edit contracts, one per axis the owner's model applies
+/// (Application/FanAxis.cs, GpuOffsets.cs, CpuPowerOverlay.cs, Undervolt.cs, DeclaredSetting.cs, ProfileSwitch.cs),
+/// the ACTION contracts this class's public surface was moved off onto (Application/Preferences.cs,
+/// HardwareToggles.cs, ProfilePower.cs, ModeApply.cs), the QUERY contracts the UI's reads moved onto
+/// (Application/Queries.cs — the profile/fan/GPU/CO/CPU-power/sensor/battery readers), plus the re-apply's
+/// (<see cref="HardwareReconciler"/>,
+/// which is this class's own executor). Every member is implemented EXPLICITLY, so not one is added to this
+/// class's public surface — the surface the retired analysis measured as too wide, 62 members plus a constructor,
+/// a count kept in docs/open-decisions.md's note on that retirement — and a caller reaches them only by naming the
+/// use case. The use cases own the rules (which half of a fan an edit touches, what an absent preset means, what
+/// is remembered before it is written, the order of a shell preference and a port write); this class owns the graph
+/// and the ports, which is why the rules could move and the graph could not.
 ///
-/// THE SIXTH IS THE LIGHTING, and it is implemented the other way round: the door is taken by
+/// THE LIGHTING IS IMPLEMENTED THE OTHER WAY ROUND: the door is taken by
 /// <see cref="LightsForCurrentMode()"/>, which RETURNS the contract (<see cref="ILightZoneMode"/>) rather than
 /// this class implementing its members, because the door has to carry the mode key and this class has no single
 /// lighting mode to be. What that member used to hand out — the stored zone dictionary itself, edited in place
 /// by the UI — is what the owner overruled; see Infrastructure/Composition/LaptopService.Lighting.cs.
 /// </summary>
 public sealed partial class LaptopService : IDisposable,
-    IFanAxisTarget, IGpuOffsetsTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget
+    IFanAxisTarget, IGpuOffsetsTarget, IGpuPowerTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget, ITuningGate,
+    IProfileTarget, IPreferenceStore, IClamshellTarget, IBatteryControlTarget, IKeyboardBrightnessTarget,
+    IAutostartTarget, IBlueLightTarget, ISetTurboTarget, ITogglePerformanceTarget, ISourceProfileTarget,
+    IPowerSourceSyncTarget, IFanModeTarget, IGpuOcModeTarget, ICpuPowerModeTarget, ICoModeTarget, IFanDriveTarget,
+    IStartupStateTarget,
+    // The QUERY contracts (Application/Queries.cs): the read side of this class's public surface, implemented
+    // EXPLICITLY so a caller reaches a read by naming the use case (ReadCurrentProfile, ReadFanState, …) and
+    // not the service. What stays here is the graph and the ports, which is why the reads could move.
+    ICurrentProfileTarget, ISelectableProfilesTarget, IBaseProfileTarget, ISourceProfileReadTarget,
+    IFanStateTarget, IGpuOcStateTarget, ICoDomainsTarget, ICpuPowerStateTarget, ISensorsReadTarget,
+    IBatteryReadTarget
 {
     // Explicit fields instead of a primary constructor. A primary constructor's parameters are in scope only in
     // the part that declares them, so while one was in use this class could not be split across partial files
@@ -70,7 +86,6 @@ public sealed partial class LaptopService : IDisposable,
     {
         this.device = device;
         this.store = store;
-        Reconciler = new HardwareReconciler(this);
         // Assigned in the body rather than as `Settings { get; } = store.Load(...)`. Field and property initializers
         // run BEFORE the body, so as an initializer this read `store` while it was still null. No initializer in
         // this class reads Settings, so loading it here rather than there is observably the same order.
@@ -88,13 +103,24 @@ public sealed partial class LaptopService : IDisposable,
         Settings = store.Load(device.DeclaredSettings);
     }
 
-    /// <summary>The one operation that re-applies volatile state, shared by every site that needs it: this
-    /// class's own <see cref="ApplyStartupState"/>, <c>AppController</c>'s refresh pass and
-    /// <c>LightingCoordinator</c>'s resume handler. It holds no state of its own — it is one instance so that
-    /// there is one place that knows HOW TO WRITE each axis, not to share anything. What a re-apply IS (which
-    /// axes, in what order, on what thread) is Application's and is read from there (see
-    /// <see cref="HardwareReconciler"/> and Application's <c>ReapplySettings</c>).</summary>
-    internal HardwareReconciler Reconciler { get; }
+    /// <summary>The one re-apply use case, shared by every site that needs it: this class's own startup path
+    /// (<see cref="IStartupStateTarget.ReapplyStartup"/>), <c>AppController</c>'s refresh pass and
+    /// <c>LightingCoordinator</c>'s resume handler. It owns the executor (this class's <see cref="IReapplyTarget"/>
+    /// implementation, <c>HardwareReconciler</c>) through its constructor; what a re-apply IS (which axes, in what
+    /// order, on what thread) is Application's and is read from there (Application's <c>ReapplySettings</c>).
+    ///
+    /// THE ASSIGNMENT IS COMPOSITION'S, on the same terms as <see cref="ProfileSwitch"/>: the executor is built
+    /// over this service and the mode-apply use cases, so composition builds the one use case and assigns it back
+    /// through this property, and the service's own callers and the two UI sites share it. The getter's lazy
+    /// fallback builds an equivalent one where nothing was assigned (a unit test), so the boot path works without
+    /// a container.</summary>
+    internal ReapplySettings Reapply
+    {
+        get => _reapply ??= new ReapplySettings(new HardwareReconciler(this,
+            new ApplyModeFan(this), new ApplyModeGpuOc(this), new ApplyModeCpuPower(this), new ApplyModeCo(this)));
+        set => _reapply = value;
+    }
+    private ReapplySettings? _reapply;
 
     /// <summary>The machine composition built. The UI reads its (nullable) feature ports to decide which
     /// sections to show; it must route all mutations through this service's methods.</summary>
@@ -132,6 +158,12 @@ public sealed partial class LaptopService : IDisposable,
     /// from the refresh loop) and <c>ApplyModeCo</c> have no reader, and wiring one up would start showing the
     /// user messages the app has never shown, which is a feature, not a refactor.
     ///
+    /// THIS PAIR FORM IS NOW FOR THE PATHS OUTSIDE THE APPLIED-EDIT SLICE: the battery's properties, the
+    /// fan/lighting writes and this class's own CO writers <c>SetCo</c>/<c>SetCoDomains</c>/<c>SaveCoValues</c>.
+    /// The APPLIED-EDIT write ports (profile, GPU offsets, CPU power overlay, manual undervolt) took the
+    /// owner's refinement of 2026-09-28 and now THROW <see cref="PortWriteFailedException"/> from a PRESENT port
+    /// (see <see cref="WriteOrThrow"/> immediately below, and docs/open-decisions.md §2).
+    ///
     /// <paramref name="reason"/> is fetched ONLY from a write that RETURNED. A port that THROWS reports no reason
     /// — deliberately, because the reason it would be read from is a field the port owns and assigns at the end
     /// of a call that runs to completion, so a throw leaves it holding an EARLIER call's words. Reporting those
@@ -159,12 +191,30 @@ public sealed partial class LaptopService : IDisposable,
         try { return write(); } catch { return (false, null); }
     }
 
+    /// <summary>The THROWING sibling of <see cref="Attempt(Func{bool}, Func{string?})"/>, for a write to a port
+    /// this app has already established is PRESENT (the caller asked a capability member first). A refusal there
+    /// is a violated precondition rather than an ordinary outcome, so it is reported by THROWING
+    /// <see cref="PortWriteFailedException"/> instead of returning a pair — and that exception always carries its
+    /// OWN reason, which the pair could not (docs/open-decisions.md §2). <paramref name="reason"/> is fetched ONLY
+    /// from a write that RETURNED, for the same reason <see cref="Attempt(Func{bool}, Func{string?})"/> fetches it
+    /// that way: a throw assigns nothing, so the port's <c>LastError</c> belongs to an earlier call and reading it
+    /// would pin another call's words on this failure. A port that itself THROWS is converted to the same
+    /// exception with NO reason — the shape the declared-setting path already uses
+    /// (<c>FlagSetting.Write</c> then <c>SettingNotAppliedException</c>).</summary>
+    private static void WriteOrThrow(string operation, Func<bool> write, Func<string?> reason)
+    {
+        bool ok;
+        try { ok = write(); }
+        catch { throw new PortWriteFailedException(operation, null); }
+        if (!ok) throw new PortWriteFailedException(operation, reason());
+    }
+
     // Guards ALL access to the mutable Settings graph (its collections + scalars), the per-source slots,
     // _onAc, the fan-curve engine, and Save() — because these are now touched from TWO threads: the UI thread
     // (user actions: slider/profile/toggle) AND the background refresh pass (AppController offloads the 3s poll
     // and its re-applies off the UI thread so a stalled ACPI-EC can't freeze the UI). Dictionary<> is not
     // thread-safe and Save() serializes the whole graph, so a concurrent mutation would throw / tear without
-    // this. Re-entrant (System.Threading.Lock), so the nested calls below (SetFan->ApplyCustom, SetTurbo->
+    // this. Re-entrant (System.Threading.Lock), so the nested calls below (a fan edit->ApplyCustom, SetTurbo->
     // ApplyProfile, SyncPowerSource->SeedSlotFromHardware->Save, ...) don't self-deadlock. Lock order is always
     // _state -> WMI Gate (this layer takes _state first, then calls a port that takes Gate); the WMI layer never
     // calls back here, so the reverse never happens -> no deadlock.
@@ -190,53 +240,47 @@ public sealed partial class LaptopService : IDisposable,
     /// from a thread holding nothing sees <c>false</c>.</summary>
     internal bool StateHeld => _state.IsHeldByCurrentThread;
 
-    /// <summary>Re-apply persisted state that the OS doesn't remember on its own.</summary>
-    public void ApplyStartupState()
+    /// <summary>Re-apply persisted state that the OS doesn't remember on its own — MOVED TO A USE CASE
+    /// (<see cref="Application.ApplyStartupState"/>). What stays here is the graph read, the blue-light port write
+    /// and the reconciler hand-off, reached through the members below; the order — clamshell, blue-light, then the
+    /// volatile axes — and the reason the hardware calls are outside the lock are stated in the use case.
+    ///
+    /// The clamshell port write is shared with the shell row's use case (<see cref="IClamshellTarget.SetEnabled"/>),
+    /// so the takeover has one writer. Everything here is implemented EXPLICITLY: a caller reaches it by naming the
+    /// use case, and the AppController constructor is that caller.</summary>
+
+    // ---- the startup-state contract (Application/ModeApply.cs) ----
+
+    /// <summary>The persisted clamshell takeover flag, read under the graph lock.</summary>
+    bool IStartupStateTarget.Clamshell
     {
-        // Every hardware call here is made OUTSIDE _state, and every value it needs is read inside it. The lock
-        // exists to guard the Settings graph and the slots, not to serialise hardware (design doc D17: this method
-        // runs on the UI thread, and it used to hold _state across four hardware calls — two powrprof, one gdi32,
-        // one NvAPI — so any other thread's _state acquirer waited behind all four).
-        //
-        // Hoisting the CALLS rather than their arguments is what makes this safe, and the distinction is the whole
-        // point: the mode axes re-read the current mode under their own _state acquisition (ApplyModeGpuOc takes
-        // one, ApplyModeCpuPower keeps its own), so moving them out of this outer lock cannot leave them applying
-        // a stale mode — it only shortens the hold. (Hoisting the *argument* of a hardware write is a different
-        // change and not safe in general: it lets a concurrent writer land first and be overwritten by the stale
-        // execution. That is why ApplyCustom and ApplyModeCpuPower's own cp.Set are left alone — see
-        // docs/open-decisions.md §3.)
-        //
-        // The ordering these four had relative to each other is preserved: they are still sequential on this
-        // thread, and "clamshell takeover before the option rows read it" (its own comment below) still holds.
-        bool clamshell;
-        int bluelight;
-        lock (_state)
-        {
-            clamshell = Settings.Clamshell;
-            bluelight = Settings.Bluelight;
-        }
-
-        if (clamshell) device.Clamshell?.SetEnabled(true);
-        if (bluelight > 0) device.DisplayTint?.Apply(bluelight);
-
-        // The volatile axes, from the one place that knows how to re-apply them: the GPU offsets (the driver
-        // zeroed them at boot) and the CPU power overlay are written on THIS thread, and the Curve Optimizer is
-        // handed to the pool, because its SMU mailbox transaction waits on a machine-wide PCI lock that other
-        // tuning tools also take and can block for seconds — holding _state (or the UI thread) across it would
-        // stall the background refresh pass and, through it, the UI. The schedule and the per-axis threads are
-        // the reconciler's; this site names only the moment.
-        //
-        // THE COMMITTED UNDERVOLT IS RE-APPLIED AS IT STANDS. There is no startup auto-revert: an offset is
-        // committed only when the user moves the manual sliders or confirms a guided-sweep proposal, so on restart
-        // the app re-applies exactly the last committed value (stock, 0, for a mode never committed) and never
-        // silently steps it back. The removed watchdog/canary is recorded in docs/auto-undervolt.md and
-        // docs/open-decisions.md.
-
-        // A throw from either synchronous axis escapes this method to its caller, which is the AppController
-        // constructor. That gap is old — it used to be the same two writes by hand — and it is recorded rather
-        // than closed: docs/domain-refactoring-plan.md §7 (see also §5, wave 2).
-        Reconciler.Reapply(ReapplyTrigger.Startup);
+        get { lock (_state) return Settings.Clamshell; }
     }
+
+    /// <summary>The persisted blue-light level, read under the graph lock. 0 means off and nothing is applied.</summary>
+    int IStartupStateTarget.Bluelight
+    {
+        get { lock (_state) return Settings.Bluelight; }
+    }
+
+    /// <summary>Apply the blue-light level to the port — a write made OUTSIDE the graph lock (design doc D17; the
+    /// lock must never span a port call). The clamshell port is <see cref="IClamshellTarget.SetEnabled"/>.</summary>
+    void IStartupStateTarget.ApplyBluelight(int level) => device.DisplayTint?.Apply(level);
+
+    /// <summary>Re-apply the volatile axes for a boot. The schedule and the per-axis threads are
+    /// <see cref="ReapplySettings"/>'s; this names only the moment, exactly as the use case's own comment says. A
+    /// throw from a synchronous axis escapes to the caller (the AppController constructor), the old recorded gap
+    /// (docs/domain-refactoring-plan.md §7).
+    ///
+    /// THE COMMITTED UNDERVOLT IS RE-APPLIED AS IT STANDS. There is no startup auto-revert: an offset is committed
+    /// only when the user moves the manual sliders or confirms a guided-sweep proposal, so on restart the app
+    /// re-applies exactly the last committed value (stock, 0, for a mode never committed) and never silently steps
+    /// it back. The removed watchdog/canary is recorded in docs/auto-undervolt.md and docs/open-decisions.md.
+    ///
+    /// The GPU offsets (the driver zeroed them at boot) and the CPU power overlay are written on THIS thread, and
+    /// the Curve Optimizer is handed to the pool, because its SMU mailbox transaction waits on a machine-wide PCI
+    /// lock that other tuning tools also take and can block for seconds.</summary>
+    void IStartupStateTarget.ReapplyStartup() => Reapply.Run(ReapplyTrigger.Startup);
 
     /// <summary>Look up <paramref name="key"/> in <paramref name="map"/>, creating and inserting a default
     /// instance when it is absent — the per-mode "preset, created on first write" idiom the Stored* and

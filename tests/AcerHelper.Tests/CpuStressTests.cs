@@ -21,43 +21,125 @@ public class CpuStressTests
     private static string Root([CallerFilePath] string thisFile = "")
         => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "..", ".."));
 
-    // Offline-derived goldens (see the class remarks).
+    // Offline-derived goldens (see the class remarks), one set per mix. All were computed by a standalone
+    // program, never by this assembly.
     private const ulong GoldenN0 = 0x0007AAA0F5C17D53UL;
     private const ulong GoldenN1 = 0x80BF4929185C18FEUL;
     private const ulong GoldenN16 = 0x03AEBD25DD28C8D9UL;
     private const ulong GoldenN256 = 0xB37FADBF366FF157UL;
+    private const ulong GoldenBlockInteger = 0x6117C64471DCD42EUL;
 
-    private static readonly LoadWidth[] AllWidths = [LoadWidth.Auto, LoadWidth.Scalar, LoadWidth.Vector128, LoadWidth.Vector256];
+    private const ulong FpN0 = 0xD1EEB58C24C05425UL;
+    private const ulong FpN1 = 0x0054EE2FE075B066UL;
+    private const ulong FpN16 = 0xA4CF0E007EDF67EEUL;
+    private const ulong FpN256 = 0x3DBB47633F032B91UL;
+    private const ulong FpBlock = 0xD2C0E3F4104CC4A7UL;
+
+    private const ulong MemN0 = 0xD4E673981DCF8F87UL;
+    private const ulong MemN16 = 0x6E1DED986AFEE9E9UL;
+    private const ulong MemN256 = 0x6D90146D868AE609UL;
+    private const ulong MemBlock = 0x594564883F846141UL;
+
+    private static readonly LoadWidth[] AllWidths =
+        [LoadWidth.Auto, LoadWidth.Scalar, LoadWidth.Vector128, LoadWidth.Vector256, LoadWidth.Vector512];
+
+    private static readonly LoadMix[] AllMixes = [LoadMix.Integer, LoadMix.FpFma, LoadMix.Memory];
 
     // ================= the kernel =================
 
-    /// <summary>The algorithm is pinned at a small count, at EVERY width: the scalar and both SIMD paths must
-    /// return the same number, which is what makes the width only an instruction-mix knob and never an oracle
-    /// difference. A change to the recurrence or the fold reddens all four rows.</summary>
+    /// <summary>The INTEGER algorithm is pinned at a small count, at EVERY width: the scalar and every SIMD path
+    /// must return the same number, which is what makes the width only an instruction-mix knob and never an oracle
+    /// difference. A change to the recurrence or the fold reddens all rows.</summary>
     [Theory]
     [InlineData(LoadWidth.Auto)]
     [InlineData(LoadWidth.Scalar)]
     [InlineData(LoadWidth.Vector128)]
     [InlineData(LoadWidth.Vector256)]
-    public void TheChecksumIsStableAtPinnedCounts(LoadWidth width)
-        => Assert.Equal(GoldenN16, CpuStressKernel.Compute(width, 16));
+    [InlineData(LoadWidth.Vector512)]
+    public void TheIntegerChecksumIsStableAtPinnedCounts(LoadWidth width)
+        => Assert.Equal(GoldenN16, CpuStressKernel.Compute(LoadMix.Integer, width, 16));
 
     [Fact]
-    public void TheChecksumIsStableAcrossCounts()
+    public void TheIntegerChecksumIsStableAcrossCounts()
     {
-        Assert.Equal(GoldenN0, CpuStressKernel.Compute(LoadWidth.Scalar, 0));
-        Assert.Equal(GoldenN1, CpuStressKernel.Compute(LoadWidth.Scalar, 1));
-        Assert.Equal(GoldenN256, CpuStressKernel.Compute(LoadWidth.Scalar, 256));
+        Assert.Equal(GoldenN0, CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, 0));
+        Assert.Equal(GoldenN1, CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, 1));
+        Assert.Equal(GoldenN256, CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, 256));
     }
 
-    /// <summary>The runtime oracle's own constant matches the algorithm it is compared against — pinned through
-    /// the same offline literal, so the constant and the loop cannot drift apart unnoticed.</summary>
-    [Fact]
-    public void TheGoldenMatchesTheAlgorithmAtTheDefaultBlock()
+    /// <summary>THE FP/FMA MIX IS EXACT AND WIDTH-INDEPENDENT. The same pinned literals must come out of every
+    /// width, and the FMA and non-FMA paths must agree, because all the values are exactly representable integers
+    /// (see the kernel's exactness argument). A mutation that let rounding in would redden a row.</summary>
+    [Theory]
+    [InlineData(LoadWidth.Auto)]
+    [InlineData(LoadWidth.Scalar)]
+    [InlineData(LoadWidth.Vector128)]
+    [InlineData(LoadWidth.Vector256)]
+    [InlineData(LoadWidth.Vector512)]
+    public void TheFpChecksumIsExactAtEveryWidth(LoadWidth width)
     {
-        Assert.Equal(0x6117C64471DCD42EUL, CpuStressKernel.Compute(LoadWidth.Scalar, CpuStressKernel.DefaultBlockIterations));
-        Assert.All(AllWidths, w => Assert.Equal(CpuStressKernel.GoldenChecksum(w),
-            CpuStressKernel.Compute(w, CpuStressKernel.DefaultBlockIterations)));
+        Assert.Equal(FpN16, CpuStressKernel.Compute(LoadMix.FpFma, width, 16));
+        Assert.Equal(FpBlock, CpuStressKernel.Compute(LoadMix.FpFma, width, CpuStressKernel.DefaultBlockIterations));
+    }
+
+    [Fact]
+    public void TheFpChecksumIsStableAcrossCounts()
+    {
+        Assert.Equal(FpN0, CpuStressKernel.Compute(LoadMix.FpFma, LoadWidth.Scalar, 0));
+        Assert.Equal(FpN1, CpuStressKernel.Compute(LoadMix.FpFma, LoadWidth.Scalar, 1));
+        Assert.Equal(FpN256, CpuStressKernel.Compute(LoadMix.FpFma, LoadWidth.Scalar, 256));
+    }
+
+    /// <summary>FMA vs SEPARATE MULTIPLY-ADD: the two paths are the same computation on exact-valued doubles, so
+    /// they must agree bit-for-bit at every width. This is the property that lets the oracle use `==` on a mix
+    /// that actually exercises the fused units.</summary>
+    [Theory]
+    [InlineData(LoadWidth.Scalar)]
+    [InlineData(LoadWidth.Vector128)]
+    [InlineData(LoadWidth.Vector256)]
+    [InlineData(LoadWidth.Vector512)]
+    public void TheFmaAndNonFmaFpPathsAgree(LoadWidth width)
+    {
+        foreach (var n in new[] { 0, 1, 16, 256 })
+            Assert.Equal(
+                CpuStressKernel.ComputeFp(width, n, useFma: false),
+                CpuStressKernel.ComputeFp(width, n, useFma: true));
+    }
+
+    /// <summary>THE MEMORY MIX is deterministic and pinned; the width is irrelevant to it (it is a pointer walk).
+    /// Two calls in a row and every width must give the same literal.</summary>
+    [Theory]
+    [InlineData(LoadWidth.Scalar)]
+    [InlineData(LoadWidth.Vector512)]
+    public void TheMemoryChecksumIsDeterministicAndPinned(LoadWidth width)
+    {
+        Assert.Equal(MemN16, CpuStressKernel.Compute(LoadMix.Memory, width, 16));
+        Assert.Equal(MemN0, CpuStressKernel.Compute(LoadMix.Memory, width, 0));
+        Assert.Equal(MemN256, CpuStressKernel.Compute(LoadMix.Memory, width, 256));
+        Assert.Equal(MemBlock, CpuStressKernel.Compute(LoadMix.Memory, width, CpuStressKernel.DefaultBlockIterations));
+        Assert.Equal(CpuStressKernel.Compute(LoadMix.Memory, width, 1024),
+                     CpuStressKernel.Compute(LoadMix.Memory, width, 1024));   // repeat is identical
+    }
+
+    /// <summary>EVERY mix agrees with its own pinned golden at the default block, by construction, at every
+    /// width. This is the oracle's contract: the runtime constant and the algorithm cannot drift apart, and a
+    /// width never changes the answer.</summary>
+    [Fact]
+    public void EveryMixMatchesItsGoldenAtTheDefaultBlock()
+    {
+        foreach (var mix in AllMixes)
+            foreach (var width in AllWidths)
+                Assert.Equal(CpuStressKernel.GoldenChecksum(mix, width),
+                    CpuStressKernel.Compute(mix, width, CpuStressKernel.DefaultBlockIterations));
+    }
+
+    /// <summary>The integer mix's width-only golden overload is the same value as the mix-aware one, so the
+    /// runners that only know the width keep the exact same oracle.</summary>
+    [Fact]
+    public void TheIntegerGoldenIsTheSameThroughBothOverloads()
+    {
+        Assert.Equal(0x6117C64471DCD42EUL, CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, CpuStressKernel.DefaultBlockIterations));
+        Assert.All(AllWidths, w => Assert.Equal(CpuStressKernel.GoldenChecksum(w), CpuStressKernel.GoldenChecksum(LoadMix.Integer, w)));
     }
 
     /// <summary>The oracle rejects a value that is NOT the golden, however close — the whole point of comparing
@@ -65,28 +147,42 @@ public class CpuStressTests
     [Fact]
     public void TheOracleRejectsAPerturbedValue()
     {
-        var actual = CpuStressKernel.Compute(LoadWidth.Scalar, 16);
+        var actual = CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, 16);
 
         Assert.True(CpuStressKernel.Matches(actual, GoldenN16));
         Assert.False(CpuStressKernel.Matches(actual ^ 1UL, GoldenN16));                       // a bit flip
         Assert.False(CpuStressKernel.Matches(actual, GoldenN16 ^ 1UL));                       // a wrong golden
         Assert.False(CpuStressKernel.Matches(actual, 0UL));
+        Assert.False(CpuStressKernel.Matches(FpBlock ^ 1UL, FpBlock));                        // no tolerance anywhere
+        Assert.False(CpuStressKernel.Matches(MemBlock ^ 1UL, MemBlock));
     }
 
-    /// <summary>Cancellation is cooperative and checked inside the loop, so a cancelled kernel returns
+    /// <summary>Cancellation is cooperative and checked inside every mix's loop, so a cancelled kernel returns
     /// promptly instead of running the block out.</summary>
     [Fact]
     public void TheKernelIsCancellable()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
-        Assert.Throws<OperationCanceledException>(() => CpuStressKernel.Compute(LoadWidth.Scalar, 1 << 20, cts.Token));
+        Assert.Throws<OperationCanceledException>(() => CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, 1 << 20, cts.Token));
+        Assert.Throws<OperationCanceledException>(() => CpuStressKernel.Compute(LoadMix.FpFma, LoadWidth.Scalar, 1 << 20, cts.Token));
+        Assert.Throws<OperationCanceledException>(() => CpuStressKernel.Compute(LoadMix.Memory, LoadWidth.Scalar, 1 << 20, cts.Token));
     }
+
+    /// <summary>The default mix set is all three, in a fixed order — the runner falls back to it, so it is the
+    /// shipped oracle's definition.</summary>
+    [Fact]
+    public void TheDefaultMixesAreAllThree()
+        => Assert.Equal([LoadMix.Integer, LoadMix.FpFma, LoadMix.Memory], CpuStressKernel.DefaultMixes);
 
     /// <summary>A negative count is a programming error, refused rather than silently treated as zero.</summary>
     [Fact]
     public void ANegativeIterationCountIsRefused()
-        => Assert.Throws<ArgumentOutOfRangeException>(() => CpuStressKernel.Compute(LoadWidth.Scalar, -1));
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => CpuStressKernel.Compute(LoadMix.Integer, LoadWidth.Scalar, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CpuStressKernel.Compute(LoadMix.FpFma, LoadWidth.Scalar, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CpuStressKernel.Compute(LoadMix.Memory, LoadWidth.Scalar, -1));
+    }
 
     // ================= the policy =================
 
@@ -202,24 +298,39 @@ public class CpuStressTests
         public int Unpins { get; private set; }
         public Func<LogicalCore, (bool ok, string? error)>? PinBehaviour { get; set; }
 
+        // How many threads are pinned at once, and the high-water mark. This is the observable that distinguishes
+        // "cores overlapped" from "cores were walked one at a time".
+        public int MaxLive { get; private set; }
+        private int _live;
+
         public CoreTopology Topology() => TopologyResult;
 
         public bool PinCurrentThread(LogicalCore core, out string? error)
         {
-            Pinned.Add(core);
+            lock (Pinned) Pinned.Add(core);
+            var live = System.Threading.Interlocked.Increment(ref _live);
+            lock (Pinned) MaxLive = Math.Max(MaxLive, live);
             var (ok, reason) = PinBehaviour?.Invoke(core) ?? (true, null);
             error = reason;
             return ok;
         }
 
-        public void UnpinCurrentThread() => Unpins++;
+        public void UnpinCurrentThread()
+        {
+            Unpins++;
+            System.Threading.Interlocked.Decrement(ref _live);
+        }
     }
 
-    private static CpuLoadOptions Tiny(TimeSpan? perCore = null) => new()
+    // The runner's OWN default is ConcurrentCores = true; these tests keep the sequential walk (the
+    // single-core coverage) unless a test asks for concurrency explicitly, so their ordering assertions stay
+    // meaningful. The sweep probe's default is set on SweepOptions.Load separately.
+    private static CpuLoadOptions Tiny(TimeSpan? perCore = null, bool concurrent = false) => new()
     {
         Width = LoadWidth.Scalar,
         PerCoreBudget = perCore ?? TimeSpan.FromMilliseconds(40),
         TotalBudget = TimeSpan.FromSeconds(10),
+        ConcurrentCores = concurrent,
     };
 
     /// <summary>The happy path: every core passed, in deterministic order, each pinned once and unpinned once,
@@ -255,13 +366,51 @@ public class CpuStressTests
         };
 
         var run = CpuLoadRunner.Run(affinity, () => 40, Tiny(TimeSpan.FromMilliseconds(20)), CancellationToken.None,
-            kernel: (width, _, _) => CpuStressKernel.GoldenChecksum(width) ^ 1UL);
+            kernel: (mix, width, _, _) => CpuStressKernel.GoldenChecksum(mix, width) ^ 1UL);
 
         Assert.Equal(LoadOutcome.ChecksumMismatch, run.Cores[0].Outcome);
         Assert.Contains("expected", run.Cores[0].Detail);
+        Assert.Equal(LoadMix.Integer, run.Cores[0].FailedMix);      // the first mix to fail is named
         Assert.Equal(LoadOutcome.Skipped, run.Cores[1].Outcome);
         Assert.Equal(CpuLoadStop.StoppedOnError, run.Stop);
         Assert.Single(affinity.Pinned);
+    }
+
+    /// <summary>THE MIX THAT FAILED IS NAMED. A kernel that corrupts only the FP/FMA mix must surface exactly
+    /// that mix in the result (and in the detail), not a generic failure — that is the whole point of running
+    /// several mixes.</summary>
+    [Fact]
+    public void TheFailingMixIsNamedInTheResult()
+    {
+        var affinity = new FakeAffinity();
+        var run = CpuLoadRunner.Run(affinity, () => 40, Tiny(TimeSpan.FromMilliseconds(20)), CancellationToken.None,
+            kernel: (mix, width, _, _) => mix == LoadMix.FpFma
+                ? CpuStressKernel.GoldenChecksum(mix, width) ^ 1UL
+                : CpuStressKernel.GoldenChecksum(mix, width));
+
+        Assert.Equal(LoadOutcome.ChecksumMismatch, run.Cores[0].Outcome);
+        Assert.Equal(LoadMix.FpFma, run.Cores[0].FailedMix);
+        Assert.Contains("FpFma", run.Cores[0].Detail);
+    }
+
+    /// <summary>A run over only ONE mix (a configured subset) never runs the others — so the mix set is a real
+    /// switch, not decoration.</summary>
+    [Fact]
+    public void OnlyTheConfiguredMixesRun()
+    {
+        var seen = new List<LoadMix>();
+        var affinity = new FakeAffinity();
+        var options = Tiny(TimeSpan.FromMilliseconds(20)) with { Mixes = [LoadMix.Memory] };
+
+        CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
+            kernel: (mix, width, _, _) =>
+            {
+                lock (seen) seen.Add(mix);
+                return CpuStressKernel.GoldenChecksum(mix, width);
+            });
+
+        Assert.NotEmpty(seen);
+        Assert.All(seen, m => Assert.Equal(LoadMix.Memory, m));
     }
 
     /// <summary>Continue-on-error, the configured alternative: every core is visited and its own error reported,
@@ -276,7 +425,7 @@ public class CpuStressTests
         var options = Tiny(TimeSpan.FromMilliseconds(20)) with { StopOnFirstError = false };
 
         var run = CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
-            kernel: (width, _, _) => CpuStressKernel.GoldenChecksum(width) ^ 1UL);
+            kernel: (mix, width, _, _) => CpuStressKernel.GoldenChecksum(mix, width) ^ 1UL);
 
         Assert.Equal(2, run.Cores.Count);
         Assert.All(run.Cores, r => Assert.Equal(LoadOutcome.ChecksumMismatch, r.Outcome));
@@ -404,7 +553,7 @@ public class CpuStressTests
         var options = Tiny(TimeSpan.FromMilliseconds(300)) with { TemperaturePollInterval = TimeSpan.FromMilliseconds(50) };
 
         var run = CpuLoadRunner.Run(affinity, () => { lock (providerThreads) providerThreads.Add(Environment.CurrentManagedThreadId); return 40; },
-            options, CancellationToken.None, kernel: (width, _, _) => CpuStressKernel.GoldenChecksum(width));
+            options, CancellationToken.None, kernel: (mix, width, _, _) => CpuStressKernel.GoldenChecksum(mix, width));
 
         Assert.True(run.Cores[0].Iterations > 0);
         Assert.NotNull(loadThread);
@@ -424,7 +573,7 @@ public class CpuStressTests
         var options = Tiny(TimeSpan.FromMilliseconds(150)) with { TemperaturePollInterval = TimeSpan.FromMilliseconds(20) };
 
         CpuLoadRunner.Run(new FakeAffinity(), () => { Interlocked.Increment(ref reads); return 40; },
-            options, CancellationToken.None, kernel: (width, _, _) => CpuStressKernel.GoldenChecksum(width));
+            options, CancellationToken.None, kernel: (mix, width, _, _) => CpuStressKernel.GoldenChecksum(mix, width));
 
         var settled = Volatile.Read(ref reads);
         Thread.Sleep(300);   // many intervals later
@@ -442,6 +591,115 @@ public class CpuStressTests
         Assert.Equal(LoadOutcome.ThermalAbort, run.Cores[0].Outcome);
         Assert.Contains("unreadable", run.Cores[0].Detail);
         Assert.Equal(CpuLoadStop.SensorUnreadable, run.Stop);
+    }
+
+    // ================= concurrency =================
+
+    /// <summary>THE ALL-CORE DEFAULT. With the default concurrent phase, a four-core run has all four cores
+    /// pinned AT THE SAME TIME (the fake's high-water mark reaches four), which one-at-a-time could never do.
+    /// The injected kernel makes each block slow enough that the workers genuinely overlap.</summary>
+    [Fact]
+    public void TheDefaultConcurrentRunLoadsEveryCoreAtOnce()
+    {
+        var affinity = new FakeAffinity
+        {
+            TopologyResult = new(
+                [new LogicalCore(0, 0), new LogicalCore(1, 0), new LogicalCore(2, 0), new LogicalCore(3, 0)],
+                CoreTopologySource.PhysicalCores, null),
+        };
+        var options = Tiny(TimeSpan.FromMilliseconds(150), concurrent: true) with { Mixes = [LoadMix.Integer] };
+
+        var run = CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
+            kernel: (mix, width, _, _) => { Thread.Sleep(25); return CpuStressKernel.GoldenChecksum(mix, width); });
+
+        Assert.Equal(4, affinity.MaxLive);                       // all four overlapped
+        Assert.Equal(4, run.Cores.Count);
+        Assert.All(run.Cores, r => Assert.Equal(LoadOutcome.Passed, r.Outcome));
+        Assert.Equal(CpuLoadStop.Completed, run.Stop);
+    }
+
+    /// <summary>THE ALL-CORE PHASE COVERS THE WHOLE TOPOLOGY, CLUSTERS INCLUDED. The sweep now runs its all-core
+    /// phase over every physical core of the machine (the package current/droop the oracle needs), not only a
+    /// swept cluster's subset. A topology that carries two clusters must therefore have ALL of its physical cores
+    /// pinned AT THE SAME INSTANT — the fake's high-water mark reaches the full core count — when the runner is
+    /// given the whole topology. The injected kernel sleeps so the workers genuinely overlap.</summary>
+    [Fact]
+    public void TheAllCorePhaseCoversEveryPhysicalCoreOfTheTopology()
+    {
+        // The Strix Point shape at a small scale: 4 performance + 4 efficiency physical cores.
+        LogicalCore[] cores =
+        [
+            new(0, 0, 1), new(2, 0, 1), new(4, 0, 1), new(6, 0, 1),
+            new(8, 0, 0), new(10, 0, 0), new(12, 0, 0), new(14, 0, 0),
+        ];
+        var (performance, efficiency) = CpuLoadPolicy.PartitionIntoClusters(CpuLoadPolicy.OrderCores(cores));
+        var affinity = new FakeAffinity
+        {
+            TopologyResult = new(CpuLoadPolicy.OrderCores(cores), CoreTopologySource.PhysicalCores, null,
+                performance, efficiency),
+        };
+        var options = Tiny(TimeSpan.FromMilliseconds(200), concurrent: true) with { Mixes = [LoadMix.Integer] };
+
+        var run = CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
+            kernel: (mix, width, _, _) => { Thread.Sleep(25); return CpuStressKernel.GoldenChecksum(mix, width); });
+
+        Assert.Equal(8, affinity.MaxLive);                    // every physical core overlapped
+        Assert.Equal(8, run.Cores.Count);
+        Assert.Equal(cores, affinity.Pinned.OrderBy(c => c.Processor));   // clusters included, none omitted
+        Assert.All(run.Cores, r => Assert.Equal(LoadOutcome.Passed, r.Outcome));
+    }
+
+    /// <summary>The sequential option really does walk one at a time — the high-water mark is one, which is the
+    /// single-core high-boost coverage the concurrent phase cannot provide.</summary>
+    [Fact]
+    public void TheSequentialOptionLoadsOneCoreAtATime()
+    {
+        var affinity = new FakeAffinity
+        {
+            TopologyResult = new(
+                [new LogicalCore(0, 0), new LogicalCore(1, 0), new LogicalCore(2, 0), new LogicalCore(3, 0)],
+                CoreTopologySource.PhysicalCores, null),
+        };
+        var options = Tiny(TimeSpan.FromMilliseconds(60), concurrent: false) with { Mixes = [LoadMix.Integer] };
+
+        var run = CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
+            kernel: (mix, width, _, _) => { Thread.Sleep(10); return CpuStressKernel.GoldenChecksum(mix, width); });
+
+        Assert.Equal(1, affinity.MaxLive);
+        Assert.All(run.Cores, r => Assert.Equal(LoadOutcome.Passed, r.Outcome));
+    }
+
+    /// <summary>STOP-ON-ERROR STOPS THE WHOLE CONCURRENT PHASE. A kernel that fails the second core cancels the
+    /// shared token, so the other cores quit (their own result is cancelled) rather than keep loading a machine
+    /// that just miscomputed. The run's stop is StoppedOnError and the failed core names its mix.</summary>
+    [Fact]
+    public void AStopOnErrorInTheConcurrentPhaseEndsTheOtherCores()
+    {
+        var affinity = new FakeAffinity
+        {
+            TopologyResult = new(
+                [new LogicalCore(0, 0), new LogicalCore(1, 0), new LogicalCore(2, 0), new LogicalCore(3, 0)],
+                CoreTopologySource.PhysicalCores, null),
+        };
+        var options = Tiny(TimeSpan.FromSeconds(5), concurrent: true) with { Mixes = [LoadMix.Integer] };
+        var gate = new object();
+        var failed = false;
+
+        // Exactly ONE core miscomputes (deterministically, the first into the kernel); the others park on the
+        // shared stop and observe the cancellation the mismatch raised. That is the property under test: a single
+        // error ends the whole concurrent phase rather than letting the other cores keep loading.
+        var run = CpuLoadRunner.Run(affinity, () => 40, options, CancellationToken.None,
+            kernel: (mix, width, _, ct) =>
+            {
+                lock (gate) { if (!failed) { failed = true; return CpuStressKernel.GoldenChecksum(mix, width) ^ 1UL; } }
+                ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(4));
+                ct.ThrowIfCancellationRequested();
+                return CpuStressKernel.GoldenChecksum(mix, width);
+            });
+
+        Assert.Equal(CpuLoadStop.StoppedOnError, run.Stop);
+        Assert.Single(run.Cores, r => r.Outcome == LoadOutcome.ChecksumMismatch);
+        Assert.All(run.Cores, r => Assert.NotEqual(LoadOutcome.Passed, r.Outcome));
     }
 
     // ================= the OS adapter guard =================

@@ -10,7 +10,7 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 //
 // WHY THIS EXISTS. On the Nitro AN18-61 the gaming-WMI profile byte (SetGamingMiscSetting index 0x0B) is only
 // an *indicator*: writing it moves the tray state and the lightbar palette but does not touch the power
-// envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit 71 W <-> 108 W
+// envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit 75 W <-> 115 W
 // while EVERY gaming-WMI value stayed frozen. So the envelope (GPU TGP/CTGP plus the CPU limits) lives in the
 // EC's own "system usage mode", reachable only over this HID interface.
 //
@@ -37,7 +37,7 @@ namespace AcerHelper.Infrastructure.Vendors.Acer;
 // no-timeout HID write on the same HID-over-I2C bus as the RGB controller, and a contended bus can block it
 // for a long time. Only the newest mode matters, so the queue is a single coalescing slot.
 //
-// Mode byte -> steady dGPU limit (0 = 108 W, 1 = 93 W, 2 = 79 W, 3 = 71 W, 4 = 71 W, 5+ acknowledged then
+// Mode byte -> measured dGPU limit (0 = 115 W, 1 = 100 W, 2 = 85 W, 3 = 75 W, 4 = 75 W, 5+ acknowledged then
 // ignored), the wire format, the measurement methodology and every dead end: see docs/power-an18-61.md.
 internal sealed partial class AcerEcHidController : IDisposable
 {
@@ -103,12 +103,69 @@ internal sealed partial class AcerEcHidController : IDisposable
         _                       => null,
     };
 
+    /// <summary>The EC usage-mode byte for a GPU power LEVEL — the SAME wire byte <see cref="ModeFor"/> produces
+    /// for the profile class of the same name, which is stated here rather than left to coincidence: the two
+    /// tables are separate surfaces (a profile class vs a chosen envelope row) and a reorder of either must not
+    /// silently move the other. Level <see cref="GpuPowerLevel.Turbo"/> is byte 0 (115 W), Quiet is byte 3
+    /// (75 W), etc. — the ordering counts up from Turbo, which is why it agrees with <see cref="ModeFor"/> only
+    /// because both were named after the same EC rows.
+    ///
+    /// No null arm and no byte-4 arm: every <see cref="GpuPowerLevel"/> is one of the EC rows this app offers, so
+    /// this mapping is total where <see cref="ModeFor"/> is not — a level cannot be "unrecognised" the way a
+    /// foreign vendor profile can. The EC's fifth row (Eco, byte 4) is deliberately absent from the level enum
+    /// because it enforces the same envelope as Quiet (see <see cref="GpuPowerLevel"/>), so no level maps to byte
+    /// 4 here — a cast of 4 reaches the refusal below.</summary>
+    public static byte ModeForLevel(GpuPowerLevel level) => level switch
+    {
+        GpuPowerLevel.Turbo       => 0,
+        GpuPowerLevel.Performance => 1,
+        GpuPowerLevel.Balanced    => 2,
+        GpuPowerLevel.Quiet       => 3,
+        _ => throw new ArgumentOutOfRangeException(nameof(level), level,
+                 "a new GpuPowerLevel needs an EC usage-mode byte here"),
+    };
+
+    /// <summary>The EC's fixed power rows as this app offers them, most power first, each with the steady
+    /// dGPU limit MEASURED on the AN18-61 (docs/power-an18-61.md §"Mode byte → measured dGPU power"). These are
+    /// the only selectable levels — there is no arbitrary wattage — so this is DATA, not a computation. The label
+    /// keys are the app's own profile strings; a machine that speaks a different row vocabulary would expose its
+    /// own list through <see cref="IGpuPowerEnvelope.Levels"/>.
+    ///
+    /// FOUR ROWS, NOT FIVE: the EC also has an Eco usage row (byte 4), but it enforces the SAME envelope as Quiet
+    /// (~77 W measured) and differs only in the CPU side, so it is not offered as a GPU power level — see
+    /// <see cref="GpuPowerLevel"/>. The wattages are the fresh measured ceiling per row (115/100/85/75), which the
+    /// driver's <c>enforced.power.limit</c> reports under load; the EC's own table declares TGP+CTGP+DynBoost, but
+    /// CTGP is not applied by the driver (the real limit is TGP+DynBoost, clamped to the 115 W VBIOS ceiling).</summary>
+    public static readonly IReadOnlyList<GpuPowerOption> PowerLevels =
+    [
+        new(GpuPowerLevel.Turbo,       "profile.turbo",       115),
+        new(GpuPowerLevel.Performance, "profile.performance", 100),
+        new(GpuPowerLevel.Balanced,    "profile.balanced",     85),
+        new(GpuPowerLevel.Quiet,       "profile.quiet",        75),
+    ];
+
+    /// <summary>Queue one of the EC's power LEVELS — the manual GPU-power pick, decoupled from the profile. The
+    /// byte goes through <see cref="ModeForLevel"/> so the level table cannot drift from the profile-class one,
+    /// and a level outside the enum is refused before anything is enqueued (the EC ACKs an out-of-range row
+    /// exactly like a good one and then ignores it, so sending one would look like success and change nothing).
+    /// Fire-and-forget like <see cref="Apply(ProfileKind)"/>: true means "accepted for sending".</summary>
+    public bool ApplyLevel(GpuPowerLevel level) => Queue(ModeForLevel(level));
+
     /// <summary>Queue the EC usage mode matching a profile class. Fire-and-forget: it only enqueues (the write
     /// happens on the writer thread), so the result means "accepted for sending", not "the EC applied it".
     /// False when there is nothing to send — no device, or a profile class with no EC mapping.</summary>
     public bool Apply(ProfileKind kind)
     {
-        if (!Available || ModeFor(kind) is not { } mode) return false;
+        if (ModeFor(kind) is not { } mode) return false;
+        return Queue(mode);
+    }
+
+    /// <summary>The single coalescing slot every envelope write goes through, whatever chose the mode (the
+    /// profile class or a manual level). One place, so the two entry points cannot disagree about availability
+    /// or about the wake-up.</summary>
+    private bool Queue(byte mode)
+    {
+        if (!Available) return false;
         lock (_gate)
         {
             if (_stopping) return false;

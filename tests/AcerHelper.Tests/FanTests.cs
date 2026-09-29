@@ -240,7 +240,7 @@ public class FanTests
     {
         var (f, fan, stored) = ServiceOnACurve(gpuFixed: 40);
 
-        f.Service.ApplyCustom(Hot);
+        f.ApplyCustom.Run(Hot);
 
         Assert.Equal([FanMode.Custom], fan.ModeCalls);          // Custom behaviour first, speeds second
         Assert.Single(fan.SpeedCalls);
@@ -256,10 +256,10 @@ public class FanTests
     {
         var (f, fan, stored) = ServiceOnACurve(gpuFixed: 40);
 
-        f.Service.ApplyCustom(Hot);
+        f.ApplyCustom.Run(Hot);
         Assert.Single(fan.SpeedCalls);
 
-        f.Service.ApplyCustom(Hot);
+        f.ApplyCustom.Run(Hot);
         Assert.Single(fan.SpeedCalls);   // nothing moved, so nothing was written
 
         var engine = new FanCurveEngine();
@@ -276,15 +276,15 @@ public class FanTests
         var (f, fan, _) = ServiceOnACurve(gpuFixed: 40);
         fan.SetCustomSpeedsResult = false;
 
-        f.Service.ApplyCustom(Hot);
-        f.Service.ApplyCustom(Hot);
+        f.ApplyCustom.Run(Hot);
+        f.ApplyCustom.Run(Hot);
 
         Assert.Equal(2, fan.SpeedCalls.Count);                    // offered again, not swallowed
         Assert.Equal(((byte)15, (byte)40), fan.SpeedCalls[1]);
 
         fan.SetCustomSpeedsResult = true;
-        f.Service.ApplyCustom(Hot);
-        f.Service.ApplyCustom(Hot);
+        f.ApplyCustom.Run(Hot);
+        f.ApplyCustom.Run(Hot);
 
         Assert.Equal(3, fan.SpeedCalls.Count);                    // committed once, then inside the deadband
     }

@@ -13,7 +13,7 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        using var mutex = new Mutex(true, SingleInstanceMutex, out bool isNew);
+        using var mutex = new Mutex(true, SingleInstanceMutex, out var isNew);
         if (!isNew)
         {
             // Another instance holds the lock. This also happens for a moment during a self-update RESTART:

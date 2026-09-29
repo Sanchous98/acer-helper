@@ -51,6 +51,7 @@ public class LaptopServicePresetReadTests
     private sealed record Arranged(LaptopServiceFixture F,
                                    FakeFanControl Fan,
                                    FakeGpuOverclock Gpu,
+                                   FakeGpuPowerEnvelope Env,
                                    FakeCurveOptimizer Co,
                                    FakeCpuPower Cpu);
 
@@ -61,13 +62,15 @@ public class LaptopServicePresetReadTests
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
         var fan = new FakeFanControl();
         var gpu = new FakeGpuOverclock();
+        var env = new FakeGpuPowerEnvelope();
         var co = new FakeCurveOptimizer();
         var cpu = new FakeCpuPower { CurrentId = "best-efficiency" };
         f.Device.FanControl = fan;
         f.Device.GpuOverclock = gpu;
+        f.Device.GpuPowerEnvelope = env;
         f.Device.CurveOptimizer = co;
         f.Device.CpuPower = cpu;
-        return new Arranged(f, fan, gpu, co, cpu);
+        return new Arranged(f, fan, gpu, env, co, cpu);
     }
 
     private static int CountOf(Settings s, string which) => which switch
@@ -90,22 +93,23 @@ public class LaptopServicePresetReadTests
 
     /// <summary>A write whose stored value is distinguishable from every default, so "the read fell back"
     /// and "the read found the other mode's preset" can never look the same.</summary>
-    private static void Write(LaptopService svc, string which)
+    private static void Write(LaptopServiceFixture f, string which)
     {
         switch (which)
         {
-            case "fan":       svc.SetFan(FanMode.Max, 42, 84); break;
-            case "gpu-oc":    svc.SetGpuOc(150, 800); break;
-            case "co":        svc.SetCo(-12); break;
-            case "cpu-power": svc.SetCpuPower("best-performance"); break;
+            case "fan":       f.ApplyFanSelection.Run(FanMode.Max, 42, 84); break;
+            case "gpu-oc":    f.ApplyGpuOffsets.Run(new GpuAxisState(150, 800)); break;
+            case "co":        f.Service.SetCo(-12); break;
+            case "cpu-power": f.ApplyCpuPower.Run("best-performance"); break;
             default:          throw new ArgumentOutOfRangeException(nameof(which));
         }
     }
 
     // ---- the readers: a Current* accessor on a mode with no preset creates NOTHING ----
 
-    /// <summary>The returned preset is the type's own default (<c>FanPreset</c>: Auto, 70/70, the built-in
-    /// ramp in each half), and the graph is untouched — no entry, no Save.
+    /// <summary>The returned state is the type's own default (<c>FanAxisState</c>: Auto, 70/70, the built-in
+    /// ramp in each half), and the graph is untouched — no entry, no Save. Reached through the
+    /// <see cref="ReadFanState"/> use case, which is what the UI reads.
     ///
     /// THE CURVES ARE THE RAMP AND NOT EMPTY, which is the value this asserts that changed: an empty curve was
     /// the stored spelling of "use the built-in ramp", and it is a shape the model cannot hold
@@ -117,13 +121,13 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        var fan = a.F.Service.CurrentFan();
+        var fan = a.F.FanState.Run();
 
-        Assert.Equal((int)FanMode.Auto, fan.Mode);
-        Assert.Equal(70, fan.Cpu);
-        Assert.Equal(70, fan.Gpu);
-        Assert.Equal(Fan.DefaultDuties(), fan.CpuCurve);
-        Assert.Equal(Fan.DefaultDuties(), fan.GpuCurve);
+        Assert.Equal(FanMode.Auto, fan.Mode);
+        Assert.Equal(70, fan.Cpu.FixedDuty);
+        Assert.Equal(70, fan.Gpu.FixedDuty);
+        Assert.Equal(Fan.DefaultDuties(), fan.Cpu.Curve);
+        Assert.Equal(Fan.DefaultDuties(), fan.Gpu.Curve);
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
     }
@@ -133,7 +137,7 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        var g = a.F.Service.CurrentGpuOc();
+        var g = a.F.GpuOcState.Run();
 
         Assert.Equal(0, g.Core);
         Assert.Equal(0, g.Mem);
@@ -146,23 +150,22 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        var c = a.F.Service.CurrentCo();
+        var c = a.F.CoDomains.Run();
 
-        Assert.Equal(0, c.AllCore);
-        Assert.Empty(c.Domains);
+        Assert.Equal(new[] { 0 }, c);                          // one all-core row on a domainless CPU
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
     }
 
     /// <summary>The CPU-power axis has no default of its own to hand back on an unconfigured mode, so it
-    /// reflects the LIVE overlay instead (`LaptopService.Tuning.cs` `CurrentCpuPower`) — reality, not a forced value. It still
+    /// reflects the LIVE overlay instead (<see cref="ReadCpuPower"/>) — reality, not a forced value. It still
     /// must not record a choice the user never made.</summary>
     [Fact]
     public void CurrentCpuPower_OnAnUnconfiguredMode_ReportsTheLiveOverlay_AndCreatesNoEntry()
     {
         var a = Setup();
 
-        Assert.Equal("best-efficiency", a.F.Service.CurrentCpuPower());
+        Assert.Equal("best-efficiency", a.F.CpuPower.Run());
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
         Assert.Empty(a.Cpu.SetCalls);                 // reporting it must not re-drive it either
@@ -173,44 +176,46 @@ public class LaptopServicePresetReadTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
 
-        Assert.Null(f.Service.CurrentCpuPower());
+        Assert.Null(f.CpuPower.Run());
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(f.Store.Settings));
         Assert.Equal(0, f.Store.SaveCount);
     }
 
-    /// <summary>A reader hands back a FRESH default every time (the <c>: new FanPreset()</c> arm of the
-    /// ternary), never a shared scratch instance and never the stored one. So a view-model that mutates what
-    /// it was handed cannot smuggle that change into the graph — only a <c>Set*</c> call can.</summary>
+    /// <summary>A reader hands back a FRESH value every time (the default arm of the read), never a shared
+    /// scratch instance and never the stored one. The domain value is IMMUTABLE — a <see cref="FanAxisState"/>
+    /// or <see cref="GpuAxisState"/> cannot be edited in place — so the only mutable thing a read hands over is
+    /// an ARRAY, and this asserts that writing through it cannot reach the graph. The GPU axis has no array, so
+    /// its row is the plain "the next read is the default again" half.</summary>
     [Theory]
     [InlineData("fan")]
     [InlineData("gpu-oc")]
     [InlineData("co")]
-    public void ADefaultFromARead_IsAFreshInstance_SoMutatingItIsNeverRemembered(string which)
+    public void ADefaultFromARead_SharesNoArrayWithTheGraph_SoWritingThroughItIsNeverRemembered(string which)
     {
         var a = Setup();
 
         switch (which)
         {
-            case "fan":    { var v = a.F.Service.CurrentFan();    v.Mode = (int)FanMode.Custom; v.Cpu = 99; break; }
-            case "gpu-oc": { var v = a.F.Service.CurrentGpuOc(); v.Core = 999;     v.Mem = 999;  break; }
-            case "co":     { var v = a.F.Service.CurrentCo();    v.AllCore = -30; v.Domains["big"] = -30; break; }
+            case "fan":    { var v = a.F.FanState.Run(); v.Cpu.Curve[0] = 99; break; }
+            case "gpu-oc": { var v = a.F.GpuOcState.Run(); v = v with { Core = 999, Mem = 999 }; break; }
+            case "co":     { var v = a.F.CoDomains.Run(); v[0] = -30; break; }
         }
 
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);
-        Assert.Equal(70, a.F.Service.CurrentFan().Cpu);          // ...the next read is the default again
-        Assert.Equal(0, a.F.Service.CurrentGpuOc().Core);
-        Assert.Equal(0, a.F.Service.CurrentCo().AllCore);
+        Assert.Equal(70, a.F.FanState.Run().Cpu.FixedDuty);      // ...the next read is the default again
+        Assert.Equal(0, a.F.GpuOcState.Run().Core);
+        Assert.Equal(new[] { 0 }, a.F.CoDomains.Run());
     }
 
     // ---- the writers: a Set* creates exactly the one entry for the CURRENT mode ----
 
     [Fact]
-    public void SetFan_InsertsThePassedValues_UnderTheCurrentModeKey()
+    public void ApplyFanSelection_InsertsThePassedValues_UnderTheCurrentModeKey()
     {
         var a = Setup();
 
-        a.F.Service.SetFan(FanMode.Max, 42, 84);
+        a.F.ApplyFanSelection.Run(FanMode.Max, 42, 84);
 
         var stored = Assert.Single(a.F.Store.Settings.FanPresets);
         Assert.Equal("balanced", stored.Key);
@@ -222,14 +227,14 @@ public class LaptopServicePresetReadTests
         Assert.Empty(a.Fan.SpeedCalls);                          // Max is a mode switch, not a manual speed
     }
 
-    /// <summary>SetFanCurve goes through the same <c>StoredFan()</c>, and must not disturb the fixed speeds
+    /// <summary>The curve edit goes through the same <c>StoredFan()</c>, and must not disturb the fixed speeds
     /// the mode already carries (they are the fallback for a fan whose curve is off).</summary>
     [Fact]
-    public void SetFanCurve_InsertsAPreset_KeepingTheFixedSpeeds()
+    public void ApplyFanCurve_InsertsAPreset_KeepingTheFixedSpeeds()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);   // no fan port needed
 
-        f.Service.SetFanCurve(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
+        f.ApplyFanCurve.Run(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
 
         var stored = Assert.Single(f.Store.Settings.FanPresets);
         Assert.Equal("balanced", stored.Key);
@@ -245,11 +250,11 @@ public class LaptopServicePresetReadTests
     }
 
     [Fact]
-    public void SetGpuOc_InsertsAndAppliesTheOffsets()
+    public void ApplyGpuOffsets_InsertsAndAppliesTheOffsets()
     {
         var a = Setup();
 
-        Assert.True(a.F.Service.SetGpuOc(150, 800).ok);
+        Assert.True(a.F.ApplyGpuOffsets.Run(new GpuAxisState(150, 800)));
 
         var stored = Assert.Single(a.F.Store.Settings.GpuOcPresets);
         Assert.Equal("balanced", stored.Key);
@@ -259,12 +264,65 @@ public class LaptopServicePresetReadTests
         Assert.Equal(new[] { (150, 800) }, a.Gpu.SetCalls);
     }
 
+    /// <summary>The GPU power level is remembered per mode BESIDE the clock offsets and applied to the EC — the
+    /// same shape as the offsets, on the same preset. A pick stores the persisted int and writes the level; a
+    /// pick of "follow the profile" (null) stores no override and writes NOTHING to the EC (the envelope is the
+    /// profile's own row then). Both arms in one test so neither can pass by the other's accident.</summary>
     [Fact]
-    public void SetCpuPower_InsertsAndAppliesTheOverlayId()
+    public void ApplyGpuPower_InsertsTheLevel_AppliesIt_AndClearsTheOverrideOnFollowTheProfile()
     {
         var a = Setup();
 
-        Assert.True(a.F.Service.SetCpuPower("best-performance").ok);
+        Assert.True(a.F.ApplyGpuPower.Run(GpuPowerLevel.Turbo));
+        var stored = Assert.Single(a.F.Store.Settings.GpuOcPresets);
+        Assert.Equal("balanced", stored.Key);
+        Assert.Equal((int)GpuPowerLevel.Turbo, stored.Value.Power);
+        Assert.Equal([GpuPowerLevel.Turbo], a.Env.SetCalls);
+
+        // Follow the profile: the override is cleared, and nothing is written to the EC.
+        a.Env.SetCalls.Clear();
+        Assert.True(a.F.ApplyGpuPower.Run(null));
+
+        Assert.Null(Assert.Single(a.F.Store.Settings.GpuOcPresets).Value.Power);
+        Assert.Empty(a.Env.SetCalls);
+    }
+
+    /// <summary>The offsets and the power level share one preset entry, so editing one must not clear the other,
+    /// and each edit persists exactly once. The two are separate controls on one mode; a writer that rebuilt the
+    /// preset instead of updating it would silently drop whichever half it did not name.</summary>
+    [Fact]
+    public void TheOffsetsAndThePowerLevel_ShareOnePresetWithoutClobberingEachOther()
+    {
+        var a = Setup();
+
+        a.F.ApplyGpuOffsets.Run(new GpuAxisState(150, 800));
+        a.F.ApplyGpuPower.Run(GpuPowerLevel.Quiet);
+
+        var stored = Assert.Single(a.F.Store.Settings.GpuOcPresets).Value;
+        Assert.Equal(150, stored.Core);
+        Assert.Equal(800, stored.Mem);
+        Assert.Equal((int)GpuPowerLevel.Quiet, stored.Power);
+    }
+
+    /// <summary>The power edit follows the offsets' "write with no port still persists the preset" asymmetry:
+    /// the choice is recorded even when the machine has no EC envelope channel, so it comes back if the channel
+    /// does. The write reports false (a capability fact), never a throw.</summary>
+    [Fact]
+    public void ApplyGpuPower_WithNoEnvelopePort_ReturnsFalse_ButStillPersistsTheChoice()
+    {
+        var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);   // no ports at all
+
+        Assert.False(f.ApplyGpuPower.Run(GpuPowerLevel.Balanced));
+
+        Assert.Equal((int)GpuPowerLevel.Balanced, Assert.Single(f.Store.Settings.GpuOcPresets).Value.Power);
+    }
+
+    [Fact]
+    public void ApplyCpuPower_InsertsAndAppliesTheOverlayId()
+    {
+        var a = Setup();
+
+        Assert.True(a.F.ApplyCpuPower.Run("best-performance"));
 
         var stored = Assert.Single(a.F.Store.Settings.CpuPowerModes);
         Assert.Equal("balanced", stored.Key);
@@ -274,9 +332,11 @@ public class LaptopServicePresetReadTests
     }
 
     /// <summary>NOTE the ordering, derived from the code and not from the doc prose: every <c>Set*</c>
-    /// persists BEFORE it consults the port (`LaptopService.Tuning.cs` `SetGpuOc`, `SetCpuPower`, `SetCo`), so a machine whose
-    /// port is missing — the feature was probed away — still records the user's choice and reports the write
-    /// as failed. Losing the setting as well would be the surprising outcome; this is the behaviour as
+    /// persists BEFORE it consults the port (`LaptopService.Tuning.cs` `IGpuOffsetsTarget.Store`/
+    /// `ICpuPowerOverlayTarget.Store`, reached through `ApplyGpuOffsets`/`ApplyCpuPowerOverlay`, and `SetCo`),
+    /// so a machine whose
+    /// port is missing — the feature was probed away — still records the user's choice and returns false for the
+    /// write. Losing the setting as well would be the surprising outcome; this is the behaviour as
     /// shipped, and it is the exact opposite of <c>SetCoDomains</c>, which returns before persisting when the
     /// port is null (`LaptopService.Tuning.cs` `SetCoDomains` — the port guard). See LaptopServiceCoTests for that half of the asymmetry.</summary>
     [Theory]
@@ -287,16 +347,16 @@ public class LaptopServicePresetReadTests
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);   // no ports at all
 
-        var r = which switch
+        var (ok, error) = which switch
         {
-            "gpu-oc"    => f.Service.SetGpuOc(150, 800),
+            "gpu-oc"    => (f.ApplyGpuOffsets.Run(new GpuAxisState(150, 800)), (string?)null),
             "co"        => f.Service.SetCo(-12),
-            "cpu-power" => f.Service.SetCpuPower("best-performance"),
+            "cpu-power" => (f.ApplyCpuPower.Run("best-performance"), (string?)null),
             _           => throw new ArgumentOutOfRangeException(nameof(which)),
         };
 
-        Assert.False(r.ok);
-        Assert.Null(r.error);                       // no port -> nothing was attempted, so there is no reason
+        Assert.False(ok);
+        Assert.Null(error);                       // no port -> nothing was attempted, so there is no reason
         Assert.Equal(1, CountOf(f.Store.Settings, which));
         Assert.Equal(["balanced"], KeysOf(f.Store.Settings, which));
         Assert.Equal(1, f.Store.SaveCount);
@@ -312,7 +372,7 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        Write(a.F.Service, which);
+        Write(a.F, which);
         Assert.Equal(1, CountOf(a.F.Store.Settings, which));
         Assert.Equal(["balanced"], KeysOf(a.F.Store.Settings, which).Order());
 
@@ -320,13 +380,13 @@ public class LaptopServicePresetReadTests
 
         switch (which)
         {
-            case "fan":    Assert.Equal(70, a.F.Service.CurrentFan().Cpu); break;
-            case "gpu-oc": Assert.Equal(0, a.F.Service.CurrentGpuOc().Core); break;
-            case "co":     Assert.Equal(0, a.F.Service.CurrentCo().AllCore); break;
+            case "fan":    Assert.Equal(70, a.F.FanState.Run().Cpu.FixedDuty); break;
+            case "gpu-oc": Assert.Equal(0, a.F.GpuOcState.Run().Core); break;
+            case "co":     Assert.Equal(0, a.F.CoDomains.Run()[0]); break;
         }
         Assert.Equal(1, CountOf(a.F.Store.Settings, which));     // ...and the read created nothing
 
-        Write(a.F.Service, which);
+        Write(a.F, which);
         Assert.Equal(2, CountOf(a.F.Store.Settings, which));
         Assert.Equal(["balanced", "performance"], KeysOf(a.F.Store.Settings, which).Order());
     }
@@ -340,12 +400,12 @@ public class LaptopServicePresetReadTests
     {
         var a = Setup();
 
-        a.F.Service.SetCpuPower("best-performance");
+        a.F.ApplyCpuPower.Run("best-performance");
         a.Cpu.CurrentId = "best-efficiency";
 
         a.F.Pp!.CurrentProfile = TestProfiles.Performance;
 
-        Assert.Equal("best-efficiency", a.F.Service.CurrentCpuPower());
+        Assert.Equal("best-efficiency", a.F.CpuPower.Run());
         Assert.Single(a.F.Store.Settings.CpuPowerModes);
         Assert.Equal(["balanced"], a.F.Store.Settings.CpuPowerModes.Keys.Order());
     }
@@ -366,6 +426,7 @@ public class LaptopServiceApplyModeGraphTests
     private sealed record Arranged(LaptopServiceFixture F,
                                    FakeFanControl Fan,
                                    FakeGpuOverclock Gpu,
+                                   FakeGpuPowerEnvelope Env,
                                    FakeCurveOptimizer Co,
                                    FakeCpuPower Cpu);
 
@@ -374,13 +435,15 @@ public class LaptopServiceApplyModeGraphTests
         var f = LaptopServiceFixture.WithProfiles(current: current ?? TestProfiles.Balanced);
         var fan = new FakeFanControl();
         var gpu = new FakeGpuOverclock();
+        var env = new FakeGpuPowerEnvelope();
         var co = new FakeCurveOptimizer();
         var cpu = new FakeCpuPower { CurrentId = "best-efficiency" };
         f.Device.FanControl = fan;
         f.Device.GpuOverclock = gpu;
+        f.Device.GpuPowerEnvelope = env;
         f.Device.CurveOptimizer = co;
         f.Device.CpuPower = cpu;
-        return new Arranged(f, fan, gpu, co, cpu);
+        return new Arranged(f, fan, gpu, env, co, cpu);
     }
 
     /// <summary>A store with one preset for ANOTHER mode ("quiet"), so every bag is non-empty and the
@@ -416,10 +479,10 @@ public class LaptopServiceApplyModeGraphTests
 
         switch (which)
         {
-            case "fan":       f.Service.ApplyModeFan(); break;
-            case "gpu-oc":    f.Service.ApplyModeGpuOc(); break;
-            case "cpu-power": f.Service.ApplyModeCpuPower(); break;
-            case "co":        f.Service.ApplyModeCo(); break;
+            case "fan":       f.ApplyModeFan.Run(); break;
+            case "gpu-oc":    f.ApplyModeGpuOc.Run(); break;
+            case "cpu-power": f.ApplyModeCpuPower.Run(); break;
+            case "co":        f.ApplyModeCo.Run(); break;
         }
 
         // Read off the MODEL rather than off the instance this test seeded: the model took a copy of the
@@ -440,7 +503,7 @@ public class LaptopServiceApplyModeGraphTests
     {
         var a = Setup();
 
-        Assert.Null(a.F.Service.ApplyModeFan());
+        Assert.Null(a.F.ApplyModeFan.Run());
 
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Empty(a.Fan.ModeCalls);
@@ -448,21 +511,20 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(0, a.F.Store.SaveCount);
     }
 
-    /// <summary>It hands back a SNAPSHOT of the stored preset, not the stored instance — the caller sees the
-    /// user's setting (not a default) without being able to reach into the graph through what it was handed.</summary>
+    /// <summary>It hands back the stored preset in the DOMAIN's vocabulary — the caller sees the user's setting
+    /// (not a default), carried as a <see cref="FanAxisState"/> value that cannot reach into the graph.</summary>
     [Fact]
-    public void ApplyModeFan_WithAPreset_ReappliesIt_AndReturnsASnapshot()
+    public void ApplyModeFan_WithAPreset_ReappliesIt_AndReturnsTheState()
     {
         var a = Setup();
-        a.F.Service.SetFan(FanMode.Max, 42, 84);
+        a.F.ApplyFanSelection.Run(FanMode.Max, 42, 84);
         a.Fan.ModeCalls.Clear();
 
-        var applied = a.F.Service.ApplyModeFan();
+        var applied = a.F.ApplyModeFan.Run();
 
         var stored = a.F.Store.Settings.FanPresets["balanced"];
-        Assert.NotSame(stored, applied);
-        Assert.Equal(stored.Mode, applied!.Mode);                // ...and it says the same thing
-        Assert.Equal(stored.Cpu, applied.Cpu);
+        Assert.Equal((FanMode)stored.Mode, applied!.Value.Mode);   // ...and it says the same thing
+        Assert.Equal(stored.Cpu, applied.Value.Cpu.FixedDuty);
         Assert.Equal([FanMode.Max], a.Fan.ModeCalls);
         Assert.Single(a.F.Store.Settings.FanPresets);            // still the one entry the writer made
         Assert.Equal(1, a.F.Store.SaveCount);                    // ...and still the one save
@@ -480,11 +542,10 @@ public class LaptopServiceApplyModeGraphTests
         var fan = new FakeFanControl();
         f.Device.FanControl = fan;
 
-        var applied = f.Service.ApplyModeFan();
+        var applied = f.ApplyModeFan.Run();
 
-        // As above: the stored preset is the MODEL's, not the instance this test seeded.
-        Assert.NotSame(f.Store.Settings.FanPresets["balanced"], applied);
-        Assert.Equal(f.Store.Settings.FanPresets["balanced"].Mode, applied!.Mode);
+        // As above: the stored preset is the MODEL's, and the value carries its mode in the domain's vocabulary.
+        Assert.Equal((FanMode)f.Store.Settings.FanPresets["balanced"].Mode, applied!.Value.Mode);
         Assert.Empty(fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);
         Assert.Equal(0, f.Store.SaveCount);
@@ -521,7 +582,7 @@ public class LaptopServiceApplyModeGraphTests
         Assert.Equal(FanMode.Auto, LaptopService.AxisStateOf(f.Store.Settings.FanPresets["balanced"]).Mode);
 
         // ...and the mode switch, which is where the EC is asked
-        f.Service.ApplyModeFan();
+        f.ApplyModeFan.Run();
 
         Assert.Equal([FanMode.Auto], fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);          // Auto is a behaviour, not a manual speed
@@ -545,7 +606,7 @@ public class LaptopServiceApplyModeGraphTests
         var fan = new FakeFanControl();
         f.Device.FanControl = fan;
 
-        f.Service.ApplyCustom(new SensorSnapshot { CpuTempC = 70, GpuTempC = 70 });
+        f.ApplyCustom.Run(new SensorSnapshot { CpuTempC = 70, GpuTempC = 70 });
 
         Assert.Empty(fan.ModeCalls);
         Assert.Empty(fan.SpeedCalls);
@@ -577,51 +638,50 @@ public class LaptopServiceApplyModeGraphTests
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
         f.Device.FanControl = new FakeFanControl();
 
-        f.Service.SetFanCurve(gpu: false, use: false, points: [10, 20, 30, 40, 50]);
+        f.ApplyFanCurve.Run(gpu: false, use: false, points: [10, 20, 30, 40, 50]);
 
         var stored = f.Store.Settings.FanPresets["balanced"];
         Assert.Equal(100, stored.Cpu);   // 300 as a byte would be 44; as a duty% it is the ceiling
         Assert.Equal(0, stored.Gpu);
     }
 
-    /// <summary>The DEPTH of the snapshot, which is the part that is easy to get wrong and the reason
-    /// <c>FanPreset.Snapshot</c> duplicates the curve ARRAYS rather than sharing them. A copy that took the
-    /// fields but kept the arrays would still let a view-model rewrite the user's fan curve in place, with no
-    /// Set method and no lock — the widest remaining door of exactly the kind this closes.</summary>
+    /// <summary>The DEPTH of the copy the READ makes, which is the part that is easy to get wrong: the state
+    /// the UI reads carries curve ARRAYS, and a copy that took the fields but kept the arrays would still let a
+    /// caller rewrite the user's fan curve in place, with no Set method and no lock — the widest remaining door
+    /// of exactly the kind this closes. The read crosses as <see cref="FanAxisState"/> (a value), whose curve
+    /// came through <see cref="FanSettings"/>'s copying constructor, so the array the caller gets is not the
+    /// stored one.</summary>
     [Fact]
     public void AMutatedSnapshotNeverReachesTheStoredPreset_NotEvenThroughItsArrays()
     {
         var a = Setup();
-        a.F.Service.SetFanCurve(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
+        a.F.ApplyFanCurve.Run(gpu: false, use: true, points: [10, 20, 30, 40, 50]);
 
-        var snapshot = a.F.Service.CurrentFan();
-        snapshot.CpuCurve[0] = 99;
-        snapshot.Cpu = 1;
-        snapshot.CpuUseCurve = false;
+        var snapshot = a.F.FanState.Run();
+        snapshot.Cpu.Curve[0] = 99;
 
         var stored = a.F.Store.Settings.FanPresets["balanced"];
         Assert.Equal(10, stored.CpuCurve[0]);                    // the array is a copy...
-        Assert.NotEqual(1, stored.Cpu);                          // ...and so is every field
         Assert.True(stored.CpuUseCurve);
     }
 
-    /// <summary>The same claim for the Curve Optimizer, whose snapshot has a dictionary rather than arrays. The
-    /// preset is seeded directly rather than through a Set method, so BOTH halves of the type carry a non-default
-    /// value: the dictionary is the deep part, and the scalar beside it must be copied too.</summary>
+    /// <summary>The same claim for the Curve Optimizer, whose read hands back an int ARRAY rather than the
+    /// preset's dictionary. The read is a fresh array each call, so writing through it cannot reach the store.
+    /// The preset is seeded directly so it carries a non-default value.</summary>
     [Fact]
     public void AMutatedCoSnapshotNeverReachesTheStoredPreset()
     {
         var settings = new Settings();
         settings.CoPresets["balanced"] = new CoPreset { AllCore = -15, Domains = { ["big"] = -10 } };
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
+        f.Device.CurveOptimizer = new FakeCurveOptimizer().WithDomains(new VoltageDomain("Zen 5", "big"));
 
-        var snapshot = f.Service.CurrentCo();
-        snapshot.Domains["big"] = 0;
-        snapshot.AllCore = 0;
+        var snapshot = f.CoDomains.Run();
+        snapshot[0] = 0;
 
         var stored = settings.CoPresets["balanced"];
-        Assert.Equal(-10, stored.Domains["big"]);                // the dictionary is a copy...
-        Assert.Equal(-15, stored.AllCore);                       // ...and so is the scalar beside it
+        Assert.Equal(-10, stored.Domains["big"]);                // the array is a copy...
+        Assert.Equal(-15, stored.AllCore);                       // ...and the scalar is the stored one
     }
 
     /// <summary>GPU offsets follow the OPPOSITE contract to fans (<c>Settings.GpuOcPresets</c>): an unconfigured mode
@@ -633,7 +693,7 @@ public class LaptopServiceApplyModeGraphTests
     {
         var a = Setup();
 
-        var g = a.F.Service.ApplyModeGpuOc();
+        var g = a.F.ApplyModeGpuOc.Run();
 
         Assert.Equal(0, g.Core);
         Assert.Equal(0, g.Mem);
@@ -643,16 +703,15 @@ public class LaptopServiceApplyModeGraphTests
     }
 
     [Fact]
-    public void ApplyModeGpuOc_WithAPreset_WritesTheStoredOffsets_AndReturnsASnapshot()
+    public void ApplyModeGpuOc_WithAPreset_WritesTheStoredOffsets_AndReturnsTheState()
     {
         var a = Setup();
-        a.F.Service.SetGpuOc(150, 800);
+        a.F.ApplyGpuOffsets.Run(new GpuAxisState(150, 800));
         a.Gpu.SetCalls.Clear();
 
-        var applied = a.F.Service.ApplyModeGpuOc();
+        var applied = a.F.ApplyModeGpuOc.Run();
 
         var stored = a.F.Store.Settings.GpuOcPresets["balanced"];
-        Assert.NotSame(stored, applied);
         Assert.Equal(stored.Core, applied.Core);
         Assert.Equal(stored.Mem, applied.Mem);
         Assert.Equal(new[] { (150, 800) }, a.Gpu.SetCalls);
@@ -666,11 +725,63 @@ public class LaptopServiceApplyModeGraphTests
         var settings = new Settings();
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
 
-        var g = f.Service.ApplyModeGpuOc();
+        var g = f.ApplyModeGpuOc.Run();
 
         Assert.Equal(0, g.Core);
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(f.Store.Settings));
         Assert.Equal(0, f.Store.SaveCount);
+    }
+
+    /// <summary>THE DIFFERENTIAL THE OWNER ASKED FOR, both arms on the same mode-switch path:
+    ///
+    /// * a mode that PINNED a power level writes that level to the EC (<c>Env.SetCalls</c>) and reports it in
+    ///   the state the UI reflects — the envelope is decoupled from the profile;
+    /// * a mode on the DEFAULT ("follow the profile") writes NOTHING to the EC — the profile switch already
+    ///   drove the class-derived row, and forcing one here would re-introduce the coupling this axis removes.
+    ///
+    /// Both are asserted together so "the override is applied" and "the default is left alone" cannot both pass
+    /// by the same accident (e.g. a target that always writes, or never does).</summary>
+    [Fact]
+    public void ApplyModeGpuOc_AppliesAPinnedPowerLevel_ButWritesNothingWhenItFollowsTheProfile()
+    {
+        var a = Setup();
+
+        // Default: follow the profile — nothing on the EC, state reports no override.
+        var follow = a.F.ApplyModeGpuOc.Run();
+        Assert.Null(follow.Power);
+        Assert.Empty(a.Env.SetCalls);
+
+        // Pin a level for this mode (through the edit use case), then switch to it again.
+        a.F.ApplyGpuPower.Run(GpuPowerLevel.Performance);
+        a.Env.SetCalls.Clear();
+
+        var pinned = a.F.ApplyModeGpuOc.Run();
+
+        Assert.Equal(GpuPowerLevel.Performance, pinned.Power);
+        Assert.Equal([GpuPowerLevel.Performance], a.Env.SetCalls);
+    }
+
+    /// <summary>The mode switch writes the level ONCE, and an unconfigured mode writes none — the same claim as
+    /// the fan/offset axes, but the load-bearing case here is that the "follow the profile" arm does not
+    /// accidentally inherit the PREVIOUS mode's level. Two modes, each with its own graph entry, switched
+    /// between: the second's default must clear the first's override rather than carry it.</summary>
+    [Fact]
+    public void AModeSwitch_DoesNotCarryAnotherModesPowerLevelIntoOneThatFollowsTheProfile()
+    {
+        var a = Setup();
+        // Seed Quiet's pinned level directly on the model's graph (the shape a file would supply).
+        a.F.Store.Settings.GpuOcPresets["quiet"] = new GpuOcPreset { Power = (int)GpuPowerLevel.Balanced };
+
+        // The live mode is Balanced — no entry -> follow the profile -> no EC write.
+        a.F.ApplyModeGpuOc.Run();
+        Assert.Empty(a.Env.SetCalls);
+
+        // Now make Quiet live: its pinned Balanced level is written.
+        a.F.Pp!.CurrentProfile = TestProfiles.Quiet;
+        var applied = a.F.ApplyModeGpuOc.Run();
+
+        Assert.Equal(GpuPowerLevel.Balanced, applied.Power);
+        Assert.Equal([GpuPowerLevel.Balanced], a.Env.SetCalls);
     }
 
     /// <summary>CPU power follows the FAN contract, not the GPU one (<c>Settings.CpuPowerModes</c>): an unconfigured
@@ -681,7 +792,7 @@ public class LaptopServiceApplyModeGraphTests
     {
         var a = Setup();
 
-        Assert.Equal("best-efficiency", a.F.Service.ApplyModeCpuPower());
+        Assert.Equal("best-efficiency", a.F.ApplyModeCpuPower.Run());
 
         Assert.Empty(a.Cpu.SetCalls);
         Assert.Equal(PresetGraph.Empty, PresetGraph.Counts(a.F.Store.Settings));
@@ -692,10 +803,10 @@ public class LaptopServiceApplyModeGraphTests
     public void ApplyModeCpuPower_WithAnEntry_AppliesTheStoredOverlay_AndInsertsNothing()
     {
         var a = Setup();
-        a.F.Service.SetCpuPower("best-performance");
+        a.F.ApplyCpuPower.Run("best-performance");
         a.Cpu.SetCalls.Clear();
 
-        Assert.Equal("best-performance", a.F.Service.ApplyModeCpuPower());
+        Assert.Equal("best-performance", a.F.ApplyModeCpuPower.Run());
 
         Assert.Equal(["best-performance"], a.Cpu.SetCalls);
         Assert.Single(a.F.Store.Settings.CpuPowerModes);
@@ -713,7 +824,7 @@ public class LaptopServiceApplyModeGraphTests
         settings.CpuPowerModes["balanced"] = "best-performance";
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
 
-        Assert.Null(f.Service.ApplyModeCpuPower());
+        Assert.Null(f.ApplyModeCpuPower.Run());
         Assert.Equal(0, f.Store.SaveCount);
         Assert.Equal(["balanced"], f.Store.Settings.CpuPowerModes.Keys);   // read off the MODEL — see above
     }
@@ -808,8 +919,8 @@ public class LaptopServicePresetGetOrAddTests
         // for a zone the door refuses to know about, which is the sibling branch's subject and not this one.
         Assert.True(mode.Advertises("keyboard"));
 
-        var first = ReadLightZone.Run("keyboard", mode);
-        var second = ReadLightZone.Run("keyboard", mode);
+        var first = new ReadLightZone(mode).Run("keyboard");
+        var second = new ReadLightZone(mode).Run("keyboard");
 
         Assert.Equal(LightZoneState.Default.Brightness, first.Brightness);
         Assert.False(first.Configured);                          // looked at is not configured
@@ -829,7 +940,7 @@ public class LaptopServicePresetGetOrAddTests
         var mode = f.Service.LightsForCurrentMode();
         mode.Write("keyboard", Zone(brightness: 37));
 
-        var zone = ReadLightZone.Run("keyboard", mode);
+        var zone = new ReadLightZone(mode).Run("keyboard");
 
         Assert.True(zone.Configured);
         Assert.Equal(37, zone.Brightness);
@@ -846,8 +957,8 @@ public class LaptopServicePresetGetOrAddTests
                                                   declare: Keyboard("keyboard", "lightbar"));
         var mode = f.Service.LightsForCurrentMode();
 
-        ReadLightZone.Run("keyboard", mode);
-        ReadLightZone.Run("lightbar", mode);
+        new ReadLightZone(mode).Run("keyboard");
+        new ReadLightZone(mode).Run("lightbar");
 
         Assert.Equal(["keyboard", "lightbar"], f.Store.Settings.LightPresets["balanced"].Zones.Keys.Order());
     }
@@ -898,8 +1009,8 @@ public class LaptopServicePresetGetOrAddTests
 
         switch (which)
         {
-            case "fan":    f.Service.SetFan(FanMode.Auto, 10, 20); break;
-            case "gpu-oc": f.Service.SetGpuOc(10, 20); break;
+            case "fan":    f.ApplyFanSelection.Run(FanMode.Auto, 10, 20); break;
+            case "gpu-oc": f.ApplyGpuOffsets.Run(new GpuAxisState(10, 20)); break;
             case "co":     f.Service.SetCo(-10); break;
         }
 
@@ -913,8 +1024,8 @@ public class LaptopServicePresetGetOrAddTests
 
         switch (which)
         {
-            case "fan":    f.Service.SetFan(FanMode.Max, 30, 40); break;
-            case "gpu-oc": f.Service.SetGpuOc(30, 40); break;
+            case "fan":    f.ApplyFanSelection.Run(FanMode.Max, 30, 40); break;
+            case "gpu-oc": f.ApplyGpuOffsets.Run(new GpuAxisState(30, 40)); break;
             case "co":     f.Service.SetCo(-20); break;
         }
 
@@ -955,10 +1066,10 @@ public class LaptopServicePresetGetOrAddTests
 
         switch (which)
         {
-            case "fan":       f.Service.SetFan(FanMode.Max, 42, 84); break;
-            case "gpu-oc":    f.Service.SetGpuOc(150, 800); break;
+            case "fan":       f.ApplyFanSelection.Run(FanMode.Max, 42, 84); break;
+            case "gpu-oc":    f.ApplyGpuOffsets.Run(new GpuAxisState(150, 800)); break;
             case "co":        f.Service.SetCo(-12); break;
-            case "cpu-power": f.Service.SetCpuPower("best-performance"); break;
+            case "cpu-power": f.ApplyCpuPower.Run("best-performance"); break;
         }
 
         // Read off the MODEL rather than off the instance this test seeded: the model took its own copy of the

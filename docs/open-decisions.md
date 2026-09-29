@@ -295,6 +295,51 @@ EC-столл») теперь опирается на измерение, а н�
 > COM-обёртки), хотя обычный отказ WMI до них не доходит. Сегодня такая ветка вернула бы
 > `LaptopService` и `FlagSetting.Write` `(false, null)` — то есть сообщение без причины,
 > а не чужую причину.
+>
+> **Уточнено 2026-09-28 (решение владельца): запись в ПРИСУТСТВУЮЩИЙ порт, которая
+> отказывает или падает, — ИСКЛЮЧЕНИЕ.** Точно так же, как объявленная настройка
+> (`SettingNotAppliedException`, `Domain/DeclaredSetting.cs`), теперь бросает и семейство
+> ПРИМЕНЯЕМЫХ ПРАВОК: `IProfileTarget.Apply`, `IGpuOffsetsTarget.Apply`,
+> `ICpuPowerOverlayTarget.Apply`, `IUndervoltTarget.Apply` возвращают
+> (`PerformanceProfile?`/`bool`/`null`-на-отсутствие-порта), а отказ ПРИСУТСТВУЮЩЕГО порта
+> бросает новый `PortWriteFailedException` (`Domain/PortWriteFailedException.cs`), несущий
+> СТРУКТУРУ — ключ операции и слова транспорта (nullable), — но не пользовательскую фразу
+> (`Exception.Message` техническое, для лога).
+>
+> Довод: действие пользователя, дошедшее до порта записи, уже прошло UI-гейт (контрол был
+> включён), поэтому отказ там — НАРУШЕННОЕ ПРЕДУСЛОВИЕ или реальная неисправность, а не
+> нормальный ход вещей; и в отличие от `(false, null)` бросок всегда несёт СВОЮ причину —
+> ровно ту неоднозначность, которую §2 пришлось латать 2026-09-18 («бросок сообщает, что
+> причины нет»). Пары `(bool ok, string? error)` остались только у путей, которые к этому
+> срезу не относятся: `SetCo`/`SetCoDomains`/`SaveCoValues` (парные писатели САМОГО
+> сервиса), батарейные строки и `SetCardwireGpuAccess`; правило §2 «канал дан только там,
+> где читатель есть сегодня» ими не нарушено.
+>
+> **ОТСУТСТВУЮЩИЙ ПОРТ — НЕ ОТКАЗ.** Машина без порта (десктоп, установка без EC-канала,
+> фича, снятая пробой) — факт ВОЗМОЖНОСТИ, а не отказ живого железа. Поэтому у контрактов
+> появились/использованы члены-возможности: `IGpuOffsetsTarget.HasPort`,
+> `ICpuPowerOverlayTarget.HasPort`, `IProfileTarget.CanApply` (уже отвечал false без порта),
+> `IUndervoltTarget.Store` (null и при отсутствии порта, и при несовпадении числа
+> смещений). Use case спрашивает возможность ДО вызова порта и сохраняет прежний исход без
+> порта ровно как был (`ApplyGpuOffsets`/`ApplyCpuPowerOverlay` возвращают `false`,
+> `ApplyUndervolt` — `(false, null)`, переключение профиля — no-op).
+>
+> **КТО ЛОВИТ.** Пользовательские действия НЕ ловят внутри use case: `AppController`
+> (`ApplyProfileCore`/`SetTurbo`/`SetGpuOc`/`SetCpuPower`/`SetCo`, хоткей) и
+> `OptionsAssembler.RunSet` (строка источника питания) ловят `PortWriteFailedException` на
+> границе действия и показывают `Reason` вместо прежнего чтения `r.error`. Системные
+> вызывающие ЛОВЯТ и превращают бросок в свой не-вердиктный исход: волатильная запись
+> свипа (`LaptopService.UndervoltSweep.cs` `WriteVolatile`, уже `try/catch` →
+> `SweepApplyOutcome.Refused`), посев/восстановление по источнику
+> (`LaptopService.Profiles.cs` `SeedSlotFromHardware`/`RecomputeOnAc`),
+> `ApplyProfileTransient` (форс/restore свипа) и `ReapplySettings` (отложенные оси идут под
+> одним `catch`). Бросок не должен выходить из фонового/опросного пути.
+>
+> **ЧТО НЕ ТРОНУТО.** Только ЗАПИСЬ: контракты ЧТЕНИЯ (`Application/Queries.cs`) не менялись.
+> `SettingNotAppliedException` и путь объявленных настроек (`OptionsAssembler.RunSet` для
+> `IDeclaredSettingTarget`) не тронуты — он уже бросал. Порядок «сначала запомнить, потом
+> писать» сохранён: `ApplyGpuOffsets`/`ApplyUndervolt` запоминают ДО записи, и бросок летит
+> ПОСЛЕ того, как запись в файл сделана.
 
 Решение за владельцем. Отдельный разбор опроверг и прежний список, и лекарство.
 

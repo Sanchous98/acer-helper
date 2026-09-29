@@ -17,7 +17,7 @@ namespace AcerHelper.Application;
 ///
 /// <see cref="ReplaceCurve"/> AND <see cref="ReplaceSelection"/> ARE TWO MEMBERS AND NOT ONE, because the EC is
 /// asked something DIFFERENT after each kind of edit, and that difference is measured rather than stylistic. A
-/// curve edit drives the fans from the curves and pushes NOTHING when the mode is not Custom — <c>ApplyCustom</c>'s
+/// curve edit drives the fans from the curves and pushes NOTHING when the mode is not Custom — <c>ApplyCustomMode</c>'s
 /// own guard returns before it touches the port, so a curve edited in Auto produces no EC traffic at all. A mode
 /// edit puts the EC into the mode instead, unless the new selection IS Custom, which goes through the same curve
 /// pass rather than being pushed as a speed. One member would have to re-derive which edit happened from the
@@ -27,7 +27,7 @@ namespace AcerHelper.Application;
 /// EACH WRITE MEMBER IS ATOMIC BY ITSELF. Both hold the graph's lock from the stored write through the EC call —
 /// which is what both edit paths have always done, and is one of the three deliberate holds
 /// (docs/open-decisions.md §3): the deadband is cleared and the write driven inside one hold, so a background
-/// <c>ApplyCustom</c> cannot be interleaved between its <c>Step</c> and its <c>Commit</c>. What IS newly separate
+/// <c>ApplyCustomMode</c> cannot be interleaved between its <c>Step</c> and its <c>Commit</c>. What IS newly separate
 /// is <see cref="Stored"/> from the write, and that window is bounded by measurement rather than by hope: the only
 /// writer of a fan preset is the UI thread — the refresh pass reads one and writes the deadband engine, never the
 /// graph — and both edit paths read and write on the caller's own thread, so no competing edit can land between
@@ -48,7 +48,8 @@ public interface IFanAxisTarget
     /// the copying changes on the write side is only WHICH array the preset ends up holding: the edit hands back a
     /// state built from this one, and the preset's field is re-pointed at the copy. Its CONTENTS are unchanged,
     /// and the array it replaces was read by this same call, so nothing that could still be looking at it exists.
-    /// The snapshot rule (<c>LaptopService.CurrentFan</c>) is still a separate, stronger rule for readers that
+    /// The snapshot rule (<c>LaptopService.CurrentFan</c>, reached by the UI through <c>ReadFanState</c>) is
+    /// still a separate, stronger rule for readers that
     /// KEEP a value — it duplicates the whole preset, arrays included.</summary>
     FanAxisState Stored();
 
@@ -80,9 +81,9 @@ public interface IFanAxisTarget
 /// validation in this use case: the rule is the domain's, the UI's own editor cannot produce a violating curve
 /// (FansViewModel builds exactly one clamped point per anchor), and this is only the call that happens to reach
 /// the constructor first.</summary>
-public static class ApplyFanCurve
+public sealed class ApplyFanCurve(IFanAxisTarget target)
 {
-    public static void Run(bool gpu, bool use, int[] points, IFanAxisTarget target)
+    public void Run(bool gpu, bool use, int[] points)
     {
         var stored = target.Stored();
         target.ReplaceCurve(gpu
@@ -104,9 +105,9 @@ public static class ApplyFanCurve
 /// WHAT IT DOES NOT DECIDE: how the selection reaches the EC. That a Custom selection is driven from the curves
 /// rather than pushed as a speed is <see cref="IFanAxisTarget.ReplaceSelection"/>'s doing, and it is the EC's own
 /// rule rather than this use case's.</summary>
-public static class ApplyFanSelection
+public sealed class ApplyFanSelection(IFanAxisTarget target)
 {
-    public static void Run(FanMode mode, byte cpu, byte gpu, IFanAxisTarget target)
+    public void Run(FanMode mode, byte cpu, byte gpu)
     {
         var stored = target.Stored();
         target.ReplaceSelection(stored with

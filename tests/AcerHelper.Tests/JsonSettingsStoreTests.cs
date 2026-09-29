@@ -67,7 +67,7 @@ public class JsonSettingsStoreTests
                 },
             },
         },
-        GpuOcPresets = { ["balanced"] = new GpuOcPreset { Core = 300, Mem = 1500 } },
+        GpuOcPresets = { ["balanced"] = new GpuOcPreset { Core = 300, Mem = 1500, Power = (int)GpuPowerLevel.Performance } },
         CoPresets =
         {
             ["balanced"] = new CoPreset
@@ -105,6 +105,11 @@ public class JsonSettingsStoreTests
         // such a file cannot carry a key that did not exist when it was written. A member that must survive is
         // asserted where the file is known to be complete.
         Assert.True(loaded.CardwireGpuAccess);
+
+        // The GPU power level survives as its persisted int (the enum's number, NOT the EC wire byte — the two
+        // agree today for the four rows, which is exactly why the distinction is pinned). Read back through the
+        // domain reader rather than the raw field so the assertion states the meaning.
+        Assert.Equal(GpuPowerLevel.Performance, GpuPowerLevels.FromStored(Present(loaded.GpuOcPresets, "balanced").Power));
 
         // And the WHOLE instance, not the hand-written list above: Load builds the model through Settings'
         // constructor, which takes the persisted half over member by member, so a member added to Settings and
@@ -207,6 +212,8 @@ public class JsonSettingsStoreTests
         var gpu = Present(loaded.GpuOcPresets, "balanced");
         Assert.Equal(300, gpu.Core);
         Assert.Equal(1500, gpu.Mem);
+        // The POWER field is asserted in the round-trip test below rather than here, because this helper is
+        // shared with the shipped-file test — and a file written before this field existed has no override.
 
         var co = Present(loaded.CoPresets, "balanced");
         Assert.Equal(-30, co.AllCore);                                          // sign survives
@@ -556,6 +563,74 @@ public class JsonSettingsStoreTests
         using var doc = JsonDocument.Parse(File.ReadAllText(dir.SettingsPath));
 
         Assert.Equal(JsonValueKind.Number, doc.RootElement.GetProperty("Language").ValueKind);
+    }
+
+    /// <summary>THE GPU-POWER FIELD IS A COMPATIBILITY SURFACE, pinned three ways, because the axis exists
+    /// precisely to distinguish "not overridden" from "Turbo chosen by hand" and a file must not lose that
+    /// distinction.
+    ///
+    /// 1. A settings.json WITHOUT the field loads as "follow the profile" (null) — the default, and the old
+    ///    behaviour, so an existing file keeps working.
+    /// 2. An EXPLICIT level round-trips as its own number. Deliberately asserted against the RAW JSON value, so
+    ///    the on-disk encoding is pinned and not just the in-memory round trip: the number is the enum's own,
+    ///    which is NOT the EC wire byte.
+    /// 3. "Follow the profile" writes back as JSON null, so clearing the choice is a value on disk rather than
+    ///    the field vanishing (which would read identically here, but is a different file shape — and the null
+    ///    spelling is what <see cref="GpuPowerLevels.FromStored"/> accepts as no-override).</summary>
+    [Fact]
+    public void TheGpuPowerField_LoadsAsFollowProfile_AndRoundTripsAnExplicitLevel()
+    {
+        using var dir = new TempDir();
+
+        // 1. A file without the field (the shape every release before this one wrote).
+        File.WriteAllText(dir.SettingsPath,
+            """{"GpuOcPresets":{"balanced":{"Core":300,"Mem":1500}}}""");
+        var old = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        Assert.Null(Present(old.GpuOcPresets, "balanced").Power);
+        Assert.Null(GpuPowerLevels.FromStored(Present(old.GpuOcPresets, "balanced").Power));
+
+        // 2. An explicit level, round-tripped, with its on-disk number pinned.
+        new JsonSettingsStore(dir.SettingsPath)
+            .Save(new Settings { GpuOcPresets = { ["balanced"] = new GpuOcPreset { Power = (int)GpuPowerLevel.Performance } } });
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        Assert.Equal((int)GpuPowerLevel.Performance, Present(loaded.GpuOcPresets, "balanced").Power);
+        using (var doc = JsonDocument.Parse(File.ReadAllText(dir.SettingsPath)))
+            Assert.Equal((int)GpuPowerLevel.Performance,
+                doc.RootElement.GetProperty("GpuOcPresets").GetProperty("balanced").GetProperty("Power").GetInt32());
+
+        // 3. "Follow the profile" is written as JSON null, and reads back as no override.
+        new JsonSettingsStore(dir.SettingsPath)
+            .Save(new Settings { GpuOcPresets = { ["balanced"] = new GpuOcPreset { Power = null } } });
+        var cleared = new JsonSettingsStore(dir.SettingsPath).Load([]);
+        Assert.Null(Present(cleared.GpuOcPresets, "balanced").Power);
+        using (var doc = JsonDocument.Parse(File.ReadAllText(dir.SettingsPath)))
+            Assert.Equal(JsonValueKind.Null,
+                doc.RootElement.GetProperty("GpuOcPresets").GetProperty("balanced").GetProperty("Power").ValueKind);
+    }
+
+    /// <summary>A stored power value naming no level (a hand edit, or a level a later build drops) reads as
+    /// "follow the profile" rather than as an invented row: <c>GpuPowerLevels.FromStored</c> refuses it exactly
+    /// as <c>FanModes.FromStored</c> refuses an undefined fan mode, and the rest of the mode's preset still
+    /// loads. A cast here would put an out-of-range row on the EC, which ACKs it and ignores it. The value 4 is
+    /// the real migration case: an older build persisted the EC's Eco row there, and this build offers four
+    /// levels, so it now reads as no override rather than as a row that moves nothing.</summary>
+    [Theory]
+    [InlineData(99)]
+    [InlineData(-1)]
+    [InlineData(4)]
+    public void AStoredPowerValueNamingNoLevel_ReadsAsFollowTheProfile(int stored)
+    {
+        using var dir = new TempDir();
+        // Built by concatenation rather than a raw interpolated string: the JSON's own braces and the
+        // interpolation's collide, and the value is an int interpolated into a literal object.
+        File.WriteAllText(dir.SettingsPath,
+            "{\"GpuOcPresets\":{\"balanced\":{\"Core\":300,\"Mem\":1500,\"Power\":" + stored + "}}}");
+
+        var loaded = new JsonSettingsStore(dir.SettingsPath).Load([]);
+
+        Assert.Equal(stored, Present(loaded.GpuOcPresets, "balanced").Power);   // the file's value survives...
+        Assert.Null(GpuPowerLevels.FromStored(Present(loaded.GpuOcPresets, "balanced").Power));   // ...but names no level
+        Assert.Equal(300, Present(loaded.GpuOcPresets, "balanced").Core);       // ...and the rest loads
     }
 }
 

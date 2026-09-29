@@ -85,20 +85,20 @@ public class LaptopServiceCoClampTests
         Assert.Equal(1, f.Store.SaveCount);
     }
 
-    /// <summary>The reason travels WITH the result rather than being parked in a field for whoever reads it
-    /// last, and that is the whole point of the change: the CPU-undervolt path hands its work to a background
-    /// task and posts the failure back to the UI, so a shared field read at post time could carry a DIFFERENT
-    /// call's error — the one the user would then be shown. A returned value cannot be someone else's.</summary>
+    /// <summary>A PRESENT SMU that refuses now THROWS, carrying its OWN reason, and it is never an earlier
+    /// call's words (the exception is this call's own object). The manual-undervolt path (Application/Undervolt.cs)
+    /// is the one the UI drives through <c>AppController.SetCo</c>, which catches this at its boundary; the
+    /// service's own <c>SetCo</c>/<c>SetCoDomains</c> pair-returning writers are untouched and keep their reason
+    /// (see <see cref="SetCo_WhenTheSmuRefuses_ReturnsFalse_ReportsTheError_AndKeepsThePreset"/>).</summary>
     [Fact]
-    public void SetCoValues_ReportsThePortsReason_WithTheResult()
+    public void ApplyUndervolt_ThrowsThePortsReason_WhenTheSmuRefuses()
     {
         var co = new FakeCurveOptimizer { SetResult = false, LastError = "SMU refused" };
         var f = Setup(co);
 
-        var r = f.Service.SetCoValues([-12]);
+        var ex = Assert.Throws<PortWriteFailedException>(() => f.ApplyUndervolt.Run([-12]));
 
-        Assert.False(r.ok);
-        Assert.Equal("SMU refused", r.error);
+        Assert.Equal("SMU refused", ex.Reason);
     }
 
     /// <summary>A refused mailbox transaction is reported but is NOT a reason to forget the setting: the
@@ -253,12 +253,12 @@ public class LaptopServiceCoDomainClampTests
     }
 
     [Fact]
-    public void SetCoValues_WithoutDomains_LeavesTheDomainMapEmpty()
+    public void ApplyUndervolt_WithoutDomains_LeavesTheDomainMapEmpty()
     {
         var co = new FakeCurveOptimizer();                       // no domains
         var f = Setup(co);
 
-        Assert.True(f.Service.SetCoValues([-12, -20]).ok);
+        Assert.True(f.ApplyUndervolt.Run([-12, -20]).ok);
 
         var stored = f.Store.Settings.CoPresets["balanced"];
         Assert.Equal(-12, stored.AllCore);
@@ -302,12 +302,12 @@ public class LaptopServiceCoKeyingTests
 
         co.DomainList.Reverse();                                 // now: [small, big]
 
-        Assert.Equal(new[] { -20, -10 }, f.Service.CurrentCoDomains());   // index-aligned with the NEW list
+        Assert.Equal(new[] { -20, -10 }, f.CoDomains.Run());   // index-aligned with the NEW list
         Assert.Equal(-10, stored["big"]);                        // ...and the store itself did not move
         Assert.Equal(-20, stored["small"]);
         Assert.Equal(2, stored.Count);                           // nothing was written by the read
 
-        f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
 
         Assert.Equal(2, co.SetDomainsCalls.Count);
         Assert.Equal(new[] { -20, -10 }, co.SetDomainsCalls[1]); // the SMU is told the reordered values too
@@ -324,7 +324,7 @@ public class LaptopServiceCoKeyingTests
 
         co.DomainList[0] = new VoltageDomain("Zen 5 (renamed)", "big");
 
-        Assert.Equal(new[] { -10, -20 }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { -10, -20 }, f.CoDomains.Run());
     }
 
     /// <summary>The counter-proof: a domain whose KEY changes is a different rail as far as the store is
@@ -339,7 +339,7 @@ public class LaptopServiceCoKeyingTests
 
         co.DomainList[0] = new VoltageDomain("Zen 5", "big-v2");
 
-        Assert.Equal(new[] { 0, -20 }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { 0, -20 }, f.CoDomains.Run());
         Assert.Equal(-10, f.Store.Settings.CoPresets["balanced"].Domains["big"]);   // still filed under the old key
     }
 
@@ -352,7 +352,7 @@ public class LaptopServiceCoKeyingTests
         var f = Setup(co);
         f.Service.SetCo(-25);                                    // all-core only: no per-domain entry at all
 
-        Assert.Equal(new[] { 0, 0 }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { 0, 0 }, f.CoDomains.Run());
         Assert.Equal(-25, f.Store.Settings.CoPresets["balanced"].AllCore);
     }
 
@@ -365,7 +365,7 @@ public class LaptopServiceCoKeyingTests
 
         f.Pp!.CurrentProfile = TestProfiles.Performance;
 
-        Assert.Equal(new[] { 0, 0 }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { 0, 0 }, f.CoDomains.Run());
         Assert.Single(f.Store.Settings.CoPresets);       // the read created nothing
 
         f.Service.SetCoDomains([-1, -2]);
@@ -432,8 +432,9 @@ public class LaptopServiceCoCountTests
     /// store is no longer empty, which permanently disarms the never-configured guard in
     /// <c>ApplyModeCo</c> (`LaptopService.Tuning.cs` `ApplyModeCo`), so every later mode switch, startup and resume now talks to
     /// the SMU on an install whose user never configured an undervolt. Pinned as shipped; unreachable from the
-    /// shipped UI, which only ever calls <c>SetCoValues</c> (<c>AppController.SetCo</c>) and that refuses an
-    /// empty array (`LaptopService.Tuning.cs` `SetCoValues` — the empty-count refusal).</summary>
+    /// shipped UI, which only ever calls the Curve-Optimizer edit use case (<c>ApplyUndervolt</c>, through
+    /// <c>AppController.SetCo</c>) and that refuses an empty array (<c>ApplyUndervolt.Run</c> — the empty-count
+    /// refusal).</summary>
     [Fact]
     public void SetCoDomains_WithADomainlessCpuAndNoCounts_IsAccepted_AndDisarmsTheNeverConfiguredGuard()
     {
@@ -449,15 +450,16 @@ public class LaptopServiceCoCountTests
         Assert.Equal(1, f.Store.SaveCount);
     }
 
-    /// <summary>SetCoValues is the single entry point the UI uses, and it picks the path from the PORT:
-    /// domains present -> per-domain, none -> all-core (`LaptopService.Tuning.cs` `SetCoValues`).</summary>
+    /// <summary>The Curve-Optimizer edit use case (<c>ApplyUndervolt</c>) is the single entry point the UI uses,
+    /// and it picks the path from the PORT: domains present -> per-domain, none -> all-core
+    /// (`LaptopService.Tuning.cs` `RememberRails`, reached through the use case's target).</summary>
     [Fact]
-    public void SetCoValues_WithoutDomains_RoutesToTheAllCoreSet()
+    public void ApplyUndervolt_WithoutDomains_RoutesToTheAllCoreSet()
     {
         var co = new FakeCurveOptimizer();                       // empty Domains == one offset for everything
         var f = Setup(co);
 
-        Assert.True(f.Service.SetCoValues([-12, -20, -30]).ok);
+        Assert.True(f.ApplyUndervolt.Run([-12, -20, -30]).ok);
 
         Assert.Equal([-12], co.SetCalls);                        // ONLY counts[0] — the rest have no rail
         Assert.Empty(co.SetDomainsCalls);
@@ -465,12 +467,12 @@ public class LaptopServiceCoCountTests
     }
 
     [Fact]
-    public void SetCoValues_WithDomains_RoutesToSetDomains()
+    public void ApplyUndervolt_WithDomains_RoutesToSetDomains()
     {
         var co = TwoDomains();
         var f = Setup(co);
 
-        Assert.True(f.Service.SetCoValues([-5, -6]).ok);
+        Assert.True(f.ApplyUndervolt.Run([-5, -6]).ok);
 
         Assert.Empty(co.SetCalls);
         Assert.Single(co.SetDomainsCalls);
@@ -483,27 +485,27 @@ public class LaptopServiceCoCountTests
     [Theory]
     [InlineData("no-port")]
     [InlineData("no-counts")]
-    public void SetCoValues_WithNoPortOrNoCounts_ReturnsFalse_AndTouchesNothing(string which)
+    public void ApplyUndervolt_WithNoPortOrNoCounts_ReturnsFalse_AndTouchesNothing(string which)
     {
         var co = which == "no-port" ? null : new FakeCurveOptimizer();
         var f = Setup(co);
         int[] counts = which == "no-port" ? [-5] : [];
 
-        Assert.False(f.Service.SetCoValues(counts).ok);
+        Assert.False(f.ApplyUndervolt.Run(counts).ok);
 
         Assert.Empty(f.Store.Settings.CoPresets);
         Assert.Equal(0, f.Store.SaveCount);
     }
 
-    /// <summary>A mismatch is caught by the per-domain path it routes to, so SetCoValues inherits the
+    /// <summary>A mismatch is caught by the per-domain path it routes to, so the use case inherits the
     /// refusal — and, again, nothing is stored.</summary>
     [Fact]
-    public void SetCoValues_WithACountMismatch_ReturnsFalse_AndPersistsNothing()
+    public void ApplyUndervolt_WithACountMismatch_ReturnsFalse_AndPersistsNothing()
     {
         var co = TwoDomains();
         var f = Setup(co);
 
-        Assert.False(f.Service.SetCoValues([-5]).ok);
+        Assert.False(f.ApplyUndervolt.Run([-5]).ok);
 
         Assert.Empty(co.SetDomainsCalls);
         Assert.Empty(f.Store.Settings.CoPresets);
@@ -512,7 +514,7 @@ public class LaptopServiceCoCountTests
 }
 
 /// <summary>
-/// <see cref="LaptopService.CurrentCoDomains"/> — the read the UI renders its rows from. It must answer in
+/// <see cref="ReadCoDomains"/> — the read the UI renders its rows from. It must answer in
 /// the port's own shape (<c>ICurveOptimizer.Domains</c>) without ever creating a preset, and it must not confuse
 /// "no Curve-Optimizer port at all" (nothing to show) with "a CPU that takes one offset" (one row).
 /// </summary>
@@ -530,7 +532,7 @@ public class LaptopServiceCurrentCoDomainsTests
     {
         var f = Setup(null);
 
-        Assert.Empty(f.Service.CurrentCoDomains());
+        Assert.Empty(f.CoDomains.Run());
         Assert.Empty(f.Store.Settings.CoPresets);
         Assert.Equal(0, f.Store.SaveCount);
     }
@@ -547,7 +549,7 @@ public class LaptopServiceCurrentCoDomainsTests
         if (allCore != 0) f.Service.SetCo(allCore);
         var before = f.Store.Settings.CoPresets.Count;
 
-        Assert.Equal(new[] { allCore }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { allCore }, f.CoDomains.Run());
         Assert.Equal(before, f.Store.Settings.CoPresets.Count);   // the read created nothing
     }
 
@@ -563,7 +565,7 @@ public class LaptopServiceCurrentCoDomainsTests
         var f = Setup(co);
         f.Store.Settings.CoPresets["balanced"] = new CoPreset { Domains = { ["small"] = -20, ["igpu"] = -5 } };
 
-        Assert.Equal(new[] { 0, -20, -5 }, f.Service.CurrentCoDomains());
+        Assert.Equal(new[] { 0, -20, -5 }, f.CoDomains.Run());
     }
 
     /// <summary>The array is a fresh one per call: the caller cannot corrupt the store by mutating what it
@@ -575,8 +577,8 @@ public class LaptopServiceCurrentCoDomainsTests
         var f = Setup(co);
         f.Service.SetCoDomains([-10]);
 
-        var first = f.Service.CurrentCoDomains();
-        var second = f.Service.CurrentCoDomains();
+        var first = f.CoDomains.Run();
+        var second = f.CoDomains.Run();
 
         Assert.NotSame(first, second);
         Assert.Equal(new[] { -10 }, first);
@@ -585,7 +587,7 @@ public class LaptopServiceCurrentCoDomainsTests
 }
 
 /// <summary>
-/// <see cref="LaptopService.ApplyModeCo"/> — the mode-change / startup / resume re-apply. Two contracts live
+/// <see cref="ApplyModeCo"/> — the mode-change / startup / resume re-apply. Two contracts live
 /// here and they pull in opposite directions, which is why both are pinned:
 ///
 /// (a) an install that has NEVER configured a Curve Optimizer must not talk to the SMU at all — the guard in
@@ -618,7 +620,8 @@ public class LaptopServiceApplyModeCoTests
         var co = cpu == "per-domain" ? TwoDomains() : new FakeCurveOptimizer();
         var f = Setup(co);
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.Equal(0, applied.AllCore);
         Assert.Empty(co.SetCalls);                               // no mailbox message at all...
@@ -635,7 +638,8 @@ public class LaptopServiceApplyModeCoTests
         var co = new FakeCurveOptimizer();
         var f = Setup(co);
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.DoesNotContain(applied, f.Store.Settings.CoPresets.Values);
         Assert.Empty(f.Store.Settings.CoPresets);
@@ -651,7 +655,8 @@ public class LaptopServiceApplyModeCoTests
         f.Service.SetCo(-12);
         Assert.Equal([-12], co.SetCalls);                        // the write from SetCo
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.Equal([-12, -12], co.SetCalls);                   // re-applied, same value
         Assert.NotSame(f.Store.Settings.CoPresets["balanced"], applied);
@@ -666,7 +671,8 @@ public class LaptopServiceApplyModeCoTests
         var f = Setup(co);
         f.Service.SetCoDomains([-10, -20]);
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.Equal(2, co.SetDomainsCalls.Count);
         Assert.Equal(new[] { -10, -20 }, co.SetDomainsCalls[1]);
@@ -686,7 +692,8 @@ public class LaptopServiceApplyModeCoTests
         f.Service.SetCo(-12);
 
         f.Pp!.CurrentProfile = TestProfiles.Performance;
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.Equal([-12, 0], co.SetCalls);                     // the second call is the clear
         Assert.Equal(0, applied.AllCore);
@@ -704,7 +711,7 @@ public class LaptopServiceApplyModeCoTests
         f.Service.SetCoDomains([-10, -20]);
 
         f.Pp!.CurrentProfile = TestProfiles.Quiet;
-        f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
 
         Assert.Equal(2, co.SetDomainsCalls.Count);
         Assert.Equal(new[] { 0, 0 }, co.SetDomainsCalls[1]);
@@ -720,7 +727,8 @@ public class LaptopServiceApplyModeCoTests
         var f = Setup(co);
         f.Store.Settings.CoPresets["balanced"] = new CoPreset { AllCore = -9, Domains = { ["big"] = -20 } };
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.Equal([-9], co.SetCalls);
         Assert.Empty(co.SetDomainsCalls);
@@ -738,7 +746,8 @@ public class LaptopServiceApplyModeCoTests
         settings.CoPresets["balanced"] = new CoPreset { AllCore = -12 };
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Balanced);
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         // The subject is the preset the MODEL holds — the one a later read would hand out — rather than the
         // instance this test seeded, which the model took a copy of at construction (Settings' constructor).
@@ -753,7 +762,8 @@ public class LaptopServiceApplyModeCoTests
     /// The reason is NOT recorded anywhere, and that is deliberate: <c>ApplyModeCo</c> has no reader of its
     /// outcome (both of its call sites are fire-and-forget), so giving it a channel would mean starting to show
     /// the user a failure message the app has never shown. The write path the user actually drives —
-    /// <c>SetCo</c>/<c>SetCoValues</c> — does report it, which the test above pins.</summary>
+    /// <c>SetCo</c> and the Curve-Optimizer edit use case (<c>ApplyUndervolt</c>) — do report it, which the
+    /// tests above pin.</summary>
     [Fact]
     public void WhenTheSmuRefuses_TheReApplyIsSwallowed_AndStillReturnsThePreset()
     {
@@ -761,7 +771,8 @@ public class LaptopServiceApplyModeCoTests
         var f = Setup(co.WithDomains(new VoltageDomain("Zen 5", "big")));
         f.Service.SetCoDomains([-10]);
 
-        var applied = f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
+        var applied = f.Service.CurrentCo();
 
         Assert.NotSame(f.Store.Settings.CoPresets["balanced"], applied);
         Assert.Equal(f.Store.Settings.CoPresets["balanced"].AllCore, applied.AllCore);

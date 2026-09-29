@@ -69,7 +69,7 @@ public class ModeAxisTableTests
 
         Assert.Equal(EmptyAxisPolicy.LeaveUntouched, ModeAxisTable.Policy(ModeAxis.Fans));
 
-        Assert.Null(a.F.Service.ApplyModeFan());
+        Assert.Null(a.F.ApplyModeFan.Run());
         Assert.Empty(a.Fan.ModeCalls);
         Assert.Empty(a.Fan.SpeedCalls);
     }
@@ -85,7 +85,7 @@ public class ModeAxisTableTests
 
         Assert.Equal(EmptyAxisPolicy.ForceStock, ModeAxisTable.Policy(ModeAxis.GpuOc));
 
-        a.F.Service.ApplyModeGpuOc();
+        a.F.ApplyModeGpuOc.Run();
         Assert.Equal(new[] { (0, 0) }, a.Gpu.SetCalls);
     }
 
@@ -100,7 +100,7 @@ public class ModeAxisTableTests
 
         Assert.Equal(EmptyAxisPolicy.LeaveUntouched, ModeAxisTable.Policy(ModeAxis.CpuPower));
 
-        a.F.Service.ApplyModeCpuPower();
+        a.F.ApplyModeCpuPower.Run();
         Assert.Empty(a.Cpu.SetCalls);
     }
 
@@ -115,7 +115,7 @@ public class ModeAxisTableTests
 
         Assert.Equal(EmptyAxisPolicy.ForceStock, ModeAxisTable.Policy(ModeAxis.Co));
 
-        a.F.Service.ApplyModeCo();
+        a.F.ApplyModeCo.Run();
         Assert.Equal([0], a.Co.SetCalls);
     }
 
@@ -131,7 +131,7 @@ public class ModeAxisTableTests
         Assert.Equal(EmptyAxisPolicy.ForceStock, ModeAxisTable.Policy(ModeAxis.Co));                          // this mode
         Assert.Equal(EmptyAxisPolicy.LeaveUntouched, ModeAxisTable.PolicyWhenNoModeWasEverConfigured(ModeAxis.Co));
 
-        a.F.Service.ApplyModeCo();
+        a.F.ApplyModeCo.Run();
         Assert.Empty(a.Co.SetCalls);
         Assert.Empty(a.Co.SetDomainsCalls);
     }
@@ -160,7 +160,7 @@ public class ModeAxisTableTests
     {
         var a = Setup(FullyConfigured());
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         // The Curve Optimizer is dispatched asynchronously, so wait for it before reading the logs.
         Assert.True(Eventually.Until(() => a.Co.SetCalls.Count > 0 || a.Co.SetDomainsCalls.Count > 0),

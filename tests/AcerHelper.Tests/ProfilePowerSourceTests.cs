@@ -66,7 +66,7 @@ public class ProfilePowerSourceTests
     }
 
     private static string[] Selectable(LaptopServiceFixture f)
-        => [.. f.Service.SelectableProfiles().Select(p => p.Id)];
+        => [.. f.SelectableProfiles.Run().Select(p => p.Id)];
 
     // ---- the availability sets ----
 
@@ -75,7 +75,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
         Assert.Equal(["eco", "balanced"], Selectable(f));
     }
@@ -85,7 +85,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
 
         Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
     }
@@ -96,10 +96,10 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
         Assert.Equal(["eco", "balanced"], Selectable(f));
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
         Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
     }
 
@@ -112,7 +112,7 @@ public class ProfilePowerSourceTests
                                                   selectable: [TestProfiles.Eco, TestProfiles.Balanced, TestProfiles.Performance]);
         f.Device.PowerProfiles = new GatedProfiles(f.Pp!, Policy);
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
         Assert.Equal(["eco", "balanced"], Selectable(f));
     }
@@ -128,7 +128,7 @@ public class ProfilePowerSourceTests
         var f = Gated(new Settings { OnBattery = new ProfileMemory { BaseId = "performance" } },
                       current: TestProfiles.Performance);
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
         Assert.Equal(["balanced"], f.Pp!.SetCallIds);
         Assert.Equal("balanced", f.Store.Settings.OnBattery.BaseId);
@@ -142,7 +142,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(new Settings { TurboToggles = true }, current: TestProfiles.Turbo);
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
         Assert.Equal(["balanced"], f.Pp!.SetCallIds);
         Assert.Equal("balanced", f.Store.Settings.OnBattery.BaseId);
@@ -155,10 +155,10 @@ public class ProfilePowerSourceTests
     public void ReturningToBatteryWithATurboMode_AppliesTheFallback()
     {
         var f = Gated(current: TestProfiles.Turbo);
-        f.Service.SyncPowerSource(OnAc);               // seen AC first; the machine is in Turbo
+        f.SyncPowerSource.Run(OnAc);               // seen AC first; the machine is in Turbo
         f.Store.Settings.OnBattery.BaseId = "turbo";   // a later edit/older file left Turbo in the battery slot
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
         Assert.Equal(["balanced"], f.Pp!.SetCallIds);  // moved off the disabled Turbo...
         Assert.Equal("balanced", f.Store.Settings.OnBattery.BaseId);
@@ -166,15 +166,34 @@ public class ProfilePowerSourceTests
 
     // ---- the write backstops ----
 
+    /// <summary>A PRESENT profile port that refuses while the refresh loop restores a remembered mode is
+    /// SWALLOWED by the system path (<c>RecomputeOnAc</c> around <c>ApplyStoredMode</c>) — the throw must not
+    /// escape the pool thread the poll runs on. The slot keeps the remembered mode, and the next source change
+    /// re-asserts it.</summary>
+    [Fact]
+    public void ASourceChange_WhoseProfileWriteThrows_IsSwallowedByTheSystemPath()
+    {
+        var f = Gated(new Settings { OnBattery = new ProfileMemory { BaseId = "eco" } },
+                      current: TestProfiles.Balanced);
+        f.SyncPowerSource.Run(OnAc);                                // seed the AC slot from the hardware
+        f.Pp!.SetResult = false;                                    // ...then make the live write refuse
+        f.Pp.LastError = "EC refused";
+
+        var escaped = Record.Exception(() => f.SyncPowerSource.Run(OnBattery));
+
+        Assert.Null(escaped);                                       // RecomputeOnAc swallowed the refusal
+        Assert.Equal("eco", f.Store.Settings.OnBattery.BaseId);
+    }
+
     [Fact]
     public void ApplyProfile_RefusesAProfileTheSourceDisables()
     {
         var f = Gated(current: TestProfiles.Balanced);
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
-        var r = f.Service.ApplyProfile(TestProfiles.Turbo);
+        var ok = f.Service.ApplyProfile(TestProfiles.Turbo);
 
-        Assert.False(r.ok);
+        Assert.False(ok);
         Assert.Empty(f.Pp!.SetCalls);              // nothing was written
     }
 
@@ -182,11 +201,11 @@ public class ProfilePowerSourceTests
     public void SetTurboOn_OnBattery_DoesNothing()
     {
         var f = Gated(new Settings { TurboToggles = true }, current: TestProfiles.Balanced);
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
-        var r = f.Service.SetTurbo(true);
+        var applied = f.SetTurbo.Run(true);
 
-        Assert.Null(r.applied);
+        Assert.Null(applied);
         Assert.Empty(f.Pp!.SetCalls);
     }
 
@@ -196,14 +215,14 @@ public class ProfilePowerSourceTests
     public void TogglePerformance_CyclesOnlyTheAvailableProfiles()
     {
         var f = Gated(current: TestProfiles.Balanced);
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
 
-        Assert.Equal(TestProfiles.Eco, f.Service.TogglePerformance());
+        Assert.Equal(TestProfiles.Eco, f.TogglePerformance.Run());
     }
 
     // ---- the per-source read side ----
 
-    /// <summary>The per-source row in Options reads through <see cref="LaptopService.SourceProfile"/>: a slot
+    /// <summary>The per-source row in Options reads through <see cref="ReadSourceProfile"/>: a slot
     /// holding a profile the source disables (Turbo, in the battery slot) reports the fallback, so the row shows
     /// what the machine would actually use rather than a mode the source forbids. Nothing remembered still
     /// reports null — the read side does not invent a value.</summary>
@@ -213,8 +232,8 @@ public class ProfilePowerSourceTests
         var f = Gated(new Settings { OnBattery = new ProfileMemory { BaseId = "turbo" } },
                       current: TestProfiles.Balanced);
 
-        Assert.Equal(TestProfiles.Balanced, f.Service.SourceProfile(false));   // battery forbids Turbo -> Balanced
-        Assert.Null(f.Service.SourceProfile(true));                            // AC has nothing remembered
+        Assert.Equal(TestProfiles.Balanced, f.SourceProfile.Run(false));   // battery forbids Turbo -> Balanced
+        Assert.Null(f.SourceProfile.Run(true));                            // AC has nothing remembered
     }
 
     // ---- the capability is optional ----
@@ -228,10 +247,10 @@ public class ProfilePowerSourceTests
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
         f.Device.PowerProfiles = new FakeThrowingPowerProfiles();
 
-        f.Service.SyncPowerSource(OnBattery);
+        f.SyncPowerSource.Run(OnBattery);
         Assert.Equal(TestProfiles.All.Select(p => p.Id), Selectable(f));
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
         Assert.Equal(TestProfiles.All.Select(p => p.Id), Selectable(f));
     }
 
@@ -246,7 +265,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnAc);              // the OS reports external power (charging)...
+        f.SyncPowerSource.Run(OnAc);              // the OS reports external power (charging)...
         f.Service.SetPowerAdapter(PowerSource.UsbC);  // ...but the EC channel types it as USB-C PD
 
         Assert.Equal(["eco", "balanced"], Selectable(f));
@@ -259,7 +278,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
         f.Service.SetPowerAdapter(PowerSource.UsbC);
         Assert.Equal(["eco", "balanced"], Selectable(f));
 
@@ -267,7 +286,7 @@ public class ProfilePowerSourceTests
         Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
 
         f.Service.SetPowerAdapter(PowerSource.UsbC);
-        f.Service.SyncPowerSource(OnBattery);            // and unplugged is the battery set regardless
+        f.SyncPowerSource.Run(OnBattery);            // and unplugged is the battery set regardless
         Assert.Equal(["eco", "balanced"], Selectable(f));
     }
 
@@ -278,7 +297,7 @@ public class ProfilePowerSourceTests
     {
         var f = Gated(current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
         f.Service.SetPowerAdapter(PowerSource.Unknown);
 
         Assert.Equal(["quiet", "balanced", "performance", "turbo"], Selectable(f));
@@ -292,7 +311,7 @@ public class ProfilePowerSourceTests
         var f = Gated(new Settings { OnBattery = new ProfileMemory { BaseId = "eco" } },
                       current: TestProfiles.Balanced);
 
-        f.Service.SyncPowerSource(OnAc);
+        f.SyncPowerSource.Run(OnAc);
         f.Service.SetPowerAdapter(PowerSource.UsbC);
 
         // The remembered battery mode (Eco) is applied, exactly as if the barrel had been unplugged.

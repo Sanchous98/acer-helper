@@ -33,12 +33,19 @@ public sealed partial class LightingViewModel : ObservableObject
     private readonly IReadOnlyList<RgbZone> _followZones;
     private readonly Action<bool> _saveFollowsProfile;
     private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
+    private readonly Func<DateTime> _clock;   // time source forwarded to every panel (flash-suspicion window)
 
     // THE MODE THIS SECTION IS BOUND TO, and the values of its zones. The mode is FIXED when the door is taken
     // (LaptopService.LightsForCurrentMode), so every edit here lands in the mode the user is looking at — which
     // is what the old live dictionary did too, since the read handed over one mode's bucket and the UI wrote
     // into that. Reload swaps both when the performance mode changes.
-    private ILightZoneMode _mode;
+    //
+    // THE MODE-SCOPED USE CASES ARE BUILT ALONGSIDE THE MODE, not kept as one instance with a settable door: they
+    // own the door through their constructors (Application/LightZone.cs), and rebuilding them HERE, at the moment
+    // the door is taken, is what keeps the fixed-mode property — a stale instance could not be handed a mode it
+    // was not built for, and a mode change builds fresh ones over the new door with the new values.
+    private ReadLightZone _readZone;
+    private ApplyLightZone _applyZone;
     private readonly Dictionary<string, LightZoneState> _lights = [];
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
@@ -63,15 +70,19 @@ public sealed partial class LightingViewModel : ObservableObject
     /// process, so a headless test cannot pump it (see <c>Eventually</c>). Without the seam the wave's rule could
     /// not be tested where the app actually calls it: a read that is not an event must leave state alone, and a
     /// "nothing changed" assertion against a post that never runs proves nothing.</summary>
+    /// <param name="clock">The time source the panels' flash-suspicion window is measured against; defaults to
+    /// <c>DateTime.UtcNow</c>. A test seam only (see <see cref="LightViewModel"/>); production never passes it.</param>
     public LightingViewModel(IRgbDevice? rgb, ILightZoneMode mode,
                              bool followsProfile, Action<bool> saveFollowsProfile,
                              IKeyboardBrightness? backlight = null, Func<int, bool>? applyBacklight = null,
-                             Action<Action>? post = null)
+                             Action<Action>? post = null, Func<DateTime>? clock = null)
     {
-        _mode = mode;
+        _readZone = new ReadLightZone(mode);
+        _applyZone = new ApplyLightZone(mode);
         foreach (var (name, state) in mode.Stored()) _lights[name] = state;
         _saveFollowsProfile = saveFollowsProfile;
         _post = post;
+        _clock = clock ?? (static () => DateTime.UtcNow);
         _followsProfile = followsProfile;   // field write: don't fire OnFollowsProfileChanged during construction
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
@@ -89,13 +100,14 @@ public sealed partial class LightingViewModel : ObservableObject
     }
 
     // The value this section is holding for a zone, creating it when the mode has none. The creation is the
-    // READ's (Application/LightZone.cs ReadLightZone), not this section's: what a mode with no entry yet IS —
-    // the zone in its defaults, held by the mode from that moment on, and not persisted — is a rule the use case
-    // states and a stub pins, and it lived here as `EnsureLightZone` plumbing before.
+    // READ's (Application/LightZone.cs ReadLightZone, built over this section's mode), not this section's: what
+    // a mode with no entry yet IS — the zone in its defaults, held by the mode from that moment on, and not
+    // persisted — is a rule the use case states and a stub pins, and it lived here as `EnsureLightZone` plumbing
+    // before.
     private LightZoneState ZoneFor(string zone)
     {
         if (_lights.TryGetValue(zone, out var state)) return state;
-        return _lights[zone] = ReadLightZone.Run(zone, _mode);
+        return _lights[zone] = _readZone.Run(zone);
     }
 
     // Write one zone's value back for the mode this section is bound to, and keep the local copy in step so the
@@ -104,24 +116,37 @@ public sealed partial class LightingViewModel : ObservableObject
     // not hold must not be what the burst re-applies.
     private void Store(string zone, LightZoneState state)
     {
-        if (ApplyLightZone.Run(zone, state, _mode)) _lights[zone] = state;
+        if (_applyZone.Run(zone, state)) _lights[zone] = state;
     }
 
-    // Build a panel for one zone, bound to the current mode's per-zone state (created on first sight). Seeds
-    // brightness from what the firmware reports (Fn keys change it out-of-band); readBrightness is what the
-    // event path re-reads it with (AdoptFromInput -> LightViewModel.AdoptFromHardware).
+    // Build a panel for one zone, bound to the current mode's per-zone state (created on first sight). A
+    // CONFIGURED zone's brightness comes from STORAGE (our settings are the source of truth); only an
+    // UNCONFIGURED zone is seeded from what the firmware reports — a fresh install has no stored intent, and the
+    // construction applies nothing there anyway. readBrightness is what the event path re-reads it with
+    // (AdoptFromInput -> LightViewModel.AdoptFromHardware), the one place a read authors intent.
     private void BuildPanel(RgbZone zone)
     {
         var state = ZoneFor(zone.Name);
+        // NOTE the missing `profileFlashPossible` predicate this panel used to take. The flash suspicion is no
+        // longer a STATIC property of the device ("this machine's register CAN lie") but an EVENT the coordinator
+        // arms when it actually sends a flash (NoteProfileFlash). A static predicate was permanently true on the
+        // AN18-61 (its lightbar follows the profile), so it refused every genuine Fn dim to 0 — the owner's
+        // "slider stops at 25%". See LightViewModel.NoteProfileFlash and docs/lighting-an18-61.md.
         var panel = new LightViewModel(zone.Name, zone.Effects, zone.SubZones,
             (e, c, b, s, d) => zone.ApplyEffect(e, b, s, d, c),
             zone.HasSubZones ? (i, b, c) => zone.ApplySubZone(i, b, c) : null,
-            state, s => Store(zone.Name, s), zone.ReadBrightness, _post,
-            // The register only lies where the profile flash is in play (the Acer OPMODE quirk): a device
-            // with a follow-capable zone whose lightbar follows the profile. Read live, because the user can
-            // flip that switch at any time. Everywhere else the hardware read is trusted — including a 0.
-            () => _followZones.Count > 0 && FollowsProfile);
+            state, s => Store(zone.Name, s), zone.ReadBrightness, _post, _clock);
         Panels.Add(panel);
+    }
+
+    /// <summary>The app just drove a profile flash (<c>LightingCoordinator.Paint</c> is the one caller, at the
+    /// instant it sends the palette). Arms the spurious-zero discrimination on every panel: until a hardware read
+    /// proves the register live again, a 0 it reports over a lit keyboard is the flash's lie, not the user dimming.
+    /// See <see cref="LightViewModel.NoteProfileFlash"/> for why this is an event and not the old static
+    /// capability predicate.</summary>
+    public void NoteProfileFlash()
+    {
+        foreach (var panel in Panels) panel.NoteProfileFlash();
     }
 
     // Flip the switch live: turning it OFF builds the follow-capable panels (each applies the mode's stored
@@ -182,7 +207,8 @@ public sealed partial class LightingViewModel : ObservableObject
     /// at.</summary>
     public void Reload(ILightZoneMode mode)
     {
-        _mode = mode;
+        _readZone = new ReadLightZone(mode);
+        _applyZone = new ApplyLightZone(mode);
         _lights.Clear();
         foreach (var (name, state) in mode.Stored()) _lights[name] = state;
         foreach (var panel in Panels)
@@ -192,18 +218,23 @@ public sealed partial class LightingViewModel : ObservableObject
     /// <summary>Push the values this section is holding at the device again — the re-apply the coordinator's
     /// burst, the drawer open, the resume and the lid each ask for.
     ///
-    /// IT TAKES NO STATE AND READS NOTHING, which is what makes the burst safe to run: the values below are the
-    /// ones the USER's edits have been updating all along, so a repaint that lands mid-edit re-applies the
-    /// edit rather than the mode's state as it stood when the burst began. (The version this replaced re-read
-    /// the live dictionary on every tick — same values, because the UI had written into it; the copy is now
-    /// here, and it is what lets the coordinator hold no lighting state at all.)
+    /// IT TAKES NO STATE FROM THE GRAPH AND READS NOTHING, but that alone does NOT make the burst safe to run
+    /// mid-edit, as an earlier comment here claimed. The values live in <c>_lights</c>, and <c>_lights[zone]</c>
+    /// is written ONLY when the panel's debounce tick commits an edit (<see cref="Store"/>) — so a repaint that
+    /// lands inside the 120 ms debounce window sees the last COMMITTED value, not the edit in flight, and the
+    /// old code here rebound every panel from it: the user's slider jumped back and the pending tick then
+    /// applied and PERSISTED the stale value over the edit. That is the owner's «настройки яркости не пишутся»
+    /// (the post-switch burst, still running ~3 s after a profile switch, was the tick that landed).
     ///
-    /// The panels reflect the value they are bound to before applying, exactly as a rebind does: that is what
-    /// turns a stored state into what the device is told, and it is also what marks a mode's first sight of a
-    /// zone as configured (see <see cref="LightViewModel.Rebind"/>).</summary>
+    /// THE PANEL DECIDES WHAT TO DO WITH IT (see <see cref="LightViewModel.Repaint"/>): with an edit pending it
+    /// re-applies the panel's OWN current values and leaves the controls alone, so the edit survives and the
+    /// pending tick commits it; with nothing pending it rebinds from the committed value, exactly as before
+    /// (which also keeps the "a mode's first sight of a zone becomes configured" rule
+    /// <see cref="LightViewModel.Rebind"/> carries). A genuine mode change does NOT come through here — it is
+    /// <see cref="Reload"/>, whose panels adopt the new mode's stored values even mid-edit.</summary>
     public void Repaint()
     {
-        foreach (var panel in Panels) panel.Rebind(_lights[panel.Title]);
+        foreach (var panel in Panels) panel.Repaint(_lights[panel.Title]);
     }
 }
 
@@ -220,14 +251,26 @@ public sealed partial class LightViewModel : ObservableObject
     private readonly Action<int, byte, AccentColor>? _applyZone;
     private readonly Func<int?>? _readBrightness;
     private readonly Action<Action> _post;   // UI-thread marshaller for an adopted read (see the ctor)
-    // Whether the profile flash may be zeroing the brightness register right now (the Acer OPMODE quirk —
-    // see the ctor and AdoptBrightness). Null means "assume it may", the conservative default.
-    private readonly Func<bool>? _profileFlashPossible;
+    // WHEN the app last drove a profile flash (<see cref="NoteProfileFlash"/>), or null when no flash is in play.
+    // This replaces the old static `profileFlashPossible` predicate, which asked the wrong question — "CAN this
+    // machine's register lie?" is a permanent YES on any device with a follow-capable zone, so it refused every
+    // genuine Fn dim to 0. The OPMODE flash only zeroes the EC register AT the switch, in a short window; gating
+    // the refusal on that window (rather than on the capability) is what lets a plain Fn dim to 0 land. A 0 read
+    // inside the window while the app believes the keyboard is lit is the flash's lie and is refused; a 0 read
+    // once the window has passed is the user's real dim and is adopted. Guarded by _readGate with the read
+    // coalescing, since the worker can post an adoption while the coordinator arms the suspicion.
+    private DateTime? _flashSuspectedAt;
+    private readonly Func<DateTime> _clock;
+    // How long a flash keeps a read-back 0 suspicious. The register is zeroed AT the switch; the app's own
+    // InputActivity re-reads (and the refresh pass) land within a few seconds, and any non-zero read clears the
+    // suspicion early, so the window only has to outlast the immediate post-flash reads. 5 s is the same "short
+    // window" the coordinator already uses for PendingTimeoutSeconds / WakeTailSeconds.
+    private const double FlashSuspectSeconds = 5;
     // This zone's lighting for the mode the section is bound to, as a VALUE — replaced by Rebind when the mode
     // changes, and by every edit this panel makes. It is deliberately not the stored object: what crosses is
     // Domain's LightZoneState (Domain/LightZoneState.cs), and the write goes back through _store.
     private LightZoneState _state;
-    // Write this zone's value back for the bound mode (LightingViewModel.Store -> ApplyLightZone.Run).
+    // Write this zone's value back for the bound mode (LightingViewModel.Store -> the mode-scoped ApplyLightZone).
     private readonly Action<LightZoneState> _store;
     private readonly PeriodicSchedule _debounce;
     private bool _loading;
@@ -268,14 +311,18 @@ public sealed partial class LightViewModel : ObservableObject
     /// defaults to <c>Dispatcher.UIThread.Post</c>. Injectable for the same reason the option rows' poster is
     /// (see <c>Eventually</c>): the real dispatcher is thread-affine and a bare xUnit process creates it from
     /// whichever thread first touches it, so a headless test cannot pump it. Same seam, same reason.</param>
-    /// <param name="profileFlashPossible">Whether a profile flash may right now be zeroing this zone's
-    /// brightness register (the Acer OPMODE quirk). Omitted means "it may" — the conservative default that keeps
-    /// the spurious-zero protection on. <c>LightingViewModel.BuildPanel</c> supplies the real answer: only a
-    /// device with a follow-capable zone whose lightbar follows the profile has the lying register.</param>
+    /// <remarks>The old <c>profileFlashPossible</c> predicate is GONE from this constructor: the flash suspicion
+    /// is no longer passed in as a static capability but armed as an event (<see cref="NoteProfileFlash"/>), because
+    /// a capability that is permanently true on the AN18-61 refused every genuine Fn dim to 0. See
+    /// <see cref="AdoptBrightness"/>.</remarks>
+    /// <param name="clock">The time source the flash-suspicion window is measured against; defaults to
+    /// <c>DateTime.UtcNow</c>. A seam for the same reason the poster is: a test must be able to place a read
+    /// INSIDE the post-flash window (the spurious 0) and OUTSIDE it (a genuine Fn dim) without sleeping for the
+    /// whole window. Production never passes it.</param>
     public LightViewModel(string title, IReadOnlyList<RgbModeInfo> effects, int zones,
                           Action<RgbModeInfo, AccentColor, byte, byte, byte> applyAll, Action<int, byte, AccentColor>? applyZone,
                           LightZoneState state, Action<LightZoneState> store, Func<int?>? readBrightness = null,
-                          Action<Action>? post = null, Func<bool>? profileFlashPossible = null)
+                          Action<Action>? post = null, Func<DateTime>? clock = null)
     {
         Title = title;
         _effects = effects;
@@ -283,7 +330,7 @@ public sealed partial class LightViewModel : ObservableObject
         _applyZone = applyZone;
         _readBrightness = readBrightness;
         _post = post ?? (a => Dispatcher.UIThread.Post(a));
-        _profileFlashPossible = profileFlashPossible;
+        _clock = clock ?? (static () => DateTime.UtcNow);
         _state = state;
         _store = store;
         _debounce = new PeriodicSchedule(ApplyDebounced, TimeSpan.FromMilliseconds(120), UiSchedule.Normal);
@@ -291,24 +338,30 @@ public sealed partial class LightViewModel : ObservableObject
 
         // Restore the persisted selection (direct field writes -> the OnXxxChanged hooks don't fire).
         _selectedEffectIndex = effects.Count > 0 ? Math.Clamp(state.EffectIndex, 0, effects.Count - 1) : 0;
-        // WAVE 6: THE ONE CONSTRUCTION-TIME READ IN THIS FILE THAT STAYS SYNCHRONOUS, deliberately. The reason is
-        // not the slider. `Brightness` is ALSO what the startup re-apply below sends to the device — the single
-        // value the app pushes at launch — so a placeholder here would change what the HARDWARE is told, not only
-        // what the user sees. And the placeholder this wave uses everywhere else, 0, is the one value that must
-        // not go in: the keyboard would come up dark on a configured zone, because the prime only re-reads the
-        // slider and never re-applies. Deferring this read therefore means deferring the startup apply with it —
-        // a device-visible change that cannot be checked without the machine. The price of leaving it: one EC
-        // transaction on the UI thread at BuildUi.
+        // WAVE 6: the construction-time read that stays SYNCHRONOUS, where it happens at all, deliberately. The
+        // reason is not the slider. `Brightness` is ALSO what the startup re-apply below sends to the device — the
+        // single value the app pushes at launch — so a placeholder here would change what the HARDWARE is told,
+        // not only what the user sees. The price is one EC transaction on the UI thread at BuildUi — and it is
+        // paid ONLY for an UNCONFIGURED zone (see below): a zone the user has configured reads nothing.
         //
-        // A CONFIGURED 0 IS NOT OVERRIDDEN. The read is the wire's answer, and after a profile flash that
-        // register lies (docs/lighting-an18-61.md), so a mode stored at 0 could come up lit and the decrease
-        // control then had nowhere to go (the slider was already at 0 while the light was on). Our stored value
-        // is the source of truth (docs/state-and-events.md); the read only seeds a zone the user has never
-        // configured — a fresh install, where there is no stored intent to apply. Every non-zero stored value
-        // keeps the old reading behaviour, so an out-of-band change is still discovered on this path.
-        _brightness = state is { Configured: true, Brightness: 0 }
-            ? 0
-            : Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100);   // hardware value wins if readable
+        // A CONFIGURED ZONE'S STORED VALUE IS AUTHORITATIVE — the read does NOT override it, not even with a
+        // non-zero value. docs/state-and-events.md states why: a read answers "what does the wire hold now", and
+        // after a profile flash the Acer keyboard-brightness register LIES (the OPMODE flash zeroes it while the
+        // keyboard is lit — docs/lighting-an18-61.md), but even a NON-zero read is not the user's intent: a read
+        // is not an author of intent except on the one event path (AdoptFromHardware/AdoptBrightness, below).
+        // The read used to win here ("hardware value wins if readable"), which is the owner's bug on both
+        // reported problems: a zone stored at 100 whose register read 0 came up with the slider at 0 and the
+        // keyboard DARK (the construction re-apply below sends the slider), and a later profile switch inherited
+        // that wrong look through the unconfigured-inheritance branch — the stored value was never wrong, only
+        // what the panel believed. Reading a configured zone here also violated the rule the wave-6 comment
+        // above already states, so it is removed rather than narrowed.
+        //
+        // THE READ SEEDS ONLY AN UNCONFIGURED ZONE — a fresh install, where there is no stored intent to apply
+        // and the firmware's own level is the honest thing to show. Such a zone applies nothing (see the
+        // Configured guard below), so the seed cannot leak to the device.
+        _brightness = state.Configured
+            ? Math.Clamp(state.Brightness, 0, 100)                              // our stored intent — the source of truth
+            : Math.Clamp(readBrightness?.Invoke() ?? state.Brightness, 0, 100); // fresh install: seed from the firmware
         _speed = state.Speed;
         _reverseDirection = state.Direction == 2;
         _color = FromPacked(state.Color);
@@ -358,9 +411,7 @@ public sealed partial class LightViewModel : ObservableObject
             {
                 int? b;
                 try { b = read.Invoke(); } catch { b = null; }
-                // The "may the register be lying" answer is read on the UI thread, where the follow switch
-                // lives, so the worker never touches view-model state.
-                if (b is { } v) _post(() => AdoptBrightness(v, _profileFlashPossible?.Invoke() ?? true));
+                if (b is { } v) _post(() => AdoptBrightness(v));
                 lock (_readGate)
                 {
                     if (!_readPending) { _reading = false; return; }
@@ -368,6 +419,18 @@ public sealed partial class LightViewModel : ObservableObject
                 }
             }
         });
+    }
+
+    /// <summary>The app is about to drive a profile flash (the palette write that the Acer OPMODE handler
+    /// performs at a switch). From this instant, for <see cref="FlashSuspectSeconds"/>, a 0 this zone reports over
+    /// a lit keyboard is the flash's lie and is refused rather than adopted. The section/coordinator arms this at
+    /// the flash instant (<see cref="LightingViewModel.NoteProfileFlash"/>), so the suspicion is tied to the EVENT
+    /// that can zero the register, not to a permanent device capability. Any non-zero read clears it early (the
+    /// register is provably live again), and the window itself expires, so a much later Fn dim to 0 lands.
+    /// See docs/lighting-an18-61.md and docs/state-and-events.md.</summary>
+    public void NoteProfileFlash()
+    {
+        lock (_readGate) _flashSuspectedAt = _clock();
     }
 
     /// <summary>The doubt moment at this panel's level: push OUR state at the device and read nothing. Called
@@ -389,6 +452,11 @@ public sealed partial class LightViewModel : ObservableObject
     /// written into the stored object the panel was holding. Nothing else about the rule moved.</summary>
     public void Rebind(LightZoneState state)
     {
+        // A mode change SUPERSEDES any edit in flight: stop the panel's debounce so the superseded edit cannot
+        // tick later and save its stale capture over the target mode's state we are about to adopt. (A Repaint
+        // of the SAME mode deliberately does NOT come here — see Repaint — because there the pending edit is the
+        // intent we must keep.)
+        _debounce.Stop();
         if (!state.Configured)
         {
             state = Captured(configured: true);
@@ -409,6 +477,32 @@ public sealed partial class LightViewModel : ObservableObject
         ApplyNow();
     }
 
+    /// <summary>Re-apply what this panel is showing at the device for the SAME mode — the panel half of
+    /// <see cref="LightingViewModel.Repaint"/>, i.e. the post-switch burst, the drawer open, the resume and the
+    /// lid. It is NOT a rebind, and the difference is load-bearing.
+    ///
+    /// THE RULE: while a user edit is pending (<c>_debounce.IsRunning</c>), the controls are NOT overwritten —
+    /// the panel just applies its OWN current values. The edit is applied and saved by its pending tick a moment
+    /// later, so the burst cannot revert it. <c>state</c> is the section's committed copy (behind the edit), so
+    /// rebinding from it here would put the stale value back on the slider and the pending tick would then save
+    /// that over the user's choice: the owner's «настройки яркости не пишутся». The read path already keeps the
+    /// mirror guard (<c>AdoptBrightness</c>: "the hardware read raced ahead of the apply"); this is the same
+    /// guard on the re-apply path.
+    ///
+    /// WITH NO EDIT PENDING it rebinds from <paramref name="state"/>, exactly as the old shape did: that is what
+    /// re-applies an adopted/Fn value the section has committed, and what marks a mode's first sight of a zone
+    /// as configured (<see cref="Rebind"/> carries that rule).
+    ///
+    /// A MODE CHANGE IS <see cref="LightingViewModel.Reload"/> → <see cref="Rebind"/>, NOT this method, and it
+    /// still ADOPTS the new mode even with an edit in flight (a mode change is a new intent that supersedes the
+    /// edit, and <c>Rebind</c> stops the superseded debounce). "Adopt the target" versus "do not touch the
+    /// pending edit" is thus distinguished by the CALL, not by guessing from the values.</summary>
+    public void Repaint(LightZoneState state)
+    {
+        if (_debounce.IsRunning) { ApplyNow(); return; }   // same mode: never clobber an edit in flight
+        Rebind(state);
+    }
+
     /// <summary>ADOPT a hardware-reported brightness: move the slider and make it the STORED intent. Reached only
     /// from <see cref="AdoptFromHardware"/>, i.e. only from an out-of-band input event — the one path on which a
     /// read is an author of intent (docs/state-and-events.md). Storing is the half that used to be missing: the
@@ -418,8 +512,18 @@ public sealed partial class LightViewModel : ObservableObject
     /// <c>_loading</c> keeps this out of <c>Schedule()</c>, and only Brightness is written: <c>Configured</c> and
     /// the rest of the slider are deliberately left alone, so a key that moves a zone the user never configured
     /// (a fresh install) cannot make the app start driving that zone — that snapshot is <c>SaveState()</c>'s job
-    /// on the user-edit path.</summary>
-    private void AdoptBrightness(int value, bool profileFlashPossible)
+    /// on the user-edit path.
+    ///
+    /// WHY A 0 CAN BE REFUSED, AND WHEN. The Acer OPMODE profile flash zeroes the EC's keyboard-brightness
+    /// register at the switch even though the keyboard stays lit by the STATIC re-apply (docs/lighting-an18-61.md),
+    /// so a 0 read in that moment is the register lying, not the user dimming. A 0 read at any other time is a
+    /// genuine Fn-key dim to off, which MUST reach 0 (the owner's "slider stops at 25%": the old guard keyed on
+    /// the static capability — permanently true on this hardware — and refused it forever). The discriminator is
+    /// therefore the flash EVENT WINDOW (<see cref="NoteProfileFlash"/> / <see cref="_flashSuspectedAt"/>): refuse
+    /// the 0 only while a flash we drove is still fresh, and adopt it otherwise. Any non-zero read proves the
+    /// register live and clears the suspicion early, so a flash whose 0 was already refused can never mask a
+    /// subsequent real read either.</summary>
+    private void AdoptBrightness(int value)
     {
         value = Math.Clamp(value, 0, 100);
         // A user edit is in flight (the debounce is pending): the hardware read raced ahead of the apply and
@@ -427,14 +531,15 @@ public sealed partial class LightViewModel : ObservableObject
         // debounce tick would then apply and PERSIST the stale value over the user's choice. The user wins;
         // the next input event re-reads after this apply has landed.
         if (_debounce.IsRunning) return;
-        // A read-back of 0 is spurious ONLY where the profile flash is in play: the OPMODE flash (a lightbar
-        // that follows the profile) zeroes the EC's keyboard-brightness register even though the keyboard is lit
-        // by the STATIC re-apply — and that register stays 0 until the next firmware switch-flash. There the
-        // app's stored brightness is authoritative, so the 0 is refused rather than snapping the slider and
-        // overwriting the mode's value. On every other device the register is trusted: a 0 is a genuine dim to
-        // off, adopted and stored, which is what keeps the decrease control working all the way to the bottom
-        // (refusing every 0 there left the control dead until the user raised the brightness first).
-        if (profileFlashPossible && value == 0 && Brightness > 0) return;
+        // A non-zero read is ground truth: the register is live, so whatever flash was suspected is over. Clear
+        // it before deciding, which also keeps a long-ago flash from poisoning a later genuine dim to 0.
+        if (value > 0) { lock (_readGate) _flashSuspectedAt = null; }
+        // The flash's lie: a 0 reported while a flash we drove is still fresh and the app believes the keyboard
+        // is lit (Brightness > 0). Refuse it — the register zeroes at the switch, and the next real read returns
+        // the true level. Outside that window (or with Brightness already 0, where a 0 is our own intent) the 0 is
+        // the user's dim and is adopted.
+        if (value == 0 && Brightness > 0 && FlashSuspected())
+            return;
         if ((int)Brightness == value) return;
         _loading = true;
         Brightness = value;
@@ -443,6 +548,15 @@ public sealed partial class LightViewModel : ObservableObject
         // where the assignment this replaced left the same guarantee only as a comment.
         _state = _state with { Brightness = value };
         _store(_state);
+    }
+
+    // Whether a flash we drove is still fresh enough that a 0 read is the register lying rather than the user
+    // dimming (see AdoptBrightness). Static window measured against the injected clock so a test can place a read
+    // on either side of it without sleeping.
+    private bool FlashSuspected()
+    {
+        lock (_readGate)
+            return _flashSuspectedAt is { } at && (_clock() - at).TotalSeconds < FlashSuspectSeconds;
     }
 
     partial void OnSelectedEffectIndexChanged(int value) { UpdateColorMode(); Schedule(); }

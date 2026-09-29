@@ -7,7 +7,7 @@ namespace AcerHelper.Tests;
 
 /// <summary>
 /// CHARACTERISATION of the startup row of the volatile-state re-apply schedule: which axes
-/// <see cref="LaptopService.ApplyStartupState"/> drives, with what values, and — the point of this file — which
+/// <see cref="ApplyStartupState"/> drives, with what values, and — the point of this file — which
 /// axis it deliberately does not touch.
 ///
 /// WHY THIS IS NOT ALREADY COVERED. <c>LaptopServicePresetTests</c> pins each <c>ApplyMode*</c> on its own.
@@ -63,7 +63,7 @@ public class ReconcileScheduleTests
         settings.GpuOcPresets["balanced"] = new GpuOcPreset { Core = -150, Mem = 800 };
         var a = Setup(settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.Equal(new[] { (-150, 800) }, a.Gpu.SetCalls);
     }
@@ -76,7 +76,7 @@ public class ReconcileScheduleTests
     {
         var a = Setup(new Settings());
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.Equal(new[] { (0, 0) }, a.Gpu.SetCalls);
     }
@@ -89,7 +89,7 @@ public class ReconcileScheduleTests
         settings.CpuPowerModes["balanced"] = "best-performance";
         var a = Setup(settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.Equal(["best-performance"], a.Cpu.SetCalls);
     }
@@ -105,7 +105,7 @@ public class ReconcileScheduleTests
         settings.CpuPowerModes["quiet"] = "best-efficiency";
         var a = Setup(settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.Empty(a.Cpu.SetCalls);
     }
@@ -121,7 +121,7 @@ public class ReconcileScheduleTests
         settings.CoPresets["balanced"] = new CoPreset { AllCore = -20 };
         var a = Setup(settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.True(Eventually.Until(() => a.Co.SetCalls.Count > 0), "startup never reached the SMU");
         Assert.Equal([-20], a.Co.SetCalls);   // the fake exposes no domains, so the all-core path is the one that runs
@@ -139,7 +139,7 @@ public class ReconcileScheduleTests
     {
         var a = Setup(new Settings());
 
-        a.F.Service.ApplyModeCo();
+        a.F.ApplyModeCo.Run();
 
         Assert.Empty(a.Co.SetCalls);
         Assert.Empty(a.Co.SetDomainsCalls);
@@ -155,7 +155,7 @@ public class ReconcileScheduleTests
         settings.CoPresets["quiet"] = new CoPreset { AllCore = -25 };
         var a = Setup(settings);
 
-        a.F.Service.ApplyModeCo();
+        a.F.ApplyModeCo.Run();
 
         Assert.Equal([0], a.Co.SetCalls);
     }
@@ -181,7 +181,7 @@ public class ReconcileScheduleTests
         settings.CpuPowerModes["balanced"] = "best-performance";
         var a = Setup(settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         // Controls: the run happened, and it drove the axes it is supposed to.
         Assert.Equal(new[] { (-150, 800) }, a.Gpu.SetCalls);
@@ -203,7 +203,7 @@ public class ReconcileScheduleTests
         var a = Setup(settings);
         var before = PresetGraph.Counts(a.F.Store.Settings);
 
-        a.F.Service.ApplyStartupState();
+        a.F.Startup.Run();
 
         Assert.Equal(before, PresetGraph.Counts(a.F.Store.Settings));
         Assert.Equal(0, a.F.Store.SaveCount);

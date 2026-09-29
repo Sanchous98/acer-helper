@@ -8,13 +8,16 @@ namespace AcerHelper.Infrastructure.Composition;
 // THE GUIDED UNDERVOLT SWEEP'S INFRASTRUCTURE HALF: the volatile SMU adapter, the load-runner invocation, the
 // CPU-cluster projection and the sweep's mutual-exclusion gate. The decisions live in
 // Infrastructure/Vendors/Generic/UndervoltSweep.cs; this half is I/O and composition, and it is deliberately as
-// thin as the port it drives.
+// thin as the port it drives. It implements BOTH kinds of probe the pure loop asks for: the short SEARCH probe
+// (Load.PerCoreBudget / SingleCoreBudget) and the long SOAK confirmation (ConfirmAllCore / ConfirmSingleCore).
+// The loop owns WHEN to soak; this half owns only the budgets, and the classification is identical, so the soak
+// cannot become a different verdict by accident.
 //
 // WHAT IT NEVER DOES: it never calls RememberRails/RememberAllCore and never touches Settings. Every write in
 // here is ICurveOptimizer.SetDomains — the SMU mailbox and nothing else — so a probe offset cannot reach
 // settings.json (see docs/auto-undervolt.md §2c and
 // Infrastructure/Vendors/Generic/UndervoltSweep.cs's safety model). Saving is a
-// separate, explicit action (SaveUndervoltSweep) that goes through SetCoValues, the existing per-mode path.
+// separate, explicit action (SaveUndervoltSweep) that goes through SaveCoValues, the existing per-mode path.
 //
 // THE GATE, and why a flag is enough. A sweep owns the SMU for its whole duration; the manual sliders and the
 // periodic re-apply must not write while it does. The port itself already serialises individual mailbox
@@ -57,9 +60,10 @@ public sealed partial class LaptopService
     /// EACH DOMAIN CARRIES ITS CLUSTER AND WHETHER IT IS IDENTIFIABLE. The cluster identity is the port's
     /// (<see cref="VoltageDomain.Cluster"/> — the port knows which rail is the performance cores), and
     /// <see cref="SweepDomain.ClusterIdentified"/> is true only when the machine's TOPOLOGY can also say which
-    /// physical cores carry that class. A domain whose cluster is unknown, or whose class the topology cannot
-    /// partition, is marked not-identified so its probe loads all cores and the progress says so — never a
-    /// silent pretence of isolation. The topology is read once here so every domain agrees.</summary>
+    /// physical cores carry that class. The probe's all-core phase loads every physical core either way; this flag
+    /// governs the SINGLE-CORE phase, which walks only the swept cluster's cores where it can and all cores (with
+    /// the progress saying so) where it cannot — never a silent pretence of isolation. The topology is read once
+    /// here so every domain agrees.</summary>
     public IReadOnlyList<SweepDomain> SweepDomains()
     {
         var co = device.CurveOptimizer;
@@ -109,6 +113,15 @@ public sealed partial class LaptopService
         // must never span that (or any) OS call: it is held for ONE mailbox transaction. Setting the flag first
         // keeps the mutual-exclusion property intact — once it is up, every other SMU writer refuses or skips, so
         // nothing can land before the snapshot — while the gate itself is released before the topology is read.
+        //
+        // EVERYTHING AFTER THE FLAG IS INSIDE ONE try/finally THAT ALWAYS CLEARS IT. This is the fix for the
+        // "auto-undervolt fails after the first cycle" report: the flag used to be cleared only by the inner
+        // finally (which began after the mode-key/base-count snapshots and the forced profile), so ANY throw from
+        // those pre-try reads — a transient EC/WMI failure in CurrentCoDomains, the profile port's Selectable(),
+        // or the forced switch — left `_sweepActive = 1` FOREVER. Every later sweep was then refused with
+        // SweepBusyReason, and because that refusal is a returned result rather than a throw the card rendered it
+        // through a path the user read as a generic failure. Clearing the flag in the OUTERMOST finally makes the
+        // gate exception-safe: a sweep can fail, but it can never leave the SMU claimed by a run that is over.
         lock (_tuningGate)
         {
             if (_sweepActive != 0)
@@ -116,40 +129,51 @@ public sealed partial class LaptopService
             _sweepActive = 1;
         }
 
-        // THE MODE KEY IS SNAPSHOTTED BEFORE THE PROFILE IS FORCED. ApplyProfileTransient writes the port only and
-        // leaves Settings, so CurrentModeKey() would not change anyway — but pinning the key here makes the
-        // requirement structural rather than a consequence of the transient path staying transient: the proposal
-        // is saved to the mode the USER was in, never to the forced Turbo. It travels on the result.
-        var userModeKey = CurrentModeKey();
-
-        // THE BASE COUNTS ARE ALSO READ BEFORE THE FORCE. CurrentCoDomains() derives the mode key from the live
-        // profile, so reading it after the force would snapshot the TURBO mode's preset instead of the user's and
-        // restore the wrong numbers. Read under the user's key, then force.
-        var previous = CurrentProfile();                       // what to put back, read before we force anything
-        var baseCounts = CurrentCoDomains();
-        var forced = ForceSweepProfile(out var profileNote);
         try
         {
-            var domains = SweepDomains();   // reads the topology, OFF the gate
-            if (domains.Count == 0) return SweepResult.Empty;
+            // THE MODE KEY IS SNAPSHOTTED BEFORE THE PROFILE IS FORCED. The forced switch writes the port and
+            // announces the lighting, but leaves Settings, so CurrentModeKey() would not change anyway — but
+            // pinning the key here makes the requirement structural rather than a consequence of the forced path
+            // staying transient: the proposal is saved to the mode the USER was in, never to the forced Turbo.
+            // It travels on the result.
+            var userModeKey = CurrentModeKey();
 
-            var request = new SweepRequest(domains, baseCounts, options);
-            var target = new SweepTarget(this, options, device.CoreAffinity);
-            var result = UndervoltSweep.Run(request, target, progress, cancellation);
-            // The key the save must target is the USER'S, carried out of band rather than re-derived after the
-            // profile was forced. If the profile was NOT touched, the reason it was not is reported in the
-            // existing Detail channel (only when the run did not already have a stop reason).
-            if (profileNote is not null && result.Detail is null) result = result with { Detail = profileNote };
-            return result with { ProposedModeKey = userModeKey };
+            // THE BASE COUNTS ARE ALSO READ BEFORE THE FORCE. CurrentCoDomains() derives the mode key from the
+            // live profile, so reading it after the force would snapshot the TURBO mode's preset instead of the
+            // user's and restore the wrong numbers. Read under the user's key, then force.
+            var previous = CurrentProfile();                   // what to put back, read before we force anything
+            var baseCounts = CurrentCoDomains();
+            var forced = ForceSweepProfile(out var profileNote);
+            try
+            {
+                var domains = SweepDomains();   // reads the topology, OFF the gate
+                if (domains.Count == 0) return SweepResult.Empty;
+
+                var request = new SweepRequest(domains, baseCounts, options);
+                var target = new SweepTarget(this, options, device.CoreAffinity);
+                var result = UndervoltSweep.Run(request, target, progress, cancellation);
+                // The key the save must target is the USER'S, carried out of band rather than re-derived after
+                // the profile was forced. If the profile was NOT touched, the reason it was not is reported in
+                // the existing Detail channel (only when the run did not already have a stop reason).
+                if (profileNote is not null && result.Detail is null) result = result with { Detail = profileNote };
+                return result with { ProposedModeKey = userModeKey };
+            }
+            finally
+            {
+                // THE PROFILE RESTORE RIDES THE SAME DISCIPLINE AS THE COUNTS RESTORE, one level out:
+                // UndervoltSweep.Run's finally (inside the try above) has already put the pre-sweep COUNTS back;
+                // this finally puts the pre-sweep PROFILE back, on every exit path (success, first error, cancel,
+                // thermal, exception). Profile restore last is deliberate: the counts restore is the one that must
+                // go back to the SMU whatever happens, and it must not race a profile change. It is best-effort:
+                // a throw from the restore must not shadow the sweep's own failure (the outer finally still
+                // releases the gate).
+                try { RestoreSweepProfile(previous, forced); } catch { /* best-effort restore */ }
+            }
         }
         finally
         {
-            // THE PROFILE RESTORE RIDES THE SAME DISCIPLINE AS THE COUNTS RESTORE, one level out: UndervoltSweep.Run's
-            // finally (inside the try above) has already put the pre-sweep COUNTS back; this finally puts the
-            // pre-sweep PROFILE back, on every exit path (success, first error, cancel, thermal, exception), and
-            // only then is the SMU released. Profile restore last is deliberate: the counts restore is the one that
-            // must go back to the SMU whatever happens, and it must not race a profile change.
-            RestoreSweepProfile(previous, forced);
+            // The gate is released on EVERY exit path, including a throw from the snapshots or the forced profile
+            // that happens before the inner try — the wedge this fixes. No sweep can leave the SMU claimed.
             lock (_tuningGate) _sweepActive = 0;
         }
     }
@@ -176,7 +200,7 @@ public sealed partial class LaptopService
                   ?? pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Performance && Offered(p));
         if (target == null) { label = "no Turbo/Performance profile is available on this source"; return null; }
 
-        if (ApplyProfileTransient(target)) return target;
+        if (ApplyProfileTransient(target) is not null) return target;
         label = "the performance profile could not be applied";
         return null;
     }
@@ -196,24 +220,26 @@ public sealed partial class LaptopService
     }
 
     /// <summary>A deliberately pessimistic ETA for the UI, from the CPU clusters, the current preset and the
-    /// number of cores each stage's probe will actually load (the cluster's subset where identified, otherwise all
-    /// physical cores). It is the honest estimate of a FULL walk to the floor — there is no time budget to clamp
-    /// it to — and an order of magnitude, not a promise — see UndervoltSweep.RoughEta.</summary>
+    /// number of cores each stage's probe will actually load. The ALL-CORE phase of every stage loads EVERY
+    /// physical core of the machine (the package current/droop the oracle needs), so every stage is costed at the
+    /// full physical-core count; the single-core phase inside <see cref="UndervoltSweep.RoughEta"/> is costed at
+    /// that same count as its (bounded) upper bound, and both phases are costed for every offset that reaches
+    /// them — the single-core-first fail-fast order only ever makes the real run cheaper than this worst case. It
+    /// is the honest estimate of a FULL walk to the floor — there is no time budget to clamp it to — and an order
+    /// of magnitude, not a promise — see UndervoltSweep.RoughEta.</summary>
     public TimeSpan UndervoltSweepEta(SweepOptions options)
     {
         var domains = SweepDomains();
         if (domains.Count == 0) return TimeSpan.Zero;
         var topology = device.CoreAffinity?.Topology();
         var cores = topology?.Cores.Count ?? Environment.ProcessorCount;
-        var perStage = domains
-            .Select(d => d.ClusterIdentified && d.Cluster is { } kind ? topology!.Cluster(kind)!.Count : cores)
-            .ToList();
+        var perStage = domains.Select(_ => cores).ToList();
         return UndervoltSweep.RoughEta(domains, CurrentCoDomains(), options, perStage);
     }
 
     /// <summary>
     /// Persist a finished sweep's proposal as the CURRENT mode's offsets — the explicit save, and the only path
-    /// from a swept value to the settings file. It goes through <see cref="SetCoValues"/>, the same per-mode edit
+    /// from a swept value to the settings file. It goes through <see cref="SaveCoValues"/>, the same per-mode edit
     /// path the sliders use (remembered before written, clamped per rail).
     ///
     /// EVERY CPU cluster is written, not only the ones the sweep reached: a cluster the sweep did NOT visit (a
@@ -269,39 +295,124 @@ public sealed partial class LaptopService
 
         public SweepProbeResult Probe(
             SweepDomain domain, int offset, IReadOnlyList<int> counts,
-            int domainIndex, int domainCount, Action<SweepProgress>? progress, CancellationToken cancellation)
+            int domainIndex, int domainCount, Action<SweepProgress>? progress, CancellationToken cancellation,
+            SweepProbeMode mode)
         {
             if (affinity is null) return SweepProbeResult.Failed("this machine has no CPU affinity adapter");
 
             var topology = affinity.Topology();
-            var all = CpuLoadPolicy.OrderCores(topology.Cores);
-            if (all.Count == 0) return SweepProbeResult.Failed("no physical cores were reported");
+            var allCores = CpuLoadPolicy.OrderCores(topology.Cores);
+            if (allCores.Count == 0) return SweepProbeResult.Failed("no physical cores were reported");
 
-            // LOAD ONLY THE SWEPT CLUSTER'S CORES. The domain names its cluster and whether the topology could
-            // attribute cores to it; where it could, the probe loads that subset so a failure belongs to this
-            // cluster (the sibling is already held at stock). Where it could not, it loads ALL cores and marks
-            // the progress not-identified, so the stage is never shown as isolated when it was not.
+            // THE SINGLE-CORE PHASE RUNS FIRST — the light one-core-at-a-time walk precedes the heavy all-core
+            // concurrent burst. The two phases probe DIFFERENT failure corners (the single-core high-boost case
+            // CoreCycler exists for, and the package current/droop case OCCT/Linpack reach), and the order is
+            // deliberate: the light phase is cheap, so a real oracle error, a thermal abort or a cancellation it
+            // reports is discovered before the (much longer) all-core phase is ever paid for. A single-core PASS
+            // proceeds to the all-core phase; only the two together can produce a PASS. Thermal/cancel/apply
+            // refusals remain GLOBAL stops exactly as before, and a single-core error is the offset's stability
+            // verdict regardless of what the all-core phase might have said.
+            //
+            // THE ALL-CORE PHASE LOADS EVERY PHYSICAL CORE OF THE MACHINE, not only the swept cluster's. This is
+            // the fix for the owner's "a few cores briefly busy, the rest near idle" report: OCCT/Linpack load
+            // every core at once, because it is the CONCURRENT package current/droop that makes a marginal
+            // undervolt fail, and a probe that loaded only the swept cluster's few cores produced almost none of
+            // that current. The offset being tested is still the swept cluster's: the sweep's baseline holds
+            // every OTHER cluster at STOCK (SweepPolicy.StockBaseline), so loading a stock-held sibling adds the
+            // package current the oracle needs without contaminating the attribution — a failure is reported
+            // per-core (Classify names the core), and the swept cluster's offset is the only one that moved.
+            //
+            // THE SWEPT CLUSTER'S CORES ARE COMPUTED HERE, because the SINGLE-CORE phase walks exactly them
+            // (where the topology can attribute them; otherwise all cores, with the progress marked
+            // not-identified) so the CoreCycler high-boost corner belongs to the cluster on the bench.
             var subset = domain.ClusterIdentified && domain.Cluster is { } kind ? topology.Cluster(kind) : null;
             var identified = subset is { Count: > 0 };
-            var cores = identified ? CpuLoadPolicy.OrderCores(subset!) : all;
+            var clusterCores = identified ? CpuLoadPolicy.OrderCores(subset!) : allCores;
+
+            // WHICH BUDGETS THE PHASE GETS is the only difference between the short SEARCH probe and the long
+            // SOAK confirmation. The search uses the per-offset Load/SingleCoreBudget; the soak uses the much
+            // longer ConfirmAllCore/ConfirmSingleCore. Everything else — the all-core load, the concurrency, the
+            // classification, the thermal/cancel policy — is identical, so the soak cannot become a weaker oracle
+            // or a different verdict by accident.
+            var allCoreBudget = mode == SweepProbeMode.Soak ? options.ConfirmAllCore : options.Load.PerCoreBudget;
+            var singleCoreBudget = mode == SweepProbeMode.Soak ? options.ConfirmSingleCore : options.SingleCoreBudget;
 
             // The probe's own run must be able to test every core it loads; a caller's short total budget is
             // widened to fit rather than turning a complete test into a false "budget exhausted". Stop-on-error is
-            // forced: the sweep wants the FIRST oracle failure, not a continued run.
-            var load = options.Load;
-            var needed = load.PerCoreBudget * (cores.Count + 1);
-            if (load.TotalBudget < needed) load = load with { TotalBudget = needed };
-            load = load with { StopOnFirstError = true };
-
+            // forced: the sweep wants the FIRST oracle failure, not a continued run. The all-core phase forces
+            // ConcurrentCores on (the whole point of the heavier oracle) and widens the total budget to
+            // per-core × (cores + 1), which is the worst case where the workers serialise on a single logical CPU
+            // rather than the usual all-at-once wall clock.
             Func<int> temperature = () => owner.device.Sensors?.Read().CpuTempC ?? -1;
             var clock = Stopwatch.StartNew();
-            var run = CpuLoadRunner.Run(affinity, temperature, load, cancellation, kernel: null,
-                onCore: (core, index, count) => progress?.Invoke(new SweepProgress(
-                    SweepPhase.Loading, domainIndex, domainCount, domain.Label, offset,
-                    index, count, core, clock.Elapsed.TotalMilliseconds, temperature(), identified)),
-                cores: cores);
 
-            return Classify(run);
+            // THE PHASE NAMES THE KIND OF LOAD, NOT THE SEARCH/SOAK STAGE: the single-core half always reports
+            // SingleCore, and the all-core half reports Loading (or Confirming for the soak), so the card can say
+            // "one core at a time" for both the search and the soak. The progress order mirrors the run order:
+            // SingleCore first, then Loading/Confirming.
+            var singleCorePhase = SweepPhase.SingleCore;
+            SweepProbeResult? singleVerdict = null;
+
+            // The single-core half is gated ONLY by IncludeSingleCorePhase/budget — never by the all-core outcome,
+            // which by construction has not run yet. A caller cancellation stops the whole probe, so it is not
+            // worth starting a minutes-long single-core pass on an already-cancelled sweep.
+            if (options.IncludeSingleCorePhase && singleCoreBudget > TimeSpan.Zero
+                && !cancellation.IsCancellationRequested)
+            {
+                Action<LogicalCore, int, int> onSingleCore = (core, index, count) => progress?.Invoke(new SweepProgress(
+                    singleCorePhase, domainIndex, domainCount, domain.Label, offset,
+                    index, count, core, clock.Elapsed.TotalMilliseconds, temperature(), identified));
+
+                // The single-core phase is sequential (one core at a time) over the swept cluster's cores, with
+                // its own total budget widened to per-core × (cores + 1) so a complete walk is never cut short.
+                var single = options.Load with
+                {
+                    ConcurrentCores = false,
+                    StopOnFirstError = true,
+                    PerCoreBudget = singleCoreBudget,
+                    TotalBudget = singleCoreBudget * (clusterCores.Count + 1),
+                };
+                var singleRun = CpuLoadRunner.Run(affinity, temperature, single, cancellation, kernel: null,
+                    onCore: onSingleCore, cores: clusterCores);
+                singleVerdict = Classify(singleRun);
+            }
+
+            // FAIL FAST, AND DO NOT SPEND THE ALL-CORE PHASE. A single-core run that already produced a REAL
+            // oracle error is a stability verdict for the offset; a thermal abort and a cancellation are global
+            // stops. None of them may be followed by the much longer all-core load. The combined verdict is
+            // returned then and there: with no all-core phase run, the single-core verdict stands unchanged (the
+            // pure rule's `single`-only case). A single-core PASS — or a merely INCONCLUSIVE single-core result
+            // (a refused pin, a budget-exhausted walk) — falls through to the all-core phase, exactly as the
+            // fail-closed combination expects: an inconclusive single-core result must still not suppress the
+            // all-core evidence.
+            if (singleVerdict is { } early && early.Status is SweepProbeStatus.CoreError
+                or SweepProbeStatus.ThermalAbort or SweepProbeStatus.Cancelled)
+                return SweepPolicy.CombineProbes(early, null);
+
+            // The ALL-CORE phase runs second, reporting Loading (or Confirming for the soak's all-core pass). It
+            // still loads every physical core and forces Concurrency/StopOnFirstError, and it is still bounded by
+            // the phase's own budget with the total widened to per-core × (cores + 1).
+            var allCorePhase = mode == SweepProbeMode.Soak ? SweepPhase.Confirming : SweepPhase.Loading;
+            Action<LogicalCore, int, int> onCore = (core, index, count) => progress?.Invoke(new SweepProgress(
+                allCorePhase, domainIndex, domainCount, domain.Label, offset,
+                index, count, core, clock.Elapsed.TotalMilliseconds, temperature(), identified));
+
+            var load = options.Load;
+            var needed = allCoreBudget * (allCores.Count + 1);
+            if (load.TotalBudget < needed) load = load with { TotalBudget = needed };
+            load = load with { PerCoreBudget = allCoreBudget, StopOnFirstError = true, ConcurrentCores = true };
+
+            var run = CpuLoadRunner.Run(affinity, temperature, load, cancellation, kernel: null,
+                onCore: onCore, cores: allCores);
+            var classification = Classify(run);
+
+            // THE TWO VERDICTS ARE COMBINED FAIL-CLOSED by the pure rule in SweepPolicy.CombineProbes: a
+            // cancellation wins, then a real oracle error from EITHER phase, then a thermal abort from either
+            // phase, and only two passes make a pass — so an all-core PASS can never mask a single-core error,
+            // and an inconclusive result from either phase is never upgraded to a pass. (The single-core phase's
+            // own pass can no longer paper over an inconclusive all-core result, and vice versa.)
+            return SweepPolicy.CombineProbes(classification, singleVerdict);
+
         }
 
         /// <summary>Turn a load run into the sweep's three-way probe result. A run that completed with every core

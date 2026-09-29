@@ -38,6 +38,12 @@ public sealed partial class AcerDevice
         var ec = new AcerEcHidController();
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
+        // The GPU power envelope as a control of its own (the owner's per-mode power level): the SAME EC channel,
+        // offered as a port so the UI can pick a row without switching the profile. Declared only where the
+        // channel exists — a model without it keeps the slot null and the row never appears. The write is the
+        // controller's enqueue-only ApplyLevel, so it lands on the writer thread, never the UI's.
+        if (_ec is { } envelopeEc) GpuPowerEnvelope = new EcPowerEnvelope(envelopeEc.ApplyLevel);
+
         // The profile set: Acer's WMI is the richer source on Windows, so it replaces the generic overlay port.
         // The traits come off the SAME table, handed over as its lookup — so the rows the UI shows and the class
         // and colours each row carries are one list rather than two that could drift (see ProfileTraits).

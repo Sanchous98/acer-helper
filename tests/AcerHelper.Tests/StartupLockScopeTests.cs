@@ -6,7 +6,7 @@ using AcerHelper.Tests.Fakes;
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// Wave 5 — how far <c>_state</c> reaches during <see cref="LaptopService.ApplyStartupState"/>.
+/// Wave 5 — how far <c>_state</c> reaches during <see cref="ApplyStartupState"/>.
 ///
 /// The method used to hold the lock across four hardware calls (two powrprof, one gdi32, one NvAPI) — design
 /// doc D17, and its Step 5 names this method. It now reads every value it needs inside the lock and makes the
@@ -34,7 +34,7 @@ public class StartupLockScopeTests
         f.Device.Clamshell = probe;
         f.Device.DisplayTint = probe;
 
-        f.Service.ApplyStartupState();
+        f.Startup.Run();
 
         // Both were reached. Without this, a probe that is simply never called would satisfy "held == false"
         // vacuously — the false green this file exists to avoid.
@@ -52,7 +52,7 @@ public class StartupLockScopeTests
         f.Device.Clamshell = probe;
         f.Device.DisplayTint = probe;
 
-        f.Service.ApplyStartupState();
+        f.Startup.Run();
 
         Assert.Empty(probe.Calls);
     }
@@ -74,7 +74,7 @@ public class StartupLockScopeTests
 
         Assert.False(f.Service.StateHeld);        // this thread holds nothing
 
-        f.Service.ApplyModeCpuPower();
+        f.ApplyModeCpuPower.Run();
 
         Assert.Equal([true], seen);               // reached the port from inside the mode call's own lock
         Assert.False(f.Service.StateHeld);        // ...and released again by the time we look

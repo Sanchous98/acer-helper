@@ -178,8 +178,8 @@ public class AcerProfilesTests
     [InlineData(0x06, "low-power")]              // Eco
     [InlineData(0x00, "quiet")]                  // Quiet
     [InlineData(0x01, "balanced")]               // Balanced
-    [InlineData(0x04, "balanced-performance")]   // Performance (93 W)
-    [InlineData(0x05, "performance")]            // Turbo (108 W) — see the trap below
+    [InlineData(0x04, "balanced-performance")]   // Performance (100 W)
+    [InlineData(0x05, "performance")]            // Turbo (115 W) — see the trap below
     public void EachProfileCarriesItsKernelChoiceName(int b, string choice)
     {
         var profile = AcerProfiles.ToDomain((byte)b);
@@ -194,12 +194,12 @@ public class AcerProfilesTests
     }
 
     /// <summary>THE TRAP, stated as the one assertion that would catch it: the kernel's <c>"performance"</c> is
-    /// Acer TURBO (byte <c>0x05</c>, the 108 W envelope), and Acer's Performance — the 93 W mode the UI shows as
+    /// Acer TURBO (byte <c>0x05</c>, the 115 W envelope), and Acer's Performance — the 100 W mode the UI shows as
     /// "Performance" — is the kernel's <c>"balanced-performance"</c>.
     ///
     /// Both halves are asserted because both were live: <c>SysfsPowerProfiles</c>'s own token table classifies
     /// <c>"performance"</c> as <see cref="ProfileKind.Performance"/>, and the app's EC envelope is driven from
-    /// the kind, so a port that let the source's classification through sent mode 1 (93 W) where the hardware
+    /// the kind, so a port that let the source's classification through sent mode 1 (100 W) where the hardware
     /// wanted mode 0. A name-keyed shortcut anywhere — <c>p.DisplayName.ToLower()</c> most of all — reproduces it
     /// silently, which is why the translation goes through this table instead.</summary>
     [Fact]

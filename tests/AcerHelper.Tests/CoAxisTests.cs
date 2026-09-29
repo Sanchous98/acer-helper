@@ -49,7 +49,7 @@ public class CoAxisTests
         f.Device.CurveOptimizer = domainless;
 
         Assert.False(Axis([.. domainless.Domains]).UsesRails);
-        Assert.True(f.Service.SetCoValues([-7]).ok);
+        Assert.True(f.ApplyUndervolt.Run([-7]).ok);
         Assert.Equal([-7], domainless.SetCalls);                 // the all-core path is the one that ran
         Assert.Empty(domainless.SetDomainsCalls);
 
@@ -57,7 +57,7 @@ public class CoAxisTests
         f.Device.CurveOptimizer = railed;
 
         Assert.True(Axis([.. railed.Domains]).UsesRails);
-        Assert.True(f.Service.SetCoValues([-7]).ok);
+        Assert.True(f.ApplyUndervolt.Run([-7]).ok);
         Assert.Single(railed.SetDomainsCalls);                   // ...and the per-rail path is the one that ran
         Assert.Empty(railed.SetCalls);
     }
@@ -288,7 +288,7 @@ public class CoAxisTests
 
         co.DomainList.Reverse();
 
-        f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
 
         var axis = new CoAxis(co.Domains, co.Range);
         Assert.Equal([-20, -10], co.SetDomainsCalls[^1]);                    // the port got the reordered values

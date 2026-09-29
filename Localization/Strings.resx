@@ -114,6 +114,15 @@
   <data name="oc.gpu_overclock_failed" xml:space="preserve">
     <value>GPU overclock failed</value>
   </data>
+  <data name="oc.gpu_power" xml:space="preserve">
+    <value>Power</value>
+  </data>
+  <data name="oc.gpu_power_follow" xml:space="preserve">
+    <value>Follow profile</value>
+  </data>
+  <data name="oc.gpu_power_failed" xml:space="preserve">
+    <value>GPU power level failed</value>
+  </data>
   <data name="oc.power_mode" xml:space="preserve">
     <value>Power mode</value>
   </data>
@@ -154,7 +163,7 @@
     <value>Guided undervolt sweep?</value>
   </data>
   <data name="uv.confirm_body" xml:space="preserve">
-    <value>The sweep tries deeper CPU offsets and load-tests each one, one core at a time. It is long and invasive and can make the machine unstable or reboot it. It REQUIRES the ORIGINAL charger (the barrel/DC-in one, not USB-C PD): on battery — and on USB-C PD, which is treated as battery — the platform can accept a Curve-Optimizer write without applying it, so a probe could pass against an offset that was never set. During the run the app temporarily switches to a performance profile (Turbo where available) and restores your previous profile when the sweep ends. Keep the laptop on the original charger and close other tuning tools (Ryzen Master, RyzenAdj, HWiNFO) — they share the SMU/PCI lock. Offsets are never saved automatically, and a reboot always restores stock.</value>
+    <value>The sweep tries deeper CPU offsets and load-tests each one (all cores at once, then one core at a time). It is long and invasive and can make the machine unstable or reboot it. Once it settles on an offset it runs a long final soak — several minutes per core on one cluster — to confirm it before proposing. It REQUIRES the ORIGINAL charger (the barrel/DC-in one, not USB-C PD): on battery — and on USB-C PD, which is treated as battery — the platform can accept a Curve-Optimizer write without applying it, so a probe could pass against an offset that was never set. During the run the app temporarily switches to a performance profile (Turbo where available) and restores your previous profile when the sweep ends. Keep the laptop on the original charger and close other tuning tools (Ryzen Master, RyzenAdj, HWiNFO) — they share the SMU/PCI lock. Offsets are never saved automatically, and a reboot always restores stock.</value>
   </data>
   <data name="uv.sweep_start" xml:space="preserve">
     <value>Start sweep</value>
@@ -184,10 +193,16 @@
     <value>Applying</value>
   </data>
   <data name="uv.phase_testing" xml:space="preserve">
-    <value>Testing</value>
+    <value>Testing (all cores)</value>
+  </data>
+  <data name="uv.phase_single_core" xml:space="preserve">
+    <value>Testing (one core at a time)</value>
   </data>
   <data name="uv.phase_backing_off" xml:space="preserve">
     <value>Backing off</value>
+  </data>
+  <data name="uv.phase_confirming" xml:space="preserve">
+    <value>Confirming — long soak</value>
   </data>
   <data name="uv.phase_restoring" xml:space="preserve">
     <value>Returning to stock</value>
@@ -227,6 +242,9 @@
   </data>
   <data name="uv.stop_smu" xml:space="preserve">
     <value>Stopped: the SMU refused a write.</value>
+  </data>
+  <data name="uv.stop_power_lost" xml:space="preserve">
+    <value>Stopped: power was disconnected. The sweep needs the original charger, so the run was halted and your offsets restored.</value>
   </data>
   <data name="uv.refused_ac" xml:space="preserve">
     <value>Refused: the guided sweep needs the original charger.</value>

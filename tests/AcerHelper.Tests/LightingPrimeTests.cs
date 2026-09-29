@@ -15,83 +15,97 @@ namespace AcerHelper.Tests;
 /// placeholder is provably invisible, and <c>SyncFromHardware</c> — wired to Fn-key changes and called once at
 /// startup and once per language rebuild — is its prime.
 ///
-/// NOT DEFERRED: an RGB zone's brightness. That value is also what the startup re-apply SENDS to the device,
-/// so a placeholder would change what the hardware is told. The plan prescribed 0 there; 0 is the one value
-/// that must not go in, because it would make a configured keyboard come up dark and never be re-applied (the
-/// prime re-reads the slider, it does not write). The gate below pins the behaviour that would have broken.
+/// NOT DEFERRED, WHERE IT IS TAKEN AT ALL: an RGB zone's brightness. That value is also what the startup
+/// re-apply SENDS to the device, so a placeholder would change what the hardware is told. The plan prescribed 0
+/// there; 0 is the one value that must not go in, because it would make a configured keyboard come up dark and
+/// never be re-applied (the prime re-reads the slider, it does not write). The gate below pins the behaviour that
+/// would have broken.
+///
+/// AND NOT TAKEN FOR A CONFIGURED ZONE AT ALL (2026-09-29): a zone the user has already set takes its
+/// brightness from STORAGE — no read at construction, and none of the read-wins behaviour this file used to
+/// pin. A read is not an author of intent (docs/state-and-events.md); the register lies after a profile flash
+/// (docs/lighting-an18-61.md), and letting it win is the owner's «настройки яркости не пишутся» / «при смене
+/// профиля сохранённые настройки не применяются правильно». The read survives for an UNCONFIGURED zone (a
+/// fresh install) and on the Fn-key event path (<c>AdoptFromHardware</c>), where its guards still apply.
 /// </summary>
 public class LightingPrimeTests
 {
     // ---------------------------------------------------------------- not deferred: the RGB zone
 
-    /// <summary>The construction read works exactly as it did before this wave, and the value it produces is
-    /// what the startup re-apply sends — the fact that makes a placeholder unsafe here.
+    /// <summary>A CONFIGURED zone's stored brightness is what the panel shows AND what the startup re-apply
+    /// sends — the hardware read does NOT override it, even when it answers with a different non-zero value.
+    /// This is the owner's bug ("настройки яркости не пишутся" / a stored 100 shown as 0 when the register lies):
+    /// the old shape read the wire first and let it win, so a configured zone's slider and the value the device
+    /// was told came from the register rather than from the user's saved intent (docs/state-and-events.md: a read
+    /// is not an author of intent except on the event path, <c>AdoptBrightness</c>).
     ///
-    /// THE THIRD ASSERTION WAS REPAIRED RATHER THAN TRANSLATED. It used to read "the stored value is not
-    /// consulted while the read works" off <c>state.Brightness</c>, where <c>state</c> was the stored OBJECT the
-    /// panel held; the state is now a VALUE the panel copies, so that line could no longer fail whatever the
-    /// panel did — the sixth-of-six failure mode this suite keeps finding. What it was protecting is that the
-    /// construction path does not PERSIST, and that is asserted against the door instead.
+    /// THE READ IS NOT EVEN TAKEN for a configured zone, so the assertion counts it: fewer EC round-trips at
+    /// <c>BuildUi</c>, and — the structural half — nothing can be believed off the wire for a zone the user owns.
     ///
-    /// MUTATIONS THAT REDDEN IT: sending the stored brightness instead of the read one (<c>written</c>); storing
-    /// on the construction path (<c>Writes</c>).</summary>
+    /// MUTATIONS THAT REDDEN IT: restoring the unconditional read
+    /// (<c>readBrightness?.Invoke() ?? state.Brightness</c>), or the read-wins branch this replaced for a
+    /// non-zero stored value.</summary>
     [Fact]
-    public void AnRgbZonesBrightness_IsReadAtConstruction_AndIsWhatStartupWrites()
+    public void AConfiguredZonesStoredBrightness_WinsOverTheRead_AndIsWhatStartupWrites()
     {
         var written = new List<byte>();
         var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
+        var reads = 0;
 
-        var panel = Panel(mode, written, readBrightness: () => 30);
+        var panel = Panel(mode, written, readBrightness: () => { reads++; return 30; });
 
-        Assert.Equal(30, panel.Brightness);   // the hardware value wins over the stored one...
-        Assert.Equal([30], written);          // ...and it is exactly what the re-apply sends
-        Assert.Empty(mode.Writes);            // the stored value is not rewritten while the read works
+        Assert.Equal(60, panel.Brightness);   // the stored intent, not the read's 30...
+        Assert.Equal([60], written);          // ...and it is exactly what the re-apply sends
+        Assert.Equal(0, reads);               // a configured zone is not read at all
+        Assert.Empty(mode.Writes);            // the stored value is not rewritten while the read would work
     }
 
-    /// <summary>The placeholder rule, on the path where it is already the live behaviour: an unreadable zone
-    /// falls back to the stored value. This is what the wave's "placeholder = the answer a failed read would
-    /// have given" means for this row — and it is why 0 could never have been the answer here.
+    /// <summary>An UNCONFIGURED zone is the one shape the construction read still seeds: there is no stored
+    /// intent to apply (a fresh install), so the firmware's own level is the honest thing to show. A null read
+    /// falls back to the stored value (what a failed read would have given). This is the path that keeps
+    /// out-of-band discovery alive without letting a read author intent for a zone the user owns.
     ///
-    /// MUTATION THAT REDDENS IT: taking the read's null as a zero.</summary>
+    /// MUTATION THAT REDDENS IT: taking the read's null as a zero, or skipping the read for an unconfigured
+    /// zone too (the slider would sit at the stored default rather than the firmware's level).</summary>
     [Fact]
-    public void AnRgbZonesBrightness_FallsBackToTheStoredValue_WhenTheReadReportsNothing()
+    public void AnUnconfiguredZonesBrightness_IsSeededFromTheRead_FallingBackToTheStoredValue()
     {
         var written = new List<byte>();
-        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
+        var mode = FakeLightZones.Of("Keyboard", new LightZoneState(false, 0, 60, 5, 1, 0xFF0000, []));
 
-        var panel = Panel(mode, written, readBrightness: () => null);
+        var seeded = Panel(mode, written, readBrightness: () => 30);
+        Assert.Equal(30, seeded.Brightness);   // the firmware's level seeds a fresh install
+        Assert.Empty(written);                 // ...and it applies nothing (unconfigured)
 
-        Assert.Equal(60, panel.Brightness);
-        Assert.Equal([60], written);
+        var fallback = Panel(mode, written, readBrightness: () => null);
+        Assert.Equal(60, fallback.Brightness); // an unreadable zone falls back to the stored value
+        Assert.Empty(written);
     }
 
-    /// <summary>PINNED AS-IS, and the reason the read above was left alone rather than deferred. A reader that
-    /// reports a SPURIOUS zero — the OPMODE profile flash zeroes the EC's brightness register while the keyboard
-    /// is lit, which is the bug the spurious-zero guard documents — makes the panel write 0, so a configured
-    /// keyboard comes up dark. That is today's behaviour on the one path the guard does not cover, and this wave
-    /// preserves it verbatim: putting a placeholder in that write's place would be a device-visible change with
-    /// no way to check it without the machine.
+    /// <summary>The specific lie the owner hit: a configured zone whose register reads a SPURIOUS zero (the
+    /// OPMODE flash zeroes it while the keyboard is lit) keeps the stored brightness on the slider and on the
+    /// wire. The old construction path let that 0 win, so a keyboard stored at 60 came up DARK and the decrease
+    /// control had nowhere to go. The read is not consulted for a configured zone at all, so the lie cannot land.
     ///
-    /// MUTATION THAT REDDENS IT: running the spurious-zero guard on the construction path (nothing would be
-    /// sent, or the stored 60 would be).</summary>
+    /// MUTATION THAT REDDENS IT: restoring the read-wins branch (the panel shows 0 and writes 0), or running only
+    /// the <c>AdoptBrightness</c> guard here rather than making the stored value authoritative.</summary>
     [Fact]
-    public void ASpuriousZeroAtConstruction_IsWrittenAsIs_BecauseThatIsTodaysBehaviour()
+    public void ASpuriousZeroAtConstruction_DoesNotOverrideTheStoredBrightness()
     {
         var written = new List<byte>();
         var mode = FakeLightZones.Of("Keyboard", new LightZoneState(true, 0, 60, 5, 1, 0xFF0000, []));
 
         var panel = Panel(mode, written, readBrightness: () => 0);
 
-        Assert.Equal(0, panel.Brightness);
-        Assert.Equal([0], written);           // the guard in AdoptBrightness does NOT run on the construction path
+        Assert.Equal(60, panel.Brightness);   // stored wins over the lying register...
+        Assert.Equal([60], written);          // ...and the device is told the user's value, never the spurious 0
     }
 
     /// <summary>A configured 0 is the app's stored intent and is applied as 0 — a stale/non-zero read does NOT
-    /// resurrect the light. This is the reported bug: switching to a profile stored at 0 left the backlight on
-    /// because the construction read won over the stored value. The register lies after a profile flash
-    /// (docs/lighting-an18-61.md) and the app's settings are the source of truth (docs/state-and-events.md), so
-    /// a configured zero is authoritative; every NON-zero stored value keeps the read-wins behaviour (the sibling
-    /// test above), so out-of-band discovery is not lost.
+    /// resurrect the light, exactly as a configured non-zero is not overridden by a lying 0. This is the same
+    /// rule as the siblings above, on the value that started it (switching to a profile stored at 0 left the
+    /// backlight on because the construction read won over the stored value, docs/lighting-an18-61.md). The
+    /// app's settings are the source of truth (docs/state-and-events.md), so a configured zero is authoritative.
     ///
     /// MUTATION THAT REDDENS IT: restoring the unconditional read
     /// (<c>readBrightness?.Invoke() ?? state.Brightness</c>).</summary>
@@ -129,7 +143,7 @@ public class LightingPrimeTests
     /// nothing: the value has nowhere to leak. `SyncFromHardware` then brings the real one off the UI thread.
     ///
     /// The port's own <c>Set</c> is the apply delegate here, which is the shape the app wires it in
-    /// (<c>AppController.BuildUi</c> passes <c>lvl =&gt; _svc.SetKeyboardBrightness(lvl).ok</c> — the delegate
+    /// (<c>AppController.BuildUi</c> passes <c>lvl =&gt; _actions.KeyboardBrightness.Run(lvl).ok</c> — the delegate
     /// IS the device write). With the old <c>_ =&gt; true</c> stand-in, <c>SetCalls</c> was a list nothing
     /// could ever add to, so "a prime never writes" was a claim no mutation could falsify.
     ///
@@ -212,5 +226,5 @@ public class LightingPrimeTests
         => new("Keyboard", [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                zones: 1,
                applyAll: (_, _, brightness, _, _) => written.Add(brightness),
-               applyZone: null, mode["Keyboard"], s => ApplyLightZone.Run("Keyboard", s, mode), readBrightness);
+               applyZone: null, mode["Keyboard"], s => new ApplyLightZone(mode).Run("Keyboard", s), readBrightness);
 }

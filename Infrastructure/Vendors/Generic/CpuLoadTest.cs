@@ -9,6 +9,12 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // core-ordering, thermal and cancellation decisions are pure and offline-testable here, while every P/Invoke,
 // sysfs read and thread-affinity call is behind ICoreAffinity in the OS-split files beside it.
 //
+// THE ORACLE IS MULTI-MIX AND CONCURRENT BY DEFAULT. Every core runs every mix (integer, FP/FMA, memory — see
+// CpuStress.cs), and by default all the physical cores of the visit are loaded SIMULTANEOUSLY, because it is the
+// concurrent package current/droop that makes a marginal undervolt fail; the one-core-at-a-time walk was the
+// weaker oracle that let a sweep walk to -40 and crash. ConcurrentCores can restore the sequential walk for
+// single-core high-boost coverage.
+//
 // THE CONTRACT IS INFRASTRUCTURE'S, NOT A DOMAIN PORT. Per docs/domain-layering-map.md a contract that models an
 // OS technology (thread affinity, processor groups, cpusets) is integration; the map's remedy is the
 // thin-contract shape Application/Undervolt.cs established (IUndervoltTarget), not a Domain/Ports.cs
@@ -98,6 +104,20 @@ public sealed record CpuLoadOptions
     /// <summary>Worker priority, below-normal by default so the UI is not starved. Applied on a best-effort
     /// basis; a platform that refuses it does not fail the run.</summary>
     public ThreadPriority Priority { get; init; } = ThreadPriority.BelowNormal;
+
+    /// <summary>WHICH self-checking mixes a block runs. Every mix is exact and false-positive-free (see
+    /// <see cref="CpuStressKernel"/>); running several is what makes the oracle catch a failure that only the FP
+    /// units or the cache/memory path exhibit. Empty means <see cref="CpuStressKernel.DefaultMixes"/> (all of
+    /// them). A probe that ran only the integer mix is the too-weak oracle this option exists to fix.</summary>
+    public IReadOnlyList<LoadMix> Mixes { get; init; } = [];
+
+    /// <summary>WHETHER THE PHYSICAL CORES ARE LOADED SIMULTANEOUSLY. On (the default) every core of the visit
+    /// runs its own pinned worker at the same time, so the package sees the concurrent current/droop that a
+    /// marginal undervolt actually fails under (OCCT/Linpack load all cores at once). Off restores the
+    /// one-core-at-a-time walk, which is the single-core high-boost coverage and is still what catches a
+    /// light-load single-core failure; the two are complementary. SMT siblings are never loaded together either
+    /// way (the topology already carries one logical processor per physical core).</summary>
+    public bool ConcurrentCores { get; init; } = true;
 }
 
 /// <summary>One run's structured result. <see cref="Cores"/> carries one entry per core the run visited, in the
@@ -262,20 +282,25 @@ internal sealed class CpuTemperatureSampler : IDisposable
 }
 
 /// <summary>
-/// Runs the kernel one core at a time. For each core in <see cref="CpuLoadPolicy.OrderCores"/> order it starts a
-/// dedicated worker thread (pinning is a property of a thread, so a pool thread would carry the affinity back),
-/// pins it through <see cref="ICoreAffinity"/>, and runs repeated blocks of <see cref="CpuStressKernel"/> until
-/// the per-core budget, the iteration bound or a stop. The caller runs this off the UI thread —
-/// <see cref="RunAsync"/> is provided for that — and cancels through the token, which the kernel checks inside
-/// every block.
+/// Runs the self-checking mixes over the physical cores. By default the cores are loaded SIMULTANEOUSLY — one
+/// dedicated pinned worker thread per core, all started before any is awaited — because OCCT/Linpack load all
+/// cores at once and it is that concurrent package current/droop that makes a marginal undervolt fail; the
+/// one-at-a-time walk hid it. <see cref="CpuLoadOptions.ConcurrentCores"/> can restore the sequential walk for
+/// pure single-core high-boost coverage. Pinning is a property of a thread, so each core gets its own thread (a
+/// pool thread would carry the affinity back).
 ///
-/// WHAT IT CHECKS PER BLOCK: the thermal verdict first (fail closed), then the block's checksum against the
-/// pinned golden, then the optional suspend pause. The thermal reading is a cached value published by a
-/// <see cref="CpuTemperatureSampler"/> on its own thread — the pinned worker never calls the temperature
-/// provider, so a slow WMI/firmware read cannot park the core (see <see cref="CpuLoadOptions.TemperaturePollInterval"/>).
-/// A mismatch or a fault is an error; with
-/// <see cref="CpuLoadOptions.StopOnFirstError"/> (the default) the run ends and the remaining cores are recorded
-/// as skipped, mirroring CoreCycler's stopOnError/skipCoreOnError shape.
+/// EACH WORKER runs every configured mix (<see cref="CpuLoadOptions.Mixes"/>, default all of
+/// <see cref="CpuStressKernel.DefaultMixes"/>) in turn, block by block: the thermal verdict first (fail closed),
+/// then the block's checksum against the pinned golden for that mix, then the optional suspend pause. The thermal
+/// reading is a cached value published by a <see cref="CpuTemperatureSampler"/> on its own thread — the pinned
+/// worker never calls the temperature provider, so a slow WMI/firmware read cannot park the core (see
+/// <see cref="CpuLoadOptions.TemperaturePollInterval"/>).
+///
+/// STOP SEMANTICS. A mismatch or a fault is an error, and its mix is named in <see cref="CoreLoadResult.Detail"/>.
+/// With <see cref="CpuLoadOptions.StopOnFirstError"/> (the default) a SINGLE mismatch signal stops the whole
+/// concurrent phase at once (the shared token, not a per-thread flag) and the remaining cores are recorded as
+/// skipped, mirroring CoreCycler's stopOnError shape. A thermal abort or a cancellation likewise ends every
+/// core and is never a stability verdict. Results are returned in visit order regardless of completion order.
 /// </summary>
 public static class CpuLoadRunner
 {
@@ -298,13 +323,14 @@ public static class CpuLoadRunner
     /// machine, an optional per-core hook so a caller (the guided undervolt sweep) can show which core is being
     /// loaded, and an optional caller-supplied core list so that caller can load a SUBSET of the topology (one
     /// cluster's cores) rather than every physical core. A null/empty <paramref name="cores"/> means "the whole
-    /// topology", which is the shipped behaviour for every existing caller.</summary>
+    /// topology", which is the shipped behaviour for every existing caller. <paramref name="onCore"/> is invoked
+    /// for every visited core in visit order before its worker starts.</summary>
     internal static CpuLoadRunResult Run(
         ICoreAffinity affinity,
         Func<int>? cpuTemperatureC,
         CpuLoadOptions options,
         CancellationToken cancellation,
-        Func<LoadWidth, int, CancellationToken, ulong>? kernel,
+        Func<LoadMix, LoadWidth, int, CancellationToken, ulong>? kernel,
         Action<LogicalCore, int, int>? onCore = null,
         IReadOnlyList<LogicalCore>? cores = null)
     {
@@ -315,134 +341,243 @@ public static class CpuLoadRunner
         var ordered = cores is { Count: > 0 } ? cores : topology.Cores;
         var coresToVisit = CpuLoadPolicy.OrderCores(ordered);
         var width = CpuStressKernel.Resolve(options.Width);
-        var expected = CpuStressKernel.GoldenChecksum(width);
+        var mixes = options.Mixes is { Count: > 0 } ? options.Mixes : CpuStressKernel.DefaultMixes;
 
-        var results = new List<CoreLoadResult>(coresToVisit.Count);
         var totalIterations = 0L;
         var stop = CpuLoadStop.Completed;
         var clock = Stopwatch.StartNew();
+        List<CoreLoadResult> results;
 
-        // THE TEMPERATURE IS READ OFF THE LOAD THREAD. One sampler serves the whole run; the pinned worker only
-        // reads the published value (a few ns) and never calls the provider, so a slow WMI/firmware read can never
+        // THE TEMPERATURE IS READ OFF THE LOAD THREAD. One sampler serves the whole run; the pinned workers only
+        // read the published value (a few ns) and never call the provider, so a slow WMI/firmware read can never
         // park a core. Disposing it in the finally stops the thread on every exit path.
-        using var sampler = new CpuTemperatureSampler(cpuTemperatureC, options.TemperaturePollInterval);
-
-        for (var i = 0; i < coresToVisit.Count; i++)
+        using (var sampler = new CpuTemperatureSampler(cpuTemperatureC, options.TemperaturePollInterval))
         {
-            if (cancellation.IsCancellationRequested)
-            {
-                stop = CpuLoadStop.Cancelled;
-                AppendSkipped(results, coresToVisit, i, width, expected);
-                break;
-            }
-            if (clock.Elapsed >= options.TotalBudget)
-            {
-                stop = CpuLoadStop.BudgetExhausted;
-                AppendSkipped(results, coresToVisit, i, width, expected);
-                break;
-            }
+            // ONE token shared by every concurrent worker: a stop is a stop for the whole phase (stop-on-first-
+            // error, thermal and cancellation), not a per-core flag that would let the others keep loading a
+            // machine that has just miscomputed. It is linked to the caller's token so the caller can cancel too.
+            using var runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            var ctx = new RunContext(affinity, sampler, options, width, mixes, kernel, runCts.Token, cancellation);
 
-            onCore?.Invoke(coresToVisit[i], i, coresToVisit.Count);   // progress only; the caller runs this off the UI thread
-
-            var (result, fatal) = RunOneCore(coresToVisit[i], affinity, sampler, options, width, expected, cancellation, kernel);
-            results.Add(result);
-            totalIterations += result.Iterations;
-
-            if (fatal is { } stopReason)
-            {
-                stop = stopReason;
-                AppendSkipped(results, coresToVisit, i + 1, width, expected);
-                break;
-            }
-            if (CpuLoadPolicy.ShouldStopForError(result, options.StopOnFirstError))
-            {
-                stop = CpuLoadStop.StoppedOnError;
-                AppendSkipped(results, coresToVisit, i + 1, width, expected);
-                break;
-            }
+            results = options.ConcurrentCores
+                ? RunConcurrent(coresToVisit, ctx, onCore, clock, runCts, ref totalIterations, ref stop)
+                : RunSequential(coresToVisit, ctx, onCore, clock, runCts, ref totalIterations, ref stop);
         }
 
         clock.Stop();
         return new CpuLoadRunResult(results, topology.Source, topology.Detail, width, totalIterations, stop, clock.Elapsed.TotalMilliseconds);
     }
 
-    private static (CoreLoadResult Result, CpuLoadStop? Fatal) RunOneCore(
-        LogicalCore core,
-        ICoreAffinity affinity,
-        CpuTemperatureSampler sampler,
-        CpuLoadOptions options,
-        LoadWidth width,
-        ulong expected,
-        CancellationToken cancellation,
-        Func<LoadWidth, int, CancellationToken, ulong>? kernel)
+    /// <summary>Shared per-run state the workers read: the affinity adapter, the sampler, the resolved options,
+    /// the width and mixes, the optional kernel and the shared stop token.</summary>
+    private sealed record RunContext(
+        ICoreAffinity Affinity,
+        CpuTemperatureSampler Sampler,
+        CpuLoadOptions Options,
+        LoadWidth Width,
+        IReadOnlyList<LoadMix> Mixes,
+        Func<LoadMix, LoadWidth, int, CancellationToken, ulong>? Kernel,
+        CancellationToken Token,
+        CancellationToken CallerToken);
+
+    /// <summary>The default: every core loaded at once. All workers are started before any is awaited, so they
+    /// genuinely overlap. Results are placed by visit index (not completion order), and a core whose worker never
+    /// ran (because the shared token was already cancelled) stays <see cref="LoadOutcome.Skipped"/>.</summary>
+    private static List<CoreLoadResult> RunConcurrent(
+        IReadOnlyList<LogicalCore> coresToVisit,
+        RunContext ctx,
+        Action<LogicalCore, int, int>? onCore,
+        Stopwatch clock,
+        CancellationTokenSource runCts,
+        ref long totalIterations,
+        ref CpuLoadStop stop)
     {
-        CoreLoadResult result = null!;
-        CpuLoadStop? fatal = null;
-        var executor = kernel ?? (Func<LoadWidth, int, CancellationToken, ulong>)
-            ((w, n, ct) => CpuStressKernel.Compute(w, n, ct));
+        var results = new CoreLoadResult[coresToVisit.Count];
+        for (var i = 0; i < coresToVisit.Count; i++) results[i] = Skipped(coresToVisit[i], ctx.Width);
 
-        var worker = new Thread(() =>
+        var workers = new List<Thread>(coresToVisit.Count);
+        for (var i = 0; i < coresToVisit.Count; i++)
         {
-            var clock = Stopwatch.StartNew();
-            var iterations = 0L;
-            var checksum = 0UL;
-            var outcome = LoadOutcome.Passed;
-            string? detail = null;
-            var nextSuspend = options.SuspendPeriod;
-
-            try
+            if (ctx.Token.IsCancellationRequested || clock.Elapsed >= ctx.Options.TotalBudget)
             {
-                if (!affinity.PinCurrentThread(core, out var pinError))
+                stop = ctx.Token.IsCancellationRequested ? CpuLoadStop.Cancelled : CpuLoadStop.BudgetExhausted;
+                break;
+            }
+
+            onCore?.Invoke(coresToVisit[i], i, coresToVisit.Count);
+
+            var index = i;
+            var worker = new Thread(() => results[index] = RunOneCore(coresToVisit[index], ctx, runCts).Result)
+            {
+                IsBackground = true,
+                Name = $"cpu-load-{coresToVisit[index].Group}:{coresToVisit[index].Processor}",
+            };
+            try { worker.Priority = ctx.Options.Priority; } catch { /* below-normal is best-effort */ }
+            workers.Add(worker);
+            worker.Start();
+        }
+
+        foreach (var worker in workers) worker.Join();
+
+        // A deterministic run-level verdict from the RESULTS (not from which worker happened to raise first):
+        // caller cancellation, then a thermal abort (never a verdict), then the first oracle error under
+        // stop-on-first-error; otherwise the start-loop reason (budget) or Completed.
+        var thermal = results.FirstOrDefault(r => r.Outcome == LoadOutcome.ThermalAbort);
+        var error = results.FirstOrDefault(r => CpuLoadPolicy.IsError(r.Outcome));
+        stop = ctx.CallerToken.IsCancellationRequested ? CpuLoadStop.Cancelled
+             : thermal is not null
+                 ? (thermal.Detail?.Contains("unreadable") == true ? CpuLoadStop.SensorUnreadable : CpuLoadStop.ThermalAbort)
+             : error is not null && ctx.Options.StopOnFirstError ? CpuLoadStop.StoppedOnError
+             : stop;
+        foreach (var r in results) totalIterations += r.Iterations;
+        return [.. results];
+    }
+
+    /// <summary>The one-core-at-a-time walk, kept for single-core high-boost coverage. Identical semantics to the
+    /// concurrent path — same mixes, same stop rules — but a worker is awaited before the next starts.</summary>
+    private static List<CoreLoadResult> RunSequential(
+        IReadOnlyList<LogicalCore> coresToVisit,
+        RunContext ctx,
+        Action<LogicalCore, int, int>? onCore,
+        Stopwatch clock,
+        CancellationTokenSource runCts,
+        ref long totalIterations,
+        ref CpuLoadStop stop)
+    {
+        var results = new List<CoreLoadResult>(coresToVisit.Count);
+        for (var i = 0; i < coresToVisit.Count; i++)
+        {
+            if (ctx.Token.IsCancellationRequested)
+            {
+                stop = CpuLoadStop.Cancelled;
+                AppendSkipped(results, coresToVisit, i, ctx.Width);
+                break;
+            }
+            if (clock.Elapsed >= ctx.Options.TotalBudget)
+            {
+                stop = CpuLoadStop.BudgetExhausted;
+                AppendSkipped(results, coresToVisit, i, ctx.Width);
+                break;
+            }
+
+            onCore?.Invoke(coresToVisit[i], i, coresToVisit.Count);
+
+            // Pinning is a property of a THREAD, so even the sequential path runs each core on its own dedicated
+            // worker and joins it before moving on (a pool thread would carry the affinity back).
+            var core = coresToVisit[i];
+            CoreLoadResult result = null!;
+            CpuLoadStop? fatal = null;
+            var worker = new Thread(() =>
+            {
+                var outcome = RunOneCore(core, ctx, runCts);
+                result = outcome.Result;
+                fatal = outcome.Fatal;
+            })
+            {
+                IsBackground = true,
+                Name = $"cpu-load-{core.Group}:{core.Processor}",
+            };
+            try { worker.Priority = ctx.Options.Priority; } catch { /* below-normal is best-effort */ }
+            worker.Start();
+            worker.Join();
+
+            results.Add(result);
+            totalIterations += result.Iterations;
+
+            if (fatal is { } stopReason)
+            {
+                stop = stopReason;
+                AppendSkipped(results, coresToVisit, i + 1, ctx.Width);
+                break;
+            }
+            if (CpuLoadPolicy.ShouldStopForError(result, ctx.Options.StopOnFirstError))
+            {
+                stop = CpuLoadStop.StoppedOnError;
+                AppendSkipped(results, coresToVisit, i + 1, ctx.Width);
+                break;
+            }
+        }
+        return results;
+    }
+
+    private static (CoreLoadResult Result, CpuLoadStop? Fatal) RunOneCore(
+        LogicalCore core, RunContext ctx, CancellationTokenSource runCts)
+    {
+        var affinity = ctx.Affinity;
+        var sampler = ctx.Sampler;
+        var options = ctx.Options;
+        var width = ctx.Width;
+        var executor = ctx.Kernel ?? (Func<LoadMix, LoadWidth, int, CancellationToken, ulong>)
+            ((mix, w, n, ct) => CpuStressKernel.Compute(mix, w, n, ct));
+
+        var clock = Stopwatch.StartNew();
+        var iterations = 0L;
+        var checksum = 0UL;
+        var expected = 0UL;
+        var outcome = LoadOutcome.Passed;
+        string? detail = null;
+        LoadMix? failedMix = null;
+        CpuLoadStop? fatal = null;
+        var nextSuspend = options.SuspendPeriod;
+
+        try
+        {
+            if (!affinity.PinCurrentThread(core, out var pinError))
+            {
+                outcome = LoadOutcome.Skipped;
+                detail = pinError ?? "could not pin the thread to this core";
+            }
+            else
+            {
+                while (true)
                 {
-                    outcome = LoadOutcome.Skipped;
-                    detail = pinError ?? "could not pin the thread to this core";
-                }
-                else
-                {
-                    while (true)
+                    if (ctx.Token.IsCancellationRequested)
                     {
-                        if (cancellation.IsCancellationRequested)
-                        {
-                            outcome = LoadOutcome.Cancelled;
-                            fatal = CpuLoadStop.Cancelled;
+                        outcome = LoadOutcome.Cancelled;
+                        fatal = CpuLoadStop.Cancelled;
+                        break;
+                    }
+                    if (clock.Elapsed >= options.PerCoreBudget || iterations >= options.MaxIterations) break;
+
+                    // THE THERMAL CHECK IS FREE ON THIS THREAD. The sampler reads the provider on its own
+                    // thread; here we only load the published value (a few ns) and apply the same pure policy.
+                    // FAIL CLOSED is unchanged: an unreadable sensor is published as -1 and aborts below.
+                    var temperature = sampler.Current;
+                    switch (CpuLoadPolicy.DecideThermal(temperature, options.ThermalLimitC))
+                    {
+                        case ThermalDecision.Abort:
+                            outcome = LoadOutcome.ThermalAbort;
+                            detail = temperature < 0
+                                ? "the CPU temperature is unreadable"
+                                : $"the CPU temperature {temperature} °C is at/over the {options.ThermalLimitC:0.#} °C limit";
+                            fatal = temperature < 0 ? CpuLoadStop.SensorUnreadable : CpuLoadStop.ThermalAbort;
                             break;
-                        }
-                        if (clock.Elapsed >= options.PerCoreBudget || iterations >= options.MaxIterations) break;
-
-                        // THE THERMAL CHECK IS FREE ON THIS THREAD. The sampler reads the provider on its own
-                        // thread; here we only load the published value (a few ns) and apply the same pure policy.
-                        // FAIL CLOSED is unchanged: an unreadable sensor is published as -1 and aborts below.
-                        var temperature = sampler.Current;
-                        switch (CpuLoadPolicy.DecideThermal(temperature, options.ThermalLimitC))
-                        {
-                            case ThermalDecision.Abort:
+                        case ThermalDecision.CoolDown:
+                            // Wait once; if the pause would overrun the core's budget, stop as a thermal
+                            // abort rather than loop forever on a hot core. Then force a FRESH synchronous
+                            // sample so the next iteration acts on a current reading, not the stale hot one.
+                            if (clock.Elapsed + options.CoolDown >= options.PerCoreBudget)
+                            {
                                 outcome = LoadOutcome.ThermalAbort;
-                                detail = temperature < 0
-                                    ? "the CPU temperature is unreadable"
-                                    : $"the CPU temperature {temperature} °C is at/over the {options.ThermalLimitC:0.#} °C limit";
-                                fatal = temperature < 0 ? CpuLoadStop.SensorUnreadable : CpuLoadStop.ThermalAbort;
+                                detail = $"the CPU temperature {temperature} °C stayed above the {options.ThermalLimitC:0.#} °C limit";
+                                fatal = CpuLoadStop.ThermalAbort;
                                 break;
-                            case ThermalDecision.CoolDown:
-                                // Wait once; if the pause would overrun the core's budget, stop as a thermal
-                                // abort rather than loop forever on a hot core. Then force a FRESH synchronous
-                                // sample so the next iteration acts on a current reading, not the stale hot one.
-                                if (clock.Elapsed + options.CoolDown >= options.PerCoreBudget)
-                                {
-                                    outcome = LoadOutcome.ThermalAbort;
-                                    detail = $"the CPU temperature {temperature} °C stayed above the {options.ThermalLimitC:0.#} °C limit";
-                                    fatal = CpuLoadStop.ThermalAbort;
-                                    break;
-                                }
-                                Thread.Sleep(options.CoolDown);
-                                sampler.SampleNow();
-                                continue;
-                        }
+                            }
+                            Thread.Sleep(options.CoolDown);
+                            sampler.SampleNow();
+                            continue;
+                    }
 
-                        if (fatal is not null) break;
+                    if (outcome == LoadOutcome.ThermalAbort) break;
 
+                    // Run the full mix set for this block. The FIRST mix to mismatch names itself in the detail
+                    // and ends this core; a mismatch also stops the whole concurrent run (stop-on-first-error).
+                    var blockIterations = 0L;
+                    foreach (var mix in ctx.Mixes)
+                    {
                         try
                         {
-                            checksum = executor(width, CpuStressKernel.DefaultBlockIterations, cancellation);
+                            checksum = executor(mix, width, CpuStressKernel.DefaultBlockIterations, ctx.Token);
                         }
                         catch (OperationCanceledException)
                         {
@@ -451,58 +586,72 @@ public static class CpuLoadRunner
                             break;
                         }
 
+                        expected = CpuStressKernel.GoldenChecksum(mix, width);
                         if (!CpuStressKernel.Matches(checksum, expected))
                         {
                             outcome = LoadOutcome.ChecksumMismatch;
-                            detail = $"expected 0x{expected:X16}, computed 0x{checksum:X16}";
+                            failedMix = mix;
+                            detail = $"the {mix} mix expected 0x{expected:X16}, computed 0x{checksum:X16}";
                             break;
                         }
-
-                        iterations += CpuStressKernel.DefaultBlockIterations;
-
-                        if (options.SuspendPeriodically && options.SuspendPeriod > TimeSpan.Zero && clock.Elapsed >= nextSuspend)
-                        {
-                            Thread.Sleep(options.SuspendDuration);
-                            nextSuspend += options.SuspendPeriod;
-                        }
+                        blockIterations += CpuStressKernel.DefaultBlockIterations;
                     }
 
-                    if (cancellation.IsCancellationRequested && outcome == LoadOutcome.Passed)
+                    if (outcome != LoadOutcome.Passed) break;
+
+                    iterations += blockIterations;
+
+                    if (options.SuspendPeriodically && options.SuspendPeriod > TimeSpan.Zero && clock.Elapsed >= nextSuspend)
                     {
-                        outcome = LoadOutcome.Cancelled;
-                        fatal = CpuLoadStop.Cancelled;
+                        Thread.Sleep(options.SuspendDuration);
+                        nextSuspend += options.SuspendPeriod;
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                outcome = LoadOutcome.Faulted;
-                detail = $"{ex.GetType().Name}: {ex.Message}";
-            }
-            finally
-            {
-                affinity.UnpinCurrentThread();
-                clock.Stop();
-            }
 
-            result = new CoreLoadResult(core, outcome, width, iterations, checksum, expected, clock.Elapsed.TotalMilliseconds, detail);
-        })
+                if (ctx.Token.IsCancellationRequested && outcome == LoadOutcome.Passed)
+                {
+                    outcome = LoadOutcome.Cancelled;
+                    fatal = CpuLoadStop.Cancelled;
+                }
+            }
+        }
+        catch (Exception ex)
         {
-            IsBackground = true,
-            Name = $"cpu-load-{core.Group}:{core.Processor}",
-        };
+            outcome = LoadOutcome.Faulted;
+            detail = $"{ex.GetType().Name}: {ex.Message}";
+        }
+        finally
+        {
+            affinity.UnpinCurrentThread();
+            clock.Stop();
+        }
 
-        try { worker.Priority = options.Priority; } catch { /* below-normal is best-effort */ }
+        // A run-level stop: a single error, thermal abort or caller cancellation ends the whole phase. The shared
+        // token is cancelled for the OTHER workers too, so they quit promptly rather than keep loading a failing
+        // machine. (Cancellation is idempotent; ObjectDisposedException means the run already finished.)
+        // A caller cancellation is recorded as Cancelled (not as the error a worker may also have seen), so a
+        // caller stop is never mis-reported as a thermal abort or an oracle error.
+        if (options.StopOnFirstError && (CpuLoadPolicy.IsError(outcome) || outcome == LoadOutcome.ThermalAbort))
+        {
+            fatal = ctx.CallerToken.IsCancellationRequested
+                ? CpuLoadStop.Cancelled
+                : outcome == LoadOutcome.ThermalAbort
+                    ? (detail?.Contains("unreadable") == true ? CpuLoadStop.SensorUnreadable : CpuLoadStop.ThermalAbort)
+                    : CpuLoadStop.StoppedOnError;
+            try { runCts.Cancel(); } catch (ObjectDisposedException) { /* run already finished */ }
+        }
 
-        worker.Start();
-        worker.Join();
-        return (result, fatal);
+        return (new CoreLoadResult(core, outcome, width, iterations, checksum, expected,
+            clock.Elapsed.TotalMilliseconds, detail, failedMix), fatal);
     }
 
+    private static CoreLoadResult Skipped(LogicalCore core, LoadWidth width)
+        => new(core, LoadOutcome.Skipped, width, 0, 0, 0, 0, "not reached");
+
     private static void AppendSkipped(
-        List<CoreLoadResult> results, IReadOnlyList<LogicalCore> cores, int from, LoadWidth width, ulong expected)
+        List<CoreLoadResult> results, IReadOnlyList<LogicalCore> cores, int from, LoadWidth width)
     {
         for (var i = from; i < cores.Count; i++)
-            results.Add(new CoreLoadResult(cores[i], LoadOutcome.Skipped, width, 0, 0, expected, 0, "not reached"));
+            results.Add(Skipped(cores[i], width));
     }
 }

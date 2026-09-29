@@ -8,9 +8,25 @@ namespace AcerHelper.Infrastructure.Composition;
 
 public sealed partial class LaptopService
 {
-    public SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();
+    // ---- the sensor and battery READ contracts (Application/Queries.cs) ----
+    //
+    // Two port reads with no graph and no policy, implemented EXPLICITLY so nothing is added to this class's
+    // public surface: the UI reaches them by naming the use case (ReadSensors, ReadBatteryInfo). The bodies are
+    // the internal helpers below, which this class's own paths (the fan drive) still call by name.
 
-    public BatteryInfoSnapshot ReadBatteryInfo() => device.Battery.Read();
+    /// <summary>The live sensors, for the ReadSensors use case.</summary>
+    SensorSnapshot ISensorsReadTarget.Read() => ReadSensors();
+
+    /// <summary>The live sensor snapshot, or the all-unavailable one with no sensor port. `internal` rather than
+    /// public: the UI reaches it through the ReadSensors use case, and the fan drive calls it by name.</summary>
+    internal SensorSnapshot ReadSensors() => device.Sensors?.Read() ?? new SensorSnapshot();
+
+    /// <summary>The battery reading, for the ReadBatteryInfo use case.</summary>
+    BatteryInfoSnapshot IBatteryReadTarget.Read() => ReadBatteryInfo();
+
+    /// <summary>The live battery snapshot through the battery object, or the all-unknown one with no telemetry.
+    /// `internal` rather than public: the UI reaches it through the ReadBatteryInfo use case.</summary>
+    internal BatteryInfoSnapshot ReadBatteryInfo() => device.Battery.Read();
 
     // ---- declared settings (each throws on refusal; the UI catches and composes the message) ----
 
@@ -23,17 +39,6 @@ public sealed partial class LaptopService
     /// list is fixed in the constructor — the model's own COPY, which nothing can append to afterwards (see
     /// <c>Settings</c>'s constructor for why a copy rather than the backend's live list).</summary>
     public IReadOnlyList<SettingDeclaration> DeclaredSettings => Settings.DeclaredSettings;
-
-    /// <summary>Apply one of the settings this machine declares, then record the value under the setting's own
-    /// key. Both halves of the switch belong to the model — <c>Settings.Apply</c> hands the value to the option's
-    /// own contract (a refusal is a <see cref="SettingNotAppliedException"/>) and <c>Settings.Remember</c> records
-    /// what took; what stays here is what the model cannot own: the graph lock and the save.
-    ///
-    /// THE ORDER IS THE POINT, and it is stated in Application now — <see cref="ApplyDeclaredSetting"/> decides that
-    /// the hardware write comes first and stands alone, so a refusal records nothing; the three members below are
-    /// only the doing.</summary>
-    public void ApplySetting(SettingDeclaration setting, string value)
-        => ApplyDeclaredSetting.Run(setting, value, this);
 
     /// <summary>The hardware write, OUTSIDE the graph lock — a setting is an EC/WMI write and the lock must never
     /// span one (docs/domain-refactoring-plan.md §4). That is also what makes "released on throw" free: a refused
@@ -52,22 +57,30 @@ public sealed partial class LaptopService
     /// record has always landed under one hold and the file been written under the next.</summary>
     void IDeclaredSettingTarget.Persist() => Save();
 
-    // ---- hardware toggles that are NOT declared settings (each returns the write's outcome AND its reason) ----
+    // ---- the battery, keyboard-backlight and autostart contracts (Application/HardwareToggles.cs) ----
+    //
+    // The battery's properties are not ports: they are ops that answer both halves of their outcome themselves
+    // (Domain/Battery.cs), so there is no LastError to fetch afterwards and the shape of the wrapper differs — see
+    // the tuple overload of Attempt. Same for the plain-backlight level, a LevelPort (an int) rather than a
+    // flag/choice. All are implemented EXPLICITLY so nothing is added to this class's public surface; a caller
+    // reaches them by naming a use case. The declared settings above take neither road: they throw.
 
-    // The battery's properties are not ports: they are ops that answer both halves of their outcome
-    // themselves (Domain/Battery.cs), so there is no LastError to fetch afterwards and the shape of the
-    // wrapper differs — see the tuple overload of Attempt. Same for the plain-backlight level, a LevelPort (an
-    // int) rather than a flag/choice. The declared settings above take neither road: they throw.
-    public (bool ok, string? error) SetBatteryToggle(BatteryToggle toggle, bool on)
+    /// <summary>Write a battery on/off property and report both halves: a throw is a failed write carrying no
+    /// reason, exactly as the port shape produces when its value was never assigned.</summary>
+    (bool ok, string? error) IBatteryControlTarget.Toggle(BatteryToggle toggle, bool on)
         => Attempt(() => toggle.Write(on));
 
-    public (bool ok, string? error) SetBatteryChoice(BatteryChoice choice, string id)
+    (bool ok, string? error) IBatteryControlTarget.Choice(BatteryChoice choice, string id)
         => Attempt(() => choice.Write(id));
 
-    public (bool ok, string? error) SetKeyboardBrightness(int level)
+    /// <summary>Write the plain-backlight level: false with no reason when this machine has no backlight port, and
+    /// the port's own <c>LastError</c> when a write that RETURNED refused (a throw reports none).</summary>
+    (bool ok, string? error) IKeyboardBrightnessTarget.Set(int level)
         => device.KeyboardBrightness is { } kb ? Attempt(() => kb.Set(level), () => kb.LastError) : (false, null);
 
-    public bool SetAutostart(bool on) => device.Autostart?.SetEnabled(on) ?? false;
+    /// <summary>Register or remove the run-at-logon entry. A machine with no autostart port reports false, which is
+    /// the same "this machine has nothing to write" the row's read reports for an absent property.</summary>
+    bool IAutostartTarget.Set(bool on) => device.Autostart?.SetEnabled(on) ?? false;
 
     /// <summary>
     /// The blue-light applies, one at a time and OFF THE CALLER'S THREAD. One instance for the service's life, so
@@ -93,41 +106,55 @@ public sealed partial class LaptopService
     /// the thread it arrived on.</summary>
     internal TintApplyPolicy TintApplies => _tintApplies;
 
-    /// <summary>
-    /// Set the blue-light level: RECORD it here, then hand the hardware write to the schedule above.
-    ///
-    /// THE TWO HALVES ARE IN THAT ORDER, and it is the one that keeps the app honest about a level it did not get
-    /// to finish: the recorded value is what <see cref="ApplyStartupState"/> re-applies on the next run, so a
-    /// level the user picked is remembered even if the process dies between the click and the write landing. The
-    /// hardware write is deliberately NOT under <c>_state</c> (design doc D17, and the rule every port call in this
-    /// class follows) — it is now not on this thread at all.
-    ///
-    /// <paramref name="onApplied"/> is answered ONLY for the newest level asked for; a superseded one reports
-    /// nothing, because its outcome is about a level the user has already left. It is called on the schedule's
-    /// thread, so a caller that touches a control must marshal (the Options row does: <c>OptionsAssembler.Fail</c>
-    /// posts). No port at all answers success — there is nothing to report, and the row is not built without one —
-    /// and a throwing port is a failed one, as for every other port in this class (<see cref="Attempt(Func{bool}, Func{string?})"/>).
-    /// </summary>
-    public void SetBlueLight(int level, Action<bool>? onApplied = null)
+    /// <summary>Record the blue-light level, under the graph lock, and persist it. The use case calls this FIRST;
+    /// the hardware write is <see cref="IBlueLightTarget.Schedule"/>, and the order is what makes a level survive
+    /// a death between the click and the write (see <see cref="SetBlueLight"/>).</summary>
+    void IBlueLightTarget.Remember(int level)
     {
         lock (_state) { Settings.Bluelight = level; Save(); }
-        _tintApplies.Submit(() => device.DisplayTint is { } tint ? tint.Apply(level) : true, onApplied);
     }
 
-    public void SetClamshell(bool on)
+    /// <summary>Hand the hardware write for <paramref name="level"/> to the schedule above. NOT under
+    /// <c>_state</c> (design doc D17, and the rule every port call in this class follows) and not on this thread
+    /// at all. The recording stays synchronous (the schedule must not delay what the app remembers);
+    /// <paramref name="onApplied"/> is answered only for the newest level asked for, on the schedule's thread, so a
+    /// caller that touches a control must marshal.</summary>
+    void IBlueLightTarget.Schedule(int level, Action<bool>? onApplied)
+        => _tintApplies.Submit(() => device.DisplayTint is { } tint ? tint.Apply(level) : true, onApplied);
+
+    // ---- the preference contracts (Application/Preferences.cs) ----
+    //
+    // The three shell preferences and the clamshell port, implemented EXPLICITLY so nothing is added to this
+    // class's public surface — a caller reaches them by naming a use case (SetTurboToggles, SetLanguage,
+    // SetClamshell, EvaluateClamshell), not the service. The clamshell is split across two contracts for the one
+    // reason the lock rule states: the port call must not run under the graph lock, so <see cref="IClamshellTarget"/>
+    // owns the port half and <see cref="IPreferenceStore"/> the file half, and the use case orders them.
+
+    /// <summary>Remember whether the lid-closed keep-awake takeover is on. The hardware half is
+    /// <see cref="IClamshellTarget.SetEnabled"/>, called by the use case BEFORE this is reached; a refused or
+    /// absent port leaves this recorded, which is the order SetClamshell's own docstring states.</summary>
+    void IPreferenceStore.Clamshell(bool on)
     {
-        device.Clamshell?.SetEnabled(on);
         lock (_state) { Settings.Clamshell = on; Save(); }
     }
 
-    public void SetTurboToggles(bool on)
+    /// <summary>Ask the port to enable or disable the clamshell takeover, OUTSIDE the graph lock (the lock must
+    /// never span a port call, docs/domain-refactoring-plan.md §4). A machine with no port is a no-op.</summary>
+    void IClamshellTarget.SetEnabled(bool on) => device.Clamshell?.SetEnabled(on);
+
+    /// <summary>Recompute the clamshell decision from the live topology — a port call and nothing else. Called by
+    /// the refresh pass off the UI thread.</summary>
+    void IClamshellTarget.Evaluate() => device.Clamshell?.Evaluate();
+
+    /// <summary>Remember the Turbo hotkey's behaviour, under the graph lock, persisted.</summary>
+    void IPreferenceStore.TurboToggles(bool on)
     {
         lock (_state) { Settings.TurboToggles = on; Save(); }
     }
 
     /// <summary>Persist the chosen UI language. Activating it (and rebuilding the UI) is the app layer's job
     /// (see AppController) — this only records the preference.</summary>
-    public void SetLanguage(AppLanguage language)
+    void IPreferenceStore.Language(AppLanguage language)
     {
         lock (_state) { Settings.Language = language; Save(); }
     }
@@ -142,7 +169,8 @@ public sealed partial class LaptopService
     ///
     /// This pair is for the backend-owned flags that are NOT declared settings — the lightbar's
     /// "follows performance profile" flag and the one-shot driver prompt. A DECLARED setting's value lands in
-    /// the same bag under its own key (<see cref="ApplySetting"/>), and its own accessors are the declaration's
+    /// the same bag under its own key (through the declared-setting edit use case, <c>ApplyDeclaredSetting</c>,
+    /// which the assembler's rows call), and its own accessors are the declaration's
     /// read and write: a choice's value is an option id, which this bool-shaped reader could not answer for.</summary>
     public bool GetDeviceFlag(string key, bool fallback)
     {
@@ -155,6 +183,4 @@ public sealed partial class LaptopService
     {
         lock (_state) { Settings.DeviceSettings[key] = on ? "1" : "0"; Save(); }
     }
-
-    public void EvaluateClamshell() => device.Clamshell?.Evaluate();
 }

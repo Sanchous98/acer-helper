@@ -44,12 +44,21 @@ public sealed record FanSection(
     Action<bool, bool, int[]> SetFanCurve,
     Func<FanCurveDialogViewModel, Task> ShowCurve);
 
-/// <summary>GPU-overclock section: the current mode's saved core/memory offsets (MHz) plus the apply/persist
-/// delegate. The section is only built when the device exposes an <see cref="IGpuOverclock"/> port.
-/// <c>Initial</c> is the domain's <see cref="GpuAxisState"/>, for the same reason as the fan section's.</summary>
+/// <summary>GPU-overclock section: the current mode's saved core/memory offsets (MHz), its chosen GPU power
+/// level and the apply/persist delegates. The section is only built when the device exposes an
+/// <see cref="IGpuOverclock"/> port. <c>Initial</c> is the domain's <see cref="GpuAxisState"/>, for the same
+/// reason as the fan section's, and it carries the power choice too.
+///
+/// <c>PowerLevels</c> is the EC's fixed envelope rows and is EMPTY on a machine without the EC channel — which
+/// is what hides the power selector, exactly like every other probe-and-hide row. The rows are the port's own
+/// data (<see cref="IGpuPowerEnvelope.Levels"/>), not a UI table, because the wattages are measured vendor
+/// figures. <c>SetGpuPower</c> takes the nullable <see cref="GpuPowerLevel"/>: null is the "follow the profile"
+/// default.</summary>
 public sealed record GpuSection(
     GpuAxisState Initial,
-    Action<int, int> SetGpuOc);
+    Action<int, int> SetGpuOc,
+    IReadOnlyList<GpuPowerOption> PowerLevels,
+    Action<GpuPowerLevel?> SetGpuPower);
 
 /// <summary>GPU-mode (MUX) section: the confirmation prompt (which carries the restart + black-screen warning)
 /// and the request delegate. The port itself is read by the view-model for its modes/support and its current +

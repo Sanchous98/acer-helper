@@ -118,7 +118,7 @@ public class OptionsAssemblerFailureTests
     /// escape the <c>OnChange</c> the UI calls, and the user must still be told.
     ///
     /// WHERE the throw is absorbed, and WHAT IT MAY CARRY. The write goes through
-    /// <c>LaptopService.ApplySetting</c> -> <c>SettingDeclaration.Apply</c> -> <c>FlagSetting.Write</c>, whose
+    /// <c>ApplyDeclaredSetting.Run</c> -> <c>SettingDeclaration.Apply</c> -> <c>FlagSetting.Write</c>, whose
     /// catch absorbs it. That layer deliberately reports NO reason, and the message asserted below is bare
     /// because of it: the port's <c>LastError</c> is assigned by a call that runs to COMPLETION, so a throw
     /// leaves whatever an earlier call put there, and reading it would pin another call's words on this failure
@@ -146,19 +146,12 @@ public class OptionsAssemblerFailureTests
     /// — read them together: this one pins the outcome, that one pins what may not be read to produce it.
     ///
     /// WHICH LAYER ABSORBS THIS THROW: the write goes <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> ->
-    /// <c>Attempt</c>, whose <c>try { ok = write(); } catch { ok = false; }</c> catches it
-    /// (<c>LaptopService.Attempt</c>), NOT <c>RunSet</c>'s own catch — the power-source row is one of the rows
-    /// that is not a declared setting, so it still hands back a pair and <c>RunSet</c> sees no exception at all
-    /// (docs/open-decisions.md, «Известные особенности» 4, where the opposite claim was withdrawn). What can
-    /// still reach <c>RunSet</c>'s own catch on that overload is a throw from OUTSIDE a wrapped call — a profile
-    /// port's read (unwrapped in <c>ApplyStoredMode</c>) or the row's own index arithmetic.
-    ///
-    /// THE NAME THEREFORE CLAIMS NO ABSORBER, and it must not: THIS test cannot tell <c>Attempt</c> from
-    /// <c>RunSet</c>. Its fake carries no reason, so the message is bare whichever layer caught the throw. The
-    /// witness for the absorber is the flag-row test above, whose assertion ends in the port's own reason.
-    /// What THIS test pins is the OUTCOME the row owes the user: reported exactly once, and not escaped.
-    /// Renamed from <c>AThrowingProfileSet_IsCaughtByRunSetItself_AndStillReported</c>, which asserted the wrong
-    /// absorber.</summary>
+    /// <c>IProfileTarget.Apply</c>, where the port's throw is converted by <c>WriteOrThrow</c> into a
+    /// <see cref="PortWriteFailedException"/> with NO reason (a throw assigns nothing, so there are no words of
+    /// its own), and THAT is caught by <c>RunSet</c>'s own <see cref="PortWriteFailedException"/> branch
+    /// (<c>OptionsAssembler.RunSet</c>, added with the 2026-09-28 refinement of docs/open-decisions.md §2). The
+    /// power-source row is not a declared setting, but its write is now one of the applied-edit ports, so it is
+    /// the same exceptional channel the declared settings use.</summary>
     [Fact]
     public void AThrowingProfileSet_DoesNotEscapeThePowerSourceRow_AndIsStillReported()
     {
@@ -184,8 +177,8 @@ public class OptionsAssemblerFailureTests
     /// call's words, which is the failure mode docs/open-decisions.md §2 exists to remove.
     ///
     /// THE CONTROL IS THE SERVICE-LEVEL SIBLING, not a second case here: <c>LaptopServiceModeTests</c>'
-    /// <c>AFailedApply_ReturnsFalse_AndPropagatesTheError</c> pins a refusal that RETURNS and asserts that the
-    /// port's words DO cross (<c>r.error == "EC refused"</c>), which is how every real transport in this tree
+    /// <c>AFailedApply_Throws_AndStillRemembersTheChoice</c> pins a refusal that now THROWS and asserts that the
+    /// port's words DO cross (<c>ex.Reason == "EC refused"</c>), which is how every real transport in this tree
     /// reports. Without it, "no reason is reported" and "no reason ever crosses this layer" would be the same
     /// observation.</summary>
     [Fact]
@@ -201,6 +194,26 @@ public class OptionsAssemblerFailureTests
 
         Assert.Single(pp.SetCalls);                        // the write was attempted once, then threw
         Assert.Equal("Profile on AC power: failed", Assert.Single(h.RunPosted()));   // the stale words are not read
+    }
+
+    /// <summary>A PRESENT profile port that REFUSES (returns false with words, not a throw) is now reported by
+    /// <c>RunSet</c>'s <see cref="PortWriteFailedException"/> branch, and its reason crosses as "...: EC refused".
+    /// This is the reason §2's refinement must preserve: the exception carries the transport's OWN words when it
+    /// has them, so the row still tells the user WHY — the property a bare "failed" would lose. It is the
+    /// non-throwing control for the two tests above, and it pins the message ENDING in the port's words.
+    ///
+    /// MUTATION THAT REDDENS IT: catching the exception and calling <c>Fail(label, null)</c> — the suffix
+    /// disappears and the assertion fails.</summary>
+    [Fact]
+    public void ARefusedProfileSet_IsCaughtByTheRow_AndCarriesThePortsReason()
+    {
+        var h = new OptionsAssemblerHarness(LaptopServiceFixture.WithProfiles(current: TestProfiles.Quiet));
+        h.F.Pp!.SetResult = false;
+        h.F.Pp.LastError = "EC refused";
+
+        AssemblerRows.Choice(h, "Profile on AC power:").OnChange(1);   // pick a non-current profile on the live source
+
+        Assert.Equal("Profile on AC power: failed: EC refused", Assert.Single(h.RunPosted()));
     }
 
     /// <summary>Every row that reports a failure must name ITSELF — an error that does not say which control
@@ -649,7 +662,7 @@ internal sealed class OptionsAssemblerHarness
                                    Action<FakeDevice>? declare = null, Func<Task<bool>>? confirmGpuAccess = null)
     {
         F = fixture ?? new LaptopServiceFixture(declare: declare);
-        Assembler = new OptionsAssembler(F.Service, Notices.Add,
+        Assembler = new OptionsAssembler(F.Service, F.Queries, F.Actions, new ApplyDeclaredSetting(F.Service), Notices.Add,
                                          confirmCalibration ?? (() => Task.FromResult(true)),
                                          Posted.Add,
                                          confirmGpuAccess ?? (() => Task.FromResult(true)));

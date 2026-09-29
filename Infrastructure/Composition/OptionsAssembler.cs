@@ -1,3 +1,4 @@
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Localization;
 
@@ -25,7 +26,9 @@ namespace AcerHelper.Infrastructure.Composition;
 /// confirmation is a modal dialog, which needs the toolkit this file must not name (the two delegates take the
 /// place of an Avalonia call, exactly as <paramref name="post"/> does of <c>Dispatcher.UIThread.Post</c>), and
 /// passing it in is what lets a test click that row and hold the answers it produces.</summary>
-internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify, Func<Task<bool>> confirmCalibration,
+internal sealed class OptionsAssembler(LaptopService svc, AppQueries queries, AppActions actions,
+                                       ApplyDeclaredSetting applyDeclaredSetting,
+                                       Action<string> notify, Func<Task<bool>> confirmCalibration,
                                        Action<Action> post, Func<Task<bool>> confirmGpuAccess)
 {
     /// <summary>Builds the toggle rows. <c>Initial</c> here is a PLACEHOLDER, not a reading: it is the value a
@@ -44,7 +47,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             if (setting is not FlagSetting flag) continue;
             var label = Loc.T(LabelFor(setting.Key));
             list.Add(new OptionToggle(label, true, false,
-                v => RunSet(() => svc.ApplySetting(flag, FlagSetting.Value(v)), label),
+                v => RunSet(() => applyDeclaredSetting.Run(flag, FlagSetting.Value(v)), label),
                 Read: flag.ReadbackVerifiesWrite ? flag.Read : null,
                 Prime: flag.ReadbackVerifiesWrite ? null : flag.Read));
         }
@@ -91,7 +94,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             var options = choice.Options;
             var names = options.Select(o => Loc.T(o.DisplayName)).ToList();
             list.Add(new OptionChoice(label, true, names, 0,
-                i => RunSet(() => svc.ApplySetting(choice, options[i].Id), label),
+                i => RunSet(() => applyDeclaredSetting.Run(choice, options[i].Id), label),
                 Read: () => choice.IndexOf(choice.Read())));
         }
 
@@ -113,7 +116,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
             int idx = Math.Clamp(svc.Bluelight, 0, names.Count - 1);
             var label = Loc.T("opt.blue_light_label");
             list.Add(new OptionChoice(label, true, names, idx,
-                i => svc.SetBlueLight(i, ok => { if (!ok) Fail(label, null); })));
+                i => actions.BlueLight.Run(i, ok => { if (!ok) Fail(label, null); })));
         }
 
         return list;
@@ -138,9 +141,9 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         OptionChoice Row(bool onAc, string label)
         {
             var text = Loc.T(label);
-            return new OptionChoice(text, true, names, IndexOfProfile(profiles, svc.SourceProfile(onAc)),
-                i => RunSet(() => svc.SetSourceProfile(onAc, profiles[i]), text),
-                Read: () => IndexOfProfile(profiles, svc.SourceProfile(onAc)));
+            return new OptionChoice(text, true, names, IndexOfProfile(profiles, queries.SourceProfile.Run(onAc)),
+                i => RunSet(() => actions.SourceProfile.Run(onAc, profiles[i]), text),
+                Read: () => IndexOfProfile(profiles, queries.SourceProfile.Run(onAc)));
         }
     }
 
@@ -156,7 +159,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         var names = modes.Select(m => Loc.T(m.DisplayName)).ToList();
         var label = Loc.T("bat.charge_mode");
         return new OptionChoice(label, true, names, 0,
-            i => RunSet(() => svc.SetBatteryChoice(mode, modes[i].Id), label),
+            i => RunSet(() => actions.BatteryChoice.Run(mode, modes[i].Id), label),
             Read: () => IndexOf(modes, mode.Read()));
     }
 
@@ -165,7 +168,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (svc.Device.Battery.ChargeLimit is not { } limit) return null;
         var label = Loc.T("bat.charge_limit");
         return new OptionToggle(label, true, false,
-            v => RunSet(() => svc.SetBatteryToggle(limit, v), label), Read: limit.Read);
+            v => RunSet(() => actions.BatteryToggle.Run(limit, v), label), Read: limit.Read);
     }
 
     // Gated behind a confirm dialog so a single click can't kick off a multi-hour charge/discharge cycle.
@@ -174,7 +177,7 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
         if (svc.Device.Battery.Calibration is not { } cal) return null;
         var label = Loc.T("bat.calibration");
         return new OptionToggle(label, true, false,
-            v => RunSet(() => svc.SetBatteryToggle(cal, v), label),
+            v => RunSet(() => actions.BatteryToggle.Run(cal, v), label),
             Read: cal.Read, ConfirmAsync: confirmCalibration);
     }
 
@@ -183,15 +186,18 @@ internal sealed class OptionsAssembler(LaptopService svc, Action<string> notify,
     /// the WMI layer serializes across controls, so this just runs the set inline and posts any error to the UI.
     /// The row's own readback is what corrects the switch when a write silently doesn't take.
     ///
-    /// A DECLARED setting refuses by THROWING (Domain/DeclaredSetting.cs), and this is where that becomes a sentence:
-    /// the exception carries what happened — which setting, and the transport's own words — while the label is
-    /// the UI's, so the message names the row the user is looking at. Composing it from a second, English name
-    /// per setting is what made five rows report a control the interface never showed them
-    /// (docs/open-decisions.md, «Известные особенности» 5); that name is gone from this file.</summary>
+    /// TWO REFUSALS BECOME A SENTENCE HERE. A DECLARED setting refuses by THROWING
+    /// <see cref="SettingNotAppliedException"/> (Domain/DeclaredSetting.cs), and a PRESENT write port reached by an
+    /// applied edit refuses by THROWING <see cref="PortWriteFailedException"/> (Domain/PortWriteFailedException.cs)
+    /// — both carry information (which thing, the transport's own words) while the label is the UI's, so the
+    /// message names the row the user is looking at. Composing it from a second, English name per setting is what
+    /// made five rows report a control the interface never showed them (docs/open-decisions.md, «Известные
+    /// особенности» 5); that name is gone from this file.</summary>
     private void RunSet(Action set, string label)
     {
         try { set(); }
         catch (SettingNotAppliedException ex) { Fail(label, ex.Reason); }
+        catch (PortWriteFailedException ex) { Fail(label, ex.Reason); }
         // A throw from outside the write itself (a transport that does not route its failure through the
         // declaration, a programming error below it): still reported, with no reason to name.
         catch { Fail(label, null); }

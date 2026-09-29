@@ -27,6 +27,94 @@ public sealed class LaptopServiceFixture
     public FakeSettingsStore Store { get; }
     public LaptopService Service { get; }
 
+    /// <summary>The moved Curve-Optimizer edit use case over <see cref="Service"/> — the UI's entry point now
+    /// that <c>Service.SetCoValues</c> is gone. Tests that exercised that method through the service call this
+    /// instead, which is also the point: they exercise the seam, not a service method.</summary>
+    public ApplyUndervolt ApplyUndervolt { get; }
+
+    /// <summary>The GPU-offset edit use case over <see cref="Service"/>, standing in for the removed
+    /// <c>Service.SetGpuOc</c>. Same rule as <see cref="ApplyUndervolt"/>: the tests exercise the seam.</summary>
+    public ApplyGpuOffsets ApplyGpuOffsets { get; }
+
+    /// <summary>The GPU power-level edit use case over <see cref="Service"/>, on the same terms — the tests
+    /// exercise the seam rather than a service method.</summary>
+    public ApplyGpuPower ApplyGpuPower { get; }
+
+    /// <summary>The CPU power-overlay edit use case over <see cref="Service"/>, standing in for the removed
+    /// <c>Service.SetCpuPower</c>.</summary>
+    public ApplyCpuPowerOverlay ApplyCpuPower { get; }
+
+    /// <summary>The fan-curve edit use case over <see cref="Service"/>, standing in for the removed
+    /// <c>Service.SetFanCurve</c>.</summary>
+    public ApplyFanCurve ApplyFanCurve { get; }
+
+    /// <summary>The fan-selection edit use case over <see cref="Service"/>, standing in for the removed
+    /// <c>Service.SetFan</c>.</summary>
+    public ApplyFanSelection ApplyFanSelection { get; }
+
+    /// <summary>The declared-setting edit use case over <see cref="Service"/>, standing in for the removed
+    /// <c>Service.ApplySetting</c>.</summary>
+    public ApplyDeclaredSetting ApplyDeclaredSetting { get; }
+
+    // ---- the shell/action family (Application/Preferences.cs, HardwareToggles.cs, ProfilePower.cs, ModeApply.cs).
+    // One property per moved action, over <see cref="Service"/>, so tests exercise the seam rather than a service
+    // method that no longer exists. The re-apply path uses the service's OWN use case (lazily built over its
+    // reconciler); the others build fresh ones over the same service.
+
+    public ApplyStartupState Startup { get; }
+    public EvaluateClamshell EvaluateClamshell { get; }
+    public SetTurboToggles SetTurboToggles { get; }
+    public SetLanguage SetLanguage { get; }
+    public SetClamshell SetClamshell { get; }
+    public SetAutostart SetAutostart { get; }
+    public SetKeyboardBrightness SetKeyboardBrightness { get; }
+    public SetBlueLight SetBlueLight { get; }
+    public SetBatteryToggle SetBatteryToggle { get; }
+    public SetBatteryChoice SetBatteryChoice { get; }
+    public SetSourceProfile SetSourceProfile { get; }
+    public SyncPowerSource SyncPowerSource { get; }
+    public ApplyCustom ApplyCustom { get; }
+    public ApplyModeFan ApplyModeFan { get; }
+    public ApplyModeGpuOc ApplyModeGpuOc { get; }
+    public ApplyModeCpuPower ApplyModeCpuPower { get; }
+    public ApplyModeCo ApplyModeCo { get; }
+
+    // ---- the QUERY family (Application/Queries.cs). One property per moved read, over <see cref="Service"/>,
+    // so tests exercise the seam rather than a service method. The service methods still EXIST as internal
+    // helpers (this class's own paths call them), but a test that reaches them would be testing the helper and
+    // not the read the UI makes, which is what these are for.
+
+    public ReadCurrentProfile CurrentProfile { get; }
+    public ReadSelectableProfiles SelectableProfiles { get; }
+    public ReadBaseProfile BaseProfile { get; }
+    public ReadSourceProfile SourceProfile { get; }
+    public ReadFanState FanState { get; }
+    public ReadGpuOcState GpuOcState { get; }
+    public ReadCoDomains CoDomains { get; }
+    public ReadCpuPower CpuPower { get; }
+    public ReadSensors Sensors { get; }
+    public ReadBatteryInfo Battery { get; }
+
+    /// <summary>Every query use case grouped as the app wires them — the set <c>OptionsAssembler</c> and
+    /// <c>AppController</c> take. Rebuilt per access.</summary>
+    public AppQueries Queries => new(CurrentProfile, SelectableProfiles, BaseProfile, SourceProfile, FanState,
+        GpuOcState, CoDomains, CpuPower, Sensors, Battery);
+
+    /// <summary>The Turbo switch, built over the service's CURRENT switch use case — a property rather than a
+    /// field so a test that installs its own <c>ProfileAnnouncer</c> after construction still reaches it (the
+    /// service rebuilds its switch when the announcer changes).</summary>
+    public SetTurbo SetTurbo => new(Service, Service.ProfileSwitch);
+
+    /// <summary>The performance hotkey, on the same terms as <see cref="SetTurbo"/>.</summary>
+    public TogglePerformance TogglePerformance => new(Service, SetTurbo, Service.ProfileSwitch);
+
+    /// <summary>Every action use case grouped as the app wires them, for a test that needs to hand the set to
+    /// <c>OptionsAssembler</c> the way <c>AppController.BuildUi</c> does. Rebuilt per access so it carries the
+    /// current <see cref="SetTurbo"/>.</summary>
+    public AppActions Actions => new(Startup, SetTurbo, TogglePerformance, SetTurboToggles, SetClamshell, SetAutostart,
+        SetLanguage, SetKeyboardBrightness, EvaluateClamshell, SyncPowerSource, ApplyCustom, SetSourceProfile,
+        SetBatteryToggle, SetBatteryChoice, SetBlueLight);
+
     /// <summary>The power-profiles port, when <see cref="Power"/> or <see cref="WithProfiles"/> created one.</summary>
     public FakePowerProfiles? Pp { get; private set; }
 
@@ -49,6 +137,42 @@ public sealed class LaptopServiceFixture
         declare?.Invoke(Device);
         Store = new FakeSettingsStore(settings);
         Service = new LaptopService(Device, Store);
+        ApplyUndervolt = new ApplyUndervolt(Service, Service);
+        ApplyGpuOffsets = new ApplyGpuOffsets(Service);
+        ApplyGpuPower = new ApplyGpuPower(Service);
+        ApplyCpuPower = new ApplyCpuPowerOverlay(Service);
+        ApplyFanCurve = new ApplyFanCurve(Service);
+        ApplyFanSelection = new ApplyFanSelection(Service);
+        ApplyDeclaredSetting = new ApplyDeclaredSetting(Service);
+        Startup = new ApplyStartupState(Service, Service);
+        EvaluateClamshell = new EvaluateClamshell(Service);
+        SetTurboToggles = new SetTurboToggles(Service);
+        SetLanguage = new SetLanguage(Service);
+        SetClamshell = new SetClamshell(Service, Service);
+        SetAutostart = new SetAutostart(Service);
+        SetKeyboardBrightness = new SetKeyboardBrightness(Service);
+        SetBlueLight = new SetBlueLight(Service);
+        SetBatteryToggle = new SetBatteryToggle(Service);
+        SetBatteryChoice = new SetBatteryChoice(Service);
+        SetSourceProfile = new SetSourceProfile(Service);
+        SyncPowerSource = new SyncPowerSource(Service);
+        ApplyCustom = new ApplyCustom(Service);
+        ApplyModeFan = new ApplyModeFan(Service);
+        ApplyModeGpuOc = new ApplyModeGpuOc(Service);
+        ApplyModeCpuPower = new ApplyModeCpuPower(Service);
+        ApplyModeCo = new ApplyModeCo(Service);
+        // The query use cases, each owning its read through the service. ReadBaseProfile composes the live-profile
+        // read with the base rule, exactly as composition wires it.
+        CurrentProfile = new ReadCurrentProfile(Service);
+        SelectableProfiles = new ReadSelectableProfiles(Service);
+        BaseProfile = new ReadBaseProfile(Service, Service);
+        SourceProfile = new ReadSourceProfile(Service);
+        FanState = new ReadFanState(Service);
+        GpuOcState = new ReadGpuOcState(Service);
+        CoDomains = new ReadCoDomains(Service);
+        CpuPower = new ReadCpuPower(Service);
+        Sensors = new ReadSensors(Service);
+        Battery = new ReadBatteryInfo(Service);
         if (cardwireGpuAccess != null) Service.CardwireGpuAccess = cardwireGpuAccess;
     }
 

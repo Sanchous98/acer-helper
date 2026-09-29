@@ -118,6 +118,10 @@ public sealed partial class AcerDevice
         var ec = new AcerEcHidController();
         if (ec.Available) Own(_ec = ec); else ec.Dispose();
 
+        // The GPU power envelope as a control of its own — same wiring and same reasoning as
+        // AcerDevice.Windows.cs: the SAME EC channel offered as a port, declared only where the channel exists.
+        if (_ec is { } envelopeEc) GpuPowerEnvelope = new EcPowerEnvelope(envelopeEc.ApplyLevel);
+
         // The power source (barrel vs USB-C PD) is read over the SAME channel, with the SAME codec and the SAME
         // SEND-then-GET frame as Windows — chosen over the /sys/class/typec + power_supply route because that
         // route's `usb_type`/`power_role` were NOT measured to reproduce Acer's 0x00/0x01/0x04 distinction on
@@ -182,17 +186,17 @@ public sealed partial class AcerDevice
         //
         // THE FALLBACK KEEPS ITS OWN MIS-MAPPING, deliberately, and reading that as the bug above is the mistake
         // to avoid. The raw sysfs port classifies "performance" as ProfileKind.Performance and so sends the EC
-        // envelope mode 1 (93 W) — which is WRONG on the Acer node, where "performance" is Turbo, and RIGHT on a
+        // envelope mode 1 (100 W) — which is WRONG on the Acer node, where "performance" is Turbo, and RIGHT on a
         // three-choice PPD/generic source, which has no Turbo to name at all: there, "performance" is the top of
         // that source's own set and mode 1 is the honest translation of it. The fix therefore belongs on the Acer
         // branch only (AcerMappedProfiles, which hands the envelope the byte's OWN kind), and the alternative —
-        // forcing ProfileKind.Turbo here — would ask the EC for 108 W on behalf of a source that never claimed to
+        // forcing ProfileKind.Turbo here — would ask the EC for 115 W on behalf of a source that never claimed to
         // be able to request it.
         //
         // AcerMappedProfiles is what fixes the LIVE BUG this wiring used to have: the raw sysfs port classifies
         // the kernel token "performance" as ProfileKind.Performance, but the kernel's "performance" is Acer TURBO
-        // (0x05, 108 W) and its "balanced-performance" is the app's Performance (0x04, 93 W). So the EC envelope
-        // was told mode 1 (93 W) on a machine the user had put in Turbo, which wants mode 0 (108 W) — and the
+        // (0x05, 115 W) and its "balanced-performance" is the app's Performance (0x04, 100 W). So the EC envelope
+        // was told mode 1 (100 W) on a machine the user had put in Turbo, which wants mode 0 (115 W) — and the
         // decorator also puts the EC bytes back into the ids the presets, the tray and settings.json key off.
         var port = sysfs is { Available: true, Writable: true } ? new AcerMappedProfiles(sysfs) : PowerProfiles;
 
@@ -207,7 +211,7 @@ public sealed partial class AcerDevice
         // Boot sync, EC-only — same reasoning as AcerDevice.Windows.cs: the profile survives a reboot but the EC
         // usage mode behind it does not, so the machine can report Turbo while running the lowest power row. It
         // reads THE PORT WE ENDED UP WITH, not the raw sysfs one: reading sysfs here meant the same mis-mapping as
-        // above, but at startup, where it silently pushed mode 1 (93 W) at a machine the firmware had left in
+        // above, but at startup, where it silently pushed mode 1 (100 W) at a machine the firmware had left in
         // Turbo. Deliberately still NOT a profile switch — no palette flash, exactly as Windows does it — and it
         // cannot disagree with what the UI shows, because it asks the port the UI reads.
         if (envelope != null && port?.Current() is { } cur) envelope(ProfileTraits.Of(port, cur).Kind);

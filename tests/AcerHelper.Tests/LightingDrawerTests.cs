@@ -194,7 +194,7 @@ public class LightingDrawerTests
             new FanSection(new FanAxisState(FanMode.Auto, new FanSettings(false, Fan.DefaultDuties(), 70),
                                                          new FanSettings(false, Fan.DefaultDuties(), 70)),
                            (_, _, _) => { }, (_, _, _) => { }, _ => Task.CompletedTask),
-            new GpuSection(new GpuAxisState(0, 0), (_, _) => { }),
+            new GpuSection(new GpuAxisState(0, 0), (_, _) => { }, [], _ => { }),
             new GpuMuxSection(_ => Task.FromResult(false), _ => new GpuMuxChange(false, false, null)),
             new CpuSection([], null, _ => { }),
             new CoSection([], [], _ => { }),

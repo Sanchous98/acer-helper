@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.37.0</Version>
+    <Version>0.38.0</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -198,6 +198,11 @@
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.1.2" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- THE COMPOSITION CONTAINER (docs/... — the graph is stated once in UI/CompositionRoot.cs instead of being
+         hand-wired at each site). Every registration uses a FACTORY delegate, never the `<TService, TImpl>` type
+         pair: the type pair makes the container reflect over a constructor, and this app is Native AOT on both
+         TFMs (README), so a delegate registration is the shape that survives the AOT/trim analysis. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM

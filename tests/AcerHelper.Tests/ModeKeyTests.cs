@@ -65,7 +65,7 @@ public class ModeKeyTests
         var f = LaptopServiceFixture.WithProfiles(settings,
             current: currentId == null ? null : TestProfiles.ById(currentId));
 
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
 
         Assert.Equal(expected, f.Service.CurrentModeKey(cur));   // the rule, pinned...
         Assert.Equal(expected, LaptopService.ModeKeyFor(cur, KindOf(f, cur), f.Service.TurboToggles, settings.OnAc).Value);
@@ -92,9 +92,9 @@ public class ModeKeyTests
         settings.OnBattery = new ProfileMemory { BaseId = "quiet", Turbo = true };
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Turbo);
 
-        f.Service.SyncPowerSource(new BatteryInfoSnapshot { State = BatteryState.Discharging });
+        f.SyncPowerSource.Run(new BatteryInfoSnapshot { State = BatteryState.Discharging });
 
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
         Assert.Equal(TestProfiles.Turbo.Id, cur?.Id);          // the sync left the machine in Turbo...
         Assert.Equal("quiet", f.Service.CurrentModeKey(cur));  // ...so the key comes from the battery slot's base
 
@@ -115,7 +115,7 @@ public class ModeKeyTests
         settings.OnAc = new ProfileMemory { BaseId = "ghost", Turbo = true };
         var f = LaptopServiceFixture.WithProfiles(settings, current: TestProfiles.Turbo);
 
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
 
         Assert.DoesNotContain(f.Pp!.All, p => p.Id == "ghost");     // the device does not offer it...
         Assert.Equal("ghost", f.Service.CurrentModeKey(cur));       // ...and it is the key anyway

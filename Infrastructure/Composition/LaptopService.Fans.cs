@@ -12,8 +12,8 @@ public sealed partial class LaptopService
     // The emulated fan-curve controller: one model per fan (Domain/Fan.cs owns the anchors, the default ramp,
     // the interpolation and that fan's last applied duty) plus the paired deadband that decides whether a write
     // happens at all. Custom mode drives the fans through it on the sensor loop; Reset() on any out-of-band
-    // change so the deadband can't swallow the first write. Touched by UI-thread SetFan/SetFanCurve and the
-    // background ApplyCustom -> guarded by _state. The model is told a fan's data and never which fan it is:
+    // change so the deadband can't swallow the first write. Touched by UI-thread fan edits and the
+    // background ApplyCustomMode -> guarded by _state. The model is told a fan's data and never which fan it is:
     // the mapping from the stored preset's two halves to the two fans is FanSettingsOf below.
     private readonly FanCurveEngine _fanCurve = new();
 
@@ -31,7 +31,7 @@ public sealed partial class LaptopService
             ok = fc.SetCustomSpeeds(cpu, gpu);
         }
         else ok = fc.SetMode(mode);
-        // No error channel here on purpose: every caller of ApplyFan is void (SetFan, SetFanCurve, ApplyCustom,
+        // No error channel here on purpose: every caller of ApplyFan is void (the fan edit paths, ApplyCustom,
         // ApplyModeFan), so there has never been a reader for this failure — and giving it one now would start
         // showing the user a message the app has never shown.
         return ok;
@@ -91,21 +91,12 @@ public sealed partial class LaptopService
 
     /// <summary>Set the fan mode + fixed speeds for the CURRENT mode and apply now. Per-fan curve settings are
     /// preserved; in Custom mode a fan's real speed is its curve value when that fan's curve is on, else the
-    /// fixed speed set here (see <see cref="ApplyCustom"/>).
+    /// fixed speed set here (see <see cref="ApplyCustomMode"/>).
     ///
     /// WHAT IS STATED HERE AND WHAT MOVED. Which fans a selection touches, and that it must not clobber the curves
     /// — the rule — is <see cref="ApplyFanSelection"/> (Application), and the state it edits crosses as
     /// <see cref="FanAxisState"/>. What stays is the graph write, the deadband and the EC, reached through
     /// <see cref="IFanAxisTarget.ReplaceSelection"/>, which is the member below.</summary>
-    public void SetFan(FanMode mode, byte cpu, byte gpu)
-        => ApplyFanSelection.Run(mode, cpu, gpu, this);
-
-    /// <summary>Turn one fan's curve on/off and store its points, for the CURRENT mode, then apply now. The rule
-    /// — which fan's half an edit names, and that the other half and the mode survive it — is
-    /// <see cref="ApplyFanCurve"/> (Application); the write is <see cref="IFanAxisTarget.ReplaceCurve"/>.</summary>
-    public void SetFanCurve(bool gpu, bool use, int[] points)
-        => ApplyFanCurve.Run(gpu, use, points, this);
-
     // ---- the fan edit contract (Application/FanAxis.cs) ----
 
     /// <summary>The current mode's preset in the domain's vocabulary, creating it if the user has never
@@ -119,10 +110,10 @@ public sealed partial class LaptopService
 
     /// <summary>The curve edit: store, clear the deadband, save, and drive the curves — all in one hold, which is
     /// the shape both edit paths have always had and one of the three deliberate holds
-    /// (docs/open-decisions.md §3: a background <c>ApplyCustom</c> must not be able to land between its
+    /// (docs/open-decisions.md §3: a background <c>ApplyCustomMode</c> must not be able to land between its
     /// <c>Step</c> and its <c>Commit</c>, and a deadband cleared outside this hold could be re-armed by one).
     ///
-    /// NOTHING REACHES THE EC WHEN THE MODE IS NOT CUSTOM, and that is not a shortcut: <see cref="ApplyCustom"/>'s
+    /// NOTHING REACHES THE EC WHEN THE MODE IS NOT CUSTOM, and that is not a shortcut: <see cref="ApplyCustomMode"/>'s
     /// own guard returns before it touches the port, so a curve edited in Auto or Max produces no EC traffic at
     /// all — and pushing the mode here instead would be a write this path has never made.</summary>
     void IFanAxisTarget.ReplaceCurve(FanAxisState state)
@@ -132,7 +123,7 @@ public sealed partial class LaptopService
             FileFan(state);
             _fanCurve.Reset();
             Save();
-            ApplyCustom(ReadSensors());
+            ApplyCustomMode(ReadSensors());
         }
     }
 
@@ -159,7 +150,7 @@ public sealed partial class LaptopService
             FileFan(state);
             _fanCurve.Reset();
             Save();
-            if (state.Mode == FanMode.Custom) ApplyCustom(ReadSensors());
+            if (state.Mode == FanMode.Custom) ApplyCustomMode(ReadSensors());
             else ApplyFan(state.Mode, (byte)state.Cpu.FixedDuty, (byte)state.Gpu.FixedDuty);
         }
     }
@@ -189,10 +180,19 @@ public sealed partial class LaptopService
         f.CpuCurve = state.Cpu.Curve; f.GpuCurve = state.Gpu.Curve;
     }
 
+    /// <summary>The current mode's fan preset in the DOMAIN's vocabulary, for the ReadFanState use case
+    /// (Application/Queries.cs). The stored shape is read here (<see cref="AxisStateOf"/>) and crosses as
+    /// <see cref="FanAxisState"/>; the two forms mirror the internal accessors below.</summary>
+    FanAxisState IFanStateTarget.Current() => AxisStateOf(CurrentFan());
+
+    /// <summary>As <see cref="IFanStateTarget.Current()"/> but reusing an already-read current profile.</summary>
+    FanAxisState IFanStateTarget.Current(PerformanceProfile? cur) => AxisStateOf(CurrentFan(cur));
+
     /// <summary>The fan preset for the current mode, or defaults if none is saved yet (not stored). A SNAPSHOT:
     /// the caller cannot reach the stored instance through it, so a view-model that keeps the value cannot
-    /// rewrite the user's settings behind <c>_state</c>'s back.</summary>
-    public FanPreset CurrentFan()
+    /// rewrite the user's settings behind <c>_state</c>'s back. `internal` rather than public: the UI reaches it
+    /// through the ReadFanState use case, and this class's own fan paths call it by name.</summary>
+    internal FanPreset CurrentFan()
     {
         lock (_state)
             return Settings.FanPresets.TryGetValue(CurrentModeKey(), out var f) ? f.Snapshot() : new FanPreset();
@@ -205,17 +205,19 @@ public sealed partial class LaptopService
     /// The lock keeps its exact former scope: the key is derived from the caller's profile and the preset is
     /// looked up under one <c>_state</c> hold, which is the pairing docs/open-decisions.md §3 protects. What is
     /// gone is only the port read — the parameterless form still reads it under the lock, deliberately.</summary>
-    public FanPreset CurrentFan(PerformanceProfile? cur)
+    internal FanPreset CurrentFan(PerformanceProfile? cur)
     {
         lock (_state)
             return Settings.FanPresets.TryGetValue(CurrentModeKey(cur), out var f) ? f.Snapshot() : new FanPreset();
     }
 
-    /// <summary>Apply the current mode's saved fan preset on a mode change. Auto/Max are pushed immediately;
-    /// Custom is left to <see cref="ApplyCustom"/> (the refresh loop) so per-fan curves track temperature.
-    /// Returns the preset so the UI reflects it, or null if this mode has none (fans left untouched) — a
-    /// SNAPSHOT, like <see cref="CurrentFan"/>, and for the same reason.</summary>
-    public FanPreset? ApplyModeFan()
+    // ---- the fan mode-apply + drive contracts (Application/ModeApply.cs) ----
+
+    /// <summary>The current mode's fan preset applied to the EC: Auto/Max pushed immediately, Custom left to the
+    /// refresh loop's <see cref="ApplyCustomMode"/> so per-fan curves track temperature. Returns the applied state
+    /// in the DOMAIN's vocabulary (<see cref="FanAxisState"/>), or null when this mode has none — the null the UI
+    /// reads as "leave the section alone". Reached by the use case <see cref="ApplyModeFan"/>, not by name.</summary>
+    FanAxisState? IFanModeTarget.ApplyCurrentMode()
     {
         lock (_state)
         {
@@ -230,14 +232,18 @@ public sealed partial class LaptopService
                 var (cpu, gpu) = FanSettingsOf(f);
                 ApplyFan(mode, (byte)cpu.FixedDuty, (byte)gpu.FixedDuty);
             }
-            return f.Snapshot();
+            return AxisStateOf(f);
         }
     }
+
+    /// <summary>Drive the fans in Custom mode with a deadband and a lock-through-EC hold (the one deliberate hold
+    /// docs/open-decisions.md §3 records). Reached by the use case <see cref="ApplyCustom"/>, not by name.</summary>
+    void IFanDriveTarget.Drive(SensorSnapshot s) => ApplyCustomMode(s);
 
     /// <summary>Drive the fans in Custom mode: each fan uses its curve value (mapped from the live temp) when
     /// its curve is on, otherwise its fixed speed. Applied with a deadband so the fans don't hunt. A no-op
     /// outside Custom mode. Called every refresh (reuses the already-read sensors — no extra hardware access).</summary>
-    public void ApplyCustom(SensorSnapshot s)
+    private void ApplyCustomMode(SensorSnapshot s)
     {
         lock (_state)
         {

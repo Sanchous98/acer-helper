@@ -75,23 +75,31 @@ public sealed class ReapplyOutcome
 /// <item><b>Which of them run on another thread</b>, from <see cref="ReapplyPlan.RunsOffTheCallersThread"/>,
 /// and that they go as ONE task so their relative order survives and they share one catch — the guarantee the
 /// resume site already had.</item>
-/// <item><b>What escapes.</b> Nothing here catches: an axis driven on the caller's thread throws straight
-/// through to the site, exactly as it did when the site called the axis itself. A single catch around both
-/// would unify three sites whose guarantees are genuinely different — <c>ApplyStartupState</c> has no catch at
-/// all, the refresh pass's covers its whole pass, and the resume handler's covers its three axes together —
-/// which the plan names as a change rather than an improvement.</item>
+/// <item><b>What escapes.</b> Nothing here catches: a NON-PORT fault thrown while driving an axis on the caller's
+/// thread passes straight through to the site, exactly as it did when the site called the axis itself. A port
+/// refusal is NOT such a fault any more: the applied-edit write ports throw <c>PortWriteFailedException</c> after
+/// the UI gate, and the mode-apply targets catch their port's throw because a re-apply is a SYSTEM path with no
+/// reader (docs/open-decisions.md §2, 2026-09-28) — so a re-apply never surfaces a hardware refusal at its site.
+/// A single catch around both would unify three sites whose guarantees are genuinely different —
+/// <c>ApplyStartupState</c> has no catch at all, the refresh pass's covers its whole pass, and the resume
+/// handler's covers its three axes together — which the plan names as a change rather than an improvement.</item>
 /// </list>
 ///
 /// NO LOCK IS TAKEN HERE. One axis (<c>ApplyModeFan</c>) takes the machine's state lock while calling its port,
 /// and it does that inside the layer that owns the lock; nothing in this file holds one across a hardware
-/// call.</summary>
-public static class ReapplySettings
+/// call.
+///
+/// IT OWNS ITS TARGET THROUGH THE CONSTRUCTOR, like every other use case in this layer: the target is the
+/// contract above, fixed when the use case is built, and <see cref="Run"/> names only the MOMENT. Composition
+/// builds one over the reconciler and hands the SAME instance to the service's boot path and to the two UI
+/// sites (see <c>CompositionRoot</c>), so there is one operation and not three constructions of it.</summary>
+public sealed class ReapplySettings(IReapplyTarget target)
 {
     /// <summary>Drive every axis <paramref name="trigger"/> schedules, in the order
     /// <see cref="ReapplyPlan.Schedule"/> states them, and return the values the calling site's UI pass
     /// reflects. Callers and what they discard: the mode-change site consumes the outcome (it feeds the
     /// view-models on its UI pass), the startup and resume sites discard it.</summary>
-    public static ReapplyOutcome Run(ReapplyTrigger trigger, IReapplyTarget target)
+    public ReapplyOutcome Run(ReapplyTrigger trigger)
     {
         var outcome = new ReapplyOutcome();
         List<ModeAxis>? deferred = null;

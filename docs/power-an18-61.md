@@ -11,11 +11,11 @@ the EC and is reachable only over HID.**
 `SetGamingMiscSetting` index `0x0B` — the call the app used for profiles — moves the tray state, the
 per-mode presets and the lightbar palette, and the EC does report it back as "current profile". It does
 **not** move the power envelope. Proof, measured live: NitroSense switching Quiet ↔ Turbo moved the dGPU's
-`enforced.power.limit` between **71 W and 108 W** while *every* gaming-WMI value stayed frozen — index
+`enforced.power.limit` between **75 W and 115 W** while *every* gaming-WMI value stayed frozen — index
 `0x0B` sat on Eco (`0x06`) the whole time and `GetGamingProfile` never changed from `0x1000001000000`.
 
 Consequence before this was fixed: the app could show (and the EC could report) "Turbo" while the dGPU ran
-the lowest power row — 70 W base TGP plus whatever Dynamic Boost granted, ~78 W sustained instead of ~108 W.
+the lowest power row — 70 W base TGP plus whatever Dynamic Boost granted, ~77 W sustained instead of ~115 W.
 
 ## Power source (AC / USB-C PD) on the same channel — investigation 2026-09-27
 
@@ -120,32 +120,42 @@ re-asserts it rather than reconciling it (see the boot sync in `AcerDevice.Windo
 
 ## Mode byte → measured dGPU power
 
-Measured under sustained GPU load, each mode entered from a **re-confirmed mode 0**:
+Measured under sustained GPU load (Witcher 3, ~97 % util), each mode entered from the app's own usage-mode
+command and sampled after an 8 s settle plus 6 readings. The driver's real `enforced.power.limit` per row:
 
-| mode | steady `enforced.power.limit` | SM clock | maps to |
-|------|------------------------------|----------|---------|
-| 0 | **108 W** | ~2230 MHz | Turbo |
-| 1 | 93 W | 2050 MHz | Performance |
-| 2 | 79 W | 1895 MHz | Balanced |
-| 3 | 71 W | ~1700 MHz | Quiet |
-| 4 | 71 W | ~1700 MHz | Eco |
-| 5+ | — | — | acknowledged, then **ignored** |
+| mode | steady `enforced.power.limit` | `power.draw` | SM clock | mem clock | maps to |
+|------|------------------------------|--------------|----------|-----------|---------|
+| 0 | **115 W** | 113 W | ~2280 MHz | 12321 MHz (P2) | Turbo |
+| 1 | **100 W** | 98 W | ~2207 MHz | 9001 MHz (P4) | Performance |
+| 2 | **85 W** | 85 W | ~2037 MHz | 9001 MHz (P4) | Balanced |
+| 3 | **75 W** (76.8 measured) | 77 W | ~1916 MHz | 9001 MHz (P4) | Quiet |
+| 4 | **75 W** (76.7 measured) | 77 W | ~1912 MHz | 9001 MHz (P4) | Eco |
+| 5+ | — | — | — | — | acknowledged, then **ignored** |
 
-Five valid values, matching the EC's own `System usage mode capability: 5`. Modes 3 and 4 are the same GPU
-row and differ only in the CPU envelope, so Quiet and Eco map to them in that order.
+Five valid values, matching the EC's own `System usage mode capability: 5`. **Modes 3 and 4 enforce the same
+GPU envelope** and differ only in the CPU side, so Quiet and Eco map to them in that order. Because they move
+nothing on the dGPU, the app's GPU-power selector offers only **four** levels (Turbo/Performance/Balanced/Quiet)
+— the trailing Eco row is deliberately not a selectable level (see §"Selecting the envelope ON ITS OWN").
+
+> **The declared CTGP is NOT applied.** The EC's table (§below) lists `TGP + CTGP + DynBoost`; row 0 declares
+> 100 + 30 + 15 = 145 W. The driver never honours that: the real ceiling is `TGP + DynBoost` (100 + 15 = 115 W;
+> 85 + 15 = 100 W), clamped to the 115 W VBIOS `Max Power Limit`. So the honest scale is **115 / 100 / 85 / 75 /
+> 75 W**, not the 145 W the table implies. Quiet (row 3) is a separate, lower envelope than Balanced even though
+> both rows declare TGP 70 + DynBoost 15 — row 3 differs in the byte flag `r11 = 1` and the CPU fields (25/45 vs
+> 35/55), so its ~77 W is not derivable from the TGP field alone.
 
 ### The EC's own power table
 
-`GetOCProfileTable` dumps four rows; the values are little-endian uint16 watts and line up exactly with the
-measurements (`TGP = 70 base + CTGP`, and `TGP + 15 W Dynamic Boost = 115 W`, which is precisely what
-`nvidia-smi` reports as *Max Power Limit*):
+`GetOCProfileTable` dumps four rows; the values are little-endian uint16 watts. They declare the *intended*
+envelope (`TGP`, `CTGP`, `DynBoost`), but only `TGP + DynBoost` reaches the driver — `CTGP` is not applied (see
+the note above):
 
-| idx | CPU sust | CPU boost | **TGP** | **CTGP** | **Dyn Boost** | **core OC** |
-|-----|----------|-----------|---------|----------|---------------|-------------|
-| 0 | 35 | 85 | **100** | 30 | 15 | +100 MHz |
-| 1 | 35 | 70 | **85** | 15 | 15 | +50 MHz |
-| 2 | 35 | 55 | **70** | 0 | 15 | 0 |
-| 3 | 25 | 45 | **70** | 0 | 15 | 0 |
+| idx | CPU sust | CPU boost | **TGP** | **CTGP** | **Dyn Boost** | **core OC** | declared total | **real limit** |
+|-----|----------|-----------|---------|----------|---------------|-------------|----------------|----------------|
+| 0 | 35 | 85 | **100** | 30 | 15 | +100 MHz | 145 | **115** |
+| 1 | 35 | 70 | **85** | 15 | 15 | +50 MHz | 115 | **100** |
+| 2 | 35 | 55 | **70** | 0 | 15 | 0 | 85 | **85** |
+| 3 | 25 | 45 | **70** | 0 | 15 | 0 | 85 | **75** |
 
 The `+100 MHz` core overclock in row 0 is what NitroSense advertises as "overclocking" in Turbo. The EC does
 **not** apply it — Acer's `AcerQAAgent` does, through NvAPI `SetPstates20`. This app already has that axis
@@ -170,9 +180,9 @@ Two caveats:
 
 1. **Never measure modes in a descending sequence.** A mode that is a no-op leaves the *previous* mode's
    power level in place and reads as if it worked — exactly how byte 5 first looked valid. Always return to
-   mode 0, re-confirm ~108 W, then send the mode under test.
+   mode 0, re-confirm ~115 W, then send the mode under test.
 2. **Allow 20–30 s per mode.** An 8-second settle reported mode 2 as a noisy 65–77 W when its true steady
-   value is a clean 79 W.
+   value is a clean 85 W.
 3. **A read on this channel is SEND, then read.** The reply only arrives if the request frame went out first
    (Acer's own agent does `hid_send_feature_report` and then `hid_get_feature_report`). Read alone and the
    handle hands back whatever frame it last held — measured here as status `0xE000`, feature echo `0x0001`,
@@ -180,8 +190,8 @@ Two caveats:
    when the request it answers went out first.
 
 Instrument with `nvidia-smi --query-gpu=enforced.power.limit` under load. *Max Power Limit* is useless here
-— it reads 115 W regardless. Idle readings mislead in the other direction: at idle, mode 5 shows a flat
-115 W while under load it does nothing at all.
+— it reads 115 W regardless (the VBIOS ceiling, which also clamps row 0). Idle readings mislead in the other
+direction: at idle, mode 5 shows a flat 115 W while under load it does nothing at all.
 
 ## Dead ends
 
@@ -273,6 +283,56 @@ packets are identical on every OS — only the transport hooks differ (`OpenTran
 
 An unrecognised vendor profile deliberately gets **no** mode: inventing a power envelope for it would be worse
 than not touching the EC.
+
+**The profile axis keeps all five classes** (including Eco, byte 4). The *power-level* axis below is a different
+surface and offers only four rows — Eco's GPU envelope is identical to Quiet's, so it would be a selector entry
+that moves nothing.
+
+### Selecting the envelope ON ITS OWN — the per-profile `PowerMode` (2026-09-29)
+
+The envelope above used to move **only** as a side-effect of a profile switch. The owner then wanted it
+selectable **independently**, and remembered **per performance profile** exactly like the GPU clock offsets
+(`GpuOcPreset.Core`/`Mem`). This is that control.
+
+**The EC's fixed rows, minus the dead one — no arbitrary wattage.** The selector offers the EC's real steps —
+Turbo **115 W**, Performance **100 W**, Balanced **85 W**, Quiet **75 W** — plus a default **"Follow profile"**.
+The EC's fifth usage row (Eco, byte 4) is deliberately **not** offered: it enforces the *same* GPU envelope as
+Quiet (both ~77 W measured), so it would be a row that moves nothing (the two differ only in the CPU side). There
+is **no arbitrary wattage**: this platform has no register for a number (see §"Dead ends" — `nvidia-smi -pl` and
+NVAPI `ClientPowerPolicies` both refuse), so a free-form wattage would need a kernel driver along the lines of
+NvPwrControl, which this project deliberately does not build. The choice is a row, or the profile decides.
+
+**Where the choice is stored.** `GpuOcPreset.Power` in `settings.json`, under the mode key (the same dictionary
+that holds the offsets). It is the enum's own number, or **absent/JSON null** for "follow the profile". The
+persisted number is deliberately **not** the EC wire byte — they agree today for the four offered rows, which is
+exactly why the two are stated separately (the wire byte lives in `AcerEcHidController.ModeForLevel`). A file
+written before this field exists loads as "follow the profile", i.e. today's behaviour; a file from an older build
+that persisted **4** (the Eco row) also reads as "follow the profile" now, because this build offers four levels
+and the reader refuses a value that names none. Both compatibility paths are pinned in `JsonSettingsStoreTests`.
+
+**Where the override is applied**, and this is the load-bearing part:
+
+* On a **profile switch**, the profile port still drives the EC's class-derived row first
+  (`AcerDevice.Windows.SetProfile` / `EcSyncedProfiles` → `AcerEcHidController.Apply(ProfileKind)`). The
+  mode-switch re-apply then runs the GPU axis (`Application.ApplyModeGpuOc`), and **only when the new mode has
+  an explicit `Power`** it enqueues that level through the envelope port (`IGpuPowerEnvelope.SetLevel` →
+  `AcerEcHidController.ApplyLevel`). Both writes go through the same single coalescing slot on the writer
+  thread, and the explicit level lands **last**, so it wins. When the mode says "follow the profile", the
+  re-apply writes **nothing** to the envelope — the profile switch's class-derived row is left standing, which
+  is exactly the old behaviour.
+* At **boot and resume**, the same axis runs: `Application.ApplyStartupState` →
+  `ReapplySettings(ReapplyTrigger.Startup/Resume)` drives `ModeAxis.GpuOc`, which now applies the pinned level
+  as well as the offsets. The device's own boot sync (`AcerDevice.Windows.InitVendor`) still pushes the profile
+  class's row; the startup re-apply then overrides it with the mode's pinned level when there is one.
+
+The write is **enqueue-only and off the UI thread** like every other EC write here (see §"Writes never happen on
+the caller's (UI) thread"), so the selector never blocks on the HID bus.
+
+**One port, one adapter.** `IGpuPowerEnvelope` (Domain/Ports.cs) is declared only where the EC channel exists
+(null otherwise, so the row hides). `EcPowerEnvelope` (Infrastructure/Vendors/Acer/) is the adapter that carries
+the level list and refuses a level it does not offer before the EC is touched — the firmware ACKs an
+out-of-range row exactly like a good one and then ignores it, so a level the port did not advertise must never
+be sent. Both OS halves wire it from the same `AcerEcHidController`.
 
 ### Writes never happen on the caller's (UI) thread
 

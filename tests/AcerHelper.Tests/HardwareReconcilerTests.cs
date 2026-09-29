@@ -6,7 +6,8 @@ using AcerHelper.Tests.Fakes;
 namespace AcerHelper.Tests;
 
 /// <summary>
-/// The re-apply SCHEDULE as an operation: <see cref="HardwareReconciler"/> drives one trigger's axes against
+/// The re-apply SCHEDULE as an operation: the re-apply use case (<see cref="ReapplySettings"/>, over
+/// <see cref="HardwareReconciler"/>) drives one trigger's axes against
 /// the ports, checked on the three things the sites used to decide by hand — WHICH axes are driven, in WHAT
 /// ORDER, and on WHICH THREAD — plus the fourth, which exception escapes.
 ///
@@ -44,6 +45,7 @@ public class HardwareReconcilerTests
         var log = new CallLog();
         f.Device.FanControl = new RecordingFan(new FakeFanControl(), log);
         f.Device.GpuOverclock = new RecordingGpu(new FakeGpuOverclock(), log);
+        f.Device.GpuPowerEnvelope = new FakeGpuPowerEnvelope();
         f.Device.CurveOptimizer = new RecordingCo(new FakeCurveOptimizer(), log);
         f.Device.CpuPower = new RecordingCpu(new FakeCpuPower { CurrentId = "best-efficiency" }, log);
         var rgb = new FakeRgbDevice();
@@ -75,7 +77,7 @@ public class HardwareReconcilerTests
         var settings = FullyConfigured();
         var a = Setup(settings);
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.Startup);
+        a.F.Service.Reapply.Run(ReapplyTrigger.Startup);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal([ModeAxis.GpuOc, ModeAxis.CpuPower, ModeAxis.Co], a.Log.Axes);
@@ -93,7 +95,7 @@ public class HardwareReconcilerTests
     {
         var a = Setup(FullyConfigured());
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.ModeChange);
+        a.F.Service.Reapply.Run(ReapplyTrigger.ModeChange);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal([ModeAxis.Fans, ModeAxis.GpuOc, ModeAxis.CpuPower, ModeAxis.Co], a.Log.Axes);
@@ -109,7 +111,7 @@ public class HardwareReconcilerTests
     {
         var a = Setup(FullyConfigured());
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.Resume);
+        a.F.Service.Reapply.Run(ReapplyTrigger.Resume);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal([ModeAxis.GpuOc, ModeAxis.CpuPower, ModeAxis.Co], a.Log.Axes);
@@ -127,7 +129,7 @@ public class HardwareReconcilerTests
         {
             var a = Setup(FullyConfigured());
 
-            a.F.Service.Reconciler.Reapply(trigger);
+            a.F.Service.Reapply.Run(trigger);
 
             a.Log.WaitFor(ModeAxis.Co);
             var scheduled = ReapplyPlan.Schedule(trigger)
@@ -149,7 +151,7 @@ public class HardwareReconcilerTests
         var a = Setup(FullyConfigured());
         var caller = Environment.CurrentManagedThreadId;
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.Startup);
+        a.F.Service.Reapply.Run(ReapplyTrigger.Startup);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal(caller, a.Log.ThreadOf(ModeAxis.GpuOc));
@@ -166,7 +168,7 @@ public class HardwareReconcilerTests
         var a = Setup(FullyConfigured());
         var caller = Environment.CurrentManagedThreadId;
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.ModeChange);
+        a.F.Service.Reapply.Run(ReapplyTrigger.ModeChange);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.Equal(caller, a.Log.ThreadOf(ModeAxis.Fans));
@@ -184,7 +186,7 @@ public class HardwareReconcilerTests
         var a = Setup(FullyConfigured());
         var caller = Environment.CurrentManagedThreadId;
 
-        a.F.Service.Reconciler.Reapply(ReapplyTrigger.Resume);
+        a.F.Service.Reapply.Run(ReapplyTrigger.Resume);
 
         a.Log.WaitFor(ModeAxis.Co);
         Assert.NotEqual(caller, a.Log.ThreadOf(ModeAxis.GpuOc));
@@ -195,18 +197,25 @@ public class HardwareReconcilerTests
 
     // ---- what a throw does at each site ----
 
-    /// <summary>The startup site's guarantee, pinned where it is observable: it has NO catch around its
-    /// synchronous axes, so a throwing port arrives at its caller (the <c>AppController</c> constructor). That is
-    /// the recorded gap — it is not fixed here, and this test is what would notice if the reconciler started
-    /// swallowing it, e.g. by handing the fast axes to the pool.</summary>
+    /// <summary>A THROWING GPU driver on a boot re-apply is caught at the axis itself
+    /// (<c>IGpuOcModeTarget.ApplyCurrentMode</c>), because the mode-apply is a SYSTEM path with no reader for the
+    /// failure: the write used to be silently discarded, and the applied-edit family's new
+    /// <c>PortWriteFailedException</c> (docs/open-decisions.md §2, 2026-09-28) made "a throw must not escape a
+    /// background re-apply" a rule rather than a coincidence. The reach witness keeps this from passing vacuously.
+    ///
+    /// WHAT THIS REPLACES: the site used to let the throw reach the caller (the <c>AppController</c> constructor)
+    /// and this test pinned that as the recorded gap. The owner's refinement closes the gap here with the rest of
+    /// the write ports.</summary>
     [Fact]
-    public void AThrowFromABootAxisOnTheCallersThreadReachesTheCaller()
+    public void AThrowFromABootAxisOnTheCallersThread_IsCaught_AndNeverReachesTheCaller()
     {
         var a = Setup(FullyConfigured());
         var boom = new ThrowingGpu(new FakeGpuOverclock());
         a.F.Device.GpuOverclock = boom;
 
-        Assert.Throws<InvalidOperationException>(() => a.F.Service.Reconciler.Reapply(ReapplyTrigger.Startup));
+        var escaped = Record.Exception(() => a.F.Service.Reapply.Run(ReapplyTrigger.Startup));
+
+        Assert.Null(escaped);
         Assert.True(boom.Reached);
     }
 
@@ -220,10 +229,27 @@ public class HardwareReconcilerTests
         var boom = new ThrowingCo(new FakeCurveOptimizer());
         a.F.Device.CurveOptimizer = boom;
 
-        var escaped = Record.Exception(() => a.F.Service.Reconciler.Reapply(ReapplyTrigger.Startup));
+        var escaped = Record.Exception(() => a.F.Service.Reapply.Run(ReapplyTrigger.Startup));
 
         Assert.Null(escaped);
         Assert.True(Eventually.Until(() => boom.Reached), "the deferred axis was never tried");
+    }
+
+    /// <summary>A THROWING CPU-power port on a re-apply is caught at the axis itself
+    /// (<c>ICpuPowerModeTarget.ApplyCurrentMode</c>): the mode-apply runs on a background path and must not let a
+    /// throw escape (the applied-edit family's new <c>PortWriteFailedException</c> is the motivation, though this
+    /// axis's port raises its own exception). The reach witness keeps this from passing vacuously.</summary>
+    [Fact]
+    public void AThrowFromTheCpuPowerModeApply_IsCaught_AndNeverReachesTheCaller()
+    {
+        var a = Setup(FullyConfigured());
+        var boom = new ThrowingCpu(new FakeCpuPower { CurrentId = "best-efficiency" });
+        a.F.Device.CpuPower = boom;
+
+        var escaped = Record.Exception(() => a.F.Service.Reapply.Run(ReapplyTrigger.Startup));
+
+        Assert.Null(escaped);
+        Assert.True(boom.Reached);
     }
 
     // ---- the UI reflect values ----
@@ -239,9 +265,9 @@ public class HardwareReconcilerTests
     {
         var a = Setup(FullyConfigured());
 
-        var started = a.F.Service.Reconciler.Reapply(ReapplyTrigger.Startup);
-        var switched = a.F.Service.Reconciler.Reapply(ReapplyTrigger.ModeChange);
-        var woken = a.F.Service.Reconciler.Reapply(ReapplyTrigger.Resume);
+        var started = a.F.Service.Reapply.Run(ReapplyTrigger.Startup);
+        var switched = a.F.Service.Reapply.Run(ReapplyTrigger.ModeChange);
+        var woken = a.F.Service.Reapply.Run(ReapplyTrigger.Resume);
         a.Log.WaitFor(ModeAxis.Co);
 
         Assert.Null(started.Co);
@@ -254,6 +280,40 @@ public class HardwareReconcilerTests
         // The DOMAIN's mode rather than the stored integer, so `.Value` is part of the assertion: an outcome
         // that never reported the fans throws here instead of reading as a pass.
         Assert.Equal(FanMode.Max, switched.Fan!.Value.Mode);
+    }
+
+    /// <summary>The BOOT/RESUME re-apply includes the GPU power level, not just the clock offsets: a mode that
+    /// pinned a row gets that row back after a reboot (the EC usage mode does not survive one), and the state the
+    /// UI reflects carries the level too. Pinned on the STARTUP trigger — the one the other tests drive through
+    /// the service's own boot path — so "the level is re-applied at startup" is an observation rather than a
+    /// claim. The RESUME trigger drives the same volatile set, which <c>ReapplyPlan</c> pins separately.</summary>
+    [Fact]
+    public void AStartupReAppliesAPinnedPowerLevel()
+    {
+        var settings = FullyConfigured();
+        settings.GpuOcPresets["balanced"].Power = (int)GpuPowerLevel.Performance;
+        var a = Setup(settings);
+
+        a.F.Service.Reapply.Run(ReapplyTrigger.Startup);
+
+        a.Log.WaitFor(ModeAxis.Co);
+        Assert.Equal([GpuPowerLevel.Performance], ((FakeGpuPowerEnvelope)a.F.Device.GpuPowerEnvelope!).SetCalls);
+    }
+
+    /// <summary>...and a boot of a mode that FOLLOWS its profile writes NOTHING to the envelope port — the
+    /// profile switch is the only thing that moves the envelope then, which is the old behaviour the default
+    /// must preserve. The offset write still happens (stock is a fact), so the absence of an envelope write is a
+    /// decision, not an empty graph.</summary>
+    [Fact]
+    public void AStartupOfAModeThatFollowsTheProfile_WritesNoPowerLevel()
+    {
+        var a = Setup(FullyConfigured());   // no Power on the preset
+
+        a.F.Service.Reapply.Run(ReapplyTrigger.Startup);
+
+        a.Log.WaitFor(ModeAxis.Co);
+        Assert.Empty(((FakeGpuPowerEnvelope)a.F.Device.GpuPowerEnvelope!).SetCalls);
+        Assert.Equal([(-150, 800)], ((RecordingGpu)a.F.Device.GpuOverclock!).SetCalls);
     }
 }
 
@@ -300,6 +360,10 @@ internal sealed class RecordingGpu(IGpuOverclock inner, CallLog log) : IGpuOverc
     public (int Min, int Max) CoreRange => inner.CoreRange;
     public (int Min, int Max) MemRange => inner.MemRange;
     public bool Set(int coreMhz, int memMhz) { log.Record(ModeAxis.GpuOc); return inner.Set(coreMhz, memMhz); }
+
+    /// <summary>The wrapped port's own record, so a test can assert WHAT was written and not only that the axis
+    /// was reached.</summary>
+    public List<(int Core, int Mem)> SetCalls => ((FakeGpuOverclock)inner).SetCalls;
 }
 
 internal sealed class RecordingCpu(ICpuPower inner, CallLog log) : ICpuPower
@@ -346,4 +410,15 @@ internal sealed class ThrowingCo(ICurveOptimizer inner) : ICurveOptimizer
     public IReadOnlyList<VoltageDomain> Domains => inner.Domains;
     public bool Set(int counts) { _reached = true; throw new InvalidOperationException("no SMU mailbox"); }
     public bool SetDomains(IReadOnlyList<int> counts) { _reached = true; throw new InvalidOperationException("no SMU mailbox"); }
+}
+
+/// <summary>A CPU-power port whose write throws, with the same reach witness, for the mode-apply path that has no
+/// reader but must still not let a throw escape a background re-apply.</summary>
+internal sealed class ThrowingCpu(ICpuPower inner) : ICpuPower
+{
+    public bool Reached { get; private set; }
+    public string? LastError => inner.LastError;
+    public IReadOnlyList<ChoiceOption> Modes => inner.Modes;
+    public string? Current() => inner.Current();
+    public bool Set(string id) { Reached = true; throw new InvalidOperationException("no OS power API"); }
 }

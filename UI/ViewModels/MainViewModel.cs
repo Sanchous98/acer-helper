@@ -121,8 +121,13 @@ public sealed partial class MainViewModel : ObservableObject
         // drawer, opened from the footer — kept off the main column so the dashboard stays uncluttered. The
         // drawer exists when the device supports at least one of the two; each child is null when its
         // capability is absent.
+        // GPU clock offsets + (where the EC channel exists) the GPU power level, remembered per performance
+        // profile. The power rows come from the envelope port so their measured watts are the vendor's figures;
+        // an absent port yields no rows and the selector is hidden.
         var gpuVm = device.GpuOverclock is { } gpu
-            ? new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange, a.Gpu.Initial, a.Gpu.SetGpuOc) : null;
+            ? new GpuViewModel(gpu.Name, gpu.CoreRange, gpu.MemRange,
+                               device.GpuPowerEnvelope?.Levels ?? [], a.Gpu.Initial, a.Gpu.SetGpuOc, a.Gpu.SetGpuPower)
+            : null;
         var cpuVm = device.CpuPower is { } cpu
             ? new CpuViewModel(cpu.Modes, a.Cpu.Initial, a.Cpu.SetCpuPower) : null;
         var coVm = device.CurveOptimizer is { } co

@@ -103,6 +103,47 @@ public class LightingReapplyFlashTests
         Assert.Contains("_svc.Device.Lighting?.SetProfileFlash(flash);", source, StringComparison.Ordinal);
     }
 
+    /// <summary>THE FLASH ARMS THE SPURIOUS-ZERO SUSPICION, and it must arm it BEFORE the palette write lands.
+    /// The OPMODE write zeroes the EC's keyboard-brightness register while the keyboard stays lit; the panels
+    /// refuse a read-back 0 only while that suspicion is fresh (<c>LightViewModel.NoteProfileFlash</c>), which is
+    /// what lets a genuine Fn dim to 0 land the rest of the time. The ordering is load-bearing: arming after the
+    /// write would leave a read that lands in between believing the lie; arming never (the pre-fix static
+    /// predicate removed without this) would refuse nothing and reintroduce the documented spurious-0 bug.
+    ///
+    /// A source guard because the coordinator needs a desktop lifetime and a refresh loop to drive, the same limit
+    /// the rest of this file records. MUTATION THAT REDDENS IT: dropping the <c>_lighting.NoteProfileFlash()</c>
+    /// call, or moving it after <c>SetProfileFlash</c>.</summary>
+    [Fact]
+    public void TheFlashArmsTheSpuriousZeroSuspicion_BeforeThePaletteLands()
+    {
+        var source = Source("UI/LightingCoordinator.cs");
+
+        var arm = source.IndexOf("_lighting.NoteProfileFlash();", StringComparison.Ordinal);
+        var send = source.IndexOf("_svc.Device.Lighting?.SetProfileFlash(flash);", StringComparison.Ordinal);
+        Assert.True(arm >= 0, "Paint must arm the flash suspicion at the flash instant");
+        Assert.True(send >= 0, "Paint must still send the palette");
+        Assert.True(arm < send, "the suspicion must be armed BEFORE the palette write, so an in-between read is covered");
+    }
+
+    /// <summary>THE SUPPRESSION CLAIM IS STILL MADE BY <c>OnProfileApplied</c>, and it is still the use case's
+    /// announcement (not a separate step a caller can skip). The 2–3× sweep flash came from a switch that wrote
+    /// the port without ever reaching this method, so two things must hold together: the coordinator implements
+    /// <c>IProfileAnnouncer</c>, and the claim (<c>_pendingId</c>, which suppresses the stale refresh pass that
+    /// would repaint the palette) is set inside it. A source guard, because the coordinator needs a desktop
+    /// lifetime and a live refresh loop to drive — the same limit the class remarks record.
+    ///
+    /// MUTATION THAT REDDENS IT: dropping <c>_pendingId = applied.Id</c> from the announced path, or unhooking the
+    /// interface.</summary>
+    [Fact]
+    public void TheAnnouncedProfileStillRecordsTheSuppressionClaim()
+    {
+        var source = Source("UI/LightingCoordinator.cs");
+
+        Assert.Contains(": IDisposable, IProfileAnnouncer", source, StringComparison.Ordinal);
+        Assert.Contains("public void OnProfileApplied(PerformanceProfile applied)", source, StringComparison.Ordinal);
+        Assert.Contains("_pendingId = applied.Id;", source, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>The repository root, from the COMPILER's path: the test host's working directory is its output

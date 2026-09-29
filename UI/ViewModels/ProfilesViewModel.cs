@@ -9,11 +9,14 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace AcerHelper.UI.ViewModels;
 
-/// <summary>Performance section: one segmented button per profile. The active one gets the
-/// <c>selected</c> class (filled with the system accent in XAML); profiles not selectable right now are
-/// disabled. When the "Turbo toggles" option is on, Turbo is NOT one of the segments — it's a separate
-/// switch layered over the selected base profile (see <see cref="TurboOn"/>), so the segments show only
-/// the base profiles and the highlighted one is the base underneath Turbo.
+/// <summary>Performance section: one segmented button per profile the current power source OFFERS. The active
+/// one gets the <c>selected</c> class (filled with the system accent in XAML); profiles the source disables
+/// (on battery only Eco and Balanced; on AC Quiet, Balanced, Performance and Turbo) are not in the row at all,
+/// rather than present-but-greyed. The active mode stays in the row even if the source disables it, so the
+/// highlight and the header can never point at a segment that does not exist. When the "Turbo toggles" option is
+/// on, Turbo is NOT one of the segments — it's a separate switch layered over the selected base profile (see
+/// <see cref="TurboOn"/>), so the segments show only the base profiles and the highlighted one is the base
+/// underneath Turbo.
 ///
 /// <paramref name="traits"/> is the backend's own reading of the profiles it offers — which class each one
 /// belongs to and the colour it is painted with (<see cref="ProfileTraits"/>, reached through the service). It
@@ -35,6 +38,10 @@ public sealed partial class ProfilesViewModel : SectionViewModel
     private readonly Func<bool, bool> _setTurbo;
     private readonly Action<PerformanceProfile?>? _onDisplay;
     private readonly Dictionary<string, ProfileButtonViewModel> _byId = new();
+    // The profiles whose segments are built RIGHT NOW — the last set the pass deemed available. Kept so a pass
+    // that does not change availability leaves the buttons (and their transient selection state) alone, and only
+    // a genuine change (the source flipping AC<->battery) rebuilds the row.
+    private IReadOnlyList<PerformanceProfile> _shown;
     private bool _turboAsToggle;
     private bool _updating;
 
@@ -72,6 +79,9 @@ public sealed partial class ProfilesViewModel : SectionViewModel
         _turboAsToggle = turboAsToggle;
         _onDisplay = onDisplay;
         HasTurbo = all.Any(p => traits(p).Kind == ProfileKind.Turbo);
+        // Until the first pass reports availability, show everything the device lists: the refresh runs before any
+        // user action, so this placeholder is never what the user acts on.
+        _shown = all;
         BuildButtons();
     }
 
@@ -84,7 +94,7 @@ public sealed partial class ProfilesViewModel : SectionViewModel
     {
         Profiles.Clear();
         _byId.Clear();
-        foreach (var p in _all)
+        foreach (var p in _shown)
         {
             if (_turboAsToggle && _traits(p).Kind == ProfileKind.Turbo) continue;   // Turbo lives in the switch instead
             var vm = new ProfileButtonViewModel(p, _traits(p), Apply);
@@ -144,27 +154,54 @@ public sealed partial class ProfilesViewModel : SectionViewModel
     }
 
     /// <summary>Repaint the optimistic display — the Turbo switch and the selected segment — without
-    /// re-triggering the writes (<see cref="_updating"/>). Availability (enabled/visible) is left to
+    /// re-triggering the writes (<see cref="_updating"/>). Which profiles are in the row at all is left to
     /// <see cref="Update"/>, which is the pass's business.</summary>
     private void Render()
     {
         _updating = true;
         TurboOn = _optimisticTurboOn;
+        ApplySelection();
+        _updating = false;
+        _onDisplay?.Invoke(_optimisticCurrent);   // the header chip follows the section immediately
+    }
+
+    /// <summary>Move the <c>selected</c> flag onto the button the optimistic state names. In toggle mode the base
+    /// under Turbo is highlighted rather than Turbo itself; otherwise the current profile is. Called after a
+    /// rebuild too, because fresh buttons start unselected and the row must never be left with nothing lit.</summary>
+    private void ApplySelection()
+    {
         string? selectedId = _turboAsToggle && _optimisticTurboOn ? _optimisticBase?.Id : _optimisticCurrent?.Id;
         foreach (var (id, vm) in _byId)
             vm.IsSelected = selectedId == id;
-        _updating = false;
-        _onDisplay?.Invoke(_optimisticCurrent);   // the header chip follows the section immediately
     }
 
     public void Update(PerformanceProfile? current, IReadOnlyList<PerformanceProfile> selectable,
                        bool turboAsToggle, PerformanceProfile? baseHighlight)
     {
-        if (turboAsToggle != _turboAsToggle) { _turboAsToggle = turboAsToggle; BuildButtons(); }
+        // The row shows only what the source OFFERS right now, plus the mode the hardware is actually in: a source
+        // that disables the active mode (Turbo on battery) must not leave the highlight pointing at a segment that
+        // is not in the row. Availability is independent of the optimistic state, so this tracks the pass even
+        // during a pending write.
+        var shown = _all.Where(p => selectable.Any(s => s.Id == p.Id) || p.Id == current?.Id).ToList();
+        bool setChanged = !_shown.Select(p => p.Id).SequenceEqual(shown.Select(p => p.Id));
+        bool turboChanged = turboAsToggle != _turboAsToggle;
+        _shown = shown;
+        _turboAsToggle = turboAsToggle;
+
+        // A genuine change — the source flipping AC<->battery, or Turbo entering/leaving the segment row — rebuilds
+        // the buttons. A pass that reports the same set leaves them (and their transient selection) untouched.
+        if (setChanged || turboChanged)
+        {
+            BuildButtons();
+            // The fresh buttons start unselected, so restore the OPTIMISTIC selection at once: the pending-write
+            // early return below must not leave the row with no segment highlighted after a rebuild.
+            ApplySelection();
+        }
 
         // Availability is independent of the optimistic state: it always tracks the pass, so a profile that
         // becomes selectable (off battery) or a Turbo switch that appears/disappears still updates during a
-        // pending write.
+        // pending write. Every shown button is selectable-or-current by construction, so this is a no-op in
+        // practice and kept only because the XAML binds IsEnabled.
         ShowTurboSwitch = turboAsToggle && HasTurbo;
         TurboEnabled = selectable.Any(p => _traits(p).Kind == ProfileKind.Turbo);
         foreach (var (id, vm) in _byId)
@@ -186,9 +223,7 @@ public sealed partial class ProfilesViewModel : SectionViewModel
         TurboOn = inTurbo;
 
         // While Turbo is active in toggle mode, highlight the base profile it sits over; otherwise the current.
-        string? selectedId = turboAsToggle && inTurbo ? baseHighlight?.Id : current?.Id;
-        foreach (var (id, vm) in _byId)
-            vm.IsSelected = selectedId == id;
+        ApplySelection();
         _updating = false;
         _onDisplay?.Invoke(_optimisticCurrent);   // the confirmed read-back reaches the header too
     }

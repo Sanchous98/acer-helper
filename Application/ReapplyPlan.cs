@@ -33,7 +33,8 @@ public enum ReapplyTrigger
 ///
 /// WHAT EXECUTES IT, and why the two are separate files rather than one. The operation is
 /// <see cref="ReapplySettings"/>, which lives here beside the plan because a set of actions is a use case: it
-/// walks this schedule and asks a contract (<see cref="IReapplyTarget"/>) to write each axis. The contract's
+/// walks this schedule and asks a contract (<see cref="IReapplyTarget"/>) to write each axis — the contract
+/// owned through its constructor and resolved at composition. The contract's
 /// implementation is Infrastructure's (<c>Infrastructure/Composition/HardwareReconciler.cs</c>), because that
 /// is the layer that owns the hardware and the stored presets.
 ///

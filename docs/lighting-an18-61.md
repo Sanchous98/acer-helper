@@ -135,9 +135,43 @@ re-applies). The colour is looked up per profile from the backend's own table si
 carries it or the profile's class.
 Sleep/hibernate clears the EC's RGB state, so the same re-apply runs on wake too (`ResumeWatcher` →
 `AppController.ReapplyLighting`; Windows `SystemEvents.PowerModeChanged`/`Resume`, more retries as the
-HID/EC can be slow to wake). The keyboard-brightness read-back (`GetGamingKBBacklight`) is unreliable right
-after an OPMODE flash — it reports 0 while the keyboard is lit — so the UI ignores a 0 read-back while it is
-driving a non-zero brightness (`LightViewModel.AdoptBrightness`).
+HID/EC can be slow to wake). The keyboard-brightness read-back (`GetGamingKBBacklight`) is unreliable:
+after an OPMODE flash it reports 0 while the keyboard is lit. A read is used in exactly one place — the
+out-of-band Fn-key event (`LightViewModel.AdoptFromHardware` → `AdoptBrightness`), where it is an author of
+intent like the slider is. Everywhere else the app's STORED value is authoritative: a CONFIGURED zone's
+brightness is neither read at construction nor overridden by a read (docs/state-and-events.md — a read is not
+an author of intent), and the read only seeds an UNCONFIGURED zone (a fresh install), which applies nothing.
+The old construction path let the register win, which is why a zone stored at 100 could show a slider at 0 and
+drive the keyboard dark, and why a profile switch appeared to apply the wrong saved look.
+
+### A genuine Fn dim to 0, and the flash's spurious 0 (2026-09-29)
+
+The register lying is a real hazard on a Fn-key read, but the guard must not confuse it with the user's own
+action. The owner's report: **dimming the keyboard with the Fn brightness key stopped the slider at 25% and it
+never reached 0.** The mechanism was that the refusal keyed on a STATIC capability predicate,
+`profileFlashPossible = () => followZones.Count > 0 && FollowsProfile` — "this machine's register CAN lie".
+That is permanently TRUE on the AN18-61 (it has a lightbar that follows the profile), so it refused EVERY
+read-back 0 with `Brightness > 0`, including a genuine monotonic Fn dim `100 → 75 → 50 → 25 → 0` (each step is
+a real read of the new level, and 0 is the final real step). The capability answers the wrong question: the
+OPMODE flash zeroes the register only **at the switch**, in a short window — it is not a property of the device.
+
+The discriminator is the flash **EVENT**, not the capability. `LightingCoordinator.Paint` calls
+`LightingViewModel.NoteProfileFlash()` **immediately before** it sends the palette, arming a suspicion on every
+panel, and `LightViewModel.AdoptBrightness` refuses a read-back `0` over a lit keyboard **only while that
+suspicion is fresh** (a 5 s window, `FlashSuspectSeconds`; the same "short window" the coordinator already uses
+for `PendingTimeoutSeconds`/`WakeTailSeconds`). A **non-zero read clears it early**, because the register only
+lies at the switch and the first real Fn step proves it live again. So:
+
+- a **monotonic Fn dim to 0** (no palette sent) lands at 0 — slider and stored value;
+- a **profile-switch flash's 0** (over a lit keyboard, inside the window) is refused — the app keeps its stored
+  brightness and does **not** persist the lie;
+- a **later genuine dim to 0 after a flash** lands once the window has passed (or as soon as any non-zero read
+  clears the suspicion), so the decrease control is never dead.
+
+The guard is NOT deleted: the spurious-0 protection the flash needs is kept, only its trigger moved from a
+permanent device fact to the event that can actually produce the lie. Pinned in `LightingAdoptionTests` (the Fn
+dim table, the refused in-window 0, the window expiry, the early clear) and, for the arming order, by the source
+guard `TheFlashArmsTheSpuriousZeroSuspicion_BeforeThePaletteLands` in `LightingReapplyFlashTests`.
 Colour order on the wire is mode-dependent — **R,G,B** for arbitrary-colour writes (keyboard STATIC, lightbar),
 **B,G,R** for the OPMODE profile-flash whitelist (see the `A4` layout note above). On Linux the identical `A4`
 report goes via
@@ -207,6 +241,64 @@ write then landed **~750 ms later** as a second, separate flash cycle. Painting 
 writes in the same moment so they **coincide into one** — and the burst kicked there deliberately carries **no**
 further palette re-sends, only the per-zone self-heal.
 
+### The switch instant rebinds to the LANDED mode (the stored-zero that stayed lit)
+
+The switch instant is only correct if the paint that follows the palette flash carries the **target** mode's
+stored zones. `OnProfileApplied` fires in the same instant as the port write, when the refresh poll has **not**
+read the new mode's door yet — so the lighting section (`LightingViewModel`) is still bound to the **previous**
+mode. The original shape repainted the section's cached `_lights` (`LightingViewModel.Repaint`), which are the
+mode being LEFT, so the per-zone write that followed the flash carried the **old** brightness and the
+palette-free burst kept re-asserting it. The owner's report «сейчас у меня Эко режим сохранил яркость подсветки
+на нуле, но при смене профиля подсветка горит» is exactly this: the target profile (Eco) was saved at keyboard
+brightness **0**, but switching to it left the keyboard **lit**, because the write after the flash sent the
+previous mode's brightness and the stored 0 only reached the port a poll later — if at all.
+
+The fix is to **rebind** rather than repaint: `OnProfileApplied` resolves the landed profile's own door
+(`LaptopService.LightsForCurrentMode(applied)` — the overload that takes an already-read profile, so it costs no
+EC read) and paints through it, so the sequence is **flash (palette) → zone repaint at the TARGET profile's
+stored brightness** (0 → dark), and the burst that follows keeps the target's values instead of the old mode's.
+The follow-up `OnStateChanged` pass that finally reports the same profile is still consumed by the `_pendingId`
+claim (it clears the claim and rebinds to the same door, idempotently), and a stale pass describing the previous
+profile is still dropped — so there is still exactly **one palette flash per action**. The announcer's UI-thread
+marshaller is an injected delegate (`uiPost`) so a test can drive the whole path synchronously; the app passes
+`Dispatcher.UIThread` (inline on the UI thread, posted from the pool).
+
+### The burst must not clobber a brightness edit in flight (the slider that would not persist)
+
+The owner's other report — «настройки яркости не пишутся»: moving the keyboard-zone brightness slider did not
+persist, while the profile-switch memory did. A live watch of `settings.json` while switching profiles and
+dragging the slider to 0 showed the source slot changing but **no `LightPresets` brightness ever**:
+
+```
+19:32:49 OnAc=1/False k0=100 k1=100 k4=100 k6=100   (Balanced; k1 should have become 0)
+```
+
+The mechanism is a **race the burst wins**, and it is NOT the read. A slider move only arms a **120 ms
+debounce** (`LightViewModel.Schedule`); the value is applied and saved on the tick (`ApplyDebounced →
+ApplyNow + SaveState`), and `LightingViewModel._lights[zone]` is updated only then (`Store`). The post-switch
+re-apply burst (`LightingCoordinator.ReapplyTick`) runs every 400 ms for ~3 s after every switch, and the owner
+was switching profiles right before editing — so a burst tick landed inside the 120 ms window. The old
+`Repaint` called `LightViewModel.Rebind(_lights[panel.Title])` — the **last committed** value — which overwrote
+the user's 0 on the slider and set `_loading = true`, which suppressed the edit's own `Schedule()`. The pending
+tick then applied and **persisted the stale 100**: the 0 was reverted before it was ever written. `Repaint`'s
+old comment ("reads nothing, so the burst is safe to run mid-edit") was false for exactly this case: it does not
+*read* the graph, but it *rebinds* from the section's own copy, which is behind the user.
+
+The fix is the same guard the read path already keeps (`AdoptBrightness`: "the hardware read raced ahead of the
+apply"), moved onto the re-apply path. `LightViewModel.Repaint(state)`:
+
+- **edit pending** (`_debounce.IsRunning`) → re-apply the panel's OWN current values (`ApplyNow`) and **leave the
+  controls alone**; the pending tick applies and saves the user's value, so the burst can no longer revert it;
+- **nothing pending** → `Rebind(state)` exactly as before, which re-applies a committed/adopted value and keeps
+  the "a mode's first sight of a zone becomes configured" rule.
+
+The distinction between "adopt the target mode" and "do not touch the pending edit" is made by the **call**, not
+guessed from the values: a genuine mode change is `LightingViewModel.Reload` → `LightViewModel.Rebind`, which
+**still adopts** the target's stored values even with an edit in flight (a mode change is a new intent), and
+`Rebind` now stops the superseded debounce so the old edit cannot tick later and save its stale capture over the
+target. Repaint is only ever the SAME-mode re-apply. Pinned in `LightingInFlightEditTests` (the repro plus the
+mode-change differential).
+
 ### The two remaining double blinks, and how they are closed
 
 The switch instant fixed profile switches; two paths still blinked twice, each by a different mechanism:
@@ -219,6 +311,91 @@ The switch instant fixed profile switches; two paths still blinked twice, each b
 - **Lightbar mode switch (the follows-profile toggle).** The flip painted the palette and then kicked a burst
   that re-sent it on its first ticks — the same second blink, 400 ms later. With the burst palette-free the flip
   is a single palette send.
+
+### The guided sweep's force/restore, and the one switch use case (the 2–3× flash)
+
+The owner's later report — the palette flashing **2–3×** during a guided undervolt sweep and on resume — was a
+third instance of the same class, with a structural cause rather than a second timing bug. The sweep temporarily
+forces a performance profile for the run and restores it afterwards. It did the port write with a **private**
+transient method (`LaptopService.ApplyProfileTransient`) that bypassed `LightingCoordinator.OnProfileApplied` —
+the call that records `_pendingId` so the ~1 s refresh poll does not repaint the palette the firmware has already
+flashed. So the sweep flashed the palette on the force, the poll repainted it (~1 s later), the restore flashed
+it again, and a manual Turbo on top made three.
+
+The port write and the lighting claim were **two separate steps the sweep could take only one of**. The fix makes
+them one indivisible action: `Application/ProfileSwitch.cs` (`SwitchProfile`) now owns **both**, and every profile
+switch routes through it — `ApplyProfile`, `SetTurbo`, `TogglePerformance` and the sweep's force/restore alike.
+The announcement is a second Application contract, `IProfileAnnouncer`, implemented by `LightingCoordinator`
+(which marshals to the UI thread, since the sweep runs off it); the profile target is `IProfileTarget`, implemented
+by `LaptopService`. Because the use case owns both halves, there is no path by which a switch can write the port
+and skip the claim. A forced-and-restored sweep therefore produces exactly **one announcement per switch**, which
+is what the per-switch tests pin.
+
+### The power-source change on resume (the old-profile-then-new-profile flash)
+
+The owner's next report — **on resume from sleep, if the power source changed, the palette flashes twice: once
+for the old power profile, once for the new** — was the same class again, on the last port write that still
+bypassed the switch use case: the per-source restore (`LaptopService.ApplyStoredMode`), reached from
+`SyncPowerSource` on any AC↔battery/USB-C change **and** from the power-source row. It had two independent
+faults, and both are needed to explain the two flashes:
+
+- **The intermediate base write.** Restoring a source whose remembered mode was **Turbo over a base** did
+  `pp.Set(base)` and then `pp.Set(turbo)` as two unconditional port writes. Each Acer `Set` makes the firmware
+  re-flash the palette, so the machine visibly **dropped out of Turbo and back** — the first ("old profile")
+  flash, then the target's. The base under Turbo is **slot bookkeeping** (`BaseProfile` reads it to know what
+  Turbo sits over); it is not a precondition the EC needs, because `AcerDevice.Windows.SetProfile` writes the
+  Turbo byte directly (`SetGamingMiscSetting` selector `0x0B` with the byte, plus the EC envelope). So there was
+  never a platform reason for the base write at all, and it is **removed** rather than coalesced — one write, one
+  repaint, the target's.
+- **The unannounced write.** Neither `pp.Set` went through `SwitchProfile`, so nothing recorded the light claim
+  (`_pendingId`) and the ~1 s refresh pass repainted the palette the firmware had already flashed — the same
+  second-blink mechanism already closed for picks and the sweep.
+
+The restore now goes **through the switch use case as a TRANSIENT** (`ProfileSwitch.Run(profile, transient:
+true)`): the port write and the announcement are one action, so the landing is announced (the app paints once, at
+the switch instant) and the stale pass is suppressed — while `transient` keeps it from re-remembering the mode
+(the slot already holds it; `SetSourceProfile` is the door that remembers a choice). The "already in that profile
+→ do nothing" guard is kept, so a same-mode source change stays flash-free.
+
+The **wake** is where the owner saw it, and `LightingCoordinator.OnResume` is part of the fix: sleep suspends the
+polling, so the source may have moved over the sleep and the refresh pass would only discover it a poll later.
+`OnResume` therefore **re-syncs the power source first** (through the same `SyncPowerSource` → `ApplyStoredMode`
+use cases the refresh pass uses), **off the UI thread** (the restore may write the EC, which can stall right after
+wake). When that restore announces a landing, `OnProfileApplied` has already painted the **new** palette and set
+`_pendingId`, so the wake's own paint carries **only the per-zone colours** — no cached **old** palette is sent
+over the profile the restore just painted. When the source did not change, the restore writes nothing, nothing is
+announced, and the wake paints its one palette exactly as before. The wake-tail suppression (`IsWakeTail`) that
+coalesces the refresh pass after a wake is unchanged. One palette repaint per wake, whichever way the source
+went.
+
+### Repeated commands to the SAME target are deduplicated at the write seam (the plug-in-then-pick flash)
+
+The owner's next report — «подключил зарядку и быстро поменял на turbo режим и подсветка моргнула дважды. Было бы
+неплохо иметь дедупликацию команд» — was a different mechanism from the four above: the palette was not flashed
+by the poll, but by a **second local write of the same target**. Plugging in the charger triggers the per-source
+restore, which may already switch to the remembered Turbo; a rapid manual pick of Turbo then re-sends the SAME
+profile. The only dedup that existed was the "already in that profile" guard in `LaptopService.ApplyStoredMode`,
+which reads the **port** — and between two local writes the ~1 s battery / 3 s full refresh pass has not caught up,
+so the port still reports the old profile (the "stale read" the `_pendingId` claim already suppresses on the
+*lighting* side, but which the *write* path never had a record for). Each Acer profile `Set` makes the firmware
+repaint the palette, so two switches to the same target produced two flashes for one intended state.
+
+The fix is at the profile-write seam, `Application/ProfileSwitch.cs`: `SwitchProfile.Run` records the profile it
+**last WROTE** (`_lastApplied`, keyed on the resolved id the port returned) and coalesces a second switch to that
+same target within **`CoalesceWindowSeconds = 5` s** — the port is not written again and **nothing is announced**,
+so the palette flashes once; the caller still gets the already-applied profile as a **success** ("already in it"),
+never an error. 5 s is the poll latency the local writes outrun (~3 s full pass), and it is deliberately the same
+number the coordinator already uses for `WakeTailSeconds`/`PendingTimeoutSeconds`, so the write seam and the
+light-claim seam agree on what "a short window" is; it is short enough that a deliberate later re-switch still
+writes. The record is made **when the write is taken**, never on a read.
+
+**The rule cannot swallow a needed write.** It is keyed on the target: a switch to a DIFFERENT profile always
+writes, which is what keeps the sweep's force/restore — two different targets — intact, and a same-target restore
+was already a port-guard no-op before this. An absent port stays a value (the capability gate answers before the
+dedup is consulted) and a present port's refusal still throws. It covers every writer — user pick, tray, hotkey,
+the Turbo switch, the sweep's transient force/restore and the per-source restore — because they all route through
+the one `SwitchProfile` use case. The regression timeline (restore-to-Turbo then an immediate manual Turbo pick:
+TWO `Set` calls / two flashes before, ONE after) is pinned in `ProfileWriteDedupTests`.
 
 ## How the app drives the ENE controller — implementation notes
 

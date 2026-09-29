@@ -14,9 +14,9 @@ namespace AcerHelper.Tests;
 ///
 /// WHAT IS PINNED HERE. Each of the four app-level rows — clamshell, autostart, Turbo-key behaviour, language —
 /// is built by <see cref="OptionsViewModel.TryCreate"/> over an <see cref="OptionsSection"/> whose delegates
-/// reach the real <c>LaptopService</c>, which is the shape <c>AppController.BuildUi</c> wires
-/// (<c>b =&gt; _svc.SetClamshell(b)</c>, <c>b =&gt; _svc.SetAutostart(b)</c>, <c>_svc.SetTurboToggles</c>,
-/// <c>_svc.SetLanguage</c>). A click on each row is then followed into the sink that row is supposed to reach:
+/// reach the real <c>LaptopService</c> through the shell use cases, which is the shape <c>AppController.BuildUi</c>
+/// wires (<c>_actions.Clamshell.Run</c>, <c>_actions.Autostart.Run</c>, <c>_actions.TurboToggles.Run</c>,
+/// <c>_actions.Language.Run</c>). A click on each row is then followed into the sink that row is supposed to reach:
 /// the clamshell port, the autostart port, <c>Settings.TurboToggles</c>, <c>Settings.Language</c>. Every test
 /// also asserts the OTHER THREE sinks were left alone, which is what makes a transposition fail rather than
 /// merely a wire that goes nowhere.
@@ -126,14 +126,14 @@ public class OptionsRowClickTests
 
     /// <summary>The section exactly as <c>AppController.BuildUi</c> fills it in — every mutation delegate
     /// pointing at the service, and nothing else in it — so what a click reaches here is what a click reaches
-    /// in the app. The one difference is the language delegate: the app wraps <c>_svc.SetLanguage</c> in a
+    /// in the app. The one difference is the language delegate: the app wraps <c>_actions.Language.Run</c> in a
     /// method that also posts a UI rebuild (which a headless test cannot pump), and that wrapper contains no
     /// mapping this file is about.</summary>
     private static OptionsSection Section(OptionsAssemblerHarness h) => new(
         HwToggles: [], HwChoices: [], ProfileChoices: [],
-        TurboToggles: h.F.Service.TurboToggles, SetTurboToggles: h.F.Service.SetTurboToggles,
-        SetClamshell: h.F.Service.SetClamshell, SetAutostart: b => h.F.Service.SetAutostart(b),
-        Language: h.F.Service.Language, SetLanguage: h.F.Service.SetLanguage);
+        TurboToggles: h.F.Service.TurboToggles, SetTurboToggles: h.F.SetTurboToggles.Run,
+        SetClamshell: h.F.SetClamshell.Run, SetAutostart: b => h.F.SetAutostart.Run(b),
+        Language: h.F.Service.Language, SetLanguage: h.F.SetLanguage.Run);
 
     /// <summary>The arranged section with the rows looked up by LABEL, the way the user meets them: each row's
     /// text is what <c>TryCreate</c> looked the label table up with, so a row is addressed by the same string

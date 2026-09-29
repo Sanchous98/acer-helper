@@ -19,6 +19,36 @@ internal sealed class AppController
 {
     private readonly IClassicDesktopStyleApplicationLifetime _desktop;
     private readonly LaptopService _svc;
+    // The moved profile-switch use case (Application/ProfileSwitch.cs). Owned through the constructor and SHARED
+    // with the service: composition builds one SwitchProfile over the service and the coordinator and assigns it
+    // to both, so a UI pick and the sweep's forced profile are the same operation — and the lighting announcement
+    // is part of it, which is what closes the double palette flash.
+    private readonly SwitchProfile _switchProfile;
+    // The moved Curve-Optimizer edit use case (Application/Undervolt.cs): the controller depends on the ACTION,
+    // not on the service's SetCoValues, which no longer exists. Owned through the constructor because the edit
+    // also needs the tuning gate — see ApplyUndervolt.
+    private readonly ApplyUndervolt _applyUndervolt;
+    // The rest of the applied-edit family, injected the same way (Application/*.cs). Each owns its target through
+    // its own constructor; the controller only names the ACTION, which is the whole point of moving them off the
+    // service. They are handed to the view-models as the section delegates below.
+    private readonly ApplyGpuOffsets _applyGpuOffsets;
+    private readonly ApplyGpuPower _applyGpuPower;
+    private readonly ApplyCpuPowerOverlay _applyCpuPower;
+    private readonly ApplyFanCurve _applyFanCurve;
+    private readonly ApplyFanSelection _applyFanSelection;
+    private readonly ApplyDeclaredSetting _applyDeclaredSetting;
+    // The moved QUERY family (Application/Queries.cs), grouped in one record for the same reason as _actions:
+    // the controller names the READ (Queries.CurrentProfile.Run(), …) rather than a service method. Handed to
+    // the view-models/assembler as needed.
+    private readonly AppQueries _queries;
+    // The moved ACTION family (Application/Preferences.cs, HardwareToggles.cs, ProfilePower.cs, ModeApply.cs),
+    // grouped so the ctor stays short. The controller names the ACTION (Startup.Run, Turbo.Run, …) rather than a
+    // service method.
+    private readonly AppActions _actions;
+    // The one re-apply use case (Application/ReapplySettings.cs), owned through the constructor and SHARED with
+    // the service and the lighting coordinator: the refresh pass's mode-change site names the ACTION
+    // (Reapply.Run(ReapplyTrigger.ModeChange)), not the executor behind it.
+    private readonly ReapplySettings _reapply;
     // The string-baked UI (view-models, flyout window, tray). Not readonly: a live language switch rebuilds all
     // three from scratch in the new language (see RebuildForLanguage) — everything below this stays put.
     private MainViewModel _vm;
@@ -36,8 +66,9 @@ internal sealed class AppController
     // Deliberately not the 1 Hz battery poll: the read is an EC HID transaction, not an OS syscall — see
     // Infrastructure/AcerPowerSourceSchedule.
     private readonly AcerPowerSourceSchedule? _powerSourcePoll;
-    // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Created before
-    // the UI so the follows-profile toggle can reach it, then re-pointed at each fresh UI via Attach.
+    // Owns the lighting re-apply / lid-blank / sleep-resume state machine (its timer + watchers). Built by
+    // composition (where the profile switch takes it as its announcer), shared with the service, and re-pointed
+    // at each fresh UI via Attach.
     private readonly LightingCoordinator _lightingCoord;
     private LightingViewModel? _lighting;              // current lighting VM (rebuilt per language); handed to _lightingCoord
     private readonly UpdateChecker _updates = new();
@@ -76,10 +107,27 @@ internal sealed class AppController
                               // item stay clickable, so without this a second click starts a second download and a
                               // second msiexec (which then trips over the Windows Installer mutex mid-upgrade)
 
-    public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized = false)
+    public AppController(IClassicDesktopStyleApplicationLifetime desktop, LaptopService svc, bool startMinimized,
+        SwitchProfile switchProfile, LightingCoordinator lightingCoordinator,
+        ApplyUndervolt applyUndervolt, ApplyGpuOffsets applyGpuOffsets, ApplyGpuPower applyGpuPower,
+        ApplyCpuPowerOverlay applyCpuPower,
+        ApplyFanCurve applyFanCurve, ApplyFanSelection applyFanSelection, ApplyDeclaredSetting applyDeclaredSetting,
+        AppActions actions, AppQueries queries, ReapplySettings reapply)
     {
         _desktop = desktop;
         _svc = svc;
+        _switchProfile = switchProfile;
+        _lightingCoord = lightingCoordinator;
+        _applyUndervolt = applyUndervolt;
+        _applyGpuOffsets = applyGpuOffsets;
+        _applyGpuPower = applyGpuPower;
+        _applyCpuPower = applyCpuPower;
+        _applyFanCurve = applyFanCurve;
+        _applyFanSelection = applyFanSelection;
+        _applyDeclaredSetting = applyDeclaredSetting;
+        _actions = actions;
+        _queries = queries;
+        _reapply = reapply;
 
         var d = _svc.Device;
 
@@ -90,13 +138,12 @@ internal sealed class AppController
         // "before" number wave 6 exists to move. It is a delta of the gate counters, so it measures blocked-on-EC
         // time, not wall time.
         var startupHw0 = GateStats.NonPoolTicks();
-        _svc.ApplyStartupState();
+        _actions.Startup.Run();
         GateStatsLog.RecordStartup(GateStats.NonPoolTicks() - startupHw0);
 
-        // The lighting re-apply / lid-blank / resume machine lives in its own coordinator. Created up front —
-        // before the UI — so the follows-profile toggle lambda built in BuildUi can reach it, and so it persists
-        // untouched across a live language rebuild (only its view-model targets are re-pointed, via Attach).
-        _lightingCoord = new LightingCoordinator(_svc);
+        // The lighting re-apply / lid-blank / resume machine is built by composition (it is also the profile
+        // switch's announcer, so it has to exist before the switch does), and handed in. It persists untouched
+        // across a live language rebuild — only its view-model targets are re-pointed, via Attach.
 
         // Read the current hardware profile ONCE, and before the UI is built, so everything that keys off the
         // current mode derives it from this one read instead of each doing its own EC round-trip: BuildUi's
@@ -105,7 +152,7 @@ internal sealed class AppController
         // because BuildUi only READS the device — the state changes live in ApplyStartupState above, which has
         // already run — and it keeps the read outside the gate-stats window below, whose subject is the time
         // BuildUi itself spends blocked on hardware.
-        var cur0 = _svc.CurrentProfile();
+        var cur0 = _queries.CurrentProfile.Run();
 
         // Build the string-baked UI (view-models, flyout window, tray). It reads all its text via Loc at
         // construction, so a live language switch simply tears this down and rebuilds it in the new language
@@ -275,13 +322,13 @@ internal sealed class AppController
                                     // snaps itself back when the write does not take, so it needs only the
                                     // success flag — the reason has no reader here and is deliberately dropped,
                                     // rather than starting to show a message the app never showed.
-                                    d.KeyboardBrightness, lvl => _svc.SetKeyboardBrightness(lvl).ok)
+                                    d.KeyboardBrightness, lvl => _actions.KeyboardBrightness.Run(lvl).ok)
             : null;
         // The post delegate is supplied here, not resolved inside: OptionsAssembler lives in the Application
         // layer now, which must not reference a UI toolkit. ConfirmGpuAccessAsync is supplied for the same
         // reason: the cardwire row's consent is a modal dialog, so the assembler is handed the answer rather
         // than reaching for a window.
-        var opts = new OptionsAssembler(_svc, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a),
+        var opts = new OptionsAssembler(_svc, _queries, _actions, _applyDeclaredSetting, Notify, ConfirmCalibrationAsync, a => Dispatcher.UIThread.Post(a),
                                         ConfirmGpuAccessAsync);
         // The three per-mode preset builds below are keyed by the CURRENT mode, and the key is derived from the
         // live profile — a PowerProfiles read, i.e. a WMI transaction on Windows. `cur` is that profile, read
@@ -293,11 +340,12 @@ internal sealed class AppController
         // presets, because the same view-model slots are reloaded by the re-apply outcome
         // (Application/ReapplySettings.cs, which Application may not build out of the container). The mapping
         // is the service's, and it is the one place the stored shape is read for this purpose.
-        var fan0 = LaptopService.AxisStateOf(_svc.CurrentFan(cur));   // defaults if this mode has none
+        var fan0 = _queries.FanState.Run(cur);   // defaults if this mode has none
         var vm = new MainViewModel(d, new UiActions(
             new ProfileActions(TryApplyProfile, _svc.TurboToggles, SetTurbo, _svc.TraitsOf),
             new FanSection(fan0, SetFan, SetFanCurve, ShowFanCurve),
-            new GpuSection(LaptopService.AxisStateOf(_svc.CurrentGpuOc(cur)), SetGpuOc),
+            new GpuSection(_queries.GpuOcState.Run(cur), SetGpuOc,
+                           d.GpuPowerEnvelope?.Levels ?? [], SetGpuPower),
             new GpuMuxSection(ConfirmGpuMuxAsync, _svc.RequestGpuMux),
             // CPU power is the odd one out: a PLACEHOLDER, not a read. Its construction read used to run right
             // here on the UI thread, and `null` is exactly what a failed read would have given — CpuViewModel
@@ -310,11 +358,11 @@ internal sealed class AppController
             // while their KEY came from the port, and they take `cur` for it above. A row is deferred when its
             // value is readable only from a port; these three are keyed by one.
             new CpuSection(d.CpuPower?.Modes ?? [], null, SetCpuPower),
-            new CoSection(d.CurveOptimizer?.Domains ?? [], _svc.CurrentCoDomains(cur), SetCo),
+            new CoSection(d.CurveOptimizer?.Domains ?? [], _queries.CoDomains.Run(cur), SetCo),
             new BatterySection(d.Battery, opts.BatteryLimit(), opts.BatteryCalibration(), opts.BatteryChargeMode()),
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.TurboToggles, SetTurboToggles,
-                b => _svc.SetClamshell(b), b => _svc.SetAutostart(b),
+                b => _actions.Clamshell.Run(b), b => _actions.Autostart.Run(b),
                 _svc.Language, SetLanguage),
             BuildSweepSection()),
             lighting, _notifications);   // the session's notifications: handed in, not built here — see the field
@@ -337,7 +385,7 @@ internal sealed class AppController
     private void SetLanguage(AppLanguage language)
     {
         if (language == _svc.Language) return;
-        _svc.SetLanguage(language);
+        _actions.Language.Run(language);
         Dispatcher.UIThread.Post(RebuildForLanguage);
     }
 
@@ -352,7 +400,7 @@ internal sealed class AppController
         _windows.Dispose();    // close + unhook the old flyout window for good
 
         Loc.Use(_svc.Language);
-        var cur = _svc.CurrentProfile();          // read once, before the UI — see the same hoist in the constructor
+        var cur = _queries.CurrentProfile.Run();          // read once, before the UI — see the same hoist in the constructor
         (_vm, _windows, _tray, _lighting) = BuildUi(cur);
         _windows.Shown += _updateSchedule.OnWindowShown;   // the fresh coordinator needs the show trigger (see the ctor)
         _lightingCoord.Attach(_vm, _lighting);    // re-point the persistent coordinator at the fresh view-models
@@ -598,7 +646,8 @@ internal sealed class AppController
     // rediscover it by polling: the firmware flashes the new palette the moment the profile byte is written, so
     // a repaint that lands ~750 ms later reads as a SECOND blink cycle of the keyboard and lightbar (and, if it
     // catches a still-running burst from the previous switch, in the PREVIOUS profile's colour). Every path that
-    // changes the profile — pick, tray, hotkey, Turbo switch — goes through here.
+    // changes the profile — pick, tray, hotkey, Turbo switch, and now the guided sweep's force/restore — goes
+    // through the ONE switch use case, which owns both the write and this repaint (Application/ProfileSwitch.cs).
     // The tray's apply: the result has no reader there, so it is discarded. The section
     // (ProfilesViewModel) uses TryApplyProfile below and rolls its optimistic selection back on false.
     private void ApplyProfile(PerformanceProfile p) => ApplyProfileCore(p);
@@ -611,68 +660,101 @@ internal sealed class AppController
 
     private bool ApplyProfileCore(PerformanceProfile p)
     {
-        var r = _svc.ApplyProfile(p);
-        if (r.ok) _lightingCoord.OnProfileApplied(p);
-        else Notify(Loc.T("profile.set_failed", Loc.T(p.DisplayName)) + Err(r.error));
+        // The switch writes the port, remembers what landed and announces it (the lighting repaint) as one
+        // action — see Application/ProfileSwitch.cs. Nothing here repaints separately: doing so is what the use
+        // case exists to prevent. A present port's refusal arrives as PortWriteFailedException and is caught at
+        // this action boundary — the user pressed an enabled segment, so showing the reason is this path's job.
+        bool applied;
+        try { applied = _switchProfile.Run(p) is not null; }
+        catch (PortWriteFailedException ex)
+        {
+            Notify(Loc.T("profile.set_failed", Loc.T(p.DisplayName)) + Err(ex.Reason));
+            Refresh();
+            return false;
+        }
+        if (!applied) Notify(Loc.T("profile.set_failed", Loc.T(p.DisplayName)));
         Refresh();
-        return r.ok;
+        return applied;
     }
 
     // Turbo used as a switch (the "Turbo toggles" mode). SetTurbo reports the profile that landed (Turbo, or the
-    // remembered base when switching off), so the lighting follows it without a read-back. Returns whether it
-    // landed, for the section's optimistic switch (null applied == failure, exactly the branch the message is on).
+    // remembered base when switching off) and announces it through the same switch use case; the lighting follows
+    // it without a read-back. Returns whether it landed, for the section's optimistic switch. A present port's
+    // refusal is a PortWriteFailedException, caught here as the action boundary.
     private bool SetTurbo(bool on)
     {
-        var r = _svc.SetTurbo(on);
-        if (r.applied is { } applied) _lightingCoord.OnProfileApplied(applied);
-        else Notify(Loc.T("profile.turbo_failed") + Err(r.error));
+        PerformanceProfile? applied;
+        try { applied = _actions.Turbo.Run(on); }
+        catch (PortWriteFailedException ex)
+        {
+            Notify(Loc.T("profile.turbo_failed") + Err(ex.Reason));
+            Refresh();
+            return false;
+        }
+        if (applied is null) Notify(Loc.T("profile.turbo_failed"));
         Refresh();
-        return r.applied != null;
+        return applied is not null;
     }
 
     // Flipping "Turbo key toggles Turbo" reshapes the Performance section (Turbo becomes a switch), so
     // persist it and refresh immediately rather than waiting for the poll.
     private void SetTurboToggles(bool on)
     {
-        _svc.SetTurboToggles(on);
+        _actions.TurboToggles.Run(on);
         Refresh();
     }
 
     // Fan mode + fixed speeds (and, in Custom, per-fan curves) are applied and persisted by the service. No
     // Refresh() here: nothing in the shared UI/tray depends on fan state, and this fires on every debounced
     // slider/curve drag — a full refresh each time would spam WMI reads.
-    private void SetFan(FanMode mode, byte cpu, byte gpu) => _svc.SetFan(mode, cpu, gpu);
-    private void SetFanCurve(bool gpu, bool use, int[] points) => _svc.SetFanCurve(gpu, use, points);
+    private void SetFan(FanMode mode, byte cpu, byte gpu) => _applyFanSelection.Run(mode, cpu, gpu);
+    private void SetFanCurve(bool gpu, bool use, int[] points) => _applyFanCurve.Run(gpu, use, points);
 
     // GPU core/memory clock offsets, applied + persisted per performance mode by the service. Like SetFan:
     // no Refresh() — nothing in the shared UI/tray depends on it and it fires on every debounced slider drag.
-    // Failure is surfaced so a rejected write (e.g. dGPU powered off) doesn't fail silently.
+    // Failure is surfaced so a rejected write (e.g. dGPU powered off) doesn't fail silently. An ABSENT port is a
+    // returned false (capability, no message); a PRESENT port's refusal is a PortWriteFailedException, caught here.
     private void SetGpuOc(int core, int mem)
     {
-        var r = _svc.SetGpuOc(core, mem);
-        if (!r.ok) Notify(Loc.T("oc.gpu_overclock_failed") + Err(r.error));
+        try { _applyGpuOffsets.Run(new GpuAxisState(core, mem)); }
+        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.gpu_overclock_failed") + Err(ex.Reason)); }
+    }
+
+    // The GPU power level, applied + persisted per performance mode like the offsets above and for the same
+    // reasons: no Refresh() (nothing shared depends on it) and failure surfaced. `null` is the explicit "follow
+    // the profile" choice — the envelope then moves with the performance mode, which is the old behaviour — and
+    // is stored as such, not written to the EC here. An ABSENT port is a returned false (capability, no
+    // message); a PRESENT port's refusal is a PortWriteFailedException, caught here.
+    private void SetGpuPower(GpuPowerLevel? level)
+    {
+        try { _applyGpuPower.Run(level); }
+        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.gpu_power_failed") + Err(ex.Reason)); }
     }
 
     // CPU power-mode overlay, applied + persisted per performance mode by the service. Like SetGpuOc: no
-    // Refresh() (nothing shared depends on it); failure surfaced.
+    // Refresh() (nothing shared depends on it); failure surfaced. An absent port returns false silently; a present
+    // port's refusal is a PortWriteFailedException, caught here.
     private void SetCpuPower(string id)
     {
-        var r = _svc.SetCpuPower(id);
-        if (!r.ok) Notify(Loc.T("oc.power_mode_failed") + Err(r.error));
+        try { _applyCpuPower.Run(id); }
+        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.power_mode_failed") + Err(ex.Reason)); }
     }
 
     // CPU undervolt (all-core Curve Optimizer), applied + persisted per performance mode by the service. Unlike
     // SetGpuOc/SetCpuPower this may NOT run inline: the SMU mailbox transaction waits on a machine-wide lock that
     // other tuning tools also take, so it can block for seconds — on the dispatcher that would freeze the window
-    // mid-drag. Hand it off and post the failure back, the same shape OptionsAssembler uses for its slow rows.
+    // mid-drag. Hand it off and post the failure back, the same shape OptionsAssembler uses for its slow rows. The
+    // non-ok result is the gate's busy precondition or a value refusal; a PRESENT SMU's refusal THROWS and is
+    // caught here, before the post, so nothing escapes the pool task.
     private void SetCo(int[] counts)
     {
         _ = Task.Run(() =>
         {
-            var r = _svc.SetCoValues(counts);
-            // The reason travels WITH the result, so there is nothing to capture before the post: reading a
-            // shared field after handing the work off was a race on the error itself.
-            if (!r.ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("uv.failed") + Err(r.error)));
+            bool ok;
+            string? reason = null;
+            try { ok = _applyUndervolt.Run(counts).ok; }
+            catch (PortWriteFailedException ex) { ok = false; reason = ex.Reason; }
+            if (!ok) Dispatcher.UIThread.Post(() => Notify(Loc.T("uv.failed") + Err(reason)));
         });
     }
 
@@ -694,7 +776,7 @@ internal sealed class AppController
             result => Task.Run(() =>
             {
                 var (ok, error) = _svc.SaveUndervoltSweep(result);
-                IReadOnlyList<int>? counts = ok ? _svc.CurrentCoDomains() : null;
+                IReadOnlyList<int>? counts = ok ? _queries.CoDomains.Run() : null;
                 return (ok, counts, error);
             }),
             _svc.OnAc);
@@ -752,12 +834,15 @@ internal sealed class AppController
         if ((now - _lastTurbo).TotalMilliseconds < 800) return;
         _lastTurbo = now;
 
-        var applied = _svc.TogglePerformance();
-        if (applied != null)
-        {
-            Notify(Loc.T("profile.status", Loc.T(applied.DisplayName)));
-            _lightingCoord.OnProfileApplied(applied);
-        }
+        PerformanceProfile? applied;
+        try { applied = _actions.TogglePerformance.Run(); }
+        catch (PortWriteFailedException) { applied = null; }   // the hotkey has never shown a refusal; just do not let it escape
+        // TogglePerformance reaches ApplyProfile/SetTurbo, which now announce the landed profile through the
+        // switch use case themselves — so there is no lighting call here any more. Only the status line is this
+        // path's own. The hotkey is a user action, so a present port's refusal is caught here; it was already
+        // silent about a refusal (it reported nothing on a null landing), so the message is deliberately not shown
+        // and the throw simply must not escape the dispatcher.
+        if (applied != null) Notify(Loc.T("profile.status", Loc.T(applied.DisplayName)));
         Refresh();
     }
 
@@ -831,7 +916,7 @@ internal sealed class AppController
         // No telemetry port (a desktop, or an OS that reports no battery): there is no fast-changing reading to
         // poll, so skip the per-second call rather than post the "unknown" snapshot forever.
         if (_svc.Device.Battery.Telemetry == null) return;
-        var battery = _svc.ReadBatteryInfo();
+        var battery = _queries.Battery.Run();
         // Re-resolve _vm at POST time so a live language rebuild — which swaps the view-model on the UI thread —
         // is picked up. The UI thread owns _vm and the post runs there, so the read is race-free.
         Dispatcher.UIThread.Post(() => _vm.Battery?.Update(battery), DispatcherPriority.Normal);
@@ -864,16 +949,16 @@ internal sealed class AppController
     {
         try
         {
-            _svc.EvaluateClamshell();                 // QueryDisplayConfig can hitch during a topology change
+            _actions.EvaluateClamshell.Run();         // QueryDisplayConfig can hitch during a topology change
 
-            var battery = _svc.ReadBatteryInfo();
-            _svc.SyncPowerSource(battery);            // re-apply the per-source remembered mode on AC<->battery change
+            var battery = _queries.Battery.Run();
+            _actions.SyncPowerSource.Run(battery);    // re-apply the per-source remembered mode on AC<->battery change
 
-            var current = _svc.CurrentProfile();      // the ONE hardware profile read this pass
+            var current = _queries.CurrentProfile.Run();      // the ONE hardware profile read this pass
             var modeKey = _svc.CurrentModeKey(current);
             var profileId = current?.Id ?? "";
-            var selectable = _svc.SelectableProfiles();
-            var sensors = _svc.ReadSensors();
+            var selectable = _queries.SelectableProfiles.Run();
+            var sensors = _queries.Sensors.Run();
             // null (not "") when the device has no diagnostic message, so MainViewModel.Refresh's `if (status != null)`
             // guard leaves the status line alone and a transient Notify() survives (a device StatusMessage, when
             // present, is a latched startup diagnostic — localized and shown; it never reverts to null).
@@ -903,7 +988,7 @@ internal sealed class AppController
                 // delay the Tick post below (chip/tray/presets) and hold the single-flight guard behind it. What
                 // comes back is what this pass reflects in the UI — including the Curve Optimizer's stored
                 // domains, read here rather than from the deferred apply, which has no value on this thread.
-                var applied = _svc.Reconciler.Reapply(ReapplyTrigger.ModeChange);
+                var applied = _reapply.Run(ReapplyTrigger.ModeChange);
                 fan = applied.Fan; gpu = applied.GpuOc; cpu = applied.CpuPower; co = applied.Co;
             }
             // On a HARDWARE profile change (incl. base<->Turbo, which shares its base's preset KEY so the block
@@ -926,11 +1011,11 @@ internal sealed class AppController
             // the overlay came back unreadable — that is what it did before the prime existed, and `null` has a
             // meaning there (Balanced) rather than being a reason to skip the reload.
             var cpuPrimed = modeChanged || !_cpuPrimed;
-            if (cpu == null && !_cpuPrimed) cpu = _svc.CurrentCpuPower();
+            if (cpu == null && !_cpuPrimed) cpu = _queries.CpuPower.Run();
             _cpuPrimed = true;   // the prime has run; an unreadable overlay stays unreadable, so no per-tick retry
 
-            _svc.ApplyCustom(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
-            var baseP = _svc.BaseProfile(current);
+            _actions.ApplyCustom.Run(sensors);   // Custom mode: drive each fan from its curve (or fixed speed) using live temps
+            var baseP = _queries.BaseProfile.Run(current);
 
             var t = new Tick(current, selectable, baseP, sensors, status, turbo,
                              modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights,

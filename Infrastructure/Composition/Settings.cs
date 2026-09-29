@@ -81,7 +81,7 @@ public sealed class Settings
     // "follows performance profile", or any setting a backend DECLARES — see SettingDeclaration below). Kept as a
     // neutral bag so Settings stays vendor-agnostic — on different hardware the unused keys just sit inert. The
     // key + its meaning live in the backend (Infrastructure/Vendors/*); access via LaptopService.GetDeviceFlag /
-    // SetDeviceFlag, and via LaptopService.ApplySetting for a declared setting.
+    // SetDeviceFlag, and via the declared-setting edit use case (ApplyDeclaredSetting) for a declared setting.
     public Dictionary<string, string> DeviceSettings { get; set; } = new();
 
     // ---- the options this machine declares (this type's runtime half) ----------------------------------------
@@ -275,17 +275,26 @@ public sealed class LightPreset
     public Dictionary<string, LightSettings> Zones { get; set; } = new();
 }
 
-/// <summary>A performance mode's remembered GPU clock offsets, in MHz (0 = stock). Applied on the mode switch
-/// and re-applied at startup/resume (the driver zeroes offsets across a reboot/driver reload).</summary>
+/// <summary>A performance mode's remembered GPU clock offsets, in MHz (0 = stock), and its chosen power level.
+/// The offsets are applied on the mode switch and re-applied at startup/resume (the driver zeroes offsets across
+/// a reboot/driver reload).</summary>
 public sealed class GpuOcPreset
 {
     public int Core { get; set; }
     public int Mem  { get; set; }
 
-    /// <summary>A copy that shares nothing with the stored instance. Both members are values, so there is no
+    /// <summary>The mode's chosen GPU power level as the persisted <c>int?</c>, or NULL for "no override — the
+    /// envelope follows the performance profile", which is the default for a file that predates this field and
+    /// exactly today's behaviour. Read through <c>GpuPowerLevels.FromStored</c> rather than cast: a cast is total,
+    /// so a hand-edited or older file holding 7 would become a level nobody offered and be sent to the EC as a
+    /// row the firmware ignores. See <c>GpuPowerLevels</c> in Domain/AxisState.cs for the encoding — the enum's
+    /// own number, deliberately NOT the EC wire byte.</summary>
+    public int? Power { get; set; }
+
+    /// <summary>A copy that shares nothing with the stored instance. All members are values, so there is no
     /// depth to get wrong here — the method exists so every axis reads the same way at the call site, and so a
     /// member added later is copied by default rather than aliased by accident.</summary>
-    public GpuOcPreset Snapshot() => new() { Core = Core, Mem = Mem };
+    public GpuOcPreset Snapshot() => new() { Core = Core, Mem = Mem, Power = Power };
 }
 
 /// <summary>A performance mode's remembered CPU Curve-Optimizer offset, in AVFS counts (0 = stock, negative =

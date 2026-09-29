@@ -56,3 +56,19 @@ looks half as large here. That difference is a units convention, not a different
 
 Windows-only, and effectively NVIDIA-only: `nvapi64.dll` ships with the NVIDIA driver and is simply **absent on
 AMD/Intel-only laptops**, where `TryCreate` returns null and the UI hides the GPU section.
+
+## The GPU power level beside the clock offsets (2026-09-29)
+
+The GPU section also hosts a **power-level selector** — which of the EC's fixed TGP rows the dGPU runs at —
+remembered **per performance mode** beside `Core`/`Mem` in `GpuOcPreset.Power`. It is a separate port
+(`IGpuPowerEnvelope`) and a separate axis from the clock offsets: the offsets are NvAPI `SetPstates20` on the
+P0 frequency delta, while the envelope is the EC's "system usage mode" over HID. Both are volatile and both are
+re-applied at startup, on resume and on each mode switch.
+
+**The only selectable levels are the EC's four distinct rows** (Turbo 115 W … Quiet 75 W) plus "Follow profile" —
+there is **no arbitrary wattage**. The EC's fifth usage row (Eco) enforces the same GPU envelope as Quiet and is
+deliberately not offered. The mechanism, the measurements and why a free-form number is out of scope (it would
+need a kernel driver) are in `docs/power-an18-61.md` §"Selecting the envelope ON ITS OWN". The section hides the
+selector on a machine without the EC channel, so an NVIDIA dGPU without Acer's EC HID interface shows the clock
+offsets alone.
+

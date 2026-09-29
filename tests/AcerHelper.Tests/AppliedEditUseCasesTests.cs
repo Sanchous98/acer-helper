@@ -13,10 +13,10 @@ namespace AcerHelper.Tests;
 /// build a machine, arrange a store and read the graph back — which is how a rule that is about the EDIT ends up
 /// being asserted through three layers that have nothing to do with it. The use cases hold the decisions (which
 /// half of a fan an edit names, what survives it, what is remembered before it is written, what a refusal does),
-/// the contracts hold the doing, and a stub is therefore enough to see each decision. The wiring — that
-/// <c>LaptopService.SetFanCurve</c> and its siblings reach these use cases — is the existing service tests'
-/// business (<c>LaptopServicePresetTests</c>, <c>LaptopServiceCoTests</c>, <c>DeclaredSettingTests</c>), which
-/// passed unedited when the bodies moved.
+/// the contracts hold the doing, and a stub is therefore enough to see each decision. The wiring — that the
+/// use cases reach the service's own targets (<see cref="IFanAxisTarget"/> and its siblings) — is the existing
+/// service tests' business (<c>LaptopServicePresetTests</c>, <c>LaptopServiceCoTests</c>,
+/// <c>DeclaredSettingTests</c>), which passed unedited when the bodies moved.
 ///
 /// THE STUBS RECORD WHAT THEY WERE ASKED, in order, because the order is load-bearing on three of these axes: an
 /// edit that is written before it is remembered reports an undo the app did not make, and an edit that is
@@ -70,7 +70,7 @@ public class AppliedEditUseCasesTests
         var axis = ArrangedAxis();
         var points = new[] { 70, 80, 90, 95, 100 };
 
-        ApplyFanCurve.Run(gpu: true, use: true, points, axis);
+        new ApplyFanCurve(axis).Run(gpu: true, use: true, points);
 
         var edited = Assert.Single(axis.CurveEdits);
         Assert.Equal(FanMode.Max, edited.Mode);
@@ -92,7 +92,7 @@ public class AppliedEditUseCasesTests
     {
         var axis = ArrangedAxis();
 
-        ApplyFanCurve.Run(gpu: false, use: false, [1, 2, 3, 4, 5], axis);
+        new ApplyFanCurve(axis).Run(gpu: false, use: false, [1, 2, 3, 4, 5]);
 
         var edited = Assert.Single(axis.CurveEdits);
         Assert.False(edited.Cpu.UseCurve);
@@ -114,8 +114,8 @@ public class AppliedEditUseCasesTests
         var curveAxis = ArrangedAxis();
         var selectionAxis = ArrangedAxis();
 
-        ApplyFanCurve.Run(gpu: true, use: true, [1, 2, 3, 4, 5], curveAxis);
-        ApplyFanSelection.Run(FanMode.Auto, 1, 2, selectionAxis);
+        new ApplyFanCurve(curveAxis).Run(gpu: true, use: true, [1, 2, 3, 4, 5]);
+        new ApplyFanSelection(selectionAxis).Run(FanMode.Auto, 1, 2);
 
         Assert.Empty(curveAxis.SelectionEdits);
         Assert.Empty(selectionAxis.CurveEdits);
@@ -138,7 +138,7 @@ public class AppliedEditUseCasesTests
         var axis = ArrangedAxis();
         var points = new[] { 70, 80, 90, 95, 100 };
 
-        ApplyFanCurve.Run(gpu: true, use: true, points, axis);
+        new ApplyFanCurve(axis).Run(gpu: true, use: true, points);
 
         var edited = Assert.Single(axis.CurveEdits);
         Assert.Equal(points, edited.Gpu.Curve);
@@ -163,7 +163,7 @@ public class AppliedEditUseCasesTests
     {
         var axis = ArrangedAxis();
 
-        ApplyFanSelection.Run(FanMode.Auto, 55, 66, axis);
+        new ApplyFanSelection(axis).Run(FanMode.Auto, 55, 66);
 
         var edited = Assert.Single(axis.SelectionEdits);
         Assert.Equal(FanMode.Auto, edited.Mode);
@@ -190,7 +190,7 @@ public class AppliedEditUseCasesTests
     {
         var axis = ArrangedAxis();
 
-        ApplyFanSelection.Run(FanMode.Max, 55, 66, axis);
+        new ApplyFanSelection(axis).Run(FanMode.Max, 55, 66);
 
         Assert.Equal(42, axis.Stored().Cpu.FixedDuty);   // the value the edit was built on
         Assert.Equal(FanMode.Max, Assert.Single(axis.SelectionEdits).Mode);
@@ -200,72 +200,182 @@ public class AppliedEditUseCasesTests
 
     private sealed class StubGpuOffsets : IGpuOffsetsTarget
     {
-        public (bool ok, string? error) Result { get; set; } = (true, null);
+        public bool HasPortResult { get; set; } = true;
+        /// <summary>Set to make a PRESENT port refuse — the write throws this from <see cref="Apply"/>, exactly
+        /// the shape the real target now has.</summary>
+        public Exception? ThrowOnApply { get; set; }
         public List<string> Calls { get; } = [];
         public GpuAxisState? Remembered { get; private set; }
         public GpuAxisState? Written { get; private set; }
 
+        public bool HasPort => HasPortResult;
         public void Store(GpuAxisState state) { Calls.Add("store"); Remembered = state; }
-        public (bool ok, string? error) Apply(GpuAxisState state) { Calls.Add("apply"); Written = state; return Result; }
+        public void Apply(GpuAxisState state)
+        {
+            Calls.Add("apply"); Written = state;
+            if (ThrowOnApply is { } ex) throw ex;
+        }
     }
 
-    /// <summary>The GPU offsets are REMEMBERED BEFORE THEY ARE WRITTEN, and the caller is told what the write said
-    /// rather than what the store did. The order is the reason a refused write still leaves the user's setting in
-    /// the file — and it is the asymmetry the co-axis deliberately does not share (a refused store there stops the
-    /// write instead).
+    /// <summary>The GPU offsets are REMEMBERED BEFORE THEY ARE WRITTEN, and a present driver's refusal now
+    /// THROWS <see cref="PortWriteFailedException"/> — carrying the driver's own words — rather than returning a
+    /// pair. The order is the reason a refused write still leaves the user's setting in the file.
     ///
-    /// MUTATION THAT REDDENS IT: <c>Apply</c> before <c>Store</c> in <c>ApplyGpuOffsets.Run</c>, or returning
-    /// <c>(true, null)</c> instead of the write's own answer.</summary>
+    /// MUTATION THAT REDDENS IT: <c>Apply</c> before <c>Store</c> in <c>ApplyGpuOffsets.Run</c>; or catching the
+    /// throw inside the use case and returning a value, which would make the <c>Assert.Throws</c> below fail.</summary>
     [Fact]
-    public void GpuOffsets_AreRememberedBeforeTheyAreWritten_AndTheWriteIsWhatIsReported()
+    public void GpuOffsets_AreRememberedBeforeTheyAreWritten_AndARefusalThrows()
     {
-        var target = new StubGpuOffsets { Result = (false, "no dGPU") };
+        var target = new StubGpuOffsets { ThrowOnApply = new PortWriteFailedException("GPU offsets", "no dGPU") };
         var pair = new GpuAxisState(-150, 800);
 
-        var r = ApplyGpuOffsets.Run(pair, target);
+        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyGpuOffsets(target).Run(pair));
 
+        Assert.Equal("GPU offsets", ex.Operation);
+        Assert.Equal("no dGPU", ex.Reason);
         Assert.Equal(["store", "apply"], target.Calls);
         Assert.Equal(pair, target.Remembered);
         Assert.Equal(pair, target.Written);
-        Assert.Equal((false, "no dGPU"), r);
+    }
+
+    /// <summary>AN ABSENT PORT IS NOT A REFUSAL: <see cref="IGpuOffsetsTarget.HasPort"/> false returns the same
+    /// <c>false</c> the UI has always read, the preset is still stored (store-before-write), and
+    /// <see cref="IGpuOffsetsTarget.Apply"/> is NEVER reached — so an absent machine can never be mistaken for a
+    /// present driver that refused.</summary>
+    [Fact]
+    public void GpuOffsets_WithNoPort_ReturnFalse_StoreAndNeverWrite()
+    {
+        var target = new StubGpuOffsets { HasPortResult = false };
+
+        var ok = new ApplyGpuOffsets(target).Run(new GpuAxisState(-150, 800));
+
+        Assert.False(ok);
+        Assert.Equal(["store"], target.Calls);
+        Assert.Null(target.Written);
     }
 
     private sealed class StubCpuPowerOverlay : ICpuPowerOverlayTarget
     {
-        public (bool ok, string? error) Result { get; set; } = (true, null);
+        public bool HasPortResult { get; set; } = true;
+        public Exception? ThrowOnApply { get; set; }
         public List<string> Calls { get; } = [];
         public string? Remembered { get; private set; }
         public string? Written { get; private set; }
 
+        public bool HasPort => HasPortResult;
         public void Store(string id) { Calls.Add("store"); Remembered = id; }
-        public (bool ok, string? error) Apply(string id) { Calls.Add("apply"); Written = id; return Result; }
+        public void Apply(string id)
+        {
+            Calls.Add("apply"); Written = id;
+            if (ThrowOnApply is { } ex) throw ex;
+        }
     }
 
     /// <summary>The same rule on the overlay axis, which is a string rather than a pair and whose stored entry is
     /// what the RE-APPLY reads on the next mode switch — so an overlay that was never remembered is one this app
     /// will never put back, while one that was remembered and refused is one it will try again at the next boot.
+    /// A present port's refusal THROWS and the store has already happened when it does.
     ///
     /// MUTATION THAT REDDENS IT: <c>Store</c> after <c>Apply</c> in <c>ApplyCpuPowerOverlay.Run</c>.</summary>
     [Fact]
-    public void TheCpuPowerOverlay_IsRememberedBeforeItIsWritten()
+    public void TheCpuPowerOverlay_IsRememberedBeforeItIsWritten_AndARefusalThrows()
     {
-        var target = new StubCpuPowerOverlay { Result = (false, "overlay not present") };
+        var target = new StubCpuPowerOverlay { ThrowOnApply = new PortWriteFailedException("CPU power overlay", "overlay not present") };
 
-        var r = ApplyCpuPowerOverlay.Run("best-performance", target);
+        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyCpuPowerOverlay(target).Run("best-performance"));
 
+        Assert.Equal("overlay not present", ex.Reason);
         Assert.Equal(["store", "apply"], target.Calls);
         Assert.Equal("best-performance", target.Remembered);
         Assert.Equal("best-performance", target.Written);
-        Assert.Equal((false, "overlay not present"), r);
+    }
+
+    /// <summary>No CPU-power port is a capability fact: the choice is still stored and <c>false</c> comes back,
+    /// and the port is never written.</summary>
+    [Fact]
+    public void TheCpuPowerOverlay_WithNoPort_ReturnsFalse_StoreAndNeverWrite()
+    {
+        var target = new StubCpuPowerOverlay { HasPortResult = false };
+
+        Assert.False(new ApplyCpuPowerOverlay(target).Run("best-performance"));
+
+        Assert.Equal(["store"], target.Calls);
+        Assert.Null(target.Written);
+    }
+
+    private sealed class StubGpuPower : IGpuPowerTarget
+    {
+        public bool HasPortResult { get; set; } = true;
+        public Exception? ThrowOnApply { get; set; }
+        public List<string> Calls { get; } = [];
+        public GpuPowerLevel? Remembered { get; private set; }
+        public GpuPowerLevel? Written { get; private set; }
+
+        public bool HasPort => HasPortResult;
+        public void Store(GpuPowerLevel? level) { Calls.Add("store"); Remembered = level; }
+        public void Apply(GpuPowerLevel? level)
+        {
+            Calls.Add("apply"); Written = level;
+            if (ThrowOnApply is { } ex) throw ex;
+        }
+    }
+
+    /// <summary>The GPU power level follows the SAME remember-before-write order as the offsets and the overlay,
+    /// and a present port's refusal THROWS after the store has happened — so a refused pick still leaves the
+    /// user's choice in the file for the next boot. NULL ("follow the profile") is a value the store records and
+    /// the target is still asked to apply, because "clear the override" is a real edit; the target decides that a
+    /// null has nothing to write.
+    ///
+    /// MUTATION THAT REDDENS IT: <c>Apply</c> before <c>Store</c> in <c>ApplyGpuPower.Run</c>.</summary>
+    [Fact]
+    public void TheGpuPowerLevel_IsRememberedBeforeItIsWritten_AndARefusalThrows()
+    {
+        var target = new StubGpuPower { ThrowOnApply = new PortWriteFailedException("GPU power level", "channel busy") };
+
+        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyGpuPower(target).Run(GpuPowerLevel.Turbo));
+
+        Assert.Equal("channel busy", ex.Reason);
+        Assert.Equal(["store", "apply"], target.Calls);
+        Assert.Equal(GpuPowerLevel.Turbo, target.Remembered);
+        Assert.Equal(GpuPowerLevel.Turbo, target.Written);
+    }
+
+    /// <summary>No envelope port is a capability fact: the choice is still stored and <c>false</c> comes back,
+    /// and the port is never written — the same shape the offsets and the overlay have.</summary>
+    [Fact]
+    public void TheGpuPowerLevel_WithNoPort_ReturnsFalse_StoreAndNeverWrite()
+    {
+        var target = new StubGpuPower { HasPortResult = false };
+
+        Assert.False(new ApplyGpuPower(target).Run(GpuPowerLevel.Balanced));
+
+        Assert.Equal(["store"], target.Calls);
+        Assert.Null(target.Written);
+    }
+
+    /// <summary>"Follow the profile" is a real edit, not a no-op: the store records the null (clearing an
+    /// override), and a present port is still asked to apply it — the target is where "a null has nothing to
+    /// write" lives, so this use case does not second-guess it.</summary>
+    [Fact]
+    public void ClearingToFollowTheProfile_IsStoredAndHandedToTheTarget()
+    {
+        var target = new StubGpuPower();
+
+        Assert.True(new ApplyGpuPower(target).Run(null));
+
+        Assert.Equal(["store", "apply"], target.Calls);
+        Assert.Null(target.Remembered);
+        Assert.Null(target.Written);
     }
 
     private sealed class StubUndervolt : IUndervoltTarget
     {
         /// <summary>What the axis remembers for a given edit — the clamp and the rails fork are the
         /// implementation's, so a test controls them from here. <c>null</c> is "this axis would not remember
-        /// it".</summary>
+        /// it" (also the absent-port answer).</summary>
         public Func<IReadOnlyList<int>, IReadOnlyList<int>?> Remembered { get; set; } = counts => [.. counts];
-        public (bool ok, string? error) Result { get; set; } = (true, null);
+        /// <summary>Set to make a PRESENT SMU refuse — the write throws this from <see cref="Apply"/>.</summary>
+        public Exception? ThrowOnApply { get; set; }
         public List<string> Calls { get; } = [];
         public IReadOnlyList<int>? RememberedFrom { get; private set; }
         public IReadOnlyList<int>? Written { get; private set; }
@@ -275,10 +385,20 @@ public class AppliedEditUseCasesTests
             Calls.Add("store"); RememberedFrom = counts; return Remembered(counts);
         }
 
-        public (bool ok, string? error) Apply(IReadOnlyList<int> counts)
+        public void Apply(IReadOnlyList<int> counts)
         {
-            Calls.Add("apply"); Written = counts; return Result;
+            Calls.Add("apply"); Written = counts;
+            if (ThrowOnApply is { } ex) throw ex;
         }
+    }
+
+    /// <summary>A gate that is never busy and simply runs the write — the use case now owns ITS gate, so a test
+    /// that means to pin the edit's rules (not the sweep exclusion, which the service tests cover) passes an open
+    /// one. The exclusion itself is pinned in <c>UndervoltSweepServiceTests</c>.</summary>
+    private sealed class StubGate : ITuningGate
+    {
+        public bool SweepActive => false;
+        public (bool ok, string? error) Guard(Func<(bool ok, string? error)> write) => write();
     }
 
     /// <summary>An empty edit is a refusal that touches nothing: no reason, nothing remembered, no SMU traffic.
@@ -293,7 +413,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt();
 
-        var r = ApplyUndervolt.Run([], target);
+        var r = new ApplyUndervolt(target, new StubGate()).Run([]);
 
         Assert.Equal((false, (string?)null), r);
         Assert.Empty(target.Calls);
@@ -311,7 +431,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt { Remembered = _ => [-5, -6] };
 
-        var r = ApplyUndervolt.Run([-50, -60], target);
+        var r = new ApplyUndervolt(target, new StubGate()).Run([-50, -60]);
 
         Assert.Equal([-50, -60], target.RememberedFrom);
         Assert.Equal([-5, -6], target.Written);
@@ -329,10 +449,29 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt { Remembered = _ => null };
 
-        var r = ApplyUndervolt.Run([-5], target);
+        var r = new ApplyUndervolt(target, new StubGate()).Run([-5]);
 
         Assert.Equal((false, (string?)null), r);
         Assert.Equal(["store"], target.Calls);
+    }
+
+    /// <summary>A PRESENT SMU that refuses now THROWS <see cref="PortWriteFailedException"/>, carrying its own
+    /// words, rather than returning <c>(false, error)</c>. The remember has already happened when it does, which is
+    /// the store-before-write order this use case states; the exception escapes the use case and the gate (the UI's
+    /// <c>SetCo</c> catches it at its boundary, the boot re-apply turns it into its non-verdict outcome).
+    ///
+    /// MUTATION THAT REDDENS IT: catching the exception inside <c>ApplyUndervolt.Run</c> and returning
+    /// <c>(false, error)</c> — the <c>Assert.Throws</c> then fails.</summary>
+    [Fact]
+    public void AnUndervoltThePresentSmuRefused_Throws_AfterRemembering()
+    {
+        var target = new StubUndervolt { ThrowOnApply = new PortWriteFailedException("Curve Optimizer offsets", "SMU refused") };
+
+        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyUndervolt(target, new StubGate()).Run([-12]));
+
+        Assert.Equal("Curve Optimizer offsets", ex.Operation);
+        Assert.Equal("SMU refused", ex.Reason);
+        Assert.Equal(["store", "apply"], target.Calls);      // remembered first, then the write that threw
     }
 
     // ------------------------------------------------------------------ a declared setting
@@ -372,7 +511,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubDeclaredSetting();
 
-        ApplyDeclaredSetting.Run(Declared(), "1", target);
+        new ApplyDeclaredSetting(target).Run(Declared(), "1");
 
         Assert.Equal(["write", "remember", "persist"], target.Calls);
         Assert.Equal([("FnLock", "1")], target.Recorded);
@@ -391,7 +530,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubDeclaredSetting { ThrowOnWrite = new SettingNotAppliedException("FnLock", "Access Denied") };
 
-        var ex = Assert.Throws<SettingNotAppliedException>(() => ApplyDeclaredSetting.Run(Declared(), "1", target));
+        var ex = Assert.Throws<SettingNotAppliedException>(() => new ApplyDeclaredSetting(target).Run(Declared(), "1"));
 
         Assert.Equal("FnLock", ex.Key);
         Assert.Equal("Access Denied", ex.Reason);

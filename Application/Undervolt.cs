@@ -21,6 +21,11 @@ namespace AcerHelper.Application;
 /// HANDING THE VALUES BACK ALSO KEEPS THE CLAMP IN ONE PLACE: what the graph holds is what the write sends, and
 /// the use case never sees an unbounded value it could pass on by mistake.
 ///
+/// THE ABSENT PORT IS THE FIRST MEMBER'S NULL, not an exception. <see cref="Store"/> returns null when this CPU
+/// has no Curve-Optimizer port (or takes a different number of offsets), which is the capability fact the use case
+/// consults: it then never reaches <see cref="Apply"/>, and the <c>(false, null)</c> the UI has always read for a
+/// portless machine is preserved. Only a PRESENT port's refusal is a <see cref="PortWriteFailedException"/>.
+///
 /// WHAT IS NOT HERE, MEASURED RATHER THAN ASSUMED. The two rules that make this axis interesting stay inside the
 /// implementation, and the reason is a layer decision rather than a size one: WHICH of the two writes this CPU
 /// takes (one offset per rail, or one for all cores) and WHERE the offsets are clamped are both the domain's, and
@@ -36,14 +41,17 @@ public interface IUndervoltTarget
     /// app only claims to have applied. Returns WHAT WAS REMEMBERED, index-aligned with the port's domains, so the
     /// write can send exactly the values the graph holds; <c>null</c> means NOTHING WAS REMEMBERED and the caller
     /// must not write — this CPU has no Curve-Optimizer port, or it takes a different number of offsets than were
-    /// handed over.</summary>
+    /// handed over. This null is the ABSENT-PORT capability answer (plus the count mismatch), a VALUE and never
+    /// <see cref="PortWriteFailedException"/>.</summary>
     IReadOnlyList<int>? Store(IReadOnlyList<int> counts);
 
-    /// <summary>Write the offsets to the SMU and report the write: false with the port's own reason when it
-    /// refused, false with no reason when there is no port or the port threw. The SMU transaction waits on a
-    /// machine-wide PCI lock other tuning tools also take and can block for seconds, so the caller runs this off
-    /// the thread that owns the UI.</summary>
-    (bool ok, string? error) Apply(IReadOnlyList<int> counts);
+    /// <summary>Write the offsets to the SMU. A PRESENT SMU that refuses or fails THROWS
+    /// <see cref="PortWriteFailedException"/> carrying the transport's own words when it has any; the old
+    /// <c>(false, null)</c> for a port that threw is gone with the ambiguity docs/open-decisions.md §2 records.
+    /// This is reached only when <see cref="Store"/> returned values, so an absent port never arrives here. The
+    /// SMU transaction waits on a machine-wide PCI lock other tuning tools also take and can block for seconds, so
+    /// the caller runs this off the thread that owns the UI.</summary>
+    void Apply(IReadOnlyList<int> counts);
 }
 
 /// <summary>The Curve-Optimizer offsets as a use case: record the counts the user set for the current mode and
@@ -63,17 +71,38 @@ public interface IUndervoltTarget
 /// counts are not clamped-and-sent anyway, because a value the axis would not remember is not one it will be
 /// asked to put back. And the write is given the values <see cref="IUndervoltTarget.Store"/> handed back rather
 /// than the caller's, so the two cannot be a clamp apart.</item>
+/// <item><b>The whole edit runs under the tuning gate</b> (<see cref="ITuningGate"/>): a manual edit must never
+/// land between two of a running sweep's probes, and the gate is what makes "is a sweep running" and the write
+/// atomic. This is the reason the operation owns the gate through its constructor rather than leaving the caller
+/// to remember a lock — the four call sites that used to hold it by hand are gone.</item>
 /// </list>
+///
+/// WHAT THE RETURN STILL CARRIES, now that the write is exceptional: the pair's non-ok path is ONLY the gate's
+/// busy precondition — "a guided sweep is running" — and the three value refusals above (empty edit, absent port,
+/// count mismatch). A PRESENT SMU's refusal is a <see cref="PortWriteFailedException"/> and escapes the gate and
+/// the use case to the caller, which catches it at its boundary (the UI) or turns it into its non-verdict outcome
+/// (the boot re-apply); it is deliberately NOT caught here, so only the remember has happened when it throws.
 ///
 /// This is the thinnest of the family and it is worth naming why: the two rules that decide what this axis
 /// actually writes are the rails fork and the clamp, and both are <c>CoAxis</c>'s, in Infrastructure
 /// (<see cref="IUndervoltTarget"/>'s docstring measures that). What is left on this side of the wall is the edit's
 /// own vocabulary — empty, refused, remembered, written — and that is what is stated here.</summary>
-public static class ApplyUndervolt
+public sealed class ApplyUndervolt(IUndervoltTarget target, ITuningGate gate)
 {
-    public static (bool ok, string? error) Run(IReadOnlyList<int> counts, IUndervoltTarget target)
+    public (bool ok, string? error) Run(IReadOnlyList<int> counts)
     {
-        if (counts.Count == 0) return (false, null);
-        return target.Store(counts) is { } remembered ? target.Apply(remembered) : (false, null);
+        if (counts.Count == 0)
+        {
+            return (false, null);
+        }
+
+        // The gate's busy refusal stays a VALUE (its own precondition, not a port refusal); a present port's
+        // refusal THROWS out of target.Apply and is not caught here.
+        return gate.Guard(() =>
+        {
+            if (target.Store(counts) is not { } remembered) return (false, (string?)null);
+            target.Apply(remembered);
+            return (true, (string?)null);
+        });
     }
 }

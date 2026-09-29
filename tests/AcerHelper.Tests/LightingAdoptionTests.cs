@@ -45,6 +45,10 @@ namespace AcerHelper.Tests;
 /// pair removed) — reddens <c>AnOutOfBandInput_IsAdopted_AndStored</c> and
 /// <c>AnAdoption_NeverClaimsTheZoneAsConfigured</c>;</item>
 /// <item><b>drop the spurious-zero guard</b> — reddens <c>ASpuriousZeroRead_IsIgnored_AndNotStored</c>;</item>
+/// <item><b>make the flash suspicion permanent</b> (the pre-fix static capability: refuse every 0 read) — reddens
+/// <c>AnFnDim_OneHundredDownToZero_ReachesZero</c>, <c>AFlashSuspicion_Expires_AndTheLaterGenuineZeroLands</c>
+/// and <c>ANonZeroRead_ClearsTheFlashSuspicion_Early</c>; conversely, <b>never arming it</b> (dropping
+/// <c>NoteProfileFlash</c> from the coordinator) reddens <c>ASpuriousZeroRead_IsIgnored_AndNotStored</c>;</item>
 /// <item><b>drop the user-edit guard</b> (<c>_debounce.IsRunning</c>) — reddens
 /// <c>AUserEditInFlight_BeatsTheEvent</c>, which also proves the guard's precondition is real without a
 /// dispatcher: the debounce IS pending after a slider move, it just never ticks headless;</item>
@@ -95,14 +99,15 @@ public class LightingAdoptionTests
         var modeB = Mode(0);
         var vm = Lighting(zone, modeA, poster.Post);
 
-        // Controls: the construction read is the value the startup re-apply SENDS (pinned in LightingPrimeTests),
-        // and it is the only read so far.
+        // Controls: the construction re-apply really does write the mode's configured 100 (a configured zone
+        // takes its brightness from STORAGE, so this is the stored value, not a register reading), and the wire
+        // is not asked at all for a configured zone — that is the authority rule this file now also covers.
         Assert.Equal([100], written);
-        Assert.Equal(1, register.Reads);
+        Assert.Equal(0, register.Reads);
 
         vm.Reload(modeB);                        // the reported bug: the user switches to a mode stored at 0
         Assert.Equal([100, 0], written);         // Control: our 0 really did go out to the device
-        Assert.Equal(1, register.Reads);         // ...and the switch itself asks the wire nothing
+        Assert.Equal(0, register.Reads);         // ...and the switch itself asks the wire nothing
 
         vm.Prime();                              // startup / live language rebuild
         vm.Reapply();                            // the doubt moment: the Lighting drawer opens
@@ -114,7 +119,7 @@ public class LightingAdoptionTests
         Assert.Equal(0, modeB.Persists);                // nothing here was an intent, so nothing was saved
         Assert.Equal(0, poster.Delivered);              // ...and no read was even delivered to the UI thread
         Assert.Equal([100, 0, 0], written);             // the doubt moment re-applied OUR value, nothing else
-        Assert.Equal(1, register.Reads);                // neither path asked the device: still only the construction read
+        Assert.Equal(0, register.Reads);                // no path asked the device: a configured zone is never read
 
         // Control: the register really is stale — asked directly, it reports the previous mode's 100.
         Assert.Equal(100, zone.ReadBrightness());
@@ -138,10 +143,10 @@ public class LightingAdoptionTests
         var poster = new Eventually.Poster();
         var panel = Panel(mode, written, register, poster.Post);
 
-        // Controls: the panel is built from the hardware read rather than the stored 60, and that reading is what
-        // the startup re-apply sends.
-        Assert.Equal(30, panel.Brightness);
-        Assert.Equal([30], written);
+        // Controls: the panel is built from the STORED 60 (a configured zone is not read at construction), and
+        // the startup re-apply sends that stored value.
+        Assert.Equal(60, panel.Brightness);
+        Assert.Equal([60], written);
 
         register.Value = 20;                     // the Fn key dims it out-of-band; nothing told the app
         panel.AdoptFromHardware();
@@ -150,7 +155,7 @@ public class LightingAdoptionTests
         Assert.Equal(20, panel.Brightness);
         Assert.Equal(20, mode[ZoneName].Brightness);   // stored — the half that used to be dropped
         Assert.Equal(1, mode.Persists);
-        Assert.Equal([30], written);             // an adoption reads; it never writes
+        Assert.Equal([60], written);             // an adoption reads; it never writes
     }
 
     /// <summary>
@@ -187,10 +192,16 @@ public class LightingAdoptionTests
     // ---------------------------------------------------------------- the guards the event path keeps
 
     /// <summary>
-    /// The spurious zero, kept exactly as it was: the OPMODE profile flash zeroes the EC's brightness register
-    /// while the keyboard stays lit, so a 0 read over a non-zero brightness is the register lying, not the user
-    /// dimming. It is ignored, and — the half that matters here — the lie is not STORED either. The delivery count
-    /// is the control: the read happened (the register was really asked, and answered 0) and was refused.
+    /// The spurious zero, still refused: the OPMODE profile flash zeroes the EC's brightness register while the
+    /// keyboard stays lit, so a 0 read over a non-zero brightness IN THE FLASH'S WINDOW is the register lying, not
+    /// the user dimming. It is ignored, and — the half that matters here — the lie is not STORED either. The
+    /// delivery count is the control: the read happened (the register was really asked, and answered 0) and was
+    /// refused.
+    ///
+    /// THE DIFFERENCE FROM THE OLD SHAPE is only the discriminator: the refusal now keys on the flash EVENT
+    /// (<c>NoteProfileFlash</c>, which the coordinator arms at the palette write) instead of on the static
+    /// capability "this machine's register can lie", which was permanently true here. The behaviour on this page
+    /// is unchanged.
     /// </summary>
     [Fact]
     public void ASpuriousZeroRead_IsIgnored_AndNotStored()
@@ -201,45 +212,145 @@ public class LightingAdoptionTests
         var poster = new Eventually.Poster();
         var panel = Panel(mode, written, register, poster.Post);
 
-        register.Value = 0;                      // the profile flash zeroes the register under a lit keyboard
+        Assert.Equal(0, register.Reads);         // a configured zone is not read at construction
+
+        panel.NoteProfileFlash();                // the app just drove a palette flash (the register now lies)
+        register.Value = 0;                      // the flash zeroes the register under a lit keyboard
         panel.AdoptFromHardware();
 
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
-        Assert.Equal(2, register.Reads);         // Control: the register WAS asked, and answered 0
-        Assert.Equal(30, panel.Brightness);      // the slider is not snapped to 0 (where it would stick)
+        Assert.Equal(1, register.Reads);         // Control: the register WAS asked, and answered 0
+        Assert.Equal(60, panel.Brightness);      // the slider is not snapped to 0 (where it would stick)
         Assert.Equal(60, mode[ZoneName].Brightness);   // ...and the stored value is not overwritten with the lie
         Assert.Empty(mode.Writes);
         Assert.Equal(0, mode.Persists);
     }
 
     /// <summary>
-    /// A genuine dim to 0 IS an intent and must be adopted where the register is trustworthy. The reported bug:
-    /// every 0 read used to be refused (for the OPMODE-flash lie), so a keyboard dimmed to off could not be
-    /// adopted — the state stayed non-zero and the DECREASE control was dead until an increase made the register
-    /// non-zero again. Here the profile flash is not in play (<c>profileFlashPossible: () =&gt; false</c>, the
-    /// shape a device without a follows-profile lightbar answers), so the 0 lands: slider, stored value and the
-    /// next re-apply all follow.
+    /// THE OWNER'S REPORT, reproduced at the panel level and fixed: a monotonic Fn-key dim 100 -> 75 -> 50 -> 25
+    /// -> 0 is a real out-of-band change, and the final real read is 0 — it must be adopted, so the slider reaches
+    /// 0. Before the fix the static flash-capability predicate was permanently true on the AN18-61, so the 0 was
+    /// refused and the slider stopped at 25 (the reported "slider stops at 25%").
     ///
-    /// THE DIFFERENTIAL IS <see cref="ASpuriousZeroRead_IsIgnored_AndNotStored"/>: the same 0 read with the
-    /// profile flash possible is refused.
+    /// NOTE there is NO <c>NoteProfileFlash</c> here: a pure Fn dim never sends a palette, so no flash is in play,
+    /// which is exactly the situation the old guard got wrong. Each row is a distinct register read, so the table
+    /// is the sequence, not one value asserted four times. The regression is meaningful only because the OLD code
+    /// refused this same sequence — see the class docs' mutation note.
     /// </summary>
     [Fact]
-    public void AGenuineDimToZero_IsAdopted_WhenTheRegisterIsReliable()
+    public void AnFnDim_OneHundredDownToZero_ReachesZero()
+    {
+        var register = new StaleRegister(100);
+        var written = new List<byte>();
+        var mode = Mode(100);
+        var poster = new Eventually.Poster();
+        var panel = Panel(mode, written, register, poster.Post);
+
+        var delivered = 0;
+        foreach (var level in new[] { 75, 50, 25, 0 })
+        {
+            var expected = ++delivered;
+            register.Value = level;
+            panel.AdoptFromHardware();
+            Assert.True(Eventually.Until(() => poster.Delivered >= expected), $"raw={level} was never delivered");
+            Assert.Equal(level, panel.Brightness);              // the slider follows every real step...
+            Assert.Equal(level, mode[ZoneName].Brightness);     // ...and each is stored
+        }
+
+        Assert.Equal(0, panel.Brightness);       // ...down to a genuine off
+        Assert.Equal(0, mode[ZoneName].Brightness);
+        Assert.Equal([100], written);            // the only write was the construction re-apply: adoptions read
+    }
+
+    /// <summary>
+    /// The flash suspicion is a WINDOW, not a latch: a 0 read while a flash is fresh is the lie (refused), but the
+    /// same 0 read once the window has passed is the user dimming (adopted). The clock is injected so the test
+    /// steps across the boundary rather than sleeping the production 5 s. This is what keeps the guard correct on
+    /// a machine that also uses the Fn key after a switch: a real dim to 0 is not refused forever.
+    ///
+    /// MUTATION THAT REDDENS IT: making the suspicion permanent (refuse the second read), i.e. the pre-fix bug.
+    /// </summary>
+    [Fact]
+    public void AFlashSuspicion_Expires_AndTheLaterGenuineZeroLands()
+    {
+        var now = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var register = new StaleRegister(30);
+        var written = new List<byte>();
+        var mode = Mode(60);
+        var poster = new Eventually.Poster();
+        var panel = Panel(mode, written, register, poster.Post, clock: () => now);
+
+        panel.NoteProfileFlash();                // the flash lands at `now`
+        register.Value = 0;
+        panel.AdoptFromHardware();               // inside the window -> refused
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the read was never delivered");
+        Assert.Equal(60, panel.Brightness);
+        Assert.Equal(60, mode[ZoneName].Brightness);
+
+        now = now.AddSeconds(6);                 // the window has passed; the register reads 0 genuinely
+        panel.AdoptFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the second read was never delivered");
+        Assert.Equal(0, panel.Brightness);              // the real dim to off now lands...
+        Assert.Equal(0, mode[ZoneName].Brightness);     // ...and is stored
+    }
+
+    /// <summary>
+    /// A NON-ZERO read proves the register live again, so it clears the flash suspicion early — the next 0 read
+    /// is then trusted even though the production window has not elapsed. This is the mechanism that keeps the
+    /// guard honest: the OPMODE flash zeroes the register only at the switch, so the first real Fn step (a
+    /// non-zero read) is itself the evidence that the lie is over. See docs/lighting-an18-61.md.
+    /// </summary>
+    [Fact]
+    public void ANonZeroRead_ClearsTheFlashSuspicion_Early()
+    {
+        var now = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var register = new StaleRegister(30);
+        var written = new List<byte>();
+        var mode = Mode(60);
+        var poster = new Eventually.Poster();
+        var panel = Panel(mode, written, register, poster.Post, clock: () => now);
+
+        panel.NoteProfileFlash();
+        register.Value = 75;                     // a real Fn step down: non-zero, so the register is live
+        panel.AdoptFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the non-zero read was never delivered");
+        Assert.Equal(75, panel.Brightness);
+
+        now = now.AddSeconds(1);                 // still inside the production window...
+        register.Value = 0;                      // ...but the suspicion was cleared by the 75 above
+        panel.AdoptFromHardware();
+        Assert.True(Eventually.Until(() => poster.Delivered >= 2), "the zero read was never delivered");
+        Assert.Equal(0, panel.Brightness);              // so this 0 is trusted
+        Assert.Equal(0, mode[ZoneName].Brightness);
+    }
+
+    /// <summary>
+    /// A genuine dim to 0 IS an intent and must be adopted when no flash is in play. The reported bug: every 0
+    /// read used to be refused (for the OPMODE-flash lie, keyed on a static capability that is permanently true
+    /// on this hardware), so a keyboard dimmed to off could not be adopted — the state stayed non-zero and the
+    /// DECREASE control was dead until an increase made the register non-zero again. With no flash event, the 0
+    /// lands: slider, stored value and the next re-apply all follow.
+    ///
+    /// THE DIFFERENTIAL IS <see cref="ASpuriousZeroRead_IsIgnored_AndNotStored"/>: the same 0 read, but inside a
+    /// flash's fresh window, is refused.
+    /// </summary>
+    [Fact]
+    public void AGenuineDimToZero_IsAdopted_WhenNoFlashIsInPlay()
     {
         var register = new StaleRegister(30);
         var written = new List<byte>();
         var mode = Mode(60);
         var poster = new Eventually.Poster();
-        var panel = Panel(mode, written, register, poster.Post, profileFlashPossible: () => false);
+        var panel = Panel(mode, written, register, poster.Post);
 
-        register.Value = 0;                      // the Fn key dims the keyboard to off
+        register.Value = 0;                      // the Fn key dims the keyboard to off; no palette was sent
         panel.AdoptFromHardware();
 
         Assert.True(Eventually.Until(() => poster.Delivered >= 1), "the event was never delivered");
         Assert.Equal(0, panel.Brightness);             // the slider reaches 0...
         Assert.Equal(0, mode[ZoneName].Brightness);    // ...the mode stores the dim-to-off...
         Assert.Equal(1, mode.Persists);
-        Assert.Equal([30], written);                   // ...and the adoption reads, never writes
+        Assert.Equal([60], written);                   // ...and the adoption reads, never writes
     }
 
     /// <summary>
@@ -254,7 +365,7 @@ public class LightingAdoptionTests
         var written = new List<byte>();
         var mode = Mode(0);                      // this profile's stored keyboard brightness is 0
         var poster = new Eventually.Poster();
-        var panel = Panel(mode, written, register, poster.Post, profileFlashPossible: () => false);
+        var panel = Panel(mode, written, register, poster.Post);
 
         Assert.Equal(0, panel.Brightness);
         Assert.Equal([0], written);              // Control: the construction re-apply really did turn it off
@@ -303,14 +414,17 @@ public class LightingAdoptionTests
     /// <summary>
     /// <see cref="LightingViewModel.Repaint"/> — the third composite path, and the one
     /// <c>LightingCoordinator</c> runs on every tick of its post-switch burst, on a resume, on a lid-open and on
-    /// a host hand-back. It is the ONLY one of the three that takes no state from the graph at all, which is what
-    /// makes the burst safe: the values it re-applies are the section's own, so a tick that lands after an edit
-    /// re-applies the edit rather than the state as it stood when the burst began.
+    /// a host hand-back. It is the ONLY one of the three that takes no state from the graph at all.
     ///
     /// THE NON-READ IS THE POINT, and it is asserted as a COUNT because it is invisible in the values: a repaint
     /// that re-read the mode every tick would write exactly the same bytes and differ only in the lock it took
     /// and the graph it walked. The coordinator itself cannot be driven here (it needs a desktop lifetime — the
     /// limit <c>ReconcileScheduleTests</c> records), so this method is pinned at its own level.
+    ///
+    /// WHAT THIS TEST DOES NOT COVER, and is covered by <c>LightingInFlightEditTests</c>: the non-read alone does
+    /// NOT make the burst safe mid-edit. <c>_lights</c> holds the last COMMITTED value, so rebinding from it
+    /// during a pending debounce reverted the user's edit — the owner's «настройки яркости не пишутся». Here
+    /// there is no edit in flight, which is exactly the case in which the rebind is correct.
     ///
     /// MUTATION THAT REDDENS IT: making <c>Repaint</c> rebind from the door (<c>Reload(_mode)</c>) — the value
     /// assertions stay green and only the read counter moves, which is exactly why the counter exists.
@@ -331,7 +445,7 @@ public class LightingAdoptionTests
 
         Assert.Equal([40, 40], written);              // the burst re-applied OUR value...
         Assert.Equal(readsBefore, mode.StoredCalls);  // ...without asking the mode again: the values are the section's
-        Assert.Equal(1, register.Reads);              // ...and without asking the device either
+        Assert.Equal(0, register.Reads);              // ...and without asking the device either (a configured zone is not read)
     }
 
     /// <summary>
@@ -361,7 +475,7 @@ public class LightingAdoptionTests
         vm.Repaint();
 
         Assert.Equal(20, vm.Panels[0].Brightness);     // the burst re-applied the ADOPTED value...
-        Assert.Equal([30, 20], written);               // ...and that is what the device was told
+        Assert.Equal([60, 20], written);               // ...and that is what the device was told
     }
 
     // ---------------------------------------------------------------- the mode switch
@@ -490,12 +604,12 @@ public class LightingAdoptionTests
     /// <see cref="ApplyLightZone"/> plus the local copy), so a test can see whether the adoption stored anything
     /// and whether it reached the file — not only whether it applied.</summary>
     private static LightViewModel Panel(FakeLightZones mode, List<byte> written, StaleRegister register,
-                                        Action<Action> post, Func<bool>? profileFlashPossible = null)
+                                        Action<Action> post, Func<DateTime>? clock = null)
         => new(ZoneName, [new RgbModeInfo("Static", HasColor: true, HasSpeed: false, Handle: new object())],
                zones: 1,
                applyAll: (_, _, brightness, _, _) => written.Add(brightness),
-               applyZone: null, mode[ZoneName], s => ApplyLightZone.Run(ZoneName, s, mode), register.Read, post,
-               profileFlashPossible);
+               applyZone: null, mode[ZoneName], s => new ApplyLightZone(mode).Run(ZoneName, s), register.Read, post,
+               clock);
 
     /// <summary>A controllable brightness register that LIES: nothing we write changes what a read reports, which
     /// is the wire's lag after a profile switch — the write is sent, the EC has not applied it, and the register

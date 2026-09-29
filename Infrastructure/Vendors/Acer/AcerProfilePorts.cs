@@ -68,8 +68,8 @@ internal sealed class EcSyncedProfiles(IPowerProfiles inner, Func<ProfileKind, b
 ///
 /// It is what makes the two vocabularies meet in one place, and that is where the live bug lived:
 /// <c>SysfsPowerProfiles</c> classifies the token <c>"performance"</c> as <see cref="ProfileKind.Performance"/>,
-/// but the kernel's <c>"performance"</c> is Acer TURBO — so the envelope went out as mode 1 (93 W) where the
-/// hardware wanted mode 0 (108 W). Profiles handed out here are the table's own, so the kind is the byte's kind.
+/// but the kernel's <c>"performance"</c> is Acer TURBO — so the envelope went out as mode 1 (100 W) where the
+/// hardware wanted mode 0 (115 W). Profiles handed out here are the table's own, so the kind is the byte's kind.
 ///
 /// The inner port writes <c>profile.Id</c> verbatim (<c>SysfsPowerProfiles.Set</c> puts that id straight into the
 /// node), which is why <see cref="Set"/> must pass the inner port's OWN object for the resolved choice rather than
@@ -89,7 +89,7 @@ internal sealed class AcerMappedProfiles(IPowerProfiles inner)
     /// <summary>The Acer table's reading, and NOT the inner source's — the second half of what this decorator is
     /// for. The source classifies the kernel token <c>"performance"</c> as <see cref="ProfileKind.Performance"/>,
     /// which on this node is Turbo's byte: handing that reading upwards would classify the app's Turbo as
-    /// Performance and send the EC envelope mode 1 (93 W) where the hardware wants mode 0 (108 W) — the live bug
+    /// Performance and send the EC envelope mode 1 (100 W) where the hardware wants mode 0 (115 W) — the live bug
     /// this class exists to close. Profiles handed out here are the table's own, so the traits are the byte's
     /// traits.</summary>
     public ProfileTraits Traits(PerformanceProfile profile) => AcerProfiles.TraitsOf(profile);

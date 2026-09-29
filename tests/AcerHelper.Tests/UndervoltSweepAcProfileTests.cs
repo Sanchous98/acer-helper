@@ -52,9 +52,13 @@ public class LaptopServiceUndervoltSweepAcGateTests
             new VoltageDomain("Zen 5c", "ccd:1") { Cluster = CpuClusterKind.Efficiency },
             new VoltageDomain("iGPU", "gfx", Range: (-50, 0), MillivoltsPerCount: 5.0));
 
+    // The single-core phase is off in these AC/profile tests (each is about one pass) so the suite stays fast;
+    // the final soak is off too, because otherwise a real service probe would run the default 5/3-minute budgets.
     private static SweepOptions Fast(int? start = null) => new()
     {
         StartCounts = start,
+        IncludeSingleCorePhase = false,
+        ConfirmSoak = false,
         Load = new CpuLoadOptions
         {
             Width = LoadWidth.Scalar,
@@ -75,8 +79,8 @@ public class LaptopServiceUndervoltSweepAcGateTests
         // A port that carries the Acer per-source policy (Turbo/Performance AC-only), forwarding to the fake so
         // every Set is recorded on f.Pp.
         f.Device.PowerProfiles = new SourcePoledProfiles(f.Pp!, turboOnAc);
-        if (onAc == true) f.Service.SyncPowerSource(new BatteryInfoSnapshot { State = BatteryState.Charging });
-        else if (onAc == false) f.Service.SyncPowerSource(new BatteryInfoSnapshot { State = BatteryState.Discharging });
+        if (onAc == true) f.SyncPowerSource.Run(new BatteryInfoSnapshot { State = BatteryState.Charging });
+        else if (onAc == false) f.SyncPowerSource.Run(new BatteryInfoSnapshot { State = BatteryState.Discharging });
         return f;
     }
 
@@ -203,6 +207,36 @@ public class LaptopServiceUndervoltSweepAcGateTests
     }
 
     // ---- the transient performance profile ----
+
+    /// <summary>A recorder for the profile switch's announcement, so a test can assert the sweep's force AND its
+    /// restore are announced through the use case (the light claim the sweep used to bypass).</summary>
+    private sealed class RecordingAnnouncer : AcerHelper.Application.IProfileAnnouncer
+    {
+        public List<PerformanceProfile> Announced { get; } = [];
+        public void OnProfileApplied(PerformanceProfile applied) => Announced.Add(applied);
+    }
+
+    /// <summary>THE SWEEP'S FORCE AND ITS RESTORE ARE ANNOUNCED — the whole of the double-flash fix, at the
+    /// service boundary. A forced-and-restored sweep announces the forced profile and then the pre-sweep one,
+    /// exactly once each, because both go through the switch use case the lighting claim is part of. Before this
+    /// slice the sweep wrote the port directly (<c>ApplyProfileTransient</c>) and announced nothing, so the ~1 s
+    /// refresh pass repainted the palette the firmware had already flashed — the second blink the owner saw.</summary>
+    [Fact]
+    public void AForcedSweepAnnouncesTheForceAndTheRestore()
+    {
+        var f = Setup(onAc: true);
+        f.Service.SetCoDomains([-5, -6, -7]);
+        var announcer = new RecordingAnnouncer();
+        f.Service.ProfileAnnouncer = announcer;
+
+        f.Service.RunUndervoltSweep(Fast(), null, CancellationToken.None);
+
+        // The forced Turbo, then the restored Balanced — one announcement each, and no third (the refresh pass is
+        // suppressed by the announcer's own pending claim, not by this use case counting anything).
+        Assert.Equal(2, announcer.Announced.Count);
+        Assert.Equal(TestProfiles.Turbo, announcer.Announced[0]);
+        Assert.Equal(TestProfiles.Balanced, announcer.Announced[1]);
+    }
 
     /// <summary>ON SUCCESS: Turbo is applied BEFORE the first probe and the PREVIOUS profile is restored after.
     /// The first SMU write is the first probe, so "Turbo before the first probe" is exact.</summary>

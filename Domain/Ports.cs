@@ -149,6 +149,46 @@ public interface IGpuOverclock
     bool Set(int coreMhz, int memMhz);
 }
 
+/// <summary>The discrete GPU's power ENVELOPE (the TGP/CTGP row the EC enforces), as a control independent of
+/// the performance profile. On an Acer EC-HID model the envelope is the EC's own "system usage mode", a FIXED
+/// five-row table reachable only over HID — it is NOT the WMI profile byte, and there is no arbitrary wattage:
+/// changing the envelope is a choice among the EC's rows, never a number. See docs/power-an18-61.md.
+///
+/// WHY IT IS A PORT OF ITS OWN. The envelope has always moved as a SIDE-EFFECT of a profile switch
+/// (<c>EcSyncedProfiles</c>), but the owner wants it selectable ON ITS OWN and remembered per performance mode
+/// alongside the clock offsets. That makes it a first-class axis: the levels it offers, their measured watts and
+/// the chosen one all have to be readable and writable without touching the profile, which is exactly what this
+/// port exists for.
+///
+/// PRESENT ONLY WHERE THE EC CHANNEL IS — null otherwise, so the UI hides the row rather than offering levels
+/// the machine cannot enforce. An absent port is a capability fact, never a write refusal: the caller keeps the
+/// value as it does for every other absent port.
+///
+/// THE WRITE IS ENQUEUE-ONLY, because the EC channel is HID-over-I2C shared with the RGB controller and must
+/// never be written on the UI thread (see <c>AcerEcHidController</c>). A true return therefore means "accepted
+/// for sending", not "the EC applied it" — the same posture <c>AcerEcHidController.Apply</c> has — which is why
+/// there is no <c>LastError</c> here: a false is "could not enqueue (no channel, or a level the port does not
+/// offer)", never a transport reason.
+///
+/// "FOLLOW THE PROFILE" IS NOT THIS PORT'S: the port only ever pins one of its own rows. The default — the
+/// envelope the machine's current profile implies — is what the profile switch already drives
+/// (<c>EcSyncedProfiles</c>/<c>SetProfile</c>), and the mode-apply path leaves that path alone when a mode has
+/// no override.</summary>
+public interface IGpuPowerEnvelope
+{
+    /// <summary>The fixed EC rows, in display order (most power first), each with its measured steady dGPU limit
+    /// in watts. Empty is not a supported shape — a present port always offers the EC's rows — so a caller may
+    /// treat an empty list as "nothing to show" rather than special-case it.</summary>
+    IReadOnlyList<GpuPowerOption> Levels { get; }
+
+    /// <summary>Apply one of <see cref="Levels"/> to the EC now — the manual pick of this axis, decoupled from
+    /// the profile and remembered per mode beside the clock offsets. A level the port does not offer is refused
+    /// without reaching the EC (the firmware ACKs an out-of-range row exactly like a good one and then ignores
+    /// it, so sending one would look like success and move nothing). Returns false when the channel is absent or
+    /// the write could not be enqueued; never throws.</summary>
+    bool SetLevel(GpuPowerLevel level);
+}
+
 /// <summary>CPU power behaviour via the Windows Power-Mode overlay (Best efficiency / Balanced / Best
 /// performance) — the one CPU-power knob that works with no driver at all on this class of machine. Acer exposes
 /// no WMI power path (it bakes the whole PPT/STAPM envelope into its fixed EC profiles), so — exactly like

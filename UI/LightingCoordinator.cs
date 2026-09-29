@@ -16,15 +16,30 @@ namespace AcerHelper.UI;
 /// <see cref="OnModeChanged"/>) and forwards the startup/rebuild repaint (<see cref="ApplyFollowLighting"/>)
 /// and the follows-profile flip (<see cref="OnFollowsProfileFlipped"/>).
 ///
-/// It does NO hardware reads of its own: the current profile's flash colour is read on the (background) refresh
-/// pass and handed in, and cached here so the timer / resume / lid / follows-flip re-paints reuse it. The
-/// per-zone lighting is not cached here at all — the section holds it as values and re-applies them when asked
-/// (<see cref="LightingViewModel.Repaint"/>), and a pass that reports a change hands in the mode's own door
-/// instead of a copy of its contents. This keeps every path on the UI thread free of a blocking EC read — the
-/// HID writes it issues are already async (EneHidController's background writer).</summary>
-internal sealed class LightingCoordinator : IDisposable
+/// It reads no hardware of its own EXCEPT at wake, and that one exception is deliberate: the current profile's
+/// flash colour is read on the (background) refresh pass and handed in, and cached here so the timer / resume /
+/// lid / follows-flip re-paints reuse it. The per-zone lighting is not cached here at all — the section holds it
+/// as values and re-applies them when asked (<see cref="LightingViewModel.Repaint"/>), and a pass that reports a
+/// change hands in the mode's own door instead of a copy of its contents. The announced landing does the same:
+/// it resolves the LANDED profile's door through the service (<c>LightsForCurrentMode(applied)</c>, the overload
+/// that takes an already-read profile and so costs no EC read) rather than repainting the section's stale cache,
+/// which is what makes a profile saved at brightness 0 come back dark. This keeps every path on the UI thread
+/// free of a blocking EC read. <see cref="OnResume"/> is the exception because a wake is also a source-change
+/// moment the app cannot see from a cache: it drives the two Application use cases (<see cref="ReadBatteryInfo"/>
+/// and <see cref="SyncPowerSource"/>) so a source that changed over sleep is restored BEFORE any paint, and the
+/// battery read there is the cheap OS gauge, not an EC transaction. See OnResume.</summary>
+internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
 {
     private readonly LaptopService _svc;
+    // The one re-apply use case (Application/ReapplySettings.cs), owned through the constructor and SHARED with
+    // the service's boot path and the controller's refresh pass: the resume handler names the ACTION
+    // (Reapply.Run(ReapplyTrigger.Resume)), not the executor behind it.
+    private readonly ReapplySettings _reapply;
+    // The two use cases the WAKE source re-sync needs (see OnResume): the cheap OS battery read and the same
+    // per-source restore the refresh pass drives. Held as Application use cases, not as the service, so this
+    // stays the coordinator naming an ACTION rather than a hardware method.
+    private readonly ReadBatteryInfo _readBattery;
+    private readonly SyncPowerSource _syncSource;
     private readonly PeriodicSchedule _lightReapply;  // re-applies the per-zone lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
 
@@ -89,9 +104,30 @@ internal sealed class LightingCoordinator : IDisposable
     private MainViewModel _vm = null!;
     private LightingViewModel? _lighting;
 
-    public LightingCoordinator(LaptopService svc)
+    // The one place this class crosses onto the UI thread, as an injected delegate rather than a direct
+    // Dispatcher call. In the app it is <c>Dispatcher.UIThread</c> — inline when already on the UI thread (the
+    // pick/tray/hotkey paths), posted when the call comes from the pool (the sweep's switch) — and a test can
+    // pass a synchronous poster so the announced repaint runs without a dispatcher loop, the same seam (and the
+    // same measured reason) as <c>LightingViewModel</c>'s `post` and the option rows' poster.
+    private readonly Action<Action> _uiPost;
+
+    /// <summary>The default marshaller: run inline on the UI thread, else post. Stated once so the coordinator's
+    /// own default and any future call site agree.</summary>
+    private static void PostToUiThread(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) action();
+        else Dispatcher.UIThread.Post(action);
+    }
+
+    public LightingCoordinator(LaptopService svc, ReapplySettings reapply,
+                               ReadBatteryInfo readBattery, SyncPowerSource syncSource,
+                               Action<Action>? uiPost = null)
     {
         _svc = svc;
+        _reapply = reapply;
+        _readBattery = readBattery;
+        _syncSource = syncSource;
+        _uiPost = uiPost ?? PostToUiThread;
 
         // Acer firmware repaints the lit zones with the profile's palette colour a moment AFTER our WMI profile
         // set. A single re-apply can land too early (before that repaint), so we re-apply the mode's lighting
@@ -104,14 +140,14 @@ internal sealed class LightingCoordinator : IDisposable
         // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — ONCE.
         // The internal keyboard is always connected and never re-enumerates across sleep, so its HID handle
         // stays valid and a single write lands; there's nothing to poll for. (See OnResume.)
-        _resume = new ResumeWatcher(() => Dispatcher.UIThread.Post(OnResume));
+        _resume = new ResumeWatcher(() => _uiPost(OnResume));
         _resume.Start();
 
         // In clamshell (keep-awake) mode the machine stays on with the lid shut, but the backlight is then hidden —
         // so blank it while the lid is closed and restore it on open. Gated on clamshell being enabled (see
         // OnLidChanged): without it a lid-close just sleeps the machine and the backlight is moot (restored by the
         // resume re-apply above). The watcher fires on its message thread, so marshal to the UI thread here.
-        _lid = new LidWatcher(open => Dispatcher.UIThread.Post(() => OnLidChanged(open)));
+        _lid = new LidWatcher(open => _uiPost(() => OnLidChanged(open)));
         _lid.Start();
     }
 
@@ -160,20 +196,49 @@ internal sealed class LightingCoordinator : IDisposable
         if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
     }
 
-    /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
-    /// profile that actually landed, so nothing has to be read back out of the hardware. Repaint NOW, in the same
-    /// instant as the firmware's own palette flash, so the two coincide into one.
+    /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch, the guided sweep's
+    /// transient force/restore) — the caller passes the profile that actually landed, so nothing has to be read
+    /// back out of the hardware. Paint NOW, in the same instant as the firmware's own palette flash, so the two
+    /// coincide into one.
+    ///
+    /// IT REBINDS TO THE LANDED MODE, and that half is not optional (see <c>ApplyProfileApplied</c>): the section
+    /// is still bound to the mode we are leaving at this instant, so a plain repaint would put the OLD profile's
+    /// brightness back over the flash — a target saved at 0 stayed lit. The landed profile's own door is resolved
+    /// here, so the flash is followed by the TARGET mode's saved zones.
     ///
     /// This used to wait for the refresh pass to DISCOVER the change by polling, which is what produced the double
     /// blink: the firmware flashes the new palette the instant the profile byte is written, and our own palette
     /// write then landed ~750 ms later as a second, separate flash cycle. The burst we kick here deliberately
-    /// carries NO further palette re-sends, only the per-zone self-heal. See docs/lighting-an18-61.md.</summary>
+    /// carries NO further palette re-sends, only the per-zone self-heal. See docs/lighting-an18-61.md.
+    ///
+    /// IT IS THE <see cref="IProfileAnnouncer"/> THE SWITCH USE CASE OWNS (<c>Application/ProfileSwitch.cs</c>),
+    /// which is what makes the claim impossible to bypass: the port write and this call are one action, so the
+    /// sweep's forced profile and its restore can no longer flash the palette without also suppressing the stale
+    /// refresh pass. The use case may run on the POOL (the sweep does), so the body is marshalled to the UI thread;
+    /// on the UI thread it runs inline, preserving the exact timing the pick/tray/hotkey paths have always had.</summary>
     public void OnProfileApplied(PerformanceProfile applied)
+    {
+        _uiPost(() => ApplyProfileApplied(applied));
+    }
+
+    private void ApplyProfileApplied(PerformanceProfile applied)
     {
         _pendingId = applied.Id;          // suppress the stale passes still describing the previous profile
         _pendingSince = DateTime.UtcNow;
         _flash = _svc.FlashColorOf(applied);
-        Paint();
+
+        // REBIND TO THE TARGET MODE, do not repaint the section's cache. At this instant the section is still
+        // bound to the PREVIOUS mode — the refresh poll has not read the new one's door yet — so a plain repaint
+        // re-applies the mode we are leaving. That was the owner's report: a target profile saved at brightness 0
+        // came back LIT, because the write that followed the palette flash carried the old mode's brightness and
+        // the palette-free burst kept re-asserting it until a later pass happened to rebind (if it did at all).
+        // The door for the mode that LANDED is resolved here, from `applied` and not from a hardware read
+        // (LightsForCurrentMode's overload), so the sequence is exactly the wanted one: the palette flash, then
+        // the target mode's saved zones painted over it — 0 for a profile saved dark. The follow-up
+        // OnStateChanged pass that reports the same profile is still consumed (it clears _pendingId and rebinds
+        // to the same door again, idempotently), and a stale pass describing the previous profile is still
+        // dropped by the claim above, so there is no second palette flash. See docs/lighting-an18-61.md.
+        Paint(rebind: _svc.LightsForCurrentMode(applied));
         KickReapply();
     }
 
@@ -266,28 +331,84 @@ internal sealed class LightingCoordinator : IDisposable
     //
     // `rebind` is the ONE case that needs state this class does not have: a pass that reports the mode or the
     // profile moved hands in the new mode's door, and the panels rebind through it before painting (exactly one
-    // apply per Paint either way — a rebind already applies, so the two must not both run).
+    // apply per Paint either way — a rebind already applies, so the two must not both run). It is supplied by
+    // both switch-instant paths — the announced landing (ApplyProfileApplied) and the refresh pass
+    // (OnStateChanged) — because in both the section is bound to a mode that is no longer the live one.
     private void Paint(bool includeFlash = true, ILightZoneMode? rebind = null)
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
 
         if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
+        {
+            // ARM THE SPURIOUS-ZERO SUSPICION BEFORE THE FLASH LANDS. The OPMODE write below zeroes the EC's
+            // keyboard-brightness register while the keyboard stays lit (docs/lighting-an18-61.md), and that
+            // register now lies for a short window — so a 0 an Fn-key read reports in it is the flash, not the
+            // user. The panels refuse a 0 only while this is fresh (LightViewModel.NoteProfileFlash), which is
+            // what lets a genuine Fn dim to 0 land at any other time. It must be armed in the same instant as the
+            // write, and the section drives the same panels that will consume the read.
+            _lighting.NoteProfileFlash();
             _svc.Device.Lighting?.SetProfileFlash(flash);
+        }
         if (rebind is { } mode) _vm.ReloadLighting(mode);
         else _vm.RepaintLighting();
     }
 
-    // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — a SINGLE
-    // re-apply from the cache (the internal keyboard's HID handle survives sleep, so one write lands; no
-    // readiness to poll for). Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
+    // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — ONE palette
+    // send. Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
     // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the OS's own double event doesn't paint twice.
     // (The refresh pass that follows the wake is coalesced separately — see OnStateChanged's wake tail.)
+    //
+    // A WAKE IS ALSO THE MOMENT THE POWER SOURCE MAY HAVE CHANGED, and this handler must let THAT win. Sleep
+    // suspends the app's polling, so the power source can move over the sleep (the machine is unplugged, or
+    // plugged in, while it sleeps); the refresh pass would only discover it up to a poll later. If we painted
+    // the OLD cached palette here, the source restore would then land on its own port write and flash the NEW
+    // palette — two flashes, one per profile, which is the owner's report («подсветка моргает дважды ... один
+    // раз для старого профиля, другой — для нового»). So the source is re-synced FIRST, through the same
+    // Application use cases the refresh pass uses (SyncPowerSource -> ApplyStoredMode): when it changed and the
+    // restore announces a landing, OnProfileApplied has already painted the NEW palette and recorded the
+    // _pendingId claim, so the wake's own paint carries only the per-zone colours and sends no palette of its
+    // own — ONE palette send for the whole wake. When the source did NOT change the restore writes nothing,
+    // nothing is announced, and the wake paints its single palette exactly as before.
+    //
+    // THE RE-SYNC RUNS OFF THE UI THREAD, because ApplyStoredMode may write the EC and the bus can stall right
+    // after wake (the same rule the refresh pass follows, and the same reason ApplyModeCpuPower below is
+    // deferred). The paint is posted back after it, so the UI-thread ordering this class requires is kept; the
+    // restore's announcement is posted from inside the sync, ahead of this paint, which is what makes the
+    // _pendingId check below see it. `_lastResume` is stamped BEFORE either path, so the pass that follows
+    // still reads as a tail.
     private void OnResume()
     {
         var now = DateTime.UtcNow;
         if ((now - _lastResume).TotalSeconds < 3) return;
-        _lastResume = now;   // stamped BEFORE the paint, so a pass that lands during it still reads as a tail
-        Paint();
+        _lastResume = now;   // stamped BEFORE the restore/paint, so a pass that lands during it still reads as a tail
+
+        // Re-sync the power source over the sleep through the SAME use cases the refresh pass drives. The battery
+        // read is the cheap OS gauge (GetSystemPowerStatus — no EC transaction); the sync restores the now-live
+        // source's remembered mode, whose landing is announced (and thus painted) by the switch use case. An
+        // unchanged source is a no-op that announces nothing. The catch is this path's own guarantee, like the
+        // deferred re-apply below: the device can be tearing down (an exit racing the wake), and the next pass
+        // re-syncs anyway.
+        _ = Task.Run(() =>
+        {
+            try { _syncSource.Run(_readBattery.Run()); } catch { /* the next pass re-syncs */ }
+            // Paint ONCE, on the UI thread. If the sync announced a landing it set _pendingId and already sent
+            // the profile's palette (OnProfileApplied), so this paint re-establishes only the per-zone colours
+            // that sleep clobbered — sending the cached palette here would be the "old profile" flash over the
+            // new one the restore just painted. With no landing, _pendingId is null and this is the wake's
+            // single palette send.
+            //
+            // THE CLAIM MUST BE ONE THIS WAKE MADE, not a stale one: a switch in the very last moments before
+            // sleep can leave _pendingId set (the poll that would clear it was suspended), and treating that as
+            // "the restore painted for us" would drop the wake's palette send entirely when the source did NOT
+            // change. The claim's stamp is compared against this wake's, so only an announcement made after
+            // _lastResume (i.e. by the restore just above) suppresses the paint.
+            Dispatcher.UIThread.Post(() =>
+            {
+                var restored = _pendingId != null && _pendingSince >= _lastResume;
+                Paint(includeFlash: !restored);
+            });
+        });
+
         // The HARDWARE half of a wake, from the one place that knows the schedule: the GPU clock offsets (the dGPU
         // power-cycles across suspend, Optimus D3-cold, and comes back at 0), the CPU power overlay and the Curve
         // Optimizer (SMU state the platform restores to stock across a power transition). The reconciler drives
@@ -298,7 +419,7 @@ internal sealed class LightingCoordinator : IDisposable
         // because an escaping throw here would be an unobserved task exception. No UI reflect needed (the values
         // are unchanged), so the outcome is discarded. No-op where those ports are absent.
         // See docs/nvidia-gpu-oc.md and docs/curve-optimizer-strix-point.md.
-        _svc.Reconciler.Reapply(ReapplyTrigger.Resume);
+        _reapply.Run(ReapplyTrigger.Resume);
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without

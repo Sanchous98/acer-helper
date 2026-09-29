@@ -269,7 +269,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 //
 // WHY THIS EXISTS. On the Nitro AN18-61 the gaming-WMI profile byte (SetGamingMiscSetting index 0x0B) is only
 // an *indicator*: writing it moves the tray state and the lightbar palette but does not touch the power
-// envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit 71 W <-> 108 W
+// envelope. Measured live — NitroSense switching Quiet<->Turbo moved the dGPU's enforced limit 75 W <-> 115 W
 // while EVERY gaming-WMI value stayed frozen. So the envelope (GPU TGP/CTGP plus the CPU limits) lives in the
 // EC's own "system usage mode", reachable only over this HID interface.
 //
@@ -290,7 +290,7 @@ The `Threading:` paragraph (**28-32**) is architecture, not archaeology, and is 
 // no-timeout HID write on the same HID-over-I2C bus as the RGB controller, and a contended bus can block it
 // for a long time. Only the newest mode matters, so the queue is a single coalescing slot.
 //
-// Mode byte -> steady dGPU limit (0 = 108 W, 1 = 93 W, 2 = 79 W, 3 = 71 W, 4 = 71 W, 5+ acknowledged then
+// Mode byte -> measured dGPU limit (0 = 115 W, 1 = 100 W, 2 = 85 W, 3 = 75 W, 4 = 75 W, 5+ acknowledged then
 // ignored), the wire format, the measurement methodology and every dead end: see docs/power-an18-61.md.
 ```
 

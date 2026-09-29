@@ -14,9 +14,11 @@ public sealed partial class LaptopService
     /// Caller holds _state.</summary>
     private GpuOcPreset StoredGpuOc() => GetOrAdd(Settings.GpuOcPresets, CurrentModeKey());
 
-    /// <summary>The GPU-OC preset for the current mode, or stock (0/0) if none is saved yet (not stored).
-    /// A SNAPSHOT — the caller cannot reach the stored instance through it.</summary>
-    public GpuOcPreset CurrentGpuOc()
+    /// <summary>The GPU-OC preset for the current mode, or stock (0/0, follow-profile) if none is saved yet (not
+    /// stored). A SNAPSHOT — the caller cannot reach the stored instance through it. `internal` rather than
+    /// public: the UI reaches it through the ReadGpuOcState use case, and this class's own GPU paths call it by
+    /// name.</summary>
+    internal GpuOcPreset CurrentGpuOc()
     {
         lock (_state)
             return Settings.GpuOcPresets.TryGetValue(CurrentModeKey(), out var g) ? g.Snapshot() : new GpuOcPreset();
@@ -26,21 +28,27 @@ public sealed partial class LaptopService
     /// for the same reason, as <see cref="CurrentModeKey(PerformanceProfile?)"/>. The key derivation and the
     /// preset lookup stay together under <c>_state</c>, exactly as in the parameterless form; the only thing
     /// removed is the <c>PowerProfiles</c> read that caller was paying for a profile it already had.</summary>
-    public GpuOcPreset CurrentGpuOc(PerformanceProfile? cur)
+    internal GpuOcPreset CurrentGpuOc(PerformanceProfile? cur)
     {
         lock (_state)
             return Settings.GpuOcPresets.TryGetValue(CurrentModeKey(cur), out var g) ? g.Snapshot() : new GpuOcPreset();
     }
 
-    /// <summary>Set the GPU core+memory clock offsets (MHz) for the CURRENT mode, persist, and apply now. The rule
-    /// — remembered BEFORE written, and what a missing port reports — is <see cref="ApplyGpuOffsets"/>
-    /// (Application); the graph write and the driver call are the two members below.</summary>
-    public (bool ok, string? error) SetGpuOc(int core, int mem)
-        => ApplyGpuOffsets.Run(new GpuAxisState(core, mem), this);
+    // ---- the GPU-offset READ contract (Application/Queries.cs) ----
+
+    /// <summary>The current mode's offsets in the DOMAIN's vocabulary, for the ReadGpuOcState use case. The
+    /// stored pair is read here and crosses as <see cref="GpuAxisState"/> (Application may not name the
+    /// container).</summary>
+    GpuAxisState IGpuOcStateTarget.Current() => AxisStateOf(CurrentGpuOc());
+
+    /// <summary>As <see cref="IGpuOcStateTarget.Current()"/> but reusing an already-read current profile.</summary>
+    GpuAxisState IGpuOcStateTarget.Current(PerformanceProfile? cur) => AxisStateOf(CurrentGpuOc(cur));
+
+    // ---- the GPU-offset edit contract (Application/GpuOffsets.cs) ----
 
     /// <summary>Remember the offsets as the current mode's, under the graph lock. Nothing else happens here: the
     /// driver call is <see cref="IGpuOffsetsTarget.Apply"/>, made OUTSIDE this lock, because the pair has to be
-    /// stored before the write can be refused and the lock must never span a hardware call
+    /// stored before the write can be refused (now by throwing) and the lock must never span a hardware call
     /// (docs/domain-refactoring-plan.md §4).</summary>
     void IGpuOffsetsTarget.Store(GpuAxisState state)
     {
@@ -52,54 +60,125 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>Write the offsets to the driver. A machine with no GPU-overclock port reports the same
-    /// <c>(false, null)</c> the UI has always read for it — the store above has already happened by then, which is
-    /// the asymmetry LaptopServicePresetTests pins ("a write with no port still persists the preset").</summary>
-    (bool ok, string? error) IGpuOffsetsTarget.Apply(GpuAxisState state)
+    // ---- the GPU power-level edit contract (Application/GpuOffsets.cs) ----
+
+    /// <summary>Remember the power level (or "no override") as the current mode's, under the graph lock. The
+    /// value is persisted as its <c>int?</c> through <c>GpuPowerLevels.ToStored</c>: null means "follow the
+    /// profile" and is written back as an ABSENT override, which is how a file without the field loads and how a
+    /// user returning to the default clears the choice. The EC call is
+    /// <see cref="IGpuPowerTarget.Apply"/>, made OUTSIDE this lock.</summary>
+    void IGpuPowerTarget.Store(GpuPowerLevel? level)
     {
-        var oc = device.GpuOverclock;
-        if (oc == null) return (false, null);
-        return Attempt(() => oc.Set(state.Core, state.Mem), () => oc.LastError);
+        lock (_state)
+        {
+            StoredGpuOc().Power = GpuPowerLevels.ToStored(level);
+            Save();
+        }
     }
 
-    /// <summary>Apply the current mode's GPU offsets to the hardware. Defaults to stock (0/0) when the mode has
-    /// no saved preset — the driver zeroes offsets on boot, so a never-configured mode is definitely stock and
-    /// switching to it must clear whatever the previous mode applied. Returns the preset so the UI reflects it.
-    /// Called on a mode change, at startup, and on resume.</summary>
-    public GpuOcPreset ApplyModeGpuOc()
+    /// <summary>Whether this machine has an EC power-envelope port. The use case's absent-port guard, so a
+    /// machine whose channel is absent stays a VALUE (the preset is still stored, the write reports false) rather
+    /// than a refusal.</summary>
+    bool IGpuPowerTarget.HasPort => device.GpuPowerEnvelope != null;
+
+    /// <summary>Write the mode's power choice to the EC. Reached only when <see cref="IGpuPowerTarget.HasPort"/>
+    /// is true. A NULL level is "follow the profile": there is nothing to write here — the envelope is the
+    /// profile's own row and the profile switch already drove it — so this is deliberately a no-op rather than a
+    /// guessed row (that coupling is what this axis exists to break). An explicit level goes to the EC's
+    /// enqueue-only <c>IGpuPowerEnvelope.SetLevel</c>; a false from it (the channel could not enqueue, or the
+    /// level is not one this port offers) THROWS <see cref="PortWriteFailedException"/>, because the caller has
+    /// already established the port is present and asked for a level it advertised.</summary>
+    void IGpuPowerTarget.Apply(GpuPowerLevel? level)
+    {
+        if (level is not { } chosen) return;
+        var env = device.GpuPowerEnvelope!;
+        WriteOrThrow("GPU power level", () => env.SetLevel(chosen), () => null);
+    }
+
+    /// <summary>Whether this machine has a GPU-overclock port. The use case's absent-port guard, so the old
+    /// <c>(false, null)</c> stays a VALUE and is never confused with a present driver's refusal.</summary>
+    bool IGpuOffsetsTarget.HasPort => device.GpuOverclock != null;
+
+    /// <summary>Write the offsets to the driver. Reached only when <see cref="IGpuOffsetsTarget.HasPort"/> is
+    /// true, so the port is present and a refusal is a real fault: it THROWS
+    /// <see cref="PortWriteFailedException"/>, carrying the driver's own words when it returned them and none
+    /// when it threw (the store above has already happened, which is the asymmetry LaptopServicePresetTests pins
+    /// — "a write with no port still persists the preset").</summary>
+    void IGpuOffsetsTarget.Apply(GpuAxisState state)
+    {
+        var oc = device.GpuOverclock!;
+        WriteOrThrow("GPU offsets", () => oc.Set(state.Core, state.Mem), () => oc.LastError);
+    }
+
+    /// <summary>Apply the current mode's GPU offsets AND its power level to the hardware. Defaults to stock
+    /// (0/0) when the mode has no saved preset — the driver zeroes offsets on boot, so a never-configured mode
+    /// is definitely stock and switching to it must clear whatever the previous mode applied. Returns the applied
+    /// state so the UI reflects it. Called on a mode change, at startup, and on resume.
+    ///
+    /// THE POWER LEVEL IS THE SECOND HALF, and it is applied only when this mode PINNED one
+    /// (<c>g.Power is not null</c>): an explicit level is written to the EC so a mode that chose a row gets it
+    /// back after the switch or a boot, while "follow the profile" writes NOTHING — the envelope is then the
+    /// profile's own class-derived row, which the profile switch already drove (<c>AcerDevice.SetProfile</c> /
+    /// <c>EcSyncedProfiles</c>). Forcing a row here on "follow the profile" would re-introduce exactly the
+    /// coupling this axis removes. That branch is also why the level is applied AFTER the offsets: both reach the
+    /// same mode's preset, but the level has no stock state to clear, so its order relative to the offsets is not
+    /// observable — it is stated for readability.
+    ///
+    /// A PRESENT driver's refusal is DISCARDED here on purpose — no caller of this axis's re-apply has ever read
+    /// one (docs/open-decisions.md §2) — but a THROWING driver/EC still must not escape a background re-apply, so
+    /// both are caught and the state is reported, just as the old void port call effectively was.
+    ///
+    /// MOVED TO A USE CASE (<see cref="Application.ApplyModeGpuOc"/>): the rule — an absent preset is STOCK, not
+    /// an absence — is Application's now and is stated there. This member is the writes it drives.</summary>
+    GpuAxisState IGpuOcModeTarget.ApplyCurrentMode()
     {
         // The pair used to be copied out under _state and the hardware call made with the captured values, because
         // CurrentGpuOc() handed back a LIVE preset and dereferencing it after the lock was released raced
-        // SetGpuOc's write of those same two fields (which cannot tear an int, but could leave the two read a beat
+        // the GPU-offset edit's write of those same two fields (which cannot tear an int, but could leave the two read a beat
         // apart, so the driver would get core from one edit and mem from another). CurrentGpuOc() now returns a
         // SNAPSHOT, so the copy-out has nothing left to protect: the values cannot change under this method.
         GpuOcPreset g;
         lock (_state) g = CurrentGpuOc();
-        device.GpuOverclock?.Set(g.Core, g.Mem);
-        return g;
+        // A throwing driver is caught here: this runs on a background re-apply, and the failure was silent before.
+        try { device.GpuOverclock?.Set(g.Core, g.Mem); } catch { /* silent on purpose: no reader ever had this */ }
+        // The power level, only when this mode pinned one. GpuPowerLevels.FromStored refuses a persisted value the
+        // enum does not define, so a hand-edited file cannot send an arbitrary byte; "follow the profile"
+        // (null / an out-of-range stored value) writes nothing. A throwing EC is caught like the driver above.
+        if (GpuPowerLevels.FromStored(g.Power) is { } level && device.GpuPowerEnvelope is { } env)
+        {
+            try { env.SetLevel(level); } catch { /* silent on purpose: no reader ever had this */ }
+        }
+        return AxisStateOf(g);
     }
 
     /// <summary>The GPU axis's state in the DOMAIN's vocabulary (<see cref="GpuAxisState"/>,
-    /// Domain/AxisState.cs) — the two offsets the stored preset holds, named as the axis names them, which is
-    /// what a use case in Application may receive. Sits beside the accessor that reads the same pair.</summary>
-    internal static GpuAxisState AxisStateOf(GpuOcPreset g) => new(g.Core, g.Mem);
+    /// Domain/AxisState.cs) — the two offsets and the power choice the stored preset holds, named as the axis
+    /// names them, which is what a use case in Application may receive. Sits beside the accessor that reads the
+    /// same pair. The power field is read through <c>GpuPowerLevels.FromStored</c> rather than cast, so an
+    /// out-of-range value a hand edit put in the file reads as "follow the profile" instead of an invented
+    /// level.</summary>
+    internal static GpuAxisState AxisStateOf(GpuOcPreset g)
+        => new(g.Core, g.Mem, GpuPowerLevels.FromStored(g.Power));
 
     // ---- CPU power mode (per-mode) ----
 
+    /// <summary>The CPU power-mode overlay id for the current mode, for the ReadCpuPower use case: the stored
+    /// choice if the user set one for this profile, otherwise the live effective overlay (so the UI reflects
+    /// reality on an unconfigured mode). `internal` rather than public: the UI reaches it through the use
+    /// case.</summary>
+    string? ICpuPowerStateTarget.Current() => CurrentCpuPower();
+
     /// <summary>The CPU power-mode overlay id for the current mode: the stored choice if the user set one for
-    /// this profile, otherwise the live effective overlay (so the UI reflects reality on an unconfigured mode).</summary>
-    public string? CurrentCpuPower()
+    /// this profile, otherwise the live effective overlay (so the UI reflects reality on an unconfigured
+    /// mode).</summary>
+    internal string? CurrentCpuPower()
     {
         lock (_state)
             if (Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id)) return id;
         return device.CpuPower?.Current();
     }
 
-    /// <summary>Set the CPU power-mode overlay for the CURRENT mode, persist, and apply now. The rule — remembered
-    /// before written — is <see cref="ApplyCpuPowerOverlay"/> (Application); the graph write and the OS call are
-    /// the two members below.</summary>
-    public (bool ok, string? error) SetCpuPower(string id)
-        => ApplyCpuPowerOverlay.Run(id, this);
+    // ---- the CPU-power overlay edit contract (Application/CpuPowerOverlay.cs) ----
 
     /// <summary>Remember the overlay id as the current mode's, under the graph lock.</summary>
     void ICpuPowerOverlayTarget.Store(string id)
@@ -111,25 +190,38 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>Write the overlay to the OS. No port reports the same <c>(false, null)</c> the UI has always read;
-    /// <see cref="ApplyModeCpuPower"/> is the one that reads a live overlay back instead of writing one, and that
-    /// is the RE-APPLY's rule rather than this path's.</summary>
-    (bool ok, string? error) ICpuPowerOverlayTarget.Apply(string id)
+    /// <summary>Whether this machine has a CPU-power port. The use case's absent-port guard, so the old
+    /// <c>(false, null)</c> stays a VALUE; <see cref="ApplyModeCpuPower"/> is the one that reads a live overlay
+    /// back instead of writing one, and that is the RE-APPLY's rule rather than this path's.</summary>
+    bool ICpuPowerOverlayTarget.HasPort => device.CpuPower != null;
+
+    /// <summary>Write the overlay to the OS. Reached only when <see cref="ICpuPowerOverlayTarget.HasPort"/> is
+    /// true, so a refusal is a real fault: it THROWS <see cref="PortWriteFailedException"/>.</summary>
+    void ICpuPowerOverlayTarget.Apply(string id)
     {
-        var cp = device.CpuPower;
-        if (cp == null) return (false, null);
-        return Attempt(() => cp.Set(id), () => cp.LastError);
+        var cp = device.CpuPower!;
+        WriteOrThrow("CPU power overlay", () => cp.Set(id), () => cp.LastError);
     }
 
     /// <summary>Apply the current mode's CPU power overlay IF the user configured one for this profile; a mode
     /// with no entry is left untouched (we don't force an OS power mode on unconfigured profiles). Returns the
-    /// id the UI should reflect (stored, or the live effective overlay). Called on mode change, startup, resume.</summary>
-    public string? ApplyModeCpuPower()
+    /// id the UI should reflect (stored, or the live effective overlay). Called on mode change, startup, resume.
+    ///
+    /// MOVED TO A USE CASE (<see cref="Application.ApplyModeCpuPower"/>): the rule — a mode with no entry is left
+    /// untouched, and the live overlay is read back instead — is stated there. This member is the write/read it
+    /// drives.</summary>
+    string? ICpuPowerModeTarget.ApplyCurrentMode()
     {
         var cp = device.CpuPower;
         if (cp == null) return null;
         lock (_state)
-            if (Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id)) { cp.Set(id); return id; }
+            if (Settings.CpuPowerModes.TryGetValue(CurrentModeKey(), out var id))
+            {
+                // A throwing OS power API is caught: this runs on a background re-apply and the failure was silent
+                // before (no caller of this axis's re-apply ever read one).
+                try { cp.Set(id); } catch { /* silent on purpose */ }
+                return id;
+            }
         return cp.Current();
     }
 
@@ -146,8 +238,9 @@ public sealed partial class LaptopService
     private CoPreset StoredCo(string modeKey) => GetOrAdd(Settings.CoPresets, modeKey);
 
     /// <summary>The Curve-Optimizer preset for the current mode, or stock (0) if none is saved yet (not stored).
-    /// A SNAPSHOT — the caller cannot reach the stored instance through it.</summary>
-    public CoPreset CurrentCo()
+    /// A SNAPSHOT — the caller cannot reach the stored instance through it. `internal` rather than public: the
+    /// UI reaches it through the ReadCoDomains use case, and this class's own CO paths call it by name.</summary>
+    internal CoPreset CurrentCo()
     {
         lock (_state)
             return Settings.CoPresets.TryGetValue(CurrentModeKey(), out var c) ? c.Snapshot() : new CoPreset();
@@ -157,7 +250,7 @@ public sealed partial class LaptopService
     /// the same reason, as <see cref="CurrentModeKey(PerformanceProfile?)"/>. It exists because
     /// <see cref="CurrentCoDomains(PerformanceProfile?)"/> renders its rows from this preset, and that caller is
     /// handed the profile: going through the parameterless form would read the port for a key it already holds.</summary>
-    public CoPreset CurrentCo(PerformanceProfile? cur)
+    internal CoPreset CurrentCo(PerformanceProfile? cur)
     {
         lock (_state)
             return Settings.CoPresets.TryGetValue(CurrentModeKey(cur), out var c) ? c.Snapshot() : new CoPreset();
@@ -197,19 +290,21 @@ public sealed partial class LaptopService
         return result;
     }
 
-    /// <summary>Apply offsets the way this CPU takes them — per voltage domain where it has them, otherwise one
-    /// all-core value — so the UI has a single entry point. Call OFF the UI thread. The fork itself is the DOMAIN's
-    /// rule (Infrastructure/Vendors/Generic/CoAxis.cs, <c>UsesRails</c>), asked by the members below rather than restated here, so the same
-    /// fork decides what a mode change sends and two sites cannot come to disagree.</summary>
-    public (bool ok, string? error) SetCoValues(IReadOnlyList<int> counts)
+    /// <summary>THE TUNING GATE (Application/ITuningGate.cs), implemented here because the flag and the lock are
+    /// this class's. The guided sweep sets <c>_sweepActive</c> (LaptopService.UndervoltSweep.cs) and every other
+    /// SMU writer — the moved use case <c>ApplyUndervolt</c>, and this class's own remaining CO writers — takes
+    /// the gate, so "is a sweep running" and the write it guards are atomic. <c>_state</c> is never part of this:
+    /// the gate is a second, disjoint lock held for one mailbox transaction.</summary>
+    bool ITuningGate.SweepActive => TuningInProgress;
+
+    /// <inheritdoc />
+    (bool ok, string? error) ITuningGate.Guard(Func<(bool ok, string? error)> write)
     {
-        (bool ok, string? error) result;
         lock (_tuningGate)
         {
             if (_sweepActive != 0) return (false, SweepBusyReason);
-            result = ApplyUndervolt.Run(counts, this);
+            return write();
         }
-        return result;
     }
 
     // ---- the undervolt edit contract (Application/Undervolt.cs) ----
@@ -231,14 +326,17 @@ public sealed partial class LaptopService
         return new CoAxis(co.Domains, co.Range).UsesRails ? RememberRails(counts) : [RememberAllCore(counts[0])];
     }
 
-    /// <summary>Write offsets to the SMU, in the shape this CPU takes. The values are the ones
-    /// <see cref="IUndervoltTarget.Store"/> handed back, so nothing is clamped a second time on the way out —
-    /// what the graph holds is what the mailbox is given.</summary>
-    (bool ok, string? error) IUndervoltTarget.Apply(IReadOnlyList<int> counts)
+    /// <summary>Write offsets to the SMU, in the shape this CPU takes. Reached only when
+    /// <see cref="IUndervoltTarget.Store"/> returned values (it is that member that answers "no port": null), so
+    /// the SMU is present and a refusal is a real fault: the pair from the private writers is converted to a
+    /// <see cref="PortWriteFailedException"/>. The values are the ones <see cref="IUndervoltTarget.Store"/> handed
+    /// back, so nothing is clamped a second time on the way out — what the graph holds is what the mailbox is
+    /// given.</summary>
+    void IUndervoltTarget.Apply(IReadOnlyList<int> counts)
     {
-        var co = device.CurveOptimizer;
-        if (co == null) return (false, null);
-        return new CoAxis(co.Domains, co.Range).UsesRails ? WriteRails(counts) : WriteAllCore(counts[0]);
+        var co = device.CurveOptimizer!;
+        var (ok, error) = new CoAxis(co.Domains, co.Range).UsesRails ? WriteRails(counts) : WriteAllCore(counts[0]);
+        if (!ok) throw new PortWriteFailedException("Curve Optimizer offsets", error);
     }
 
     /// <summary>Remember one all-core offset for the current mode, clamped against the port's own range BEFORE
@@ -310,7 +408,8 @@ public sealed partial class LaptopService
     }
 
     /// <summary>Push one all-core offset. A machine with no Curve-Optimizer port reports the same
-    /// <c>(false, null)</c> every caller of this axis has always received.</summary>
+    /// <c>(false, null)</c> the paired service writers have always received. <see cref="IUndervoltTarget.Apply"/>
+    /// is reached only when <c>Store</c> returned values, so it never has to answer the no-port case.</summary>
     private (bool ok, string? error) WriteAllCore(int counts)
     {
         var co = device.CurveOptimizer;
@@ -324,10 +423,21 @@ public sealed partial class LaptopService
         return co == null ? (false, null) : Attempt(() => co.SetDomains(counts), () => co.LastError);
     }
 
+    // ---- the Curve-Optimizer READ contract (Application/Queries.cs) ----
+
+    /// <summary>The current mode's Curve-Optimizer offsets, index-aligned with the port's voltage domains, for
+    /// the ReadCoDomains use case. The port's own row shape crosses unchanged.</summary>
+    int[] ICoDomainsTarget.Current() => CurrentCoDomains();
+
+    /// <summary>As <see cref="ICoDomainsTarget.Current()"/> but reusing an already-read current profile.</summary>
+    int[] ICoDomainsTarget.Current(PerformanceProfile? cur) => CurrentCoDomains(cur);
+
     /// <summary>The current mode's Curve-Optimizer offsets, index-aligned with the port's voltage domains — or a single
     /// all-core value on a CPU without domain control, so the UI can render rows without knowing which path is in play.
-    /// Empty when the device has no Curve-Optimizer port.</summary>
-    public int[] CurrentCoDomains()
+    /// Empty when the device has no Curve-Optimizer port. `internal` rather than public: the UI reaches it through
+    /// the ReadCoDomains use case, and this class's own paths (the reconciler's reflect, the sweep) call it by
+    /// name.</summary>
+    internal int[] CurrentCoDomains()
     {
         var co = device.CurveOptimizer;
         if (co == null) return [];
@@ -350,7 +460,7 @@ public sealed partial class LaptopService
     /// <see cref="CurrentCo(PerformanceProfile?)"/>: this form reads NO port at all, so a caller holding the
     /// profile (the UI build path does, see <c>AppController.BuildUi</c>) stops paying an EC round-trip for the
     /// rows it renders.</summary>
-    public int[] CurrentCoDomains(PerformanceProfile? cur)
+    internal int[] CurrentCoDomains(PerformanceProfile? cur)
     {
         var co = device.CurveOptimizer;
         if (co == null) return [];
@@ -362,11 +472,12 @@ public sealed partial class LaptopService
     /// has no saved preset — the offset is SMU-resident and a power cycle clears it, so a never-configured mode is
     /// definitely stock and switching to it must clear whatever undervolt the previous mode applied. Returns the
     /// preset so the UI reflects it. Called on a mode change, at startup, and on resume — always off the UI thread,
-    /// because the mailbox transaction can wait seconds on the shared PCI lock.</summary>
-    public CoPreset ApplyModeCo()
-    {
-        return ApplyModeCoCore();
-    }
+    /// because the mailbox transaction can wait seconds on the shared PCI lock.
+    ///
+    /// MOVED TO A USE CASE (<see cref="Application.ApplyModeCo"/>): the use case states that the re-apply is
+    /// fire-and-forget and reports nothing; the never-configured guard and the write stay here, in the domain's
+    /// <c>CoAxis</c> and the port. This member drives them.</summary>
+    void ICoModeTarget.ApplyCurrentMode() => ApplyModeCoCore();
 
     private CoPreset ApplyModeCoCore()
     {

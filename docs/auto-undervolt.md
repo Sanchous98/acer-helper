@@ -193,13 +193,123 @@ this hardware is the payoff there.
 
 > **SHIPPED (2026-09-27).** A bounded version of this loop exists: the guided sweep in
 > `Infrastructure/Vendors/Generic/UndervoltSweep.cs` + `Infrastructure/Composition/LaptopService.UndervoltSweep.cs`.
-> It is **two stages, one per CPU cluster** (Zen 5 then Zen 5c); each stage loads **only the swept cluster's
-> cores**, and **where the cluster cannot be identified** it loads all cores and says so. It probes volatilely,
-> restores on every exit via a `finally`, holds the sibling cluster at stock, and persists only through the
-> explicit `SaveUndervoltSweep`. It is bounded by the rail's hard range cap, the bounded back-off, the load's
-> per-core/thermal limits and cancellation — **NOT by time**; the stop is the first oracle error (or a completed
-> walk to the rail's floor). The core attribution and the all-cores fallback are the parts added after the first
-> cut, whose progress read a bare "core x/10" that did not match the two stages.
+> It is **two stages, one per CPU cluster** (Zen 5 then Zen 5c); each probe runs the **single-core phase FIRST**
+> (the light one-core-at-a-time walk over the swept cluster's cores; where the cluster cannot be identified it
+> walks all cores and says so) and the **all-core phase SECOND**, which loads EVERY physical core of the machine
+> at once (the package current/droop the oracle needs, as OCCT/Linpack do), with the **swept cluster carrying the
+> tested offset** and every other cluster held at **stock** by the sweep's baseline — so a failure is still
+> attributable to the swept cluster. The single-core-first order is deliberate: a real oracle error, a thermal
+> abort or a cancellation the light phase finds is not followed by the much longer all-core load. It probes
+> volatilely, restores on every exit via a `finally`, holds the sibling cluster at stock, and persists only
+> through the explicit `SaveUndervoltSweep`. It is bounded by the rail's hard range cap, the bounded back-off,
+> the load's per-core/thermal limits and cancellation — **NOT by time**; the stop is the first oracle error (or a
+> completed walk to the rail's floor). The core attribution and the all-cores fallback are the parts added after
+> the first cut, whose progress read a bare "core x/10" that did not match the two stages.
+>
+> **THE ORACLE WAS REBUILT (2026-09-27): multi-mix, exact, concurrently all-core.** The first cut walked each
+> CPU cluster from stock toward the rail floor with a load that was **too weak an oracle**, and on the owner's
+> AMD Ryzen AI 9 365 (Strix Point, 10 physical cores) it walked to **-40 counts and the SYSTEM CRASHED** — while
+> OCCT and Linpack find errors on the same machine at only *mild* undervolt instability. Four causes, all fixed:
+>
+> 1. **Only integer ALUs were exercised.** `CpuStressKernel` was deliberately integer-only (a documented
+>    anti-false-positive choice). Undervolt instability tends to surface in the **FP/FMA/AVX execution units**
+>    and the cache/memory subsystem, not the integer ALUs.
+> 2. **The load was tiny and L1-resident → low current/power**, so it never reached the voltage/current-droop
+>    corner a heavy FP load reaches.
+> 3. **Cores were loaded ONE AT A TIME** (`CpuLoadRunner` started a worker per core and joined it before moving
+>    on). OCCT/Linpack load all cores **concurrently**, which is what creates the package current/droop a
+>    marginal undervolt fails under.
+> 4. **One short pass per offset.** Mild instability is probabilistic and load/dwell dependent.
+>
+> **The three mixes, all exact (no tolerance, `==` only):**
+> - **Integer** — the original 8-lane integer recurrence, scalar → `Vector128` → `Vector256` → `Vector512`.
+>   Every width computes the same checksum by construction.
+> - **FP/FMA** — a widest-hardware-width `double` recurrence that **actually exercises the fused units**. It is
+>   exact because it computes on **integer-valued doubles** in `[0, 2^20)`: every product, addend, quotient and
+>   partial sum is exactly representable (all well under `2^53`), `M = 2^20` is a power of two so `/` and
+>   `floor` are exact, and therefore FMA contraction and every legal reassociation yield a **bit-identical**
+>   result. The exact-equality oracle is sound, and FMA vs non-FMA paths are asserted equal. The previous
+>   "floating point was left out on purpose" rationale was about **inexact** FP (which really does have legal
+>   width/FMA differences); exact-valued FP is safe, and the `CpuStress.cs` header now says both.
+> - **Memory** — a deterministic strided walk over a **32 MB** read-only pool (larger than L2/L3) with an exact
+>   integer checksum, stressing the memory controller / Infinity Fabric rails.
+>
+> **Concurrency.** The all-core phase now loads **every physical core of the machine simultaneously** (one pinned
+> thread per core, all started at once, each self-checking every mix) — the fix for the owner's "only a few cores
+> briefly busy" report, which came from the phase loading only the swept cluster's subset. The swept cluster
+> carries the tested offset; every other cluster is held at stock by the sweep's baseline but is still loaded,
+> because it is the concurrent package current/droop (as OCCT/Linpack produce) that makes a marginal undervolt
+> fail. A single oracle error cancels the whole concurrent phase (shared token, stop-on-first-error); SMT siblings
+> are still never loaded together, and the result is still one entry per visited core with the **failing mix
+> named** in `Detail`/`FailedMix`. `CpuLoadOptions.ConcurrentCores` (default **on**) can restore the
+> one-core-at-a-time walk, and the sweep runs a **single-core phase** as well (`SweepOptions.IncludeSingleCorePhase`,
+> default **on**), which walks the swept cluster's cores one at a time because all-core load cannot reach the
+> single-core boost corner CoreCycler exists for.
+>
+> **THE SINGLE-CORE PHASE IS NOW A REAL, VISIBLE, FAIL-CLOSED ONE-CORE-AT-A-TIME TEST (2026-09-28).** The owner
+> watched the guided sweep "полностью пропускает одноядерную проверку" — the one-core-at-a-time check appeared to
+> be skipped, with progress hopping through all 10 cores and then running them all at once. Diagnosis (recorded in
+> `tests/AcerHelper.Tests/UndervoltSweepTimelineTests.cs`, which drives the REAL `RunUndervoltSweep` through an
+> affinity fake that records each pin's start/end interval): the phase *is* sequential and cluster-scoped in the
+> shipped code (its pins are pairwise disjoint and limited to the swept cluster), but two real defects made it
+> neither reliably present nor visible —
+> 1. **it was silently SKIPPED whenever the all-core phase was not `Passed`.** The probe did
+>    `if (classification.Status != Passed) return classification;` BEFORE the single-core block, so an all-core
+>    phase that was merely **inconclusive** — a core the OS refused to pin, a `BudgetExhausted` run — dropped the
+>    one-core-at-a-time check entirely. That is not a verdict about the offset, so it must not suppress a check
+>    that might be. The phase now runs for every probe that reaches it (gated only by `IncludeSingleCorePhase` /
+>    the budget), and the two verdicts are combined by the fail-closed `SweepPolicy.CombineProbes`: a cancellation
+>    from either phase wins, then a real oracle **error** from either phase (an all-core PASS no longer masks a
+>    single-core error), then a thermal abort from either phase, and only **two passes** make a pass — an
+>    inconclusive result from either phase is never upgraded to one.
+> 2. **it was hidden inside the all-core `Loading` progress** — the card could not say which phase was running, so
+>    a genuine one-at-a-time walk was indistinguishable from the all-core load. There is now a distinct
+>    `SweepPhase.SingleCore` (rendered as "Testing (one core at a time)"; the all-core phase is "Testing (all
+>    cores)"), with the cluster's cores reported in ascending order.
+> The search `SingleCoreBudget` was also raised from **5 s to 10 s**, and then to **30 s** per core (`2026-09-28`):
+> the owner still reported the single-core check as too short, so the search single-core dwell is now a
+> meaningful high-boost window. It remains bounded, and the long `ConfirmSingleCore` (3 min) is the real
+> high-boost evidence the soak supplies. The single-core phase stays on the SWEPT cluster's cores only (all
+> cores, with the progress saying so, where the cluster cannot be identified); the all-core phase still loads
+> every physical core.
+>
+> **THE SINGLE-CORE PHASE NOW RUNS FIRST (2026-09-28).** Inside one probe the order is reversed: the light
+> one-core-at-a-time phase runs BEFORE the heavy all-core concurrent burst. The reason is cost and
+> fail-fast — the single-core walk is far cheaper per offset than the all-core load of every physical core, so
+> a real oracle error, a thermal abort or a cancellation it reports is discovered *before* the much longer
+> all-core phase is paid for; the probe returns the combined verdict then and there, and only a single-core
+> PASS proceeds to the all-core phase. Thermal/cancel/apply-refusal remain global stops exactly as before, and a
+> single-core error is the offset's stability verdict regardless of what the all-core phase might have said. The
+> two verdicts are still combined by the fail-closed `SweepPolicy.CombineProbes`; the phase *reporting* order in
+> a probe is now `SingleCore` then `Loading` (or `Confirming` in the soak), and the soak uses the same order with
+> its `ConfirmSingleCore`/`ConfirmAllCore` budgets.
+>
+> **Dwell and proposal.** `SweepOptions.Repetitions` (default **2**) runs every offset's probe that many times,
+> all of which must pass; the load's `PerCoreBudget` default is now **30 s** (was 20 s). After the first failure
+> the proposal backs off from the failing offset toward stock by `SafetyMargin` (default **3**, was 1), so the
+> proposed value sits *below* the last merely-passing offset, never on the edge. `UndervoltSweep.RoughEta` and
+> the UI estimate include the repetitions, the single-core phase and the all-core concurrency honestly, so a
+> full all-core sweep of this part is now **many tens of minutes**.
+>
+> **Search vs. final soak (2026-09-28).** The per-offset probes are a *search*: short by design, because their
+> job is to find the edge quickly and lengthening every step would turn a full-rail walk into hours. They are
+> **not** the evidence a value is presented as stable on. Once the search (or its bounded back-off) settles on a
+> candidate for a cluster, the loop runs a **final soak confirmation** on that exact offset — the same phase
+> order as the search (single-core first, then the all-core concurrent pass), with the much longer budgets: a
+> long single-core phase (`SweepOptions.ConfirmSingleCore`, default **3 min** per core, gated by the same
+> `SweepOptions.IncludeSingleCorePhase`) and a long all-core concurrent phase (`SweepOptions.ConfirmAllCore`,
+> default **5 min** per core). Only a soak PASS sets `SweepDomainResult.Stable` (and the new
+> `SweepDomainResult.Soaked`); with the soak configured, the short search dwell no longer decides stability by
+> itself. A soak FAILURE retreats toward stock by `SafetyMargin` and re-soaks, bounded by `MaxBackoffAttempts`;
+> if nothing above stock verifies, the proposal is stock with `Stable = false` — never the offset that just
+> failed. The soak is cancellable and thermal-safe (reusing the runner's fail-closed policy; a thermal abort or
+> a cancellation during the soak is never a verdict), reports the new `SweepPhase.Confirming` phase, and rides
+> the unchanged never-persist / restore-on-every-exit model. `ConfirmSoak` can turn the whole confirmation off
+> (restoring the old "the search's result is the proposal" behaviour); it is on by default. `RoughEta` accounts
+> for the soak (the settled value plus the bounded retreats, per domain), so the UI estimate stays honest.
+>
+> **The safety model is unchanged:** probes are volatile only (no persist path), the pre-sweep counts are
+> restored on every exit path, thermal/cancel are never stability verdicts, and the result is a proposal.
 >
 > **The source gate is the ORIGINAL CHARGER, not "the OS says AC" (2026-09-27).** USB-C Power Delivery IS
 > external power, so the requirement is stated as the barrel/DC-in charger, not "AC": the sweep is refused
@@ -207,6 +317,18 @@ this hardware is the payoff there.
 > so it is refused there too. Windows reports USB-C PD as plain "AC" (it is charging), so the distinction comes
 > from the typed EC reading (`Battery.PowerSource` → `SetPowerAdapter`); a machine with no EC channel keeps the
 > OS answer, and an `Unknown` reading is ignored so a failed poll cannot flap the gate.
+>
+> **The sweep gate can no longer wedge (2026-09-27).** The reported "auto-undervolt fails after the first cycle"
+> was a leaked mutual-exclusion flag: `RunUndervoltSweep` set `_sweepActive = 1`, then snapshotted the mode key
+> and base counts and forced a performance profile, and only THEN entered the `try/finally` that cleared the
+> flag. A throw from any of those pre-body reads (a transient EC/WMI failure in `CurrentCoDomains`, the profile
+> port's `Selectable()`, the forced switch) escaped with the flag still set, so every later sweep was refused
+> with `SweepBusyReason` — a returned result the card rendered as a generic failure, which read as "it worked
+> once, then never again". The whole flagged region is now inside one `try/finally` whose `finally` always
+> releases the gate, so a sweep can fail but can never leave the SMU claimed by a run that is over. The card
+> also no longer swallows the cause: a result's `Detail` (the forced-profile note, the SMU's words, the back-off
+> explanation) and a thrown exception's type/message are appended to the outcome line instead of being replaced
+> by the generic `uv.sweep_failed`.
 
 **Why it is fundamentally unreliable on this hardware.** Each reason is a measured fact from the curve
 documents, not a preference:
@@ -241,12 +363,21 @@ documents, not a preference:
   stages, one per CPU cluster** — first the Zen 5 (performance) cluster, then the Zen 5c (efficiency) cluster —
   walking each **from stock (0)** — never from the mode's stored preset, which may itself be unstable — and holds
   every *other* CPU cluster at stock during a probe, so a stored sibling offset can neither cause nor mask a
-  result. **A stage's probe loads only the cores of the cluster being swept** (the four Zen 5 or the six Zen 5c
-  cores on this part), so a failure is attributable to that cluster; the progress reads "stage N/M — cluster
-  <label> — ... core i/n" with `n` the cluster's own core count. **When the machine cannot attribute cores to a
-  cluster** — the topology carries no per-core efficiency class (see below) — the probe falls back to loading
-  *all* physical cores and the progress says **"all cores (cluster not identified)"** rather than pretending the
-  stage was isolated. The iGPU is never swept (AMD does not auto-derive GFX either) and is carried verbatim. The
+  result. Each probe runs the **single-core phase FIRST** — the swept cluster's cores one at a time for the
+  boost corner, cheap and fail-fast so a real error, thermal abort or cancellation is found before the heavy
+  phase is paid for — and the **all-core phase SECOND**, which loads EVERY physical core of the machine at once
+  (the concurrent package current/droop is what a marginal undervolt fails under — loading only the swept
+  cluster's few cores, as the first cut did, left most of the machine idle and the load far too weak), while the
+  **swept cluster is the only cluster whose offset moved**, so a per-core failure is still attributable to that
+  cluster. The **single-core phase** walks only the swept cluster's cores, one at a time — and it runs for
+  **every** probe where it is enabled, never skipped because the all-core phase was inconclusive, with the two
+  verdicts combined fail-closed (`SweepPolicy.CombineProbes`); the phase is reported as its own
+  `SweepPhase.SingleCore`, ahead of the all-core `SweepPhase.Loading`. The progress reads
+  "stage N/M — cluster <label> — ... core i/n" with `n` the machine's physical-core count (the all-core phase's
+  real scope). **When the machine cannot attribute cores to a cluster** — the topology carries no per-core
+  efficiency class (see below) — the single-core phase falls back to walking *all* physical cores and the
+  progress says **"all cores (cluster not identified)"** rather than pretending the stage was isolated. The iGPU
+  is never swept (AMD does not auto-derive GFX either) and is carried verbatim. The
   true pre-sweep counts are restored on exit; the stock baseline is probe-only and never persisted. The sweep is
   **bounded by the rail's hard range cap, the bounded back-off (`MaxBackoffAttempts`), the load's per-core/thermal
   limits and cancellation — NOT by time**: its only stability boundary is the first oracle error, and a rail that
@@ -752,9 +883,9 @@ feature after that removal.
 | Infrastructure | `Infrastructure/Vendors/Generic/CpuLoadTest.cs` | the load tool's contracts (`ICoreAffinity`), the pure policy (`CpuLoadPolicy`) and the runner (`CpuLoadRunner` + the sampler), reused by the sweep |
 | Infrastructure | `Infrastructure/Vendors/Generic/CpuStress.cs` | the self-checking integer kernel (`CpuStressKernel`) and its value types, the oracle the sweep uses |
 | Infrastructure | `Infrastructure/Vendors/Generic/UndervoltSweep.cs` | the guided sweep's pure policy (`SweepPolicy`, `UndervoltSweep`, `RoughEta`) and its contracts (`IUndervoltSweepTarget`); each `SweepDomain` carries its cluster and whether it is identifiable, and `SweepProgress` carries the stage (`DomainIndex`/`DomainCount`) and `ClusterIdentified` |
-| Infrastructure | `Infrastructure/Vendors/Generic/CpuLoadTest.cs` | also the pure cluster partition (`CpuLoadPolicy.PartitionIntoClusters`) and the runner's caller-supplied subset overload, which is how a stage loads only its cluster |
+| Infrastructure | `Infrastructure/Vendors/Generic/CpuLoadTest.cs` | also the pure cluster partition (`CpuLoadPolicy.PartitionIntoClusters`) and the runner's caller-supplied core-list overload, which the sweep uses to run its ALL-CORE phase over every physical core and its SINGLE-CORE phase over the swept cluster |
 | Infrastructure | `Infrastructure/Vendors/Generic/CoreAffinity.Windows.cs` / `.Linux.cs` | the OS halves fill each physical core's efficiency class (Windows `EfficiencyClass`; Linux from `cpu_capacity`) so the topology can partition the clusters |
-| Infrastructure | `Infrastructure/Composition/LaptopService.UndervoltSweep.cs` | the guided sweep's service half: volatile SMU writes, restore-on-every-exit, the domain→cluster projection, the cluster-subset probe (with the all-cores fallback), and the explicit `SaveUndervoltSweep` through the per-mode path |
+| Infrastructure | `Infrastructure/Composition/LaptopService.UndervoltSweep.cs` | the guided sweep's service half: volatile SMU writes, restore-on-every-exit, the domain→cluster projection, the probe (all-core phase over every physical core; single-core phase over the swept cluster, with the all-cores fallback), and the explicit `SaveUndervoltSweep` through the per-mode path |
 | Infrastructure | `Infrastructure/Composition/Settings.cs` | `CoPreset` (`AllCore` + `Domains`) — the committed per-mode offsets; no `Suspect` member any more |
 
 **Removed 2026-09-27** (deleted outright, not re-homed): `Infrastructure/Vendors/Generic/UndervoltCanary.cs`,

@@ -165,7 +165,7 @@ public class AcerProfilePortsTests
     /// and what <c>AcerProfiles.ToByte</c> parses for the EC write, so a port that passed the source's profiles
     /// through would put <c>"balanced-performance"</c> into <c>settings.json</c> — a value the Windows half has
     /// never seen. The CLASS is the other half of the same override and it now has to be asserted through the
-    /// port: the source's own reading would hand the envelope Turbo as Performance, which is the live 93 W/108 W
+    /// port: the source's own reading would hand the envelope Turbo as Performance, which is the live 100 W/115 W
     /// bug this decorator exists to close.</summary>
     [Fact]
     public void TheMappedSetIsTheAcerTableInDisplayOrder()
@@ -233,8 +233,8 @@ public class AcerProfilePortsTests
     /// <summary>Reading the active profile goes through the table, so <c>"performance"</c> is reported as Turbo —
     /// id <c>"5"</c>, kind <see cref="ProfileKind.Turbo"/>, the Acer display name — and not as the source's own
     /// "Performance" profile. That difference is not cosmetic: the kind is what selects the per-mode presets and
-    /// drives the EC envelope, so the wrong one applies another mode's fan curve and 93 W where the hardware is
-    /// running 108 W.
+    /// drives the EC envelope, so the wrong one applies another mode's fan curve and 100 W where the hardware is
+    /// running 115 W.
     ///
     /// The whole table is exercised rather than the one risky row, because a table with a single transposed pair
     /// would pass a single-case test.</summary>
@@ -304,7 +304,7 @@ public class AcerProfilePortsTests
     /// <summary>Clicking Turbo writes <c>"performance"</c> and clicking Performance writes
     /// <c>"balanced-performance"</c> — the pairing that a name-keyed shortcut gets backwards, asserted together
     /// and in both directions because each direction alone can look right by accident. If this test fails, the app
-    /// has asked the kernel for the other mode: the user clicked the 93 W profile and the machine went to 108 W,
+    /// has asked the kernel for the other mode: the user clicked the 100 W profile and the machine went to 115 W,
     /// or the reverse, and nothing in the UI would say so.</summary>
     [Fact]
     public void TheWritePathSpellsTurboPerformanceAndPerformanceBalancedPerformance()
@@ -416,5 +416,66 @@ public class AcerProfilePortsTests
         var port = new EcSyncedProfiles(new AcerMappedProfiles(new FakePowerProfiles(Kernel.All)), _ => true);
 
         Assert.Equal(["profile.eco", "profile.balanced"], port.AvailableOn(onAc: false).Select(p => p.DisplayName));
+    }
+
+    // ---- EcPowerEnvelope: the GPU power level as a port over the EC channel ----
+
+    /// <summary>The port offers the EC's fixed rows, most power first — the same list
+    /// <c>AcerEcHidController.PowerLevels</c> holds, so the selector and the byte mapping read one table. A port
+    /// that advertised a different set would offer rows the mapping cannot send.</summary>
+    [Fact]
+    public void TheEnvelopePortOffersTheEcRows()
+    {
+        var port = new EcPowerEnvelope(_ => true);
+
+        Assert.Equal(GpuPowerLevels.All, port.Levels.Select(o => o.Level));
+    }
+
+    /// <summary>An offered level reaches the EC delegate and its result is returned unchanged — the manual pick
+    /// is enqueue-only, so the bool is "accepted for sending", not "the EC applied it".</summary>
+    [Fact]
+    public void AnOfferedLevelReachesTheEcAndForwardsItsResult()
+    {
+        var picked = new List<GpuPowerLevel>();
+        var port = new EcPowerEnvelope(l => { picked.Add(l); return true; });
+
+        Assert.True(port.SetLevel(GpuPowerLevel.Turbo));
+
+        Assert.Equal([GpuPowerLevel.Turbo], picked);
+    }
+
+    /// <summary>A level the port does not offer is refused WITHOUT reaching the EC: an undefined enum value is
+    /// not among the advertised rows, and the firmware ACKs an out-of-range row exactly like a good one and then
+    /// ignores it — so sending it would look like success and move nothing. The refused level never invokes the
+    /// delegate (which is where <c>ModeForLevel</c>, and its own refusal, would run).</summary>
+    [Fact]
+    public void ALevelThePortDoesNotOfferIsRefusedWithoutReachingTheEc()
+    {
+        var reached = false;
+        var port = new EcPowerEnvelope(_ => { reached = true; return true; });
+
+        Assert.False(port.SetLevel((GpuPowerLevel)99));
+        Assert.False(reached);
+    }
+
+    /// <summary>No EC channel: the delegate is null and every write is the value false — an absent port, never a
+    /// throw — which is what the UI reads as "the row is hidden".</summary>
+    [Fact]
+    public void WithNoEcChannel_TheEnvelopePortRefusesEveryLevelAsAValue()
+    {
+        var port = new EcPowerEnvelope(null);
+
+        Assert.False(port.SetLevel(GpuPowerLevel.Balanced));
+    }
+
+    /// <summary>The delegate's false (the channel could not enqueue) is forwarded as false — the port does not
+    /// turn a write that did not take into a throw; the use case decides that, because only it knows the port
+    /// was present when the caller asked.</summary>
+    [Fact]
+    public void TheEnvelopeForwardsADecliningWrite()
+    {
+        var port = new EcPowerEnvelope(_ => false);
+
+        Assert.False(port.SetLevel(GpuPowerLevel.Quiet));
     }
 }

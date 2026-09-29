@@ -213,16 +213,16 @@ public class BatteryTelemetryTests
         Assert.True(section.HasInfo);
     }
 
-    /// <summary>The service reads through the object and falls back to the "unknown" snapshot when there is
-    /// no telemetry — exactly the answer `device.BatteryInfo?.Read() ?? new BatteryInfoSnapshot()` gave, so a
-    /// machine with no battery keeps showing the placeholder it always showed. The read count separates "read
-    /// the hardware" from "answered from the fallback".</summary>
+    /// <summary>The battery read through the object and its fallback to the "unknown" snapshot is the
+    /// ReadBatteryInfo use case's now (Application/Queries.cs); a machine with no battery keeps showing the
+    /// placeholder it always showed. The read count separates "read the hardware" from "answered from the
+    /// fallback".</summary>
     [Fact]
     public void ReadBatteryInfo_ReadsThroughTheObject_AndFallsBackToUnknown()
     {
         var f = new LaptopServiceFixture();
 
-        var absent = f.Service.ReadBatteryInfo();
+        var absent = f.Battery.Run();
         Assert.Equal(-1, absent.Percent);
         Assert.Equal(BatteryState.Unknown, absent.State);
 
@@ -232,7 +232,7 @@ public class BatteryTelemetryTests
         };
         f.Device.Battery.Telemetry = telemetry.Read;
 
-        var read = f.Service.ReadBatteryInfo();
+        var read = f.Battery.Run();
         Assert.Equal(42, read.Percent);
         Assert.Equal(BatteryState.Charging, read.State);
         Assert.Equal(88, read.HealthPercent);

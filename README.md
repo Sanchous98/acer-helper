@@ -19,7 +19,7 @@ Switch the platform performance profile from a tray icon and a compact window:
   choice is greyed out for being on battery. What a profile moves here is
   measurable only as CPU-package watts — RAPL reports 49.12 / 59.27 / 73.47 /
   83.35 W for low-power / balanced / balanced-performance / performance — not as
-  the ~108 W dGPU envelope of the Windows measurements, which this box cannot
+  the ~115 W dGPU envelope of the Windows measurements, which this box cannot
   reproduce: the Linux side sees no discrete GPU at all
   ([docs/acer-linux.md](docs/acer-linux.md)).
 - Tray icon shows the active profile; right-click to switch; window auto-refreshes.
@@ -34,7 +34,7 @@ via `root\WMI` class `AcerGamingFunction`.
 *indicator*: it moves the tray state and the lightbar palette, and the EC reports it back as the current
 profile, but it does **not** move the power envelope. The envelope — GPU TGP/CTGP and the CPU limits — lives in
 the EC's own "system usage mode", reachable only over HID (VID `0x1025` / PID `0x174B`, 65-byte feature
-reports). Without it the dGPU stays at its bare vBIOS default (~78 W sustained instead of ~108 W) no matter
+reports). Without it the dGPU stays at its bare vBIOS default (~77 W sustained instead of ~115 W) no matter
 which profile the app shows. A profile switch now drives both channels, and at startup the EC mode is synced —
 EC only, no profile switch — to whatever profile the hardware reports, because the profile byte survives a
 reboot while the EC mode behind it does not. Full protocol, the measured mode→watts table and the dead ends:

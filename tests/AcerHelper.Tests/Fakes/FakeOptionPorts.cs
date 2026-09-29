@@ -163,11 +163,12 @@ public sealed class FakeDisplayTint(int levels = 5) : IDisplayTint
 /// still reported instead of escaping the row.
 ///
 /// WHAT IT DOES NOT DO, corrected by measurement: it does not reach <c>OptionsAssembler.RunSet</c>'s own
-/// <c>catch</c>. <c>Attempt</c> absorbs the throw one layer below (Infrastructure/Composition/LaptopService.cs),
-/// reached
-/// through <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>Attempt(() =&gt; pp.Set(…))</c>, and the same is
-/// true of the flag and choice ports. The reason is visible in the message rather than in the trace:
-/// <c>RunSet</c>'s catch discards the reason, and a message that carries one therefore did not come from it.
+/// <c>catch</c> by a PAIR — the applied-edit port converts the throw one layer below. The write goes
+/// <c>SetSourceProfile</c> -> <c>ApplyStoredMode</c> -> <c>IProfileTarget.Apply</c>, where <c>WriteOrThrow</c>
+/// (Infrastructure/Composition/LaptopService.cs) turns the port's throw into a <c>PortWriteFailedException</c>
+/// with NO reason, and <c>RunSet</c> catches THAT (the same channel the flag and choice ports use, since the
+/// 2026-09-28 refinement of docs/open-decisions.md §2). The reason is visible in the message rather than in the
+/// trace: this fake carries no reason, so the row prints a bare "failed".
 ///
 /// Everything else is the canonical five-profile device, and <see cref="Current"/> reports nothing so a write
 /// is never short-circuited as "already in that profile" before it can throw.

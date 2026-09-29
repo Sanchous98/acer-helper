@@ -75,7 +75,7 @@ public class LightZoneUseCasesTests
     {
         var mode = new StubZoneMode([Zone]);
 
-        var taken = ApplyLightZone.Run("unknown-zone", Edited, mode);
+        var taken = new ApplyLightZone(mode).Run("unknown-zone", Edited);
 
         Assert.False(taken);
         Assert.Empty(mode.Effects);
@@ -94,7 +94,7 @@ public class LightZoneUseCasesTests
     {
         var mode = new StubZoneMode([Zone]);
 
-        Assert.True(ApplyLightZone.Run(Zone, Edited, mode));
+        Assert.True(new ApplyLightZone(mode).Run(Zone, Edited));
 
         Assert.Equal([$"write {Zone}", "persist"], mode.Effects);
         // Field for field, array included: the whole zone crosses at once and no part of it is interpreted.
@@ -119,7 +119,7 @@ public class LightZoneUseCasesTests
     {
         var mode = new StubZoneMode([Zone]);
 
-        var read = ReadLightZone.Run(Zone, mode);
+        var read = new ReadLightZone(mode).Run(Zone);
 
         Assert.Equal(LightZoneState.Default, read);
         Assert.Equal(100, read.Brightness);                  // ...and not the struct's zero
@@ -137,7 +137,7 @@ public class LightZoneUseCasesTests
     {
         var mode = new StubZoneMode([Zone]).With(Zone, Edited);
 
-        var read = ReadLightZone.Run(Zone, mode);
+        var read = new ReadLightZone(mode).Run(Zone);
 
         Assert.Equal(Edited, read);
         Assert.Empty(mode.Effects);
@@ -154,7 +154,7 @@ public class LightZoneUseCasesTests
     {
         var mode = new StubZoneMode([Zone]);
 
-        var read = ReadLightZone.Run("unknown-zone", mode);
+        var read = new ReadLightZone(mode).Run("unknown-zone");
 
         Assert.Equal(LightZoneState.Default, read);
         Assert.Empty(mode.Effects);

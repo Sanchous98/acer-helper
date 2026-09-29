@@ -71,10 +71,16 @@ public interface ILightZoneMode
 /// lighting may only hold zones this machine has, and a name that is not one of them has no state to read. The
 /// caller reaching this has taken the name from the device, so the branch is unreachable from the tree's own
 /// callers — it is stated rather than left to <c>TryGetValue</c>'s accident, and the same rule is what
-/// <see cref="ApplyLightZone"/> refuses a write with.</summary>
-public static class ReadLightZone
+/// <see cref="ApplyLightZone"/> refuses a write with.
+///
+/// IT OWNS ITS MODE THROUGH THE CONSTRUCTOR, and that is what preserves the fixed-mode property: the door is
+/// taken once per UI build / refresh pass and the mode is fixed when it is taken, so the use case is built at
+/// the door and holds it (<c>LightingViewModel</c> builds one alongside <see cref="ApplyLightZone"/> when it
+/// takes the door). A static <c>Run(zone, mode)</c> would let a caller hand in a mode the door was not taken
+/// for; owning the door makes that unrepresentable and keeps a mode change from freezing a stale one.</summary>
+public sealed class ReadLightZone(ILightZoneMode mode)
 {
-    public static LightZoneState Run(string zone, ILightZoneMode mode)
+    public LightZoneState Run(string zone)
     {
         if (!mode.Advertises(zone)) return LightZoneState.Default;
         if (mode.Stored().TryGetValue(zone, out var stored)) return stored;
@@ -105,10 +111,14 @@ public static class ReadLightZone
 /// A WRITE DOES NOT HAVE TO CREATE ANYTHING: the entry is normally already there from the read, and
 /// <see cref="ILightZoneMode.Write"/> creates it when it is not — the same "created on first write" rule every
 /// other per-mode axis has, and the one that makes an edit on a mode that was never configured start from its
-/// presets instead of being refused.</summary>
-public static class ApplyLightZone
+/// presets instead of being refused.
+///
+/// IT OWNS ITS MODE THROUGH THE CONSTRUCTOR on the same terms as <see cref="ReadLightZone"/>: built at the door
+/// and handed the mode the caller is looking at, so an edit lands in THAT mode and a later mode change cannot
+/// silently retarget it.</summary>
+public sealed class ApplyLightZone(ILightZoneMode mode)
 {
-    public static bool Run(string zone, LightZoneState state, ILightZoneMode mode)
+    public bool Run(string zone, LightZoneState state)
     {
         if (!mode.Advertises(zone)) return false;
         mode.Write(zone, state);

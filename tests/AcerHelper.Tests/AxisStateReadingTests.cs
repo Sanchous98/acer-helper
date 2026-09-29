@@ -95,12 +95,12 @@ public class AxisStateReadingTests
 
     /// <summary>The same reload for the GPU section — one line of code, but it is the line the mode switch
     /// runs, and an offsets pair read the wrong way round is exactly the failure a "both are numbers" pair
-    /// invites.</summary>
+    /// invites. The power choice reloads with it.</summary>
     [Fact]
     public void ReloadingTheGpuSectionReplacesBothOffsets()
     {
-        var vm = new GpuViewModel("NVIDIA GeForce RTX 4060 Laptop GPU", (-200, 300), (-1000, 1500),
-                                  new GpuAxisState(Core: -150, Mem: 800), set: (_, _) => { });
+        var vm = new GpuViewModel("NVIDIA GeForce RTX 4060 Laptop GPU", (-200, 300), (-1000, 1500), PowerLevels,
+                                  new GpuAxisState(Core: -150, Mem: 800), set: (_, _) => { }, setPower: _ => { });
 
         vm.Load(new GpuAxisState(Core: 125, Mem: -400));
 
@@ -113,10 +113,81 @@ public class AxisStateReadingTests
     [Fact]
     public void TheGpuSectionReadsBothOffsetsFromTheirOwnField()
     {
-        var vm = new GpuViewModel("NVIDIA GeForce RTX 4060 Laptop GPU", (-200, 300), (-1000, 1500),
-                                  new GpuAxisState(Core: -150, Mem: 800), set: (_, _) => { });
+        var vm = new GpuViewModel("NVIDIA GeForce RTX 4060 Laptop GPU", (-200, 300), (-1000, 1500), PowerLevels,
+                                  new GpuAxisState(Core: -150, Mem: 800), set: (_, _) => { }, setPower: _ => { });
 
         Assert.Equal(-150, vm.Core);
         Assert.Equal(800, vm.Mem);
     }
+
+    /// <summary>The POWER row's mapping: the state's nullable level arrives as a dropdown index — 0 for
+    /// "follow the profile" (the default), otherwise one past the level's position in the port's list — and a
+    /// reload of a different mode moves it. The rows are the port's own fixed levels, so the index has to agree
+    /// with the list order rather than with the enum's numbers.</summary>
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(GpuPowerLevel.Turbo, 1)]
+    [InlineData(GpuPowerLevel.Performance, 2)]
+    [InlineData(GpuPowerLevel.Balanced, 3)]
+    [InlineData(GpuPowerLevel.Quiet, 4)]
+    public void TheGpuSectionMapsAPowerLevelToItsDropdownRow(GpuPowerLevel? level, int expectedIndex)
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), PowerLevels,
+                                  new GpuAxisState(0, 0, level), set: (_, _) => { }, setPower: _ => { });
+
+        Assert.Equal(expectedIndex, vm.PowerIndex);
+
+        vm.Load(new GpuAxisState(0, 0, level));   // the reload path maps the same way
+
+        Assert.Equal(expectedIndex, vm.PowerIndex);
+    }
+
+    /// <summary>A PICK applies the level immediately (no debounce: a pick is discrete, unlike a slider drag),
+    /// and picking row 0 sends the explicit "follow the profile" null rather than a level.</summary>
+    [Fact]
+    public void PickingAPowerRowAppliesTheLevelAtOnce_AndRowZeroIsFollowTheProfile()
+    {
+        var picks = new List<GpuPowerLevel?>();
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), PowerLevels,
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: p => picks.Add(p));
+
+        vm.PowerIndex = 3;    // Balanced
+        vm.PowerIndex = 0;    // follow the profile
+
+        Assert.Equal([GpuPowerLevel.Balanced, null], picks);
+    }
+
+    /// <summary>Loading a mode's power choice must NOT apply it — the service already set the hardware on the
+    /// mode switch, so reflecting it is a read, and turning it into a write is exactly the bug the
+    /// <c>_loading</c> guard exists to prevent.</summary>
+    [Fact]
+    public void LoadingAPowerChoiceDoesNotApplyIt()
+    {
+        var picks = new List<GpuPowerLevel?>();
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), PowerLevels,
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: p => picks.Add(p));
+
+        vm.Load(new GpuAxisState(0, 0, GpuPowerLevel.Quiet));
+
+        Assert.Empty(picks);
+        Assert.Equal(4, vm.PowerIndex);
+    }
+
+    /// <summary>No EC channel: the port offers no rows and the selector is hidden (<c>HasPower</c> false). A
+    /// machine that cannot enforce any level must not offer one.</summary>
+    [Fact]
+    public void WithNoEnvelopeChannel_ThePowerSelectorIsHidden()
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), [],
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: _ => { });
+
+        Assert.False(vm.HasPower);
+        Assert.Empty(vm.PowerNames);
+    }
+
+    /// <summary>The port's canonical rows, shared by the tests above. Their order is the EC's own (most power
+    /// first), which is what the dropdown index has to follow. The label keys are placeholders — no assertion
+    /// here reads a row NAME, only the index mapping.</summary>
+    private static readonly IReadOnlyList<GpuPowerOption> PowerLevels =
+        [.. GpuPowerLevels.All.Select((lvl, i) => new GpuPowerOption(lvl, $"profile.{lvl}", 108 - i * 10))];
 }

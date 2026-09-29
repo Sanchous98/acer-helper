@@ -209,7 +209,7 @@ public class DeclaredSettingTests
         var f = new LaptopServiceFixture(declare: d => d.Declare("lcd_override", port, readbackVerifiesWrite: false));
         var setting = f.Service.DeclaredSettings.OfType<FlagSetting>().Single();
 
-        f.Service.ApplySetting(setting, FlagSetting.Value(true));
+        f.ApplyDeclaredSetting.Run(setting, FlagSetting.Value(true));
 
         Assert.Equal([true], port.SetCalls);                              // the hardware write happened
         Assert.Equal("1", f.Store.Settings.DeviceSettings["lcd_override"]); // ...and the value was recorded
@@ -226,7 +226,7 @@ public class DeclaredSettingTests
         var f = new LaptopServiceFixture(declare: d => d.Declare("stop_timeout", new FakeChoicePort("5s", "30s", "1h")));
         var setting = f.Service.DeclaredSettings.Single();
 
-        f.Service.ApplySetting(setting, "30s");
+        f.ApplyDeclaredSetting.Run(setting, "30s");
 
         Assert.Equal("30s", f.Store.Settings.DeviceSettings["stop_timeout"]);
     }
@@ -242,7 +242,7 @@ public class DeclaredSettingTests
                       readbackVerifiesWrite: false));
         var setting = f.Service.DeclaredSettings.Single();
 
-        Assert.Throws<SettingNotAppliedException>(() => f.Service.ApplySetting(setting, "1"));
+        Assert.Throws<SettingNotAppliedException>(() => f.ApplyDeclaredSetting.Run(setting, "1"));
 
         Assert.Empty(f.Store.Settings.DeviceSettings);
         Assert.Equal(0, f.Store.SaveCount);
@@ -263,7 +263,7 @@ public class DeclaredSettingTests
         var f = new LaptopServiceFixture(declare: d => d.Declare("lcd_override", probe, readbackVerifiesWrite: false));
         probe.Service = f.Service;
 
-        f.Service.ApplySetting(f.Service.DeclaredSettings.Single(), "1");
+        f.ApplyDeclaredSetting.Run(f.Service.DeclaredSettings.Single(), "1");
 
         Assert.True(probe.SetCalled);        // non-vacuity: the probe really was written through
         Assert.False(probe.HeldDuringSet);   // the lock never spanned that write
@@ -328,7 +328,7 @@ public class DeclaredSettingTests
         var undeclaredPort = new FakeFlagPort();
         var undeclared = new FlagSetting { Key = "lcd_override", Port = undeclaredPort };
 
-        var ex = Assert.Throws<SettingNotAppliedException>(() => f.Service.ApplySetting(undeclared, "1"));
+        var ex = Assert.Throws<SettingNotAppliedException>(() => f.ApplyDeclaredSetting.Run(undeclared, "1"));
 
         Assert.Equal("lcd_override", ex.Key);
         Assert.Equal("this machine does not declare it", ex.Reason);   // the clause the UI would append
@@ -355,7 +355,7 @@ public class DeclaredSettingTests
         var rebuiltPort = new FakeFlagPort();
         var rebuilt = new FlagSetting { Key = "FnLock", Port = rebuiltPort };
 
-        f.Service.ApplySetting(rebuilt, "1");
+        f.ApplyDeclaredSetting.Run(rebuilt, "1");
 
         Assert.Equal([true], rebuiltPort.SetCalls);                  // the rebuilt declaration's own transport ran
         Assert.Equal("1", f.Store.Settings.DeviceSettings["FnLock"]); // ...and the value is recorded under the key

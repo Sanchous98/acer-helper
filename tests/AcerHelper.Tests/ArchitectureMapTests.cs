@@ -180,9 +180,13 @@ public class ArchitectureMapTests
     /// Domain vocabulary) and the executor went with the service. What came back afterwards is the operation
     /// ITSELF, and only because the result changed shape first: the outcome now speaks Domain vocabulary
     /// (<c>FanAxisState</c>, <c>GpuAxisState</c>) and the implementing layer translates at the accessor that
-    /// already reads the preset. Application is TEN files today — the four this docstring used to name, plus the
-    /// family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
-    /// Undervolt, DeclaredSetting, each one contract plus its use cases); the automatic-undervolt wrapper
+    /// already reads the preset. Application is EIGHTEEN files today — the four this docstring used to name, plus
+    /// the family of APPLIED EDITS that landed afterwards on the same terms (FanAxis, GpuOffsets, CpuPowerOverlay,
+    /// Undervolt, DeclaredSetting, each one contract plus its use cases), the family of ACTION use cases that
+    /// came off the service's public surface next (ProfileSwitch, Preferences, HardwareToggles, ProfilePower,
+    /// ModeApply, AppActions), and the family of QUERY use cases that came off it after those (Queries.cs — the
+    /// profile/fan/GPU/CO/CPU-power/sensor/battery readers, each a contract plus the use case that owns it); the
+    /// automatic-undervolt wrapper
     /// (CpuLoadTest, UndervoltSweep) was among them until it left for Infrastructure on 2026-09-27 (see the
     /// paragraph below), which is why the count is what it is and not larger — and the rule is the reason for
     /// every boundary in each of them, not an accident of the moves.
@@ -196,19 +200,25 @@ public class ArchitectureMapTests
     /// states — what an edit must not clobber, what is remembered before it is written — is stated without it.
     /// What could NOT get in that way is measured in the retired analysis — the measurements it carried are kept
     /// in docs/open-decisions.md's note on its retirement: the profile switch (a
-    /// lock held across the port call). The per-mode lighting was named there too, and is NOT any more: it was
+    /// lock held across the port call). It got in afterwards on the same terms as the rest, once the lock was
+    /// split into the contract's two halves (<c>IProfileTarget.CanApply</c>/<c>Apply</c>) and the announcement the
+    /// switch must not skip became a second contract (<c>IProfileAnnouncer</c>, implemented by the UI's
+    /// <c>LightingCoordinator</c>): <c>Application/ProfileSwitch.cs</c> names neither the graph nor the lighting
+    /// coordinator, so the rule below held throughout. The per-mode lighting was named there too, and is NOT any
+    /// more: it was
     /// stopped by a contract-shaped reason (the door handed the UI a live reference it edited in place, so
     /// hiding the graph would have broken it by construction), the owner overruled that reason, and the axis
     /// landed on the same terms as the others — one Domain type for one axis (<c>LightZoneState</c>), one
     /// contract (<c>ILightZoneMode</c>), two use cases (<c>Application/LightZone.cs</c>: <c>ReadLightZone</c>
     /// and <c>ApplyLightZone</c>).
     ///
-    /// Today Application imports Domain and nothing else: Localization is still permitted for the same reason
-    /// <see cref="DomainPointsAtNothingButItselfAndLocalization"/> permits it, but the <c>AppLanguage</c> the
-    /// settings model stored went with the container, so nothing here uses it any more. Localization is
-    /// deliberately NOT removed from the list below for that reason: it was allowed before for a real design
-    /// reason, and dropping it here would be a rule change smuggled into a move. The UI may still reach
-    /// Infrastructure (it does, by design; see the file's own docstring); this rule fences Application, which
+    /// Today Application imports Domain and, for the language preference, Localization — the same permission this
+    /// file's sibling grants and the reason it is in the allowed list below: the settings model's
+    /// <c>AppLanguage</c> went with the container, but a use case that records the chosen language names it, so
+    /// the permission is exercised again (<c>Application/Preferences.cs</c>). Localization is deliberately NOT
+    /// removed from the list below either way: it was allowed before for a real design reason, and the rule fences
+    /// Application from the layers ABOVE it, which is what the sentence after this one is about. The UI may still
+    /// reach Infrastructure (it does, by design; see the file's own docstring); this rule fences Application, which
     /// has no such need.
     ///
     /// WHAT LEFT APPLICATION 2026-09-27, AND WHY THE RULE GOT SMALLER RATHER THAN LOOSER. The owner ruled that
@@ -259,5 +269,47 @@ public class ArchitectureMapTests
 
         Assert.True(offenders.Length == 0,
             "these files pull the UI toolkit into a layer below the UI:\n  " + string.Join("\n  ", offenders));
+    }
+
+    /// <summary>NO <c>static Run(…)</c> WITH A CONTRACT PARAMETER UNDER <c>Application/</c>. A use case in this
+    /// layer OWNS its dependency through its CONSTRUCTOR (<c>sealed class XxxUseCase(IDep dep)</c> with a
+    /// <c>Run(…)</c>) — the shape every applied edit, action and query was moved to, and the shape the three
+    /// last offenders were converted to (<c>ReapplySettings</c>, <c>ReadLightZone</c>, <c>ApplyLightZone</c>). The
+    /// forbidden form is the STATIC-with-target <c>public static Run(…, IDep dep)</c>: it puts the dependency
+    /// back in the caller's hands, which is exactly the hand-wiring the constructor-ownership seam exists to
+    /// remove (a caller that can pass a contract in can also build the use case over the wrong one).
+    ///
+    /// WHAT COUNTS AS AN INTERFACE PARAMETER is a parameter whose type name begins <c>I</c> + an uppercase letter
+    /// (<c>ILightZoneMode</c>, <c>IReapplyTarget</c>, <c>IFanAxisTarget</c>, …) — the tree's interface naming, and
+    /// the only thing the parameter list needs to be scanned for. A use case whose Run takes DOMAIN values
+    /// (<c>ReapplyTrigger</c>, <c>LightZoneState</c>) is untouched by this rule and stays green.
+    ///
+    /// THE PURE STATICS ARE DELIBERATELY NOT EXCEPTIONS: <c>ReapplyPlan</c>, <c>AutostartPolicy</c> and
+    /// <c>AppArgs</c> are static classes with no interface parameters (or no <c>Run</c> at all), so they never
+    /// match — no allow-list entry is needed, and adding one would be the loophole this test exists to close.
+    ///
+    /// MUTATION THAT REDDENS IT: adding <c>public static LightZoneState Run(string zone, ILightZoneMode mode)</c>
+    /// to any file under <c>Application/</c> — the parameter list names an interface and the file is listed.</summary>
+    [Fact]
+    public void NoApplicationUseCaseIsAStaticRunTakingItsContractAsAParameter()
+    {
+        // A `public static <return> Run(<params>)` declaration; the parameter list may span lines.
+        var declaration = new Regex(
+            @"public\s+static\s+[\w<>?\[\],\.\s]+?\sRun\s*\((?<params>[^)]*)\)", RegexOptions.Multiline);
+
+        var offenders = SourcesIn("Application")
+            .SelectMany(p =>
+            {
+                var text = File.ReadAllText(p);
+                return declaration.Matches(text)
+                    .Where(m => Regex.IsMatch(m.Groups["params"].Value, @"\bI[A-Z]\w*"))
+                    .Select(_ => Relative(p));
+            })
+            .Distinct()
+            .ToArray();
+
+        Assert.True(offenders.Length == 0,
+            "Application use cases must own their dependencies through a constructor, not a static Run(dep):\n  "
+            + string.Join("\n  ", offenders));
     }
 }

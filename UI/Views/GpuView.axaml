@@ -35,5 +35,21 @@
                  Text="{Binding MemLabel}"/>
     </Grid>
 
+    <!-- GPU power level: which of the EC's fixed envelope rows the dGPU runs at, remembered per mode. Only
+         shown where the machine exposes the EC envelope channel (HasPower); its rows are the EC's own four
+         distinct measured levels (the Eco row enforces the same envelope as Quiet and is not offered) —
+         there is no arbitrary wattage on this platform (docs/power-an18-61.md). The default
+         row, index 0, is "follow the profile": the envelope then moves with the performance mode exactly as
+         before. Row names carry the measured steady watts so the trade-off is visible.
+         Laid out like the CPU power-mode row and the Options choice rows (label fills the left, a
+         content-sized dropdown sits on the right) so every "label + selector" row in the app reads the same and
+         the select is not stretched across the card. -->
+    <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasPower}">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Margin="0,0,10,0" Text="{l:Tr 'oc.gpu_power'}"/>
+      <ComboBox Grid.Column="1" MinWidth="160" VerticalAlignment="Center"
+                ItemsSource="{Binding PowerNames}"
+                SelectedIndex="{Binding PowerIndex, Mode=TwoWay}"/>
+    </Grid>
+
   </StackPanel>
 </UserControl>

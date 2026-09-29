@@ -51,7 +51,7 @@ public class FanEditWiringTests
     {
         var (f, fan) = Arranged();
 
-        f.Service.SetFanCurve(gpu: false, use: false, points: [1, 2, 3, 4, 5]);
+        f.ApplyFanCurve.Run(gpu: false, use: false, points: [1, 2, 3, 4, 5]);
 
         Assert.Equal([(77, 88)], fan.SpeedCalls);
         Assert.Equal([FanMode.Custom], fan.ModeCalls);
@@ -71,11 +71,11 @@ public class FanEditWiringTests
     public void AnEditClearsTheDeadband_SoTheFansAreDrivenAgainEvenThoughNothingMoved()
     {
         var (f, fan) = Arranged();
-        f.Service.SetFanCurve(gpu: false, use: false, [1, 2, 3, 4, 5]);   // establishes a committed duty
+        f.ApplyFanCurve.Run(gpu: false, use: false, [1, 2, 3, 4, 5]);   // establishes a committed duty
         Assert.Equal([(77, 88)], fan.SpeedCalls);                         // control: the pass really writes
         fan.SpeedCalls.Clear();
 
-        f.Service.SetFanCurve(gpu: true, use: false, [1, 2, 3, 4, 5]);    // the OTHER fan's half
+        f.ApplyFanCurve.Run(gpu: true, use: false, [1, 2, 3, 4, 5]);    // the OTHER fan's half
 
         Assert.Equal([(77, 88)], fan.SpeedCalls);
     }
@@ -106,7 +106,7 @@ public class FanEditWiringTests
         f.Device.FanControl = new FakeFanControl();
         var points = new[] { 1, 2, 3, 4, 5 };
 
-        f.Service.SetFanCurve(gpu: false, use: true, points);
+        f.ApplyFanCurve.Run(gpu: false, use: true, points);
 
         var stored = f.Store.Settings.FanPresets["balanced"];
         Assert.Equal([1, 2, 3, 4, 5], stored.CpuCurve);

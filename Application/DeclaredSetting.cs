@@ -57,9 +57,9 @@ public interface IDeclaredSettingTarget
 /// what happened — which setting, and the transport's words — and not a sentence: this layer knows the setting by
 /// its opaque key and has no name to put in a message, so the row that called this composes what the user reads
 /// from its own label (<c>OptionsAssembler.RunSet</c>).</summary>
-public static class ApplyDeclaredSetting
+public sealed class ApplyDeclaredSetting(IDeclaredSettingTarget target)
 {
-    public static void Run(SettingDeclaration setting, string value, IDeclaredSettingTarget target)
+    public void Run(SettingDeclaration setting, string value)
     {
         target.Write(setting, value);
         target.Remember(setting, value);

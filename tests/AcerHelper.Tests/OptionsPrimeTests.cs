@@ -255,7 +255,7 @@ public class OptionsPrimeTests
     }
 
     /// <summary>The two shell rows' write delegates point at the fake the row reads from — the same shape
-    /// <c>AppController.BuildUi</c> wires (<c>b =&gt; _svc.SetClamshell(b)</c>, <c>b =&gt; _svc.SetAutostart(b)</c>).
+    /// <c>AppController.BuildUi</c> wires (<c>b =&gt; _actions.Clamshell.Run(b)</c>, <c>b =&gt; _actions.Autostart.Run(b)</c>).
     /// With a no-op in their place the fakes' <c>SetCalls</c> lists were a destination nothing could reach, so a
     /// click on either row could not have been observed by any assertion — finding (2)'s hazard, here in the
     /// harness rather than in an assertion. The Turbo-toggles and language delegates stay no-ops because this

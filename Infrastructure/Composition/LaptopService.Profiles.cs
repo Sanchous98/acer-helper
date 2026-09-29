@@ -1,4 +1,5 @@
 using System.Threading;
+using AcerHelper.Application;
 using AcerHelper.Domain;
 using AcerHelper.Infrastructure.Vendors.Generic;
 using AcerHelper.Localization;
@@ -24,6 +25,50 @@ public sealed partial class LaptopService
     /// service for everything else it knows about a profile, and because it makes the null-tolerant reading —
     /// "no profile, no colour" — the one the caller can state plainly.</summary>
     public ProfileTraits TraitsOf(PerformanceProfile profile) => ProfileTraits.Of(device.PowerProfiles, profile);
+
+    // ---- the profile-switch use case (Application/ProfileSwitch.cs) ----
+    //
+    // EVERY profile write in this class goes through ONE SwitchProfile, and that is the point: the port write and
+    // the lighting announcement are one action inside the use case, so no path — a pick, the tray, the hotkey, the
+    // Turbo switch, the guided sweep's transient force/restore, or the per-source restore (ApplyStoredMode) — can
+    // write the profile without also recording the light claim (the double palette flash this closes). The
+    // per-source restore was the last hand-written port write, and it is routed through the use case too now; the
+    // omission that used to be named here as a decision was the source-change half of the same double flash.
+    //
+    // The announcer is the one dependency that CANNOT be constructor-injected here: the real one is the UI's
+    // LightingCoordinator, which is built ON TOP of this service, so wiring it at construction would be a cycle.
+    // Composition builds the SwitchProfile (target = this service, announcer = the coordinator) and hands the SAME
+    // instance back through <see cref="ProfileSwitch"/>, so the service's internal callers and the UI share one
+    // use case. Where composition has not (a unit test, or a machine with no lighting), the getter builds one over
+    // the no-op announcer, so a switch still writes and remembers and simply paints nothing.
+    private SwitchProfile? _profileSwitch;
+    private IProfileAnnouncer _announcer = NoLighting.Instance;
+
+    /// <summary>The one switch use case over this service. Composition assigns the shared singleton (whose
+    /// announcer is the UI's coordinator) so the service's own callers and <c>AppController</c> use the same
+    /// instance; the getter lazily builds one over <see cref="ProfileAnnouncer"/> where nothing was assigned.</summary>
+    internal SwitchProfile ProfileSwitch
+    {
+        get => _profileSwitch ??= new SwitchProfile(this, _announcer);
+        set => _profileSwitch = value;
+    }
+
+    /// <summary>The fallback announcement sink, used only when <see cref="ProfileSwitch"/> is not assigned by
+    /// composition. <c>internal</c> so a test can substitute a recorder; the running app lets composition set the
+    /// whole switch instead.</summary>
+    internal IProfileAnnouncer ProfileAnnouncer
+    {
+        get => _announcer;
+        set { _announcer = value; _profileSwitch = null; }
+    }
+
+    /// <summary>A no-op announcer: the switch still writes the port and remembers the mode, and nothing paints.
+    /// The honest default for a machine with no lighting and for a test that is about the switch itself.</summary>
+    private sealed class NoLighting : IProfileAnnouncer
+    {
+        public static readonly NoLighting Instance = new();
+        public void OnProfileApplied(PerformanceProfile applied) { }
+    }
 
     /// <summary>The colour the firmware paints the operating-mode indicator for <paramref name="profile"/>, or
     /// null for no profile / a backend with no such palette. Null is the honest answer and it is also what the
@@ -94,25 +139,31 @@ public sealed partial class LaptopService
         _onAc = effective;
         if (effective == null) return;                                  // unknown: nothing to apply
         if (string.IsNullOrEmpty(Slot.BaseId)) SeedSlotFromHardware();  // first time on this source
-        else ApplyStoredMode();                                         // restore what we remembered
+        else
+        {
+            // A SYSTEM path: a present profile port's refusal is caught here and swallowed rather than escaping
+            // the refresh loop's pool thread (an unobserved task exception is nothing at all). The source change
+            // is the doubt moment that must move the machine off a disabled mode; the next trigger re-asserts.
+            try { ApplyStoredMode(); }
+            catch (PortWriteFailedException) { /* the next pass re-syncs */ }
+        }
     }
 
-    /// <summary>Apply <paramref name="profile"/> to the port for a TRANSIENT, in-app purpose only, WITHOUT
-    /// touching the remembered per-source slot or Settings. Used by the guided sweep to sit in a performance
-    /// profile for the run and then restore the previous one (LaptopService.UndervoltSweep.cs): a plain
-    /// <see cref="ApplyProfile"/> would persist <c>Slot.BaseId</c> and clear the Turbo flag, leaking the forced
-    /// profile into the user's chosen mode, which the owner ruled must never happen. The write is to the same
-    /// port <see cref="ApplyProfile"/> uses, so the machine really switches; only the memory is skipped. No
-    /// availability check: the caller picked the profile from what the live source offers.</summary>
-    internal bool ApplyProfileTransient(PerformanceProfile profile)
+    /// <summary>Apply <paramref name="profile"/> as a TRANSIENT, in-app purpose only, WITHOUT touching the
+    /// remembered per-source slot or Settings, and ANNOUNCE it so the lighting repaints. This is the path the
+    /// guided sweep's forced profile and its restore take, through the same switch use case every other profile
+    /// change uses — which is what closes the double-flash: the sweep can no longer write the port without also
+    /// recording the light claim. The write is to the same port a persistent switch uses, so the machine really
+    /// switches; only the memory is skipped. Availability is the live source's own check (the sweep picked the
+    /// profile from what the source offers). Returns what landed (null when it did not), for the restore.
+    ///
+    /// A SYSTEM path: a present profile port's refusal THROWS out of the switch use case, so it is caught here and
+    /// reported as null — the same "nothing landed" a refusing port gave before, which the sweep's force/restore
+    /// already handles. A throw must never escape a sweep's background run.</summary>
+    internal PerformanceProfile? ApplyProfileTransient(PerformanceProfile profile)
     {
-        var pp = device.PowerProfiles;
-        if (pp == null) return false;
-        lock (_state)
-        {
-            try { return pp.Set(profile); }
-            catch { return false; }   // a throwing port is a failed switch, not a reason to abort the restore
-        }
+        try { return ProfileSwitch.Run(profile, transient: true); }
+        catch (PortWriteFailedException) { return null; }
     }
 
     /// <summary>Key identifying the current performance "mode" for per-mode presets: the profile id, except
@@ -169,7 +220,23 @@ public sealed partial class LaptopService
             ? ModeKey.From(slot.BaseId)
             : ModeKey.For(cur);
 
-    public PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
+    // ---- the profile READ contracts (Application/Queries.cs) ----
+    //
+    // The UI's reads, implemented EXPLICITLY so nothing is added to this class's public surface: a caller
+    // reaches a read by naming the use case (ReadCurrentProfile, ReadSelectableProfiles, ReadBaseProfile,
+    // ReadSourceProfile), not the service. The bodies are the internal helpers below, kept under their old
+    // names because this class's own paths (the Turbo switch, the hotkey's cycle, the sweep) still call them.
+
+    /// <summary>The live profile, for the ReadCurrentProfile use case.</summary>
+    PerformanceProfile? ICurrentProfileTarget.Current() => CurrentProfile();
+
+    /// <summary>What the port reports as active right now, or null with no port. `internal` rather than public:
+    /// the UI reaches it through the use case, and this class's own paths (the sweep's base read) call it by
+    /// name.</summary>
+    internal PerformanceProfile? CurrentProfile() => device.PowerProfiles?.Current();
+
+    /// <summary>The profiles the UI may offer RIGHT NOW, for the ReadSelectableProfiles use case.</summary>
+    IReadOnlyList<PerformanceProfile> ISelectableProfilesTarget.Selectable() => SelectableProfiles();
 
     /// <summary>The profiles the UI may offer RIGHT NOW: what the port lists as selectable, narrowed by the
     /// vendor's per-source availability policy when it declares one
@@ -177,8 +244,9 @@ public sealed partial class LaptopService
     /// Quiet, Balanced, Performance and Turbo). A port with no policy — ASUS, Dell, the generic ports — is
     /// returned verbatim, so nothing outside the declaring vendor is affected. The live source comes from
     /// <see cref="_onAc"/>, set by <see cref="SyncPowerSource"/> before this is read in the refresh pass;
-    /// "unknown" (before the first battery reading) reads as AC, the safe default.</summary>
-    public IReadOnlyList<PerformanceProfile> SelectableProfiles()
+    /// "unknown" (before the first battery reading) reads as AC, the safe default. `internal` rather than public:
+    /// the hotkey's own cycle calls it by name and the UI reaches it through the use case.</summary>
+    internal IReadOnlyList<PerformanceProfile> SelectableProfiles()
     {
         var pp = device.PowerProfiles;
         if (pp == null) return [];
@@ -211,36 +279,81 @@ public sealed partial class LaptopService
             ?? pp.All.FirstOrDefault(p => AvailableFor(p, onAc));
     }
 
-    public (bool ok, string? error) ApplyProfile(PerformanceProfile p)
+    // ---- the profile-switch target (Application/ProfileSwitch.cs) ----
+    //
+    // THREE explicit members, the two halves of the write plus the memory, exactly as Application's contract
+    // declares them. They are implemented EXPLICITLY so nothing is added to this class's public surface: a caller
+    // reaches them by naming the use case (SwitchProfile), not the service. `Apply` is a port call and nothing
+    // else; `Remember` is the graph write; `CanApply` is the source gate. The use case orders them.
+    //
+    // THE LOCK AND THE PORT CALL ARE SPLIT, deliberately: the old ApplyProfile held _state across pp.Set, and the
+    // contract exists precisely so it need not — CanApply reads the source under the lock, Apply makes the port
+    // call under it (the port is serialised process-wide by the WMI/EC layer anyway), and Remember is the graph
+    // write under it. What no caller can do any more is perform the port write WITHOUT the announcement, which is
+    // the double-flash the use case removes.
+
+    bool IProfileTarget.CanApply(PerformanceProfile profile)
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return (false, null);
+        if (pp == null) return false;
+        lock (_state) return AvailableFor(profile, _onAc ?? true);
+    }
+
+    /// <summary>Write the profile to the port. Reached only after <see cref="IProfileTarget.CanApply"/> answered
+    /// true (which is false when this machine has no port), so the port is present and a refusal — or a throwing
+    /// port — is a real fault: it THROWS <see cref="PortWriteFailedException"/>, carrying the port's own words
+    /// when it returned them and none when it threw. The store-before-write order of the other axes does not apply
+    /// here: this axis remembers only what LANDED, and the exception escapes before <see cref="Remember"/>.</summary>
+    PerformanceProfile? IProfileTarget.Apply(PerformanceProfile profile)
+    {
+        if (device.PowerProfiles is not { } pp) return null;   // absent port: a capability fact, not a refusal
         lock (_state)
         {
-            // A profile this source does not offer is refused rather than written: the UI disables those
-            // segments, and this is the backstop for the tray, the hotkey and the per-source paths. Null error
-            // means the standard "Failed to set X" line — the reason is already on screen, where the segment
-            // is greyed out, so no new message is invented for it.
-            if (!AvailableFor(p, _onAc ?? true)) return (false, null);
-            var r = Attempt(() => pp.Set(p), () => pp.LastError);
-            if (!r.ok) return r;
-            // Remember this as the base for the current source; a direct profile pick clears the Turbo flag.
-            Slot.BaseId = p.Id;
-            Slot.Turbo = false;
-            Save();
-            return r;
+            WriteOrThrow("profile switch", () => pp.Set(profile), () => pp.LastError);
+            return profile;
         }
     }
 
-    /// <summary>True if the hardware is currently in the Turbo profile.</summary>
-    public bool IsTurboOn() => KindOf(device.PowerProfiles?.Current()) == ProfileKind.Turbo;
+    void IProfileTarget.Remember(PerformanceProfile profile)
+    {
+        lock (_state)
+        {
+            // Remember this as the base for the current source; a direct profile pick clears the Turbo flag.
+            Slot.BaseId = profile.Id;
+            Slot.Turbo = false;
+            Save();
+        }
+    }
+
+    /// <summary>Apply a profile as a persistent switch (a direct pick): write the port, remember what landed as
+    /// the live source's base (clearing the Turbo flag) and announce it so the lighting repaints. The rules — the
+    /// source gate first, only what landed being remembered, one announcement per landed switch — are the use
+    /// case's (<see cref="SwitchProfile"/>); this method is the door the UI and the per-source paths call.
+    ///
+    /// AN ABSENT PORT IS A VALUE: false, the same no-op a portless machine has always returned (the use case's
+    /// gate answers it without ever reaching the port). A PRESENT port's refusal is a
+    /// <see cref="PortWriteFailedException"/> and escapes to the caller — a UI action catches it at its boundary
+    /// and shows the message.</summary>
+    public bool ApplyProfile(PerformanceProfile p) => ProfileSwitch.Run(p) is not null;
+
+    /// <summary>True if the hardware is currently in the Turbo profile. NOT a UI query and not on this class's
+    /// public surface: its only reader is the hotkey's cycle, which reaches it through
+    /// <see cref="ITogglePerformanceTarget.IsTurboOn"/>.</summary>
+    internal bool IsTurboOn() => KindOf(device.PowerProfiles?.Current()) == ProfileKind.Turbo;
+
+    // ---- the base-profile READ contract (Application/Queries.cs) ----
+
+    /// <summary>The base (non-Turbo) profile to show as selected, reusing a profile the caller already holds —
+    /// for the ReadBaseProfile use case. `internal` rather than public: the use case names the read, and this
+    /// class's own path (<see cref="ISetTurboTarget.BaseProfileOrNull"/>) calls it by name.</summary>
+    PerformanceProfile? IBaseProfileTarget.Base(PerformanceProfile? cur) => BaseProfile(cur);
 
     /// <summary>The base (non-Turbo) profile to show as selected: the current profile when it isn't Turbo,
     /// otherwise the remembered base (falling back to Balanced / the first non-Turbo profile).</summary>
-    public PerformanceProfile? BaseProfile() => BaseProfile(device.PowerProfiles?.Current());
+    internal PerformanceProfile? BaseProfile() => BaseProfile(device.PowerProfiles?.Current());
 
     /// <summary>As <see cref="BaseProfile()"/> but reusing an already-read current profile.</summary>
-    public PerformanceProfile? BaseProfile(PerformanceProfile? cur)
+    internal PerformanceProfile? BaseProfile(PerformanceProfile? cur)
     {
         var pp = device.PowerProfiles;
         if (pp == null) return null;
@@ -262,36 +375,54 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>Turbo used as a switch (the "Turbo toggles" mode): on = apply Turbo over the current base;
-    /// off = return to the remembered base. The base id is preserved; only the Turbo flag flips.
-    /// Returns the profile that actually landed (null on failure) so the caller doesn't have to read it back
-    /// out of the hardware to know what it just applied — see AppController's lighting hand-off.</summary>
-    public (PerformanceProfile? applied, string? error) SetTurbo(bool on)
+    // ---- the Turbo-switch contract (Application/ProfilePower.cs) ----
+
+    /// <summary>Whether this machine has a power-profiles port at all. A machine with none is the no-op the Turbo
+    /// key has always been on it.</summary>
+    bool ISetTurboTarget.HasProfiles => device.PowerProfiles != null;
+
+    /// <summary>Find the Turbo profile the LIVE source offers and, under the SAME hold, capture the base it is
+    /// about to sit over. Null when there is no Turbo profile or the source disables it — the backstop for the
+    /// hotkey, which has no other way to learn the switch did nothing. The capture is BEFORE the port write
+    /// because after it the live profile IS Turbo; this member exists so the two cannot be ordered wrongly.</summary>
+    PerformanceProfile? ISetTurboTarget.BeginTurbo()
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return (null, null);
+        if (pp == null) return null;
         lock (_state)
         {
-            if (on)
-            {
-                var turbo = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
-                // Turbo is an AC-only mode under the declared policy (NitroSense parity): on battery the switch
-                // is disabled, and this is the backstop for the hotkey, which reports "nothing landed".
-                if (turbo == null || !AvailableFor(turbo, _onAc ?? true)) return (null, null);
-                var cur = pp.Current();
-                if (cur != null && KindOf(cur) != ProfileKind.Turbo) Slot.BaseId = cur.Id;   // capture the base we sit over
-                var r = Attempt(() => pp.Set(turbo), () => pp.LastError);
-                if (!r.ok) return (null, r.error);
-                Slot.Turbo = true;
-                Save();
-                return (turbo, null);
-            }
-            var baseP = BaseProfile();
-            if (baseP == null) return (null, null);
-            var applied = ApplyProfile(baseP);   // clears Turbo flag + persists base
-            return applied.ok ? (baseP, null) : (null, applied.error);
+            var found = pp.All.FirstOrDefault(p => KindOf(p) == ProfileKind.Turbo);
+            // Turbo is an AC-only mode under the declared policy (NitroSense parity): on battery the switch is
+            // disabled, and this is the backstop for the hotkey, which reports "nothing landed".
+            if (found == null || !AvailableFor(found, _onAc ?? true)) return null;
+            // Capture the base we sit over BEFORE the write: after it, the live profile IS Turbo and there would
+            // be nothing to remember as the base.
+            var cur = pp.Current();
+            if (cur != null && KindOf(cur) != ProfileKind.Turbo) Slot.BaseId = cur.Id;
+            return found;
         }
     }
+
+    /// <summary>The base (non-Turbo) profile to return to when switching off, read under the lock, or null when
+    /// this source has none.</summary>
+    PerformanceProfile? ISetTurboTarget.BaseProfileOrNull()
+    {
+        lock (_state) return BaseProfile();
+    }
+
+    /// <summary>Record (or clear) the Turbo flag over the preserved base — the Turbo switch's OWN memory, a graph
+    /// write under the lock, persisted. Called by the use case only for a write that landed.</summary>
+    void ISetTurboTarget.RememberTurbo(bool on)
+    {
+        lock (_state) { Slot.Turbo = on; Save(); }
+    }
+
+    // ---- the source-profile READ contract (Application/Queries.cs) ----
+
+    /// <summary>The profile a power source is set to use, for the ReadSourceProfile use case. `internal` rather
+    /// than public: the UI reaches it through the use case, and this class's own path
+    /// (<see cref="RestoreSweepProfile"/>) calls it by name.</summary>
+    PerformanceProfile? ISourceProfileReadTarget.Source(bool onAc) => SourceProfile(onAc);
 
     /// <summary>The profile a power source is set to use — what <see cref="SyncPowerSource"/> applies when the
     /// machine switches to it. Null when nothing is remembered for that source yet (fresh install, before the
@@ -300,8 +431,10 @@ public sealed partial class LaptopService
     ///
     /// A slot pointing at a profile the source does not offer reports the FALLBACK rather than the stale id
     /// (NitroSense parity): the per-source row in Options then shows what the machine would actually use, not a
-    /// mode the source disables. A port with no availability policy keeps returning the stored id verbatim.</summary>
-    public PerformanceProfile? SourceProfile(bool onAc)
+    /// mode the source disables. A port with no availability policy keeps returning the stored id verbatim.
+    /// `internal` rather than public: the UI reaches it through the use case, and the sweep's restore calls it
+    /// by name.</summary>
+    internal PerformanceProfile? SourceProfile(bool onAc)
     {
         var pp = device.PowerProfiles;
         if (pp == null) return null;
@@ -317,50 +450,82 @@ public sealed partial class LaptopService
         }
     }
 
-    /// <summary>Set the profile a power source should use, and apply it right away when that source is the live
-    /// one. Stored exactly the way a manual pick stores it (<see cref="ApplyProfile"/>), so the two can't
-    /// disagree: base id + a Turbo flag, since Turbo is a switch over a base rather than a mode of its own
-    /// while "Turbo toggles" is on. Reports a failure only if the immediate apply failed.</summary>
-    public (bool ok, string? error) SetSourceProfile(bool onAc, PerformanceProfile p)
+    // ---- the source-profile contract (Application/ProfilePower.cs) ----
+    //
+    // The decision — Turbo as a flag over a preserved/seeded base, store-then-apply for the live source — is the
+    // use case's (Application.SetSourceProfile). What stays is the graph (the two slots), the port and the
+    // live-source comparison, implemented EXPLICITLY so nothing is added to this class's public surface.
+
+    bool ISourceProfileTarget.HasProfiles => device.PowerProfiles != null;
+
+    bool ISourceProfileTarget.TurboToggles
+    {
+        get { lock (_state) return Settings.TurboToggles; }
+    }
+
+    /// <summary>The port's own reading of whether <paramref name="profile"/> is its Turbo mode.</summary>
+    bool ISourceProfileTarget.IsTurbo(PerformanceProfile profile) => KindOf(profile) == ProfileKind.Turbo;
+
+    /// <summary>The base to seed under Turbo when the source has never held one — Balanced if this backend offers
+    /// it, else the first non-Turbo profile. Null when this machine has neither.</summary>
+    PerformanceProfile? ISourceProfileTarget.TurboSeed()
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return (false, null);
+        if (pp == null) return null;
+        return pp.All.FirstOrDefault(x => KindOf(x) == ProfileKind.Balanced)
+            ?? pp.All.FirstOrDefault(x => KindOf(x) != ProfileKind.Turbo);
+    }
+
+    /// <summary>Store <paramref name="profile"/> as the source's base, clearing the Turbo flag.</summary>
+    void ISourceProfileTarget.RememberBase(bool onAc, PerformanceProfile profile)
+    {
         lock (_state)
         {
             var slot = onAc ? Settings.OnAc : Settings.OnBattery;
-            if (Settings.TurboToggles && KindOf(p) == ProfileKind.Turbo)
-            {
-                // Turbo is not a base: keep whatever base it sits over, falling back to Balanced when this
-                // source has never held one (otherwise dropping Turbo later would leave nothing to return to).
-                slot.Turbo = true;
-                if (slot.BaseId.Length == 0)
-                    slot.BaseId = (pp.All.FirstOrDefault(x => KindOf(x) == ProfileKind.Balanced)
-                                ?? pp.All.FirstOrDefault(x => KindOf(x) != ProfileKind.Turbo))?.Id ?? "";
-            }
-            else { slot.BaseId = p.Id; slot.Turbo = false; }
+            slot.BaseId = profile.Id;
+            slot.Turbo = false;
             Save();
-            // Reference equality against the live slot: exact, and it also covers the "source still unknown"
-            // case (Slot then reads as the AC slot), so setting the AC profile before any battery reading
-            // applies immediately rather than silently waiting for a source change.
-            return !ReferenceEquals(Slot, slot) ? (true, (string?)null) : ApplyStoredMode();
         }
     }
 
-    /// <summary>Keep the per-source remembered mode in sync with live battery telemetry. On an AC<->battery
-    /// change (and on the first reading, i.e. startup): if this source already has a remembered mode, re-apply
-    /// it; if not (fresh install), seed the slot from whatever the hardware is currently set to — never force
-    /// a change on a source we've not seen before. A no-op while the source is unchanged or unknown
-    /// (desktop / no battery). Called from the refresh loop.
-    ///
-    /// This feeds the OS half only; the typed EC adapter (USB-C vs barrel) is folded in by
-    /// <see cref="RecomputeOnAc"/>, so a USB-C-powered machine is treated as "not AC" even though the OS says
-    /// "charging".</summary>
-    public void SyncPowerSource(BatteryInfoSnapshot battery)
+    /// <summary>Record Turbo over the source's preserved base, seeding it from <paramref name="seed"/> only when
+    /// the source has never held one (otherwise dropping Turbo later would leave nothing to return to).</summary>
+    void ISourceProfileTarget.RememberTurbo(bool onAc, PerformanceProfile? seed)
     {
-        if (battery.State == BatteryState.Unknown) return;            // no battery/source info
         lock (_state)
         {
-            _osOnAc = battery.State != BatteryState.Discharging;      // Charging/Idle => OS sees external power
+            var slot = onAc ? Settings.OnAc : Settings.OnBattery;
+            slot.Turbo = true;
+            if (slot.BaseId.Length == 0) slot.BaseId = seed?.Id ?? "";
+            Save();
+        }
+    }
+
+    /// <summary>Whether <paramref name="onAc"/> names the LIVE source. Reference equality against the live slot is
+    /// exact, and it also covers the "source still unknown" case (Slot then reads as the AC slot), so setting the
+    /// AC profile before any battery reading applies immediately rather than silently waiting for a source
+    /// change. Read under the lock, because the slot the comparison selects is guarded by it (the original held
+    /// <c>_state</c> across the whole method).</summary>
+    bool ISourceProfileTarget.SourceIsLive(bool onAc)
+    {
+        lock (_state) return ReferenceEquals(Slot, onAc ? Settings.OnAc : Settings.OnBattery);
+    }
+
+    /// <summary>Apply the live source's remembered mode to the port — the private <see cref="ApplyStoredMode"/>,
+    /// reached by the use case.</summary>
+    void ISourceProfileTarget.ApplyStoredMode() => ApplyStoredMode();
+
+    // ---- the power-source sync contract (Application/ProfilePower.cs) ----
+
+    /// <summary>Record the OS's own "external power" reading and recompute the effective source, which seeds or
+    /// restores that source's remembered mode when the effective source actually changes. The USB-C demotion and
+    /// the seeding/restore are <see cref="RecomputeOnAc"/>'s, unchanged. The use case has already dropped the
+    /// unknown state; only a known reading reaches here.</summary>
+    void IPowerSourceSyncTarget.ObserveOsPower(bool onAc)
+    {
+        lock (_state)
+        {
+            _osOnAc = onAc;
             RecomputeOnAc();
         }
     }
@@ -384,7 +549,10 @@ public sealed partial class LaptopService
             Slot.BaseId = fb.Id;
             Slot.Turbo = false;
             Save();
-            ApplyProfile(fb);   // re-entrant lock; applies and re-saves
+            // A SYSTEM path: the fallback write goes through the switch use case, whose present-port refusal is
+            // caught here rather than escaping the seeding/refresh path. The slot now points at the fallback, and
+            // the next source change re-asserts it.
+            try { ApplyProfile(fb); } catch (PortWriteFailedException) { /* the next pass re-syncs */ }
             return;
         }
 
@@ -398,19 +566,16 @@ public sealed partial class LaptopService
         Save();
     }
 
-    /// <summary>Apply the live source's remembered mode. Reports a failure only when a hardware write failed —
-    /// "nothing to do" (already in that mode, nothing remembered) is success.
-    ///
-    /// It carries a channel because ONE of its two callers reads it: <see cref="SetSourceProfile"/>'s result is
-    /// surfaced by the power-source row in Options, so an error reaching it today through the shared field must
-    /// keep reaching it. The other caller (<see cref="SyncPowerSource"/>, from the refresh loop) discards it,
-    /// exactly as it did before.</summary>
-    private (bool ok, string? error) ApplyStoredMode()
+    /// <summary>Apply the live source's remembered mode. "Nothing to do" — no port, nothing remembered, already in
+    /// that mode — returns normally; a PRESENT profile port's refusal THROWS
+    /// <see cref="PortWriteFailedException"/>, which each caller catches on its own terms (the Options row shows
+    /// the message, the refresh loop swallows it).</summary>
+    private void ApplyStoredMode()
     {
         var pp = device.PowerProfiles;
-        if (pp == null) return (false, null);
+        if (pp == null) return;
         var slot = Slot;
-        if (string.IsNullOrEmpty(slot.BaseId)) return (true, null);
+        if (string.IsNullOrEmpty(slot.BaseId)) return;
 
         bool onAc = _onAc ?? true;
         var baseP = pp.All.FirstOrDefault(p => p.Id == slot.BaseId && AvailableFor(p, onAc));
@@ -423,12 +588,12 @@ public sealed partial class LaptopService
             if (pp.All.Any(p => p.Id == slot.BaseId))
             {
                 baseP = FallbackProfile(onAc);
-                if (baseP == null) return (true, null);
+                if (baseP == null) return;
                 slot.BaseId = baseP.Id;
                 slot.Turbo = false;
                 Save();
             }
-            else return (true, null);
+            else return;
         }
 
         var current = pp.Current();
@@ -440,35 +605,61 @@ public sealed partial class LaptopService
         // Only touch the profile when the hardware isn't already in the target mode. Each Acer profile Set makes
         // the firmware re-flash the keyboard/lightbar palette, so blindly re-applying an already-active mode on
         // every AC<->battery change — the common case, same mode on both sources — just blinks the keyboard for
-        // nothing (TWICE in Turbo mode: the old code did base-Set + Turbo-Set unconditionally, briefly dropping
-        // out of Turbo and back). The base under Turbo is bookkeeping in the slot (BaseProfile reads it), not the
-        // active profile, so we don't need to re-drive it while Turbo is engaged.
+        // nothing. THIS GUARD IS WHAT KEEPS A SAME-MODE SOURCE CHANGE FLASH-FREE; everything below it is a real
+        // move and must paint exactly once.
+        //
+        // IT IS A PORT-READ GUARD, and that is deliberately not the whole story: it sees only what the port
+        // currently REPORTS, which between two LOCAL writes is stale (the ~1 s/3 s poll has not caught up). The
+        // complementary guard for that gap is the write-side coalescing in Application/ProfileSwitch.cs
+        // (CoalesceWindowSeconds), which remembers the profile we just WROTE and dedups a repeat of it — the
+        // owner's «подключил зарядку и быстро поменял на turbo» flash. Keep both: this one is free and exact for
+        // the already-settled case; the use case's covers the not-yet-polled one.
+        //
+        // A SOURCE CHANGE WRITES THROUGH THE SWITCH USE CASE, as a TRANSIENT. Two things follow, and both are the
+        // fix for the resume double flash:
+        //   * The port write and the light claim are one action, so the landing is ANNOUNCED (OnProfileApplied
+        //     records _pendingId and paints) and the ~1 s stale refresh pass is suppressed — exactly as for a
+        //     pick or the sweep's force/restore. The hand-written pp.Set here used to skip that claim, so the
+        //     firmware's own flash on the write was followed by the poll's repaint: two palette cycles.
+        //   * TRANSIENT because the slot ALREADY holds the mode — this restores what was remembered, it does not
+        //     re-remember it (that would re-seed/re-flag on every source change). SetSourceProfile is the door that
+        //     remembers a choice; this door only applies one.
+        // The base under Turbo is bookkeeping in the slot (BaseProfile reads it), not the active profile, so we DO
+        // NOT re-drive it: the old `pp.Set(baseP)` before the Turbo write was the intermediate "old profile" flash
+        // — the machine briefly dropped out of Turbo and back. The Acer EC takes the Turbo profile byte directly
+        // and needs no base established over it (AcerDevice.Windows.SetProfile writes one gmInput; the base is a
+        // slot concept, not a platform precondition), so that write is gone rather than coalesced.
         if (wantTurbo)
         {
-            if (KindOf(current) == ProfileKind.Turbo) return (true, null);   // already in Turbo -> nothing to do
-            if (current?.Id != baseP.Id) pp.Set(baseP);            // establish the base we sit over (skip if on it)
-            return Attempt(() => pp.Set(turbo!), () => pp.LastError);
+            if (KindOf(current) == ProfileKind.Turbo) return;   // already in Turbo -> nothing to do
+            ProfileSwitch.Run(turbo!, transient: true);         // a present port's refusal throws to the caller
+            return;
         }
-        if (current?.Id == baseP.Id) return (true, null);          // already in the remembered base profile
-        return Attempt(() => pp.Set(baseP), () => pp.LastError);
+        if (current?.Id == baseP.Id) return;          // already in the remembered base profile
+        ProfileSwitch.Run(baseP, transient: true);    // a present port's refusal throws to the caller
     }
 
-    /// <summary>Performance hotkey: cycle profiles, or toggle Turbo (per the "Turbo toggles" setting).
-    /// Returns the profile that was applied, or null.</summary>
-    public PerformanceProfile? TogglePerformance()
+    // ---- the performance-hotkey contract (Application/ProfilePower.cs) ----
+    //
+    // The branch choice (Turbo flip vs cycle), the fresh read of the preference and the two writes go through the
+    // shared switch use case are Application's now (Application.TogglePerformance). What stays is the pure wrap
+    // rule NextSelectable and the port reads it needs, implemented EXPLICITLY.
+
+    bool ITogglePerformanceTarget.TurboToggles
+    {
+        get { lock (_state) return Settings.TurboToggles; }
+    }
+
+    bool ITogglePerformanceTarget.IsTurboOn() => IsTurboOn();
+
+    /// <summary>The next profile the cycle should land on, from the live source's FILTERED selectable set, so the
+    /// hotkey cannot land on a profile the source disables (Acer's NitroSense parity); a port with no availability
+    /// policy passes its own set through. Null when this machine offers no profiles at all.</summary>
+    PerformanceProfile? ITogglePerformanceTarget.NextSelectableProfile()
     {
         var pp = device.PowerProfiles;
         if (pp == null) return null;
-
-        bool turboToggles;
-        lock (_state) turboToggles = Settings.TurboToggles;
-        if (turboToggles)
-            return SetTurbo(!IsTurboOn()).applied;   // returns what landed — no read-back needed
-
-        // The cycle runs over the FILTERED set, so the hotkey cannot land on a profile the live source
-        // disables (Acer's NitroSense parity); a port with no availability policy passes its own set through.
-        var target = NextSelectable(pp, pp.Current(), SelectableProfiles());
-        return target != null && ApplyProfile(target).ok ? target : null;
+        return NextSelectable(pp, pp.Current(), SelectableProfiles());
     }
 
     private static PerformanceProfile? NextSelectable(IPowerProfiles pp, PerformanceProfile? current,

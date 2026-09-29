@@ -49,6 +49,12 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
     private Stopwatch? _clock;
     private SweepResult? _result;
 
+    /// <summary>True when the LIVE source stopped being AC while the sweep was running and this class cancelled
+    /// the run for it. It exists only to render the specific "charger was disconnected" stop instead of the
+    /// generic "cancelled", so the user understands why a run they did not cancel ended — the sweep's own
+    /// finally has already restored the pre-sweep offsets either way. Cleared at each start.</summary>
+    private bool _powerLost;
+
     /// <summary>The live power source as last pushed by the refresh pass: true on AC, false on battery, null
     /// before any reading. The sweep is REFUSED unless this is exactly true — on battery the platform can accept
     /// a Curve-Optimizer write without applying it (the 0xFD cause), and an unknown source has to fail closed
@@ -118,12 +124,24 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
     }
 
     /// <summary>Push the live power source in. Called from the refresh pass on the UI thread; raises the start
-    /// button's enabled state so a plug/unplug is reflected without waiting for a rebuild.</summary>
+    /// button's enabled state so a plug/unplug is reflected without waiting for a rebuild.
+    ///
+    /// IT ALSO STOPS A RUNNING SWEEP WHEN THE CHARGER GOES AWAY. The AC requirement is not only a gate on the
+    /// START: the same reason it is refused on battery — the platform can ACKNOWLEDGE a Curve-Optimizer write
+    /// while SUPPRESSING its effect, so a probe "passes" against an offset that was never applied — applies the
+    /// moment the source drops mid-run. Everything the run has measured since the unplug is suspect, and the
+    /// machine is now on a power budget whose throttling the probe never accounted for, so the honest action is
+    /// to stop, not to keep producing a verdict from contaminated evidence. The REFRESH PASS is what calls this
+    /// (AppController.UiPass pushes <c>LaptopService.OnAc</c> every pass), so a physical unplug reaches here
+    /// within one pass without any polling of its own. Cancelling is enough: the cancellation propagates into the
+    /// loop and the load run, and the sweep's finally restores the pre-sweep SMU counts, exactly as the Cancel
+    /// button does. A source flapping BACK to AC mid-run cannot revive the run — it was stopped.</summary>
     public void SetOnAc(bool? onAc)
     {
         if (_onAc == onAc) return;
         _onAc = onAc;
         OnPropertyChanged(nameof(CanStart));
+        if (onAc != true && IsRunning) { _powerLost = true; _cts?.Cancel(); }
     }
 
     [RelayCommand]
@@ -149,6 +167,7 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
         if (HasResult) _discardPreview();
         _result = null;
         HasResult = false;
+        _powerLost = false;               // a new run starts with no power-loss stop behind it
         _clock = Stopwatch.StartNew();
         _cts = new CancellationTokenSource();
         IsRunning = true;
@@ -170,11 +189,17 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
                 _previewProposal(result.Domains.Where(d => d.Domain.Index >= 0)
                                                .Select(d => (d.Domain.Index, d.Proposed)).ToList());
             HasResult = true;
-            StatusText = StopText(result);
+            StatusText = OutcomeText(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            _report(Loc.T("uv.sweep_failed"));
+            // A run that THREW is not a stability verdict and it must not be dressed as one. The sweep's own
+            // failure channel is the stop reason, but an exception never reaches a SweepResult, so the honest
+            // report is the app's own words PLUS the exception's — without it the user only ever saw the generic
+            // "Guided undervolt failed" and the real cause (a stale gate, an EC/WMI throw, a port that blew up)
+            // was swallowed here.
+            _report(Loc.T("uv.sweep_failed") + Err(ex));
+            StatusText = Loc.T("uv.sweep_failed") + Err(ex);
         }
         finally
         {
@@ -233,9 +258,10 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
     private void OnProgress(SweepProgress p)
     {
         // STAGE FIRST, then the cluster being swept, so the user sees which cluster is on the bench — not a bare
-        // "core x/10", which read as if one probe loaded all ten physical cores. When the cluster could not be
-        // identified the probe loaded ALL cores, and the "all cores" wording says so rather than letting the stage
-        // look isolated.
+        // "core x/10", which read as if one probe loaded all ten physical cores. The ALL-CORE phase loads every
+        // physical core regardless (the package current the oracle needs); this flag governs the SINGLE-CORE
+        // phase, so when the cluster could not be identified it walked ALL cores and the "all cores" wording says
+        // so rather than letting the stage look isolated.
         var stage = Loc.T("uv.stage", p.Stage, p.DomainCount);
         var cluster = p.ClusterIdentified
             ? Loc.T("uv.cluster", p.DomainLabel)
@@ -255,21 +281,46 @@ public sealed partial class UndervoltSweepViewModel : ObservableObject
         if (IsRunning && _clock is not null) ElapsedText = Loc.T("uv.elapsed", Duration(_clock.Elapsed));
     }
 
-    private static string StopText(SweepResult result) => result.Stop switch
+    /// <summary>The run's outcome line: the stop reason in the user's words, with the run's own Detail appended
+    /// when it carries one. The Detail is where the REAL cause lives — a forced-profile note, the SMU's refusal
+    /// text, the back-off explanation, the port's error — and dropping it (as this card used to) turned every
+    /// failure into the same generic sentence. It is appended verbatim because it is a diagnostic, not a localized
+    /// string; the stop reason above it is the localized half.
+    ///
+    /// A POWER-LOSS STOP IS ITS OWN SENTENCE. The sweep's Stop is <see cref="SweepStop.Cancelled"/> for a charger
+    /// disconnect just as it is for the Cancel button, because the mechanism is the same cancellation — but the
+    /// two mean different things to the user, and "Stopped: cancelled" for a run they never cancelled is exactly
+    /// the confusing half-truth this flag exists to avoid. <see cref="_powerLost"/> is set only on the
+    /// source-loss path, so it can tell them apart.</summary>
+    private string OutcomeText(SweepResult result)
     {
-        SweepStop.Completed or SweepStop.FirstError => Loc.T("uv.finished"),
-        SweepStop.ThermalAbort => Loc.T("uv.stop_thermal"),
-        SweepStop.Cancelled => Loc.T("uv.stop_cancelled"),
-        SweepStop.ApplyFailed => Loc.T("uv.stop_smu"),
-        SweepStop.NotOnAc => Loc.T("uv.refused_ac"),
-        _ => Loc.T("uv.stopped"),
-    };
+        var line = StopText(result);
+        return string.IsNullOrWhiteSpace(result.Detail) ? line : line + " — " + result.Detail;
+    }
+
+    private string StopText(SweepResult result)
+    {
+        if (_powerLost && result.Stop == SweepStop.Cancelled) return Loc.T("uv.stop_power_lost");
+        return result.Stop switch
+        {
+            SweepStop.Completed or SweepStop.FirstError => Loc.T("uv.finished"),
+            SweepStop.ThermalAbort => Loc.T("uv.stop_thermal"),
+            SweepStop.Cancelled => Loc.T("uv.stop_cancelled"),
+            SweepStop.ApplyFailed => Loc.T("uv.stop_smu"),
+            SweepStop.NotOnAc => Loc.T("uv.refused_ac"),
+            _ => Loc.T("uv.stopped"),
+        };
+    }
+
+    private static string Err(Exception ex) => $": {ex.GetType().Name}: {ex.Message}";
 
     private static string PhaseKey(SweepPhase phase) => phase switch
     {
         SweepPhase.Applying => "uv.phase_applying",
         SweepPhase.Loading => "uv.phase_testing",
+        SweepPhase.SingleCore => "uv.phase_single_core",
         SweepPhase.BackingOff => "uv.phase_backing_off",
+        SweepPhase.Confirming => "uv.phase_confirming",
         SweepPhase.Restoring => "uv.phase_restoring",
         _ => "nav.done",
     };

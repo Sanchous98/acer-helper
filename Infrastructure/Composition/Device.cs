@@ -49,6 +49,7 @@ public class Device : IDisposable
     public IHotkeys?            Hotkeys            { get; set; }
     public IDisplayTint?        DisplayTint        { get; set; }
     public IGpuOverclock?       GpuOverclock       { get; set; }
+    public IGpuPowerEnvelope?   GpuPowerEnvelope   { get; set; }
     public ICpuPower?           CpuPower           { get; set; }
     public ICurveOptimizer?     CurveOptimizer     { get; set; }
     public IDriverSetup?        DriverSetup        { get; set; }

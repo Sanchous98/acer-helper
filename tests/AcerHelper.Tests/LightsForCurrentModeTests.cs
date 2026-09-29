@@ -43,7 +43,7 @@ public class LightsForCurrentModeTests
     public void WithTheCurrentProfile_BothFormsNameTheSameMode()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
 
         var withProfile = f.Service.LightsForCurrentMode(cur);
         var withoutProfile = f.Service.LightsForCurrentMode();
@@ -62,7 +62,7 @@ public class LightsForCurrentModeTests
     public void WithAProfileInHand_ThePortIsNotRead()
     {
         var f = LaptopServiceFixture.WithProfiles(current: TestProfiles.Balanced);
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
         var readsBefore = f.Pp!.CurrentCount;
 
         _ = f.Service.LightsForCurrentMode(cur);
@@ -107,7 +107,7 @@ public class LightsForCurrentModeTests
             current: TestProfiles.Balanced);
         f.Service.ApplyProfile(TestProfiles.Balanced);          // remember Balanced as the base for this source
         f.Pp!.CurrentProfile = TestProfiles.Turbo;              // ...and Turbo is now what the hardware reports
-        var cur = f.Service.CurrentProfile();
+        var cur = f.CurrentProfile.Run();
 
         var withProfile = f.Service.LightsForCurrentMode(cur);
         var withoutProfile = f.Service.LightsForCurrentMode();
@@ -126,7 +126,7 @@ public class LightsForCurrentModeTests
     public void WithNoReadableProfile_BothFormsKeyOffDefault()
     {
         var f = LaptopServiceFixture.WithProfiles(current: null);
-        var cur = f.Service.CurrentProfile();          // the caller's read — counted, and the last one expected
+        var cur = f.CurrentProfile.Run();          // the caller's read — counted, and the last one expected
         var readsBefore = f.Pp!.CurrentCount;
 
         var mode = f.Service.LightsForCurrentMode(cur);

@@ -82,6 +82,8 @@ public sealed partial class LaptopService
         }
 
         public void Persist() => service.Save();
+
+        void ILightZoneMode.Write(string zone, LightZoneState state) => Write(zone, state);
     }
 
     /// <summary>The stored entry as the domain's value, with the zone-colour array DUPLICATED. The copy is not

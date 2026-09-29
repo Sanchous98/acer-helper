@@ -11,7 +11,8 @@ namespace AcerHelper.Tests;
 /// agree TODAY by construction, but agreement by construction is not a guard: the failure mode this type exists
 /// for is one end quietly spelling the switch itself, which is how the bug happened, and a hand-written literal
 /// at either end is invisible to every other test in this suite — the registration is a scheduled task or a
-/// .desktop file and the parse lives in <c>App.axaml.cs</c>, none of which this suite can execute.
+/// .desktop file and the parse lives in <c>CompositionRoot.cs</c> (it used to be <c>App.axaml.cs</c>; the
+/// composition root now reads the args for the controller factory), none of which this suite can execute.
 ///
 /// SO THE CLAIM IS ABOUT SOURCE WIRING, not about behaviour, and it is checked the way
 /// <see cref="ArchitectureMapTests"/> checks the layer map: by reading the tree from the compiler's path. The
@@ -31,7 +32,7 @@ namespace AcerHelper.Tests;
 ///
 /// MUTATION-VERIFIED, one end at a time, and each is the historical bug:
 /// <c>Autostart.Windows.cs</c>'s <c>&lt;Arguments&gt;</c> hard-coded, <c>Autostart.Linux.cs</c>'s Exec line
-/// hard-coded, and <c>App.axaml.cs</c>'s <c>Contains</c> hard-coded each redden exactly their own row of
+/// hard-coded, and the parse end's <c>Contains</c> hard-coded each redden exactly their own row of
 /// <see cref="EveryEndThatMustAgreeAboutTheStartupSwitch_WiresTheOneConstant"/> — three runs, one row red each.
 /// Note what the third one means: the PARSE end is reachable here even though no test can execute it.
 ///
@@ -79,7 +80,7 @@ public class AppArgsWiringTests
                 "AppArgs.Startup")]                           // heals: whether the task already carries the switch
     [InlineData("Infrastructure/Vendors/Generic/Autostart.Linux.cs",
                 "AppArgs.Startup")]                           // registers: the .desktop file's Exec line
-    [InlineData("UI/App.axaml.cs",
+    [InlineData("UI/CompositionRoot.cs",
                 "AppArgs.Startup")]                           // parses: decides startMinimized
     public void EveryEndThatMustAgreeAboutTheStartupSwitch_WiresTheOneConstant(string relativePath, string required)
     {

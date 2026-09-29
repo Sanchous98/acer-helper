@@ -36,7 +36,12 @@ public class LaptopServiceUndervoltSweepTests
         public CoreTopology TopologyResult { get; set; } = new([Core0], CoreTopologySource.PhysicalCores, null);
         public List<LogicalCore> Pinned { get; } = [];
         public CoreTopology Topology() { OnTopology?.Invoke(); return TopologyResult; }
-        public bool PinCurrentThread(LogicalCore core, out string? error) { Pinned.Add(core); error = null; return true; }
+        public bool PinCurrentThread(LogicalCore core, out string? error)
+        {
+            // The all-core probe phase pins several cores CONCURRENTLY, so the recorder must be thread-safe.
+            lock (Pinned) Pinned.Add(core);
+            error = null; return true;
+        }
         public void UnpinCurrentThread() { }
     }
 
@@ -56,9 +61,15 @@ public class LaptopServiceUndervoltSweepTests
         new(8, 0, 0), new(10, 0, 0), new(12, 0, 0), new(14, 0, 0),   // efficiency (Zen 5c)
     ];
 
+    // The single-core phase is turned OFF in these control-flow tests (each is about one pass) so the suite
+    // stays fast; the phase has its own test (AProbeRunsTheSingleCorePhaseForEveryCore). The long final soak is
+    // off here too — it has its own tests — because a real service probe with the default 5/3-minute budgets
+    // would dominate the suite.
     private static SweepOptions Fast(int? start = null) => new()
     {
         StartCounts = start,
+        IncludeSingleCorePhase = false,
+        ConfirmSoak = false,
         Load = new CpuLoadOptions
         {
             Width = LoadWidth.Scalar,
@@ -83,7 +94,7 @@ public class LaptopServiceUndervoltSweepTests
         // The guided sweep is refused unless the source is a CONFIRMED AC. Every pre-existing sweep test means
         // "a sweep on a normal, plugged-in machine", so the source is set here once. The refusal paths are their
         // own tests (see LaptopServiceUndervoltSweepAcGateTests).
-        f.Service.SyncPowerSource(new BatteryInfoSnapshot { State = BatteryState.Charging });
+        f.SyncPowerSource.Run(new BatteryInfoSnapshot { State = BatteryState.Charging });
         return f;
     }
 
@@ -122,6 +133,24 @@ public class LaptopServiceUndervoltSweepTests
         Assert.All(co.SetDomainsCalls, c => Assert.Equal(-7, c[2]));                        // the iGPU slot is carried
         Assert.Equal([-5, -6, -7], co.SetDomainsCalls[^1]);                                 // ...and the restore is the base
         Assert.Empty(co.SetCalls);                                                          // the all-core path is not used
+    }
+
+    /// <summary>A PRESENT SMU whose every volatile write THROWS is caught by the sweep's own volatile adapter
+    /// (<c>WriteVolatile</c>), turned into <c>SweepApplyOutcome.Refused</c>, and the run aborts as an
+    /// <see cref="SweepStop.ApplyFailed"/> — the throw never escapes the background sweep, and the flag is
+    /// released. This is the SYSTEM-path guarantee for the applied-edit family's new exception: a throw must not
+    /// leave an unobserved task exception, and it must not wedge the SMU claim.</summary>
+    [Fact]
+    public void ASweepWhoseVolatileWritesThrow_AbortsWithoutEscaping_AndReleasesTheGate()
+    {
+        var f = Setup();
+        ((FakeCurveOptimizer)f.Device.CurveOptimizer!).ThrowOnSet = true;
+
+        var escaped = Record.Exception(() => f.Service.RunUndervoltSweep(Fast(), null, CancellationToken.None));
+
+        Assert.Null(escaped);                                       // the throw was caught by WriteVolatile
+        Assert.False(f.Service.TuningInProgress);                   // ...and the gate was released on the way out
+        Assert.Empty(f.Store.Settings.CoPresets);                   // a volatile sweep never persists
     }
 
     /// <summary>Thermal protection fails closed (the runner already does): a hot machine ends the sweep, the
@@ -195,8 +224,7 @@ public class LaptopServiceUndervoltSweepTests
     /// <summary>The mutual exclusion: while a sweep owns the SMU, a manual edit is refused (and persists
     /// nothing) and the per-mode re-apply does not write. Once the sweep ends both work again.</summary>
     [Fact]
-    public async Task AManualEditAndAReapplyAreRefusedWhileASweepRuns()
-    {
+    public async Task AManualEditAndAReapplyAreRefusedWhileASweepRuns()    {
         var f = Setup();
         var co = (FakeCurveOptimizer)f.Device.CurveOptimizer!;
         f.Service.SetCoDomains([-5, -6, -7]);
@@ -208,19 +236,19 @@ public class LaptopServiceUndervoltSweepTests
         Assert.True(Eventually.Until(() => f.Service.TuningInProgress), "the sweep never became active");
 
         var savesBefore = f.Store.SaveCount;
-        var refused = f.Service.SetCoValues([-1, -1, -1]);
+        var refused = f.ApplyUndervolt.Run([-1, -1, -1]);
         Assert.False(refused.ok);
         Assert.Equal(LaptopService.SweepBusyReason, refused.error);
         Assert.Equal(savesBefore, f.Store.SaveCount);                                       // a refused edit persists nothing
 
         var callsBefore = co.SetDomainsCalls.Count;
-        f.Service.ApplyModeCo();
+        f.ApplyModeCo.Run();
         Assert.Equal(callsBefore, co.SetDomainsCalls.Count);                                // the re-apply did not stomp a probe
 
         hold.Set();
         await task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(f.Service.TuningInProgress);
-        Assert.True(f.Service.SetCoValues([-1, -2, -7]).ok);                                // free again
+        Assert.True(f.ApplyUndervolt.Run([-1, -2, -7]).ok);                                // free again
     }
 
     /// <summary>THE MAPPING. Each domain carries the port's cluster identity, and the performance cluster is the
@@ -245,37 +273,106 @@ public class LaptopServiceUndervoltSweepTests
         Assert.Equal([8, 10, 12, 14], topology.Cluster(CpuClusterKind.Efficiency)!.Select(c => c.Processor));
     }
 
-    /// <summary>THE PROBE SUBSETTING, end to end: the stage sweeping <c>ccd:0</c> (Zen 5, the performance
-    /// cluster) loads ONLY that cluster's four cores, and the stage sweeping <c>ccd:1</c> only the Zen 5c four.
-    /// Driven through the real service probe and read off the per-core progress, so it is the run and not a claim.</summary>
+    /// <summary>THE ALL-CORE PHASE LOADS EVERY PHYSICAL CORE OF THE MACHINE. The owner's report was Task Manager
+    /// showing only a few cores briefly busy during the sweep — because the probe used to load only the swept
+    /// cluster's cores. OCCT/Linpack load every core at once, because it is the concurrent package current/droop
+    /// that makes a marginal undervolt fail, so the probe must too. Driven through the real service probe and read
+    /// off the per-core progress, the all-core phase pins all eight physical cores in BOTH stages (the swept
+    /// cluster carries the tested offset; the sibling is held at stock by the sweep's baseline but is still
+    /// loaded), and every progress report names the full physical-core count.</summary>
     [Fact]
-    public void AProbeLoadsOnlyTheSweptClustersCores()
+    public void TheAllCorePhaseLoadsEveryPhysicalCore()
     {
         var f = Setup();
         var affinity = (FakeCoreAffinity)f.Device.CoreAffinity!;
         affinity.TopologyResult = WithClusters(StrixLikeCores);
 
         var seen = new List<SweepProgress>();
-        f.Service.RunUndervoltSweep(new SweepOptions { StartCounts = 0,
+        f.Service.RunUndervoltSweep(new SweepOptions { StartCounts = 0, IncludeSingleCorePhase = false, ConfirmSoak = false,   // isolate the all-core phase
             Load = new CpuLoadOptions { Width = LoadWidth.Scalar, PerCoreBudget = TimeSpan.FromMilliseconds(5), TotalBudget = TimeSpan.FromSeconds(5) } },
             p => seen.Add(p), CancellationToken.None);
 
         var coreProgress = seen.Where(p => p.Phase == SweepPhase.Loading && p.Core is not null).ToList();
         Assert.NotEmpty(coreProgress);
 
-        // Stage 1 loads the performance cluster's four cores only; stage 2 the efficiency cluster's four.
+        // Every one of the eight physical cores was loaded in stage 0 (the Zen 5 performance cluster's stage)...
         var stage0 = coreProgress.Where(p => p.DomainIndex == 0).ToList();
-        var stage1 = coreProgress.Where(p => p.DomainIndex == 1).ToList();
         Assert.NotEmpty(stage0);
-        Assert.NotEmpty(stage1);
-        Assert.All(stage0, p => Assert.Contains(p.Core!.Value.Processor, new[] { 0, 2, 4, 6 }));
-        Assert.DoesNotContain(stage0, p => p.Core!.Value.Processor >= 8);
-        Assert.All(stage1, p => Assert.Contains(p.Core!.Value.Processor, new[] { 8, 10, 12, 14 }));
-        Assert.DoesNotContain(stage1, p => p.Core!.Value.Processor < 8);
+        Assert.All(Enumerable.Range(0, 4).Select(i => i * 2), proc =>
+            Assert.Contains(stage0, p => p.Core!.Value.Processor == proc));
+        Assert.Contains(stage0, p => p.Core!.Value.Processor == 8);    // ...and the sibling cluster too
+        Assert.Contains(stage0, p => p.Core!.Value.Processor == 14);
 
-        // Every stage reports the SUBSET size, not the ten-core total.
-        Assert.All(stage0, p => Assert.Equal(4, p.CoreCount));
-        Assert.All(stage1, p => Assert.Equal(4, p.CoreCount));
+        // ...and the report always states the FULL physical-core count, not the swept cluster's subset.
+        Assert.All(coreProgress, p => Assert.Equal(8, p.CoreCount));
+
+        // The all-core run genuinely pinned every physical core (the fake records each pin).
+        Assert.Contains(affinity.Pinned, c => c.Processor == 0);
+        Assert.Contains(affinity.Pinned, c => c.Processor == 14);
+    }
+
+    /// <summary>THE SINGLE-CORE PHASE STAYS ON THE SWEPT CLUSTER. The all-core phase loads every physical core;
+    /// the single-core phase is the CoreCycler boost-corner coverage and walks ONLY the swept cluster's cores one
+    /// at a time. Proven by pin counts on a single-domain sweep (ccd:0, the performance cluster): both phases pin
+    /// the four performance cores (2 each), while the efficiency cores are pinned only by the all-core phase
+    /// (once) — so the single-core phase did NOT walk them. If it loaded all cores this would be 2/2, not 2/1.</summary>
+    [Fact]
+    public void TheSingleCorePhaseWalksOnlyTheSweptClustersCores()
+    {
+        var f = Setup();
+        var affinity = (FakeCoreAffinity)f.Device.CoreAffinity!;
+        affinity.TopologyResult = WithClusters(StrixLikeCores);
+        // One CPU cluster only (ccd:0), so a single-domain sweep keeps the pin arithmetic unambiguous.
+        f.Device.CurveOptimizer = new FakeCurveOptimizer { Range = (-30, 0) }.WithDomains(
+            new VoltageDomain("Zen 5", "ccd:0") { Cluster = CpuClusterKind.Performance },
+            new VoltageDomain("iGPU", "gfx", Range: (-50, 0), MillivoltsPerCount: 5.0));
+
+        f.Service.RunUndervoltSweep(new SweepOptions
+        {
+            StartCounts = -30,                 // one probe: single-core then all-core, then done
+            Repetitions = 1,                   // one pass per offset, so the pin arithmetic is exact
+            IncludeSingleCorePhase = true,
+            ConfirmSoak = false,
+            SingleCoreBudget = TimeSpan.FromMilliseconds(50),
+            Load = new CpuLoadOptions { Width = LoadWidth.Scalar, PerCoreBudget = TimeSpan.FromMilliseconds(50), TotalBudget = TimeSpan.FromSeconds(30) },
+        }, null, CancellationToken.None);
+
+        // Performance cluster: all-core + single-core = two pins each.
+        Assert.Equal(2, affinity.Pinned.Count(c => c.Processor == 0));
+        Assert.Equal(2, affinity.Pinned.Count(c => c.Processor == 6));
+        // Efficiency cluster: all-core only = one pin each (the single-core phase never walked them).
+        Assert.Equal(1, affinity.Pinned.Count(c => c.Processor == 8));
+        Assert.Equal(1, affinity.Pinned.Count(c => c.Processor == 14));
+    }
+
+    /// <summary>THE SINGLE-CORE PHASE. With the phase enabled, a probe loads EVERY core of the swept cluster a
+    /// second time over, and each load's core order is strictly ascending within one phase (one core at a time),
+    /// so the CoreCycler high-boost corner is covered in addition to the all-core concurrent phase.</summary>
+    [Fact]
+    public void AProbeRunsTheSingleCorePhaseForEveryCore()
+    {
+        var f = Setup();
+        var affinity = (FakeCoreAffinity)f.Device.CoreAffinity!;
+        affinity.TopologyResult = WithClusters(StrixLikeCores);
+
+        var seen = new List<SweepProgress>();
+        // Start at the rail floor so each stage does exactly ONE probe and the budgets below are ample for it:
+        // this test is about the PHASE (each core loaded twice), not the walk, and a short per-core budget under
+        // full-suite load let a worker be cut short and skip a core — a timing flake, not a behaviour.
+        f.Service.RunUndervoltSweep(new SweepOptions
+        {
+            StartCounts = -30,
+            IncludeSingleCorePhase = true,
+            ConfirmSoak = false,
+            SingleCoreBudget = TimeSpan.FromMilliseconds(100),
+            Load = new CpuLoadOptions { Width = LoadWidth.Scalar, PerCoreBudget = TimeSpan.FromMilliseconds(100), TotalBudget = TimeSpan.FromSeconds(30) },
+        }, p => seen.Add(p), CancellationToken.None);
+
+        // Stage 0 (performance cluster) must pin each of its four cores at least twice (all-core + single-core).
+        var stage0Pins = affinity.Pinned.Where(c => c.Processor is 0 or 2 or 4 or 6).ToList();
+        Assert.True(stage0Pins.Count >= 8, $"expected the four cores loaded at least twice, saw {stage0Pins.Count}");
+        Assert.Contains(stage0Pins, c => c.Processor == 0);
+        Assert.Contains(stage0Pins, c => c.Processor == 6);
     }
 
     /// <summary>THE FALLBACK: when the topology cannot attribute cores to a cluster, the domain is marked
@@ -305,6 +402,33 @@ public class LaptopServiceUndervoltSweepTests
         var loads = seen.Where(p => p.Phase == SweepPhase.Loading).ToList();
         Assert.NotEmpty(loads);
         Assert.All(loads, p => Assert.False(p.ClusterIdentified));
+    }
+
+    /// <summary>THE SOAK AT THE SERVICE BOUNDARY: with the confirmation on, the real service probe runs a second,
+    /// longer pass on the settled offset and reports the CONFIRMING phase with the loaded core, and the domain
+    /// comes back soaked and stable. ConfirmSoak is the only switch; the budgets here are short so the suite stays
+    /// fast, but the code path is the shipped one.</summary>
+    [Fact]
+    public void TheRealServiceRunsTheSoakAndReportsTheConfirmingPhase()
+    {
+        var f = Setup();
+        var affinity = (FakeCoreAffinity)f.Device.CoreAffinity!;
+        affinity.TopologyResult = WithClusters(StrixLikeCores);
+
+        var seen = new List<SweepProgress>();
+        f.Service.RunUndervoltSweep(new SweepOptions
+        {
+            StartCounts = -1,                 // one search step, so the soak is cheap in wall clock terms here
+            IncludeSingleCorePhase = false,
+            ConfirmSoak = true,
+            ConfirmAllCore = TimeSpan.FromMilliseconds(20),
+            Load = new CpuLoadOptions { Width = LoadWidth.Scalar, PerCoreBudget = TimeSpan.FromMilliseconds(10), TotalBudget = TimeSpan.FromSeconds(5) },
+        }, p => seen.Add(p), CancellationToken.None);
+
+        // The confirming phase is reported with a real core (the soak actually loaded the cluster).
+        var confirming = seen.Where(p => p.Phase == SweepPhase.Confirming).ToList();
+        Assert.NotEmpty(confirming);
+        Assert.Contains(confirming, p => p.Core is not null);
     }
 
     [Fact]
@@ -481,6 +605,74 @@ public class UndervoltSweepViewModelTests
         Assert.Equal([true, false], sliders);   // sweepRunning raised for the run, cleared on cancel
     }
 
+    /// <summary>UNPLUGGING MID-RUN STOPS THE SWEEP. The AC requirement is not only a gate on the start: the moment
+    /// the source drops, everything the run has measured is contaminated (the platform can suppress a
+    /// Curve-Optimizer write while acknowledging it, and the power budget change throttles the load the oracle
+    /// reads), so the refresh pass pushing the new source must cancel the run through the same cancellation the
+    /// Cancel button uses — the sweep's own finally then restores the pre-sweep counts.</summary>
+    [Fact]
+    public async Task LosingAcMidRunCancelsTheSweep()
+    {
+        var sliders = new List<bool>();
+        CancellationToken seen = default;
+        var vm = Vm((_, ct) =>
+        {
+            seen = ct;
+            return Task.Run(async () => { while (!ct.IsCancellationRequested) await Task.Delay(10); return Result(); }, ct);
+        }, sliders: sliders);
+
+        _ = vm.StartCommand.ExecuteAsync(null);
+        Assert.True(Eventually.Until(() => vm.IsRunning), "the run never started");
+
+        vm.SetOnAc(false);                        // the charger was pulled (USB-C PD or battery)
+        Assert.True(Eventually.Until(() => !vm.IsRunning), "the power-source loss never stopped the run");
+
+        Assert.True(seen.IsCancellationRequested);
+        Assert.False(vm.CanStart);                // and the start button is now refused until AC returns
+        Assert.Equal([true, false], sliders);     // the sliders are unlocked by the same path as a manual cancel
+    }
+
+    /// <summary>The power-loss stop is its OWN sentence, not the generic "cancelled": the user did not press
+    /// Cancel, and a bare "Stopped: cancelled" would read as a run that ended for no stated reason. The run still
+    /// reports <see cref="SweepStop.Cancelled"/> (the mechanism is the same cancellation), so the flag is what
+    /// distinguishes the two.</summary>
+    [Fact]
+    public async Task APowerLossStopReadsAsItsOwnSentenceNotAsCancelled()
+    {
+        // The fake mirrors the real runner: a run whose token was cancelled comes back as SweepStop.Cancelled
+        // (the real runner observes the token and returns the result; it does not throw).
+        var cancelled = new SweepResult([], SweepStop.Cancelled, 0, null);
+        var vm = Vm((_, ct) =>
+            Task.Run(async () => { while (!ct.IsCancellationRequested) await Task.Delay(10); return cancelled; }));
+
+        _ = vm.StartCommand.ExecuteAsync(null);
+        Assert.True(Eventually.Until(() => vm.IsRunning), "the run never started");
+
+        vm.SetOnAc(false);
+        Assert.True(Eventually.Until(() => !vm.IsRunning));
+
+        Assert.Equal(Loc.T("uv.stop_power_lost"), vm.StatusText);
+        Assert.NotEqual(Loc.T("uv.stop_cancelled"), vm.StatusText);
+    }
+
+    /// <summary>A source flapping BACK to AC cannot revive a run that was already stopped — and a run that was
+    /// never stopped is not marked as a power-loss stop by a later reading. The flag is set only when a RUNNING
+    /// sweep is actually cancelled for it, and cleared at each start.</summary>
+    [Fact]
+    public async Task ASourceThatComesBackDoesNotRestartOrRelabelTheRun()
+    {
+        var vm = Vm((_, ct) =>
+            Task.Run(async () => { while (!ct.IsCancellationRequested) await Task.Delay(10); return Result(); }, ct));
+
+        _ = vm.StartCommand.ExecuteAsync(null);
+        Assert.True(Eventually.Until(() => vm.IsRunning));
+        vm.SetOnAc(false);
+        Assert.True(Eventually.Until(() => !vm.IsRunning));
+        vm.SetOnAc(true);                          // plugged back in
+        Assert.False(vm.IsRunning);                // it did NOT restart
+        Assert.True(vm.CanStart);                  // ...but a fresh run may be started again
+    }
+
     [Fact]
     public async Task SavingCallsTheExplicitSaveReloadsTheRowsAndClearsThePanel()
     {
@@ -513,6 +705,39 @@ public class UndervoltSweepViewModelTests
 
         Assert.True(vm.HasResult);                    // the proposal is not thrown away on a refusal
         Assert.Contains(reported, t => t.Contains("refused"));
+    }
+
+    /// <summary>THE REAL REASON IS SURFACED. A run whose result carries a Detail (the forced-profile note, the
+    /// SMU's own words, the back-off explanation) shows that Detail on the outcome line instead of the bare
+    /// "guided undervolt failed" the card used to render. This is the reporting half of the "fails after the
+    /// first cycle" bug: the leaked gate reported only SweepBusyReason's result through a generic line.
+    ///
+    /// MUTATION THAT REDDENS IT: reverting <c>OutcomeText</c> to <c>StopText</c> (dropping the Detail append).</summary>
+    [Fact]
+    public async Task ARunThatStoppedWithADetail_ShowsThatDetailOnTheOutcomeLine()
+    {
+        var result = Result() with { Stop = SweepStop.ApplyFailed, Detail = "a guided undervolt sweep is running" };
+        var vm = Vm((_, _) => Task.FromResult(result));
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Contains("a guided undervolt sweep is running", vm.StatusText);
+    }
+
+    /// <summary>A run that THREW reports the exception, not the bare generic sentence — the cause was swallowed
+    /// here before, which is why the user could never see what actually failed.
+    ///
+    /// MUTATION THAT REDDENS IT: reverting the catch to <c>_report(Loc.T("uv.sweep_failed"))</c>.</summary>
+    [Fact]
+    public async Task ARunThatThrew_ReportsTheExceptionRatherThanTheGenericLine()
+    {
+        var reported = new List<string>();
+        var vm = Vm((_, _) => throw new InvalidOperationException("the EC hiccuped"), reported: reported);
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Contains(reported, t => t.Contains("the EC hiccuped"));
+        Assert.Contains(reported, t => t.Contains("InvalidOperationException"));
     }
 
     [Fact]
@@ -761,13 +986,14 @@ public class UndervoltSweepLocalizationTests
             "uv.result_hint",
             "uv.save", "uv.discard",
             "uv.sweep_failed",
-            "uv.phase_first", "uv.phase_applying", "uv.phase_testing", "uv.phase_backing_off", "uv.phase_restoring", "nav.done",
+            "uv.phase_first", "uv.phase_applying", "uv.phase_testing", "uv.phase_single_core", "uv.phase_backing_off", "uv.phase_confirming", "uv.phase_restoring", "nav.done",
             "uv.temp_unreadable", "uv.temp_c",
             "uv.stage", "uv.cluster", "uv.all_cores",
             "uv.telemetry", "uv.telemetry_core", "uv.elapsed",
             "uv.finished",
             "uv.stop_thermal", "uv.stop_cancelled",
             "uv.stop_smu",
+            "uv.stop_power_lost",
             "uv.refused_ac",
             "uv.connect_ac",
             "uv.waiting_power",

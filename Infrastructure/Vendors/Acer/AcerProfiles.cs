@@ -26,8 +26,8 @@ public static class AcerProfiles
         // that switch, transcribed (verified on AN18-61 against platform-profile-1/profile — the same five names
         // the hardware offers, and the same five bytes this table writes; see docs/acer-linux.md).
         //
-        // THE TRAP: the kernel's word for byte 0x05 is "performance", and 0x05 is TURBO (108 W) — while 0x04,
-        // the app's "Performance" (93 W), is "balanced-performance". So the obvious name-keyed lookup is wrong in
+        // THE TRAP: the kernel's word for byte 0x05 is "performance", and 0x05 is TURBO (115 W) — while 0x04,
+        // the app's "Performance" (100 W), is "balanced-performance". So the obvious name-keyed lookup is wrong in
         // BOTH directions: reading sysfs "performance" as Performance reports the wrong mode (and re-sends the
         // wrong envelope through EcSyncedProfiles), and writing Performance by sending the token "performance"
         // asks the kernel for Turbo instead. No caller may match these words itself; ToChoiceName/FromChoiceName

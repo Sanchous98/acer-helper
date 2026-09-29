@@ -18,7 +18,8 @@ namespace AcerHelper.Tests;
 /// <item><c>null</c> really does land on Balanced — if it silently landed on the first entry (Best power
 /// efficiency, which is <c>_modes[0]</c>), every startup would flash the wrong mode and the "placeholder is
 /// what a failed read gives" rule would be false for this row;</item>
-/// <item>neither the placeholder's arrival nor the prime's can reach <c>SetCpuPower</c> — a prime that wrote
+/// <item>neither the placeholder's arrival nor the prime's can reach the CPU-power edit use case
+/// (<c>ApplyCpuPowerOverlay</c>) — a prime that wrote
 /// would be the app forcing an OS power mode on a machine whose user never asked, which
 /// <c>ApplyModeCpuPower</c> deliberately avoids on an unconfigured profile.</item>
 /// </list>
