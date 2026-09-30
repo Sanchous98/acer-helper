@@ -9,9 +9,14 @@ namespace AcerHelper.Infrastructure;
 /// running exe lives in Program Files and is LOCKED while we're alive, so we can't overwrite it ourselves;
 /// instead a tiny detached .cmd waits for THIS process to exit, runs msiexec, restarts the app, and deletes
 /// itself + the MSI. Our process is already elevated (app.manifest requireAdministrator), so the child cmd
-/// and msiexec inherit elevation — no second UAC prompt. A portable/dev run cannot use that in-place path (it
-/// lives outside Program Files and is not elevated), so there the caller downloads the same MSI and launches it
-/// through the Windows Installer (<see cref="LaunchInstaller"/>) — an install rather than the release page.</summary>
+/// and msiexec inherit elevation — no second UAC prompt.
+///
+/// A PORTABLE/dev run lives outside Program Files and is not elevated, so it cannot self-replace; it installs
+/// the same MSI through the Windows Installer instead. That path used to leave the user with a fresh install and
+/// NOTHING running (it "had nothing to relaunch"): the installer completed and the app was simply gone, which
+/// reads exactly as "the update broke — it reinstalls but never restarts". The installer is now WAITED on and
+/// then the freshly installed copy is launched before the portable process quits (see
+/// <see cref="InstallPortableAsync"/> + <see cref="RelaunchInstalled"/>).</summary>
 public static class WindowsUpdater
 {
     /// <summary>True only for the MSI-installed build (AcerHelper.exe under Program Files). A portable or
@@ -79,16 +84,70 @@ public static class WindowsUpdater
         }
     }
 
-    /// <summary>Hand a downloaded MSI to the Windows Installer (shell-execute, so its own UI and UAC appear).
-    /// This is the portable build's install path: unlike the installed build's in-place helper there is nothing
-    /// to unlock and nothing to relaunch — the installer places the app under Program Files while this copy keeps
-    /// running. The staged file is swept on the next download (see <see cref="SweepStale"/>).</summary>
-    public static bool LaunchInstaller(string msiPath)
+    /// <summary>The installed MSI's exe, launched after a portable-run install so the user ends up in the NEW
+    /// build rather than with a fresh install and nothing on screen. A fixed path on purpose: the MSI's
+    /// INSTALLFOLDER is pinned in packaging/AcerHelper.wxs, and a per-machine install ignores wherever the
+    /// portable run happens to live — so there is nothing to probe and nothing to guess. Null off Windows.</summary>
+    public static string? InstalledExePath =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                           "AcerHelper", "AcerHelper.exe")
+            : null;
+
+    /// <summary>PORTABLE/DEV install path: run the MSI through the Windows Installer, WAIT for it to finish, and
+    /// report whether it succeeded so the caller can relaunch into the new build and quit (see
+    /// <see cref="RelaunchInstalled"/>). Blocking I/O — call off the UI thread.
+    ///
+    /// WHY IT WAITS. This used to shell-execute the MSI and return at once, which left the user with a completed
+    /// install and NO running app — the "update reinstalls but does not restart" defect. The elevated msiexec is
+    /// the only thing that can write Program Files, and the caller cannot know it is done unless it waits; "done"
+    /// is exactly when the relaunch is safe. <c>Verb=runas</c> (not a bare shell-execute) is what makes the wait
+    /// honest: it hands back the ELEVATED msiexec that does the work, instead of the non-elevated stub msiexec
+    /// would otherwise leave us holding while it elevates itself and the wait returns before any file is written.
+    /// An already-elevated call (the usual case: app.manifest requireAdministrator) elevates to the same level, so
+    /// no prompt is shown; a medium-IL caller gets the one UAC consent the install needs. /passive shows progress
+    /// with no prompts and /norestart keeps a reboot from being scheduled behind the user's back. A non-zero exit
+    /// is a failed install: we do NOT pretend to relaunch, the caller reports it, and the old copy stays put.
+    /// A declined UAC prompt throws out of Start and is the same failure.</summary>
+    public static async Task<bool> InstallPortableAsync(string msiPath, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows()) return false;
         try
         {
-            using var p = Process.Start(new ProcessStartInfo(msiPath) { UseShellExecute = true });
+            using var p = Process.Start(new ProcessStartInfo
+            {
+                FileName = "msiexec.exe",
+                Arguments = $"/i \"{msiPath}\" /passive /norestart",
+                UseShellExecute = true,   // required for Verb=runas; the handle is the elevated msiexec
+                Verb = "runas",
+            });
+            if (p == null) return false;
+            await p.WaitForExitAsync(ct).ConfigureAwait(false);   // blocks on the ELEVATED process (see above)
+            try { return p.ExitCode == 0; }
+            catch
+            {
+                // Some shell-executed launches refuse ExitCode. The wait already told us it finished, so the
+                // honest fallback is whether the install actually landed a fresh exe.
+                return InstalledExePath is { } exe && File.Exists(exe);
+            }
+        }
+        catch { return false; }   // e.g. Win32Exception 1223: the user declined the UAC prompt
+    }
+
+    /// <summary>Launch the freshly installed build, detached, so an update leaves the user in the NEW app instead
+    /// of with a fresh install and nothing running. Only meaningful after <see cref="InstallPortableAsync"/>
+    /// returned true (the file exists then). The caller exits right after; the new process waits out our
+    /// single-instance mutex (see Bootstrap/Program.cs) and takes over.
+    ///
+    /// UseShellExecute=true is deliberate: it inherits THIS process's elevation token, and every Windows build
+    /// self-elevates (app.manifest requireAdministrator), so the relaunch comes up with the hardware access it
+    /// needs and no second consent prompt.</summary>
+    public static bool RelaunchInstalled()
+    {
+        if (InstalledExePath is not { } exe || !File.Exists(exe)) return false;
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
             return p != null;
         }
         catch { return false; }

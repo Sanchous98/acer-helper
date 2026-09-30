@@ -144,9 +144,33 @@ public class UpdateRouterTests
         Assert.Contains("StartUpdate(() => SelfUpdateAsync(", source, StringComparison.Ordinal);
         // ...and the blocking updater calls still sit on the body's side of the hand-off.
         Assert.Contains("await WindowsUpdater.DownloadAsync", source, StringComparison.Ordinal);
-        Assert.Contains("WindowsUpdater.LaunchInstaller", source, StringComparison.Ordinal);
+        Assert.Contains("WindowsUpdater.InstallPortableAsync", source, StringComparison.Ordinal);
         Assert.Contains("WindowsUpdater.InstallAndExit", source, StringComparison.Ordinal);
         Assert.Contains("AppImageUpdater.ReplaceAsync", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>THE PORTABLE INSTALL MUST RESTART. The defect this pins: the portable Windows path ran the MSI
+    /// and returned, leaving a fresh install and NOTHING running — "it reinstalls but never restarts". The fix
+    /// has two halves that are only useful together: InstallPortableAsync WAITS for msiexec (so the relaunch
+    /// cannot race the install), and the controller relaunches the installed exe before it quits. The source is
+    /// read because a portable launch and a real msiexec are not something a unit test can drive.
+    ///
+    /// MUTATIONS: go back to a fire-and-forget LaunchInstaller — the InstallPortableAsync assert goes red; drop
+    /// the relaunch — the RelaunchInstalled assert goes red.</summary>
+    [Fact]
+    public void APortableInstallWaitsForTheInstallerAndRelaunches()
+    {
+        var controller = Source("UI/AppController.cs");
+        Assert.Contains("await WindowsUpdater.InstallPortableAsync(", controller, StringComparison.Ordinal);
+        Assert.Contains("WindowsUpdater.RelaunchInstalled()", controller, StringComparison.Ordinal);
+        Assert.Contains("ExitApp()", controller, StringComparison.Ordinal);
+        // The old fire-and-forget launcher is gone for good.
+        Assert.DoesNotContain("LaunchInstaller", controller, StringComparison.Ordinal);
+
+        var updater = Source("Infrastructure/WindowsUpdater.cs");
+        Assert.Contains("WaitForExitAsync", updater, StringComparison.Ordinal);
+        Assert.Contains("InstalledExePath", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("LaunchInstaller", updater, StringComparison.Ordinal);
     }
 
     /// <summary>The repository root, taken from the COMPILER's path rather than the current directory (the test

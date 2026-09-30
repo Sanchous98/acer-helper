@@ -553,17 +553,26 @@ internal sealed class AppController
         else PostNotify(() => Loc.T("update.failed"));
     }
 
-    // Portable/development Windows run: download the release MSI and launch the Windows Installer, which shows
-    // its own UI and its own UAC prompt. Unlike the installed build's in-place helper there is nothing to unlock
-    // and nothing to relaunch — the installer places the app under Program Files while this copy keeps running.
+    // Portable/development Windows run: download the release MSI and run it through the Windows Installer, which
+    // shows its own UI and its own UAC prompt. Unlike the installed build's in-place helper there is no lock to
+    // wait out, but there IS still a relaunch to do — the install is only useful once the user is in the NEW
+    // build. So we WAIT for the installer, then launch the installed copy and quit this one. Leaving the portable
+    // process running (the old behaviour) is what made an update look broken: it reinstalled and never restarted.
     private async Task InstallWindowsAsync(string assetUrl)
     {
         PostNotify(() => Loc.T("update.downloading"));
         var (ok, res) = await WindowsUpdater.DownloadAsync(assetUrl).ConfigureAwait(false);
         if (!ok) { PostNotify(() => Loc.T("update.failed") + Err(res)); return; }
 
-        PostNotify(() => Loc.T("update.launching"));
-        if (!WindowsUpdater.LaunchInstaller(res!)) PostNotify(() => Loc.T("update.failed"));
+        PostNotify(() => Loc.T("update.installing"));
+        if (!await WindowsUpdater.InstallPortableAsync(res!).ConfigureAwait(false))
+        {
+            PostNotify(() => Loc.T("update.failed"));
+            return;
+        }
+        // Installed: bring up the new build and step aside. The relaunch is spawned on the UI thread with the
+        // shutdown because both touch the process tree and the application lifetime.
+        Dispatcher.UIThread.Post(() => { WindowsUpdater.RelaunchInstalled(); ExitApp(); });
     }
 
     private async Task GrantHardwareAccessAsync()

@@ -471,9 +471,6 @@
   <data name="update.installing" xml:space="preserve">
     <value>Installing update…</value>
   </data>
-  <data name="update.launching" xml:space="preserve">
-    <value>Launching installer…</value>
-  </data>
   <data name="update.failed" xml:space="preserve">
     <value>Update failed</value>
   </data>

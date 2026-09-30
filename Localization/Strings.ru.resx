@@ -471,9 +471,6 @@
   <data name="update.installing" xml:space="preserve">
     <value>Установка обновления…</value>
   </data>
-  <data name="update.launching" xml:space="preserve">
-    <value>Запуск установщика…</value>
-  </data>
   <data name="update.failed" xml:space="preserve">
     <value>Не удалось обновить</value>
   </data>
