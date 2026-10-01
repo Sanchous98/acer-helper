@@ -38,19 +38,30 @@ resume, and on each mode switch**.
 Writing the offset requires the process to be **elevated** (the app already runs as admin for the EC/WMI
 controls).
 
-## Safety caps, and the raw-vs-effective memory figure
+## The exposed range is the driver's own (2026-10-01)
+
+The slider's bounds come from the range the driver reports for the P0 frequency delta, **unclipped**. There used to
+be an app-side safety cap (`CoreCap = 300` / `MemCap = 1500`) that clipped the exposed range even when the driver
+offered more; it is **gone** — the owner asked to be able to reach the driver's bound.
+
+Measured on this machine (AN18-61, RTX 5070 Ti Laptop, driver 615.x), read live through NvAPI on P0:
 
 ```
-CoreCap = 300 MHz     MemCap = 1500 MHz
+core range:   -1000 .. +1000 MHz
+memory range: -1000 .. +3000 MHz
 ```
 
-The caps are applied **even if the driver reports more headroom**, because a single slider drag to an extreme
-offset can **hang or corrupt the GPU** (NVIDIA **XID 62** — a GPU-side error class that has been observed from
-over-aggressive memory offsets).
+So a core offset of **+1000 MHz** and a memory offset of **+3000 MHz** are now reachable from the slider; a slider
+drag can no longer be stopped at ±300 by the app.
 
-The memory value is the **RAW memory-clock offset**, matching **G-Helper's convention** (it writes the number
-as-is, with no GDDR6 doubling). An **Afterburner "effective" figure is ~2× this** — so the same physical offset
-looks half as large here. That difference is a units convention, not a different limit.
+**The one remaining guard is the read-back, not a cap.** `SetPstates20` is followed by a `GetPstates20` that must
+report back exactly what was asked (`Held`), so a value the vBIOS or driver silently clamps surfaces as a failure
+rather than as a number the app cannot vouch for. On a powered-off / D3-cold dGPU the range reads come back `0..0`;
+that degenerate answer — and only that — is replaced by a guessed ±300 / ±1500 envelope so the slider is not dead.
+
+The memory value is still the **RAW memory-clock offset**, matching **G-Helper's convention** (the number as
+written, with no GDDR6/GDDR7 doubling). An **Afterburner "effective" figure is ~2× this** — so the same physical
+offset looks half as large here. That difference is a units convention, not a different limit.
 
 ## Availability
 

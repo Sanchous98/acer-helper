@@ -6,7 +6,7 @@ namespace AcerHelper.Tests;
 /// THE GPU CLOCK-OFFSET PORT'S POLICY, driven through injected I/O — the Linux port's correctness rests on this
 /// file, because the Linux half (<c>NvidiaGpu.Linux.cs</c>) is excluded from this project's TFM and cannot be
 /// compiled here at all. What is proved here is everything above the P/Invoke: the availability gate's decision
-/// table, the safety caps and the degenerate-range fallback, the clamping, the write/confirm ORDER, and the NVML
+/// table, the range rule and the degenerate-range fallback, the clamping, the write/confirm ORDER, and the NVML
 /// return-code vocabulary the user ends up reading.
 ///
 /// THE SEQUENCE IS ASSERTED AS A TRACE rather than per-effect, for the reason CurveOptimizerPolicyTests gives: a
@@ -33,7 +33,7 @@ public class NvidiaGpuPolicyTests
     private const int MeasuredCoreMin = -1000, MeasuredCoreMax = 1000;
     private const int MeasuredMemMin = -2000, MeasuredMemMax = 6000;
 
-    private const int CoreCap = 300, MemCap = 1500;
+    private const int FallbackCore = 300, FallbackMem = 1500;
 
     // ================= the recording fake =================
 
@@ -169,56 +169,57 @@ public class NvidiaGpuPolicyTests
         Assert.Equal(NvidiaGpuPolicy.DefaultName, Healthy().Create(name: "   ")!.Name);
     }
 
-    // ================= the caps =================
+    // ================= the range rule =================
 
-    /// <summary>The caps are applied even where the driver offers more, and on this machine the driver offers a
-    /// LOT more memory headroom: -2000..+6000 MHz reported against a 1500 MHz cap. The exposed range is the
-    /// intersection, so the top of that driver range is unreachable from the slider.</summary>
+    /// <summary>THE DRIVER'S RANGE IS THE CEILING. This machine's driver reports core ±1000 MHz and memory
+    /// -2000..+6000, and the exposed range is now EXACTLY that — the old app-side cap (±300 / ±1500) is gone, by
+    /// the owner's request to be able to reach the driver's bound. The memory assertion also pins the raw-vs-
+    /// effective convention staying out of it: the number reaches the slider as the driver wrote it.</summary>
     [Fact]
-    public void Ranges_Are_Intersected_With_The_Caps()
+    public void Ranges_Are_The_Drivers_Own_Unclipped()
     {
         var ranges = NvidiaGpuPolicy.RangesFor(MeasuredCoreMin, MeasuredCoreMax, MeasuredMemMin, MeasuredMemMax);
-        Assert.Equal((-CoreCap, CoreCap), ranges.Core);
-        Assert.Equal((-MemCap, MemCap), ranges.Mem);
-        Assert.True(ranges.Mem.Max < MeasuredMemMax, "the driver's +6000 MHz must not reach the slider");
+        Assert.Equal((MeasuredCoreMin, MeasuredCoreMax), ranges.Core);
+        Assert.Equal((MeasuredMemMin, MeasuredMemMax), ranges.Mem);
+        Assert.True(ranges.Mem.Max > FallbackMem, "the driver's +6000 MHz must now reach the slider");
     }
 
-    /// <summary>A driver range narrower than the cap is left alone — the cap bounds the slider, it does not widen
-    /// it.</summary>
+    /// <summary>A driver range narrower than the fallback is returned as-is, and a driver that offers ONLY a
+    /// positive window (a real, non-empty range) is no longer collapsed to stock — the old cap turned this into
+    /// 0..0, the new rule passes it through.</summary>
     [Fact]
-    public void A_Narrower_Driver_Range_Survives_The_Cap()
+    public void A_Narrower_Or_Positive_Only_Driver_Range_Survives()
     {
-        var ranges = NvidiaGpuPolicy.RangesFor(-80, 120, -200, 300);
-        Assert.Equal((-80, 120), ranges.Core);
-        Assert.Equal((-200, 300), ranges.Mem);
+        Assert.Equal((-80, 120), NvidiaGpuPolicy.RangesFor(-80, 120, -200, 300).Core);
+        Assert.Equal((400, 1000), NvidiaGpuPolicy.Range(400, 1000, FallbackCore));
     }
 
     /// <summary>A degenerate 0..0 read is what a powered-off / D3-cold dGPU answers, and reading it literally would
-    /// leave a dead 0..0 slider. The fallback is the full ±cap envelope, which is what the Windows port does too —
-    /// one rule, both OSes.</summary>
+    /// leave a dead 0..0 slider. The fallback is the ±fallback envelope — a guessed, modest bound, never the
+    /// driver's real one, which this read did not carry.</summary>
     [Fact]
     public void A_Degenerate_Zero_Range_Falls_Back_To_The_Envelope()
     {
-        Assert.Equal((-CoreCap, CoreCap), NvidiaGpuPolicy.Cap(0, 0, CoreCap));
-        Assert.Equal((-MemCap, MemCap), NvidiaGpuPolicy.Cap(0, 0, MemCap));
+        Assert.Equal((-FallbackCore, FallbackCore), NvidiaGpuPolicy.Range(0, 0, FallbackCore));
+        Assert.Equal((-FallbackMem, FallbackMem), NvidiaGpuPolicy.Range(0, 0, FallbackMem));
     }
 
-    /// <summary>A driver range lying entirely above the cap has nothing safe to offer, and the intersection is
-    /// genuinely empty. It collapses to stock rather than producing a CROSSED pair — which would reach
-    /// <c>Math.Clamp</c>, throw, and take the UI thread down on a slider drag.</summary>
+    /// <summary>A CROSSED driver range (Min &gt; Max) is the one case that still collapses to stock rather than
+    /// producing a crossed pair — which would reach <c>Math.Clamp</c>, throw, and take the UI thread down on a
+    /// slider drag.</summary>
     [Fact]
-    public void An_Empty_Intersection_Collapses_To_Stock_Instead_Of_A_Crossed_Range()
+    public void A_Crossed_Range_Collapses_To_Stock_Instead_Of_Throwing()
     {
-        var capped = NvidiaGpuPolicy.Cap(400, 1000, CoreCap);
-        Assert.Equal((0, 0), capped);
+        var crossed = NvidiaGpuPolicy.Range(1000, 400, FallbackCore);
+        Assert.Equal((0, 0), crossed);
 
         // And the consequence that matters: the clamp the write path performs cannot throw on it.
-        Assert.Equal(0, NvidiaGpuPolicy.ClampOffset(250, capped));
-        Assert.Equal(0, NvidiaGpuPolicy.ClampOffset(-250, capped));
+        Assert.Equal(0, NvidiaGpuPolicy.ClampOffset(250, crossed));
+        Assert.Equal(0, NvidiaGpuPolicy.ClampOffset(-250, crossed));
     }
 
     [Fact]
-    public void Every_Cap_Result_Is_A_Usable_Range()
+    public void Every_Range_Result_Is_A_Usable_Range()
     {
         // Math.Clamp throws when Min > Max, so this is the invariant the write path depends on. Swept rather than
         // spot-checked because the crossing case is a narrow band of driver answers.
@@ -226,8 +227,8 @@ public class NvidiaGpuPolicyTests
         {
             for (var max = min; max <= 3000; max += 89)
             {
-                var (lo, hi) = NvidiaGpuPolicy.Cap(min, max, CoreCap);
-                Assert.True(lo <= hi, $"Cap({min}, {max}) produced a crossed range ({lo}, {hi})");
+                var (lo, hi) = NvidiaGpuPolicy.Range(min, max, FallbackCore);
+                Assert.True(lo <= hi, $"Range({min}, {max}) produced a crossed range ({lo}, {hi})");
                 Assert.InRange(NvidiaGpuPolicy.ClampOffset(0, (lo, hi)), lo, hi);
             }
         }
@@ -269,11 +270,14 @@ public class NvidiaGpuPolicyTests
             fake.Calls());
     }
 
+    /// <summary>The write path clamps to the DRIVER's range (the fake's Healthy() reports this machine's measured
+    /// values), not to any app-side cap — there is no cap any more.</summary>
     [Theory]
-    [InlineData(1000, 5000, CoreCap, MemCap)]     // far above
-    [InlineData(-9999, -9999, -CoreCap, -MemCap)] // far below
-    [InlineData(CoreCap + 1, MemCap + 1, CoreCap, MemCap)]
-    public void Set_Clamps_To_The_Capped_Range(int askedCore, int askedMem, int expectCore, int expectMem)
+    [InlineData(9999, 9999, MeasuredCoreMax, MeasuredMemMax)]           // far above the driver's ceiling
+    [InlineData(-9999, -9999, MeasuredCoreMin, MeasuredMemMin)]         // far below the driver's floor
+    [InlineData(MeasuredCoreMax + 1, MeasuredMemMax + 1,
+                MeasuredCoreMax, MeasuredMemMax)]
+    public void Set_Clamps_To_The_Driver_Range(int askedCore, int askedMem, int expectCore, int expectMem)
     {
         var fake = Healthy();
         var policy = fake.Policy();

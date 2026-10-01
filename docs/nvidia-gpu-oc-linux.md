@@ -14,7 +14,7 @@ and a read-only `ctypes` probe; nothing here was inferred from documentation.
 
 | file | what it owns |
 |---|---|
-| `Infrastructure/Vendors/Generic/NvidiaGpuPolicy.cs` | un-suffixed: the availability gate, the safety caps, the range rule, the clamping, the write/confirm order and the NVML return-code vocabulary |
+| `Infrastructure/Vendors/Generic/NvidiaGpuPolicy.cs` | un-suffixed: the availability gate, the range rule, the clamping, the write/confirm order and the NVML return-code vocabulary |
 | `Infrastructure/Vendors/Generic/NvidiaGpu.Linux.cs` | the library, the P/Invoke declarations, the device handle, the probe |
 | `Infrastructure/Vendors/Generic/NvidiaGpu.Windows.cs` | the NvAPI transport; now consumes `NvidiaGpuPolicy`'s caps and clamp rather than keeping a second copy |
 | `tests/AcerHelper.Tests/NvidiaGpuPolicyTests.cs` | 36 tests over the policy, driven through a recording fake |
@@ -25,9 +25,9 @@ project targets `net10.0-windows` and `AcerHelper.csproj`'s `<Compile Remove>` k
 TFM, so anything left in the Linux file cannot be compiled by the suite at all. The UI is OS-agnostic and needed no
 change: `NvidiaGpu.Linux.cs` presents exactly the surface its Windows twin does.
 
-**One rule was moved rather than duplicated.** The safety caps (`CoreCap`/`MemCap`) and `ClampOffset` now live in
-`NvidiaGpuPolicy` and both OS ports call them. That is why `NvidiaGpu.Windows.cs` changed: two OS-local copies of a
-safety rule are the thing that drifts while both look correct.
+**One rule was moved rather than duplicated.** The range rule (`Range`/`RangesFor`) and `ClampOffset` live in
+`NvidiaGpuPolicy` and both OS ports call them. That is why `NvidiaGpu.Windows.cs` changed: two OS-local copies of the
+rule are the thing that drifts while both look correct.
 
 ## The library
 
@@ -120,10 +120,12 @@ Read as `uid=1000` with `CapEff=0`:
 | live clocks | graphics 180, SM 180, memory 405, video 600 MHz |
 | supported memory clocks | `405, 810, 9001, 10821, 14001` |
 
-**The memory range is why the caps exist on this side.** The driver offers `+6000` MHz of headroom against
-`NvidiaGpuPolicy.MemCap = 1500`, so the slider's top is set by the app's safety rule, not by the driver. The core
-range (`±1000`) is likewise intersected with `CoreCap = 300`. Without the caps this port would expose four times
-the offset the Windows port does for the same physical effect.
+**The exposed range is now the driver's own, NOT capped.** The driver offers `+6000` MHz of memory headroom and
+`±1000` MHz of core, and since 2026-10-01 the slider's bounds are exactly those — the old app-side cap
+(`NvidiaGpuPolicy.MemCap = 1500` / `CoreCap = 300`) is **gone**, so both ports expose the same full driver range for
+the same physical effect. The one remaining guard is the write path's read-back (`Held`): a value the driver does
+not confirm it holds is reported as a failure, not shown as a number the app cannot vouch for. A degenerate `0..0`
+range (a D3-cold dGPU) is the one case replaced by a guessed ±300 / ±1500 envelope so the slider is not dead.
 
 **Units: NVML speaks MHz on both sides** — the getters, the setters and the range getters all take and return a
 plain `int` in MHz. There is therefore **no kHz conversion** here, unlike the Windows port whose
@@ -239,7 +241,7 @@ offsets untouched; that the `…ClkVfOffset` and `…ClockOffsets` families agre
 no offset.
 
 **Verified by test (36 tests, `NvidiaGpuPolicyTests`):** the gate's decision table; that the probe writes nothing;
-the caps and the degenerate-range fallback; that no `Cap` result can be a crossed range (so `Math.Clamp` cannot
+the range rule and the degenerate-range fallback; that no `Range` result can be a crossed range (so `Math.Clamp` cannot
 throw on a slider drag); clamping; the write order (core → memory → confirm core → confirm memory) with fail-fast;
 that a read-back mismatch or a failed read-back is a failure; and the return-code vocabulary.
 

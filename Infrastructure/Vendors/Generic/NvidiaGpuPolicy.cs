@@ -8,9 +8,15 @@ namespace AcerHelper.Infrastructure.Vendors.Generic;
 // stays in the OS files is I/O: NvAPI function pointers on Windows, NVML entry points on Linux.
 //
 // IT IS THE AXIS'S SHARED POLICY, NOT THE LINUX ONE'S, and the Windows port consumes the two rules below
-// (<see cref="Cap"/> and <see cref="ClampOffset"/>) rather than carrying a private copy. That is a decision: the
-// caps are a SAFETY rule whose whole purpose is that a slider drag cannot reach an extreme offset (NVIDIA XID 62),
-// and two OS-local copies of a safety rule are exactly the thing that drifts while both look correct.
+// (<see cref="Range"/> and <see cref="ClampOffset"/>) rather than carrying a private copy. That is a decision: the
+// range rule is what decides the slider's bounds on BOTH OSes, and two OS-local copies of it are exactly the thing
+// that drifts while both look correct.
+//
+// THE DRIVER'S OWN RANGE IS THE CEILING. There used to be an app-side safety cap (CoreCap/MemCap) that clipped the
+// exposed range to ±300 MHz core / ±1500 MHz memory. The owner asked to be able to reach the driver's bound and see
+// what the silicon does, so that cap is GONE: the range rule now hands the driver's own reported range straight to
+// the slider. What remains is the degenerate-read fallback (<see cref="FallbackCore"/>/<see cref="FallbackMem"/>),
+// and the write path's read-back — the app still refuses to claim an offset the driver did not confirm it holds.
 //
 // UNITS: NVML speaks MHz on BOTH sides of this axis — nvmlDeviceGet/SetGpcClkVfOffset and …MemClkVfOffset take and
 // return a plain `int` in MHz. There is therefore NO kHz conversion here, unlike the Windows port, whose NvAPI
@@ -42,16 +48,13 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
     /// header, so it can never be empty.</summary>
     internal const string DefaultName = "NVIDIA GPU";
 
-    // ---- safety caps on the exposed offset range (MHz) ----
-    // Applied EVEN WHERE THE DRIVER OFFERS MORE: one slider drag to an extreme offset can hang or corrupt the GPU
-    // (NVIDIA XID 62). It is not theoretical on this side — the memory range this machine's driver reports is
-    // -2000..+6000 MHz, four times the cap.
-    //
-    // The memory value is the RAW memory-clock offset, matching G-Helper's convention (the number as written, with
-    // no GDDR6/GDDR7 doubling); an Afterburner "effective" figure is ~2× this. Same convention as Windows, so the
-    // two OSes show the same number for the same physical offset.
-    internal const int CoreCap = 300;
-    internal const int MemCap = 1500;
+    // ---- the range rule's fallback envelope (MHz) ----
+    // NOT A CAP ANY MORE: the driver's own reported range is the exposed range (see the header). This envelope is
+    // used ONLY when a range read comes back DEGENERATE (0..0) — the answer a powered-off / D3-cold dGPU gives on an
+    // Optimus laptop, where reading it literally would leave a dead 0..0 slider. It is deliberately modest for a
+    // guessed bound; the real values come straight from the driver on any dGPU that is actually awake.
+    internal const int FallbackCore = 300;
+    internal const int FallbackMem = 1500;
 
     // ---- NVML return codes this axis actually meets ----
     // Named rather than inlined because the NUMBER is what the transport hands back and the MEANING is what the
@@ -96,7 +99,7 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
         internal static RangeResult Failure(int code) => new(code, 0, 0);
     }
 
-    /// <summary>The axis's two allowed ranges, after the caps above have been applied. Held as one value so the
+    /// <summary>The axis's two allowed ranges, after the range rule above has been applied. Held as one value so the
     /// pair cannot be assembled from two reads taken a probe apart.</summary>
     internal readonly record struct OffsetRanges((int Min, int Max) Core, (int Min, int Max) Mem);
 
@@ -224,31 +227,31 @@ internal sealed class NvidiaGpuPolicy : IGpuOverclock
 
     // ---- the rules ----
 
-    /// <summary>Intersect a driver-reported range with a safety cap.
+    /// <summary>The exposed range for one domain: the driver's own reported range, EXCEPT for a degenerate read.
     ///
-    /// A DEGENERATE READ FALLS BACK TO THE FULL ±cap ENVELOPE: a driver that answers 0..0 is not saying "no offset
-    /// is allowed", it is not answering usefully — on an Optimus laptop that is what a dGPU which is powered off /
-    /// D3-cold at probe time looks like — and a literal reading would leave the user a dead 0..0 slider.
+    /// A DEGENERATE READ (0..0) FALLS BACK TO THE ±fallback ENVELOPE: a driver that answers 0..0 is not saying "no
+    /// offset is allowed", it is not answering usefully — on an Optimus laptop that is what a dGPU which is powered
+    /// off / D3-cold at probe time looks like — and a literal reading would leave the user a dead 0..0 slider.
     ///
-    /// AN EMPTY INTERSECTION COLLAPSES TO 0..0 RATHER THAN THROWING. A driver range lying entirely above the cap
-    /// (say +400..+1000 MHz against a 300 cap) has nothing safe to offer; returning a crossed pair instead would
-    /// reach <see cref="Math.Clamp(int,int,int)"/>, which THROWS on Min &gt; Max — the difference between a hidden
-    /// slider and an exception on the UI thread.
-    /// </summary>
-    internal static (int Min, int Max) Cap(int driverMin, int driverMax, int cap)
+    /// A CROSSED OR EMPTY driver range COLLAPSES TO 0..0 RATHER THAN THROWING. A driver that reports Min &gt; Max (or
+    /// a range with no room) has nothing usable to offer; returning a crossed pair instead would reach
+    /// <see cref="Math.Clamp(int,int,int)"/>, which THROWS on Min &gt; Max — the difference between a hidden slider and
+    /// an exception on the UI thread. A driver that offers only a POSITIVE window (say +400..+1000) is a legitimate
+    /// non-empty range and is returned as-is, crossed-guard aside.
+    ///
+    /// The driver's own range is the ceiling — this rule no longer clips it to an app-side cap (see the file header).</summary>
+    internal static (int Min, int Max) Range(int driverMin, int driverMax, int fallback)
     {
-        if (driverMax <= 0 && driverMin >= 0) return (-cap, cap);   // degenerate 0..0 read
-        var min = Math.Max(driverMin, -cap);
-        var max = Math.Min(driverMax, cap);
-        return min > max ? (0, 0) : (min, max);                     // empty intersection -> stock only
+        if (driverMax <= 0 && driverMin >= 0) return (-fallback, fallback);   // degenerate 0..0 read
+        return driverMin <= driverMax ? (driverMin, driverMax) : (0, 0);      // crossed -> stock only
     }
 
-    /// <summary>Both ranges, capped. One entry point so the core and memory caps cannot be applied to the wrong
-    /// pair of numbers at a call site.</summary>
+    /// <summary>Both ranges, through <see cref="Range"/>. One entry point so the core and memory fallbacks cannot
+    /// be applied to the wrong pair of numbers at a call site.</summary>
     internal static OffsetRanges RangesFor(int coreMin, int coreMax, int memMin, int memMax)
-        => new(Cap(coreMin, coreMax, CoreCap), Cap(memMin, memMax, MemCap));
+        => new(Range(coreMin, coreMax, FallbackCore), Range(memMin, memMax, FallbackMem));
 
-    /// <summary>Bring one requested offset inside its allowed range. <see cref="Cap"/> guarantees Min ≤ Max, which
+    /// <summary>Bring one requested offset inside its allowed range. <see cref="Range"/> guarantees Min ≤ Max, which
     /// <see cref="Math.Clamp(int,int,int)"/> requires.</summary>
     internal static int ClampOffset(int mhz, (int Min, int Max) range) => Math.Clamp(mhz, range.Min, range.Max);
 

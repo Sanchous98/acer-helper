@@ -35,11 +35,11 @@ internal sealed unsafe partial class NvidiaGpu : IGpuOverclock, IDisposable
     private const uint CLOCK_MEMORY   = 4;
     private const uint PSTATE_P0      = 0;   // NVAPI_GPU_PERF_PSTATE_P0 (the only editable/meaningful state)
 
-    // The safety caps on the exposed offset range (MHz) — and the raw-vs-effective memory convention that goes
-    // with them — live in NvidiaGpuPolicy (CoreCap / MemCap), NOT here: they are a safety rule, the Linux port
-    // needs the identical rule, and a safety rule kept in two OS-local copies is one that drifts while both look
-    // correct. The Windows half keeps only what is genuinely NvAPI's: the reading of the P0 frequency deltas,
-    // which are kHz there and have to be divided down, and the struct layout they arrive in.
+    // The rule for the exposed offset range — and the raw-vs-effective memory convention that goes with it — lives
+    // in NvidiaGpuPolicy (Range / RangesFor), NOT here: it is the same rule the Linux port needs, and two OS-local
+    // copies of it are exactly the thing that drifts while both look correct. The Windows half keeps only what is
+    // genuinely NvAPI's: the reading of the P0 frequency deltas, which are kHz there and have to be divided down,
+    // and the struct layout they arrive in.
     // See docs/nvidia-gpu-oc.md (this port) and docs/nvidia-gpu-oc-linux.md (the NVML one).
 
     // nvapi64.dll's single export. Blittable (uint -> nint), so the source-generated marshalling is AOT-safe.

@@ -5,7 +5,7 @@ using AcerHelper.Domain;
 namespace AcerHelper.Infrastructure.Vendors.Generic;
 
 // THE LINUX TRANSPORT FOR THE GPU CLOCK-OFFSET AXIS, AND NOTHING ELSE: this file owns the library, the P/Invoke
-// declarations, the device handle and the probe. Every rule — the availability gate's decision, the safety caps,
+// declarations, the device handle and the probe. Every rule — the availability gate's decision, the range rule,
 // the clamping, the write/confirm ORDER and the NVML return-code vocabulary — lives in NvidiaGpuPolicy.cs (an
 // UN-SUFFIXED file) because this one cannot be compiled by the test project: AcerHelper.csproj's <Compile Remove>
 // keeps **/*.Linux.cs out of the test TFM. If a rule is worth proving, it does not belong here.
