@@ -36,6 +36,12 @@ jobs:
   windows:
     name: AcerHelper.exe + MSI
     runs-on: windows-2022
+    # A hung step must not sit for GitHub's 6-hour default. Measured over the last ~40 successful
+    # releases, this job runs 2.5-2.8 min typically and ~4.3 min at its slowest (v0.35.1, a cold
+    # NuGet/AOT case), so 5 min is the owner's bound with ~15% headroom above the worst observed run.
+    # It is tight: a cold-cache or slow-runner release can exceed it and be CANCELLED (timeout-minutes
+    # fails the whole job, loudly). Raise it if a release ever trips this.
+    timeout-minutes: 5
     permissions:
       contents: write        # create/attach to the GitHub Release on a version tag
     steps:
@@ -194,6 +200,10 @@ jobs:
     # reaches the Docker daemon and BuildKit through the runner (its steps would run inside fedora, with no
     # docker CLI and no socket). Packing an AppImage needs nothing fedora provided.
     runs-on: ubuntu-latest
+    # Same reasoning as the windows job: measured 1.8-2.2 min across the last ~40 releases, so 5 min
+    # is the owner's bound with a generous margin above the observed time (the container buildx with a
+    # warm gha cache is the fastest part of the run).
+    timeout-minutes: 5
     permissions:
       contents: write        # attach the AppImage to the GitHub Release on a version tag
     steps:
