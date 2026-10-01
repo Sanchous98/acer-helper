@@ -721,32 +721,46 @@ internal sealed class AppController
 
     // GPU core/memory clock offsets, applied + persisted per performance mode by the service. Like SetFan:
     // no Refresh() — nothing in the shared UI/tray depends on it and it fires on every debounced slider drag.
-    // Failure is surfaced so a rejected write (e.g. dGPU powered off) doesn't fail silently. An ABSENT port is a
-    // returned false (capability, no message); a PRESENT port's refusal is a PortWriteFailedException, caught here.
+    //
+    // OFF THE UI THREAD, like SetCo: the body holds the graph lock across Save() (a whole-settings JSON write +
+    // fsync) AND makes the blocking NvAPI SetPstates20 call, so running it inline froze the cursor for the
+    // duration of every apply the owner dragged. The view-model still calls this synchronously; the work is what
+    // is handed to the pool, and the failure is posted back (Notify is UI-thread-only). The offsets debounce in
+    // the view-model, so a drag produces ONE apply — this hand-off is not a queue.
     private void SetGpuOc(int core, int mem)
     {
-        try { _applyGpuOffsets.Run(new GpuAxisState(core, mem)); }
-        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.gpu_overclock_failed") + Err(ex.Reason)); }
+        _ = Task.Run(() =>
+        {
+            try { _applyGpuOffsets.Run(new GpuAxisState(core, mem)); }
+            catch (PortWriteFailedException ex) { PostNotify(() => Loc.T("oc.gpu_overclock_failed") + Err(ex.Reason)); }
+        });
     }
 
     // The GPU power level, applied + persisted per performance mode like the offsets above and for the same
-    // reasons: no Refresh() (nothing shared depends on it) and failure surfaced. `null` is the explicit "follow
-    // the profile" choice — the envelope then moves with the performance mode, which is the old behaviour — and
-    // is stored as such, not written to the EC here. An ABSENT port is a returned false (capability, no
-    // message); a PRESENT port's refusal is a PortWriteFailedException, caught here.
+    // reasons: no Refresh(), off the UI thread (same Store+Save+port shape), failure posted back. `null` is the
+    // explicit "follow the profile" choice — the envelope then moves with the performance mode, which is the old
+    // behaviour — and is stored as such, not written to the EC here. An ABSENT port is a returned false
+    // (capability, no message); a PRESENT port's refusal is a PortWriteFailedException, caught on the pool.
     private void SetGpuPower(GpuPowerLevel? level)
     {
-        try { _applyGpuPower.Run(level); }
-        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.gpu_power_failed") + Err(ex.Reason)); }
+        _ = Task.Run(() =>
+        {
+            try { _applyGpuPower.Run(level); }
+            catch (PortWriteFailedException ex) { PostNotify(() => Loc.T("oc.gpu_power_failed") + Err(ex.Reason)); }
+        });
     }
 
-    // CPU power-mode overlay, applied + persisted per performance mode by the service. Like SetGpuOc: no
-    // Refresh() (nothing shared depends on it); failure surfaced. An absent port returns false silently; a present
-    // port's refusal is a PortWriteFailedException, caught here.
+    // CPU power-mode overlay, applied + persisted per performance mode by the service. Same off-the-UI-thread
+    // shape as SetGpuOc/SetGpuPower: the body stores + Save()s and writes the port, so it must not run on the
+    // dispatcher. An absent port returns false silently; a present port's refusal is a PortWriteFailedException,
+    // caught on the pool and posted back.
     private void SetCpuPower(string id)
     {
-        try { _applyCpuPower.Run(id); }
-        catch (PortWriteFailedException ex) { Notify(Loc.T("oc.power_mode_failed") + Err(ex.Reason)); }
+        _ = Task.Run(() =>
+        {
+            try { _applyCpuPower.Run(id); }
+            catch (PortWriteFailedException ex) { PostNotify(() => Loc.T("oc.power_mode_failed") + Err(ex.Reason)); }
+        });
     }
 
     // CPU undervolt (all-core Curve Optimizer), applied + persisted per performance mode by the service. Unlike

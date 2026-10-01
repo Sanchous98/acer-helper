@@ -229,7 +229,7 @@ public class SectionSwitchPerformanceTests
         Assert.DoesNotContain("<ScrollViewer", xaml, StringComparison.Ordinal);
     }
 
-    /// <summary>THE OPTIONS ROWS KEEP THEIR OWN SPACING, they do not fill the frame by stretching. A one-column
+    /// <summary>AND THE OPTIONS ROWS KEEP THEIR OWN SPACING, they do not fill the frame by stretching. A one-column
     /// UniformGrid was briefly used to fill the taller fixed frame, but it divides the frame between the rows and
     /// so widens the gaps — the owner's "надо вернуть небольшие отступы у параметров". This pins the plain
     /// spacing panel and the absence of the stretching layout, so the gaps cannot silently drift again.</summary>
@@ -241,5 +241,42 @@ public class SectionSwitchPerformanceTests
         Assert.Contains("<StackPanel Spacing=\"12\"/>", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<UniformGrid Columns=\"1\"/>", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("VerticalAlignment=\"Stretch\"", xaml, StringComparison.Ordinal);
+    }
+
+    /// <summary>THE GPU APPLY DOES NOT RUN ON THE UI THREAD. The owner reported the cursor hitching on every GPU
+    /// setting change ("применение настроек gpu вызывает подвисания курсора"). The body of an offsets/power apply
+    /// holds the graph lock across <c>Save()</c> — a whole-settings JSON serialize + fsync — AND makes the blocking
+    /// NvAPI/EC write, so running it inline on the dispatcher froze the cursor for the duration of the apply. The
+    /// three applied-edit handlers the Tuning drawer drives (GPU offsets, GPU power level, CPU power overlay) must
+    /// therefore hand their work to the pool and post any failure back, exactly as <c>SetCo</c> already does — a
+    /// bare <c>try { …Run(…) }</c> on the dispatcher is precisely the regression this pins.
+    ///
+    /// A source guard, because <c>AppController</c> is not constructible here and a "the handler returned before
+    /// the work ran" property is not observable through the delegate any other way (the same technique and the
+    /// same limit as the guards above).</summary>
+    [Theory]
+    [InlineData("SetGpuOc")]
+    [InlineData("SetGpuPower")]
+    [InlineData("SetCpuPower")]
+    public void TheAppliedTuningEditsRunOffTheUiThread(string handler)
+    {
+        var body = MethodBody(Source("UI/AppController.cs"), handler);
+
+        Assert.Contains("Task.Run(", body, StringComparison.Ordinal);          // off the dispatcher
+        Assert.Contains("_ = Task.Run(", body, StringComparison.Ordinal);      // ...and actually started
+        Assert.Contains("PostNotify(", body, StringComparison.Ordinal);        // the failure marshals back to the UI
+        Assert.DoesNotContain("Notify(Loc", body, StringComparison.Ordinal);   // ...not reported inline on the UI thread
+    }
+
+    /// <summary>The handler's own source, from its signature to the line that closes it — so an assert about
+    /// "off the UI thread" reads the method under test rather than the whole file (where another handler's
+    /// <c>Task.Run</c> would satisfy it by accident).</summary>
+    private static string MethodBody(string code, string handler)
+    {
+        var start = code.IndexOf($"private void {handler}", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"{handler} is gone from AppController.cs");
+        var end = code.IndexOf("\n    }", start, StringComparison.Ordinal);
+        Assert.True(end > start, $"could not find the end of {handler}");
+        return code[start..end];
     }
 }
