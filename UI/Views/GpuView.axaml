@@ -16,23 +16,30 @@
       <Button Grid.Column="1" Content="{l:Tr 'oc.reset'}" Padding="10,4" Command="{Binding ResetCommand}"/>
     </Grid>
 
-    <!-- Core clock offset (MHz). -->
-    <Grid ColumnDefinitions="Auto,*,Auto">
+    <!-- Core clock offset (MHz). The slider gives the quick coarse drag; the number box beside it is the EXACT
+         entry (Enter / leaving the box commits via ApplyCoreText) — a drag cannot land finer than one pixel of
+         the track, which at the driver's full range is several MHz. The unit is a separate label so the box is
+         just a number, easy to edit. -->
+    <Grid ColumnDefinitions="Auto,*,72,28">
       <TextBlock Classes="muted" Width="64" VerticalAlignment="Center" Text="{l:Tr 'oc.gpu_core'}"/>
       <Slider Grid.Column="1" Minimum="{Binding CoreMin}" Maximum="{Binding CoreMax}" TickFrequency="25"
               VerticalAlignment="Center" Value="{Binding Core, Mode=TwoWay}"/>
-      <TextBlock Grid.Column="2" Width="72" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
-                 Text="{Binding CoreLabel}"/>
+      <TextBox Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right"
+               Text="{Binding CoreText, Mode=TwoWay}"
+               KeyDown="OnCoreKeyDown" LostFocus="OnCoreLostFocus"/>
+      <TextBlock Grid.Column="3" Classes="muted" Margin="6,0,0,0" VerticalAlignment="Center" Text="MHz"/>
     </Grid>
 
     <!-- Memory clock offset (MHz). Raw memory-clock offset (G-Helper convention), not the doubled
-         "effective" figure Afterburner shows. -->
-    <Grid ColumnDefinitions="Auto,*,Auto">
+         "effective" figure Afterburner shows. Same slider + exact-entry pair as the core row. -->
+    <Grid ColumnDefinitions="Auto,*,72,28">
       <TextBlock Classes="muted" Width="64" VerticalAlignment="Center" Text="{l:Tr 'oc.gpu_memory'}"/>
       <Slider Grid.Column="1" Minimum="{Binding MemMin}" Maximum="{Binding MemMax}" TickFrequency="50"
               VerticalAlignment="Center" Value="{Binding Mem, Mode=TwoWay}"/>
-      <TextBlock Grid.Column="2" Width="72" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
-                 Text="{Binding MemLabel}"/>
+      <TextBox Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right"
+               Text="{Binding MemText, Mode=TwoWay}"
+               KeyDown="OnMemKeyDown" LostFocus="OnMemLostFocus"/>
+      <TextBlock Grid.Column="3" Classes="muted" Margin="6,0,0,0" VerticalAlignment="Center" Text="MHz"/>
     </Grid>
 
     <!-- GPU power level: which of the EC's fixed envelope rows the dGPU runs at, remembered per mode. Only

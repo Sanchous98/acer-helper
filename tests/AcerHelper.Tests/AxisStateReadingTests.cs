@@ -185,6 +185,80 @@ public class AxisStateReadingTests
         Assert.Empty(vm.PowerNames);
     }
 
+    /// <summary>THE EXACT ENTRY. Typing into the box and committing (Enter / lost focus) must reach the SAME
+    /// value a drag would — so a core offset of +287 (which no drag on a ~250 px track could land on exactly)
+    /// is settable, clamped to the range, and the box is rewritten to the applied value.</summary>
+    [Theory]
+    [InlineData("287", 287)]        // a value a drag cannot hit exactly
+    [InlineData("+250", 250)]       // a leading '+' (the label's own spelling)
+    [InlineData("-150", -150)]      // negative
+    [InlineData(" 120 ", 120)]      // spaces
+    [InlineData("80 MHz", 80)]      // a pasted label
+    [InlineData("9999", 300)]       // clamped to the range, like the slider
+    [InlineData("-9999", -200)]     // clamped the other way
+    public void CommittingTheCoreTextBoxSetsTheExactOffset(string typed, int expected)
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), [],
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: _ => { });
+
+        vm.CoreText = typed;
+        vm.ApplyCoreText();
+
+        Assert.Equal(expected, vm.Core);
+        Assert.Equal(Fmt(expected), vm.CoreText);
+    }
+
+    /// <summary>An unparsable entry does not move the offset and snaps the box back to the applied value — a
+    /// control that reads as "what is set" must not be left holding junk.</summary>
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("-")]
+    public void AnUnparsableCoreEntrySnapsBackWithoutMovingTheOffset(string typed)
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), [],
+                                  new GpuAxisState(42, 0), set: (_, _) => { }, setPower: _ => { });
+
+        vm.CoreText = typed;
+        vm.ApplyCoreText();
+
+        Assert.Equal(42, vm.Core);
+        Assert.Equal("+42", vm.CoreText);
+    }
+
+    /// <summary>The memory box is the same contract, on its own range.</summary>
+    [Fact]
+    public void CommittingTheMemoryTextBoxUsesItsOwnRange()
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 3000), [],
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: _ => { });
+
+        vm.MemText = "2500";
+        vm.ApplyMemText();
+
+        Assert.Equal(2500, vm.Mem);
+        Assert.Equal("+2500", vm.MemText);
+    }
+
+    /// <summary>The typed value travels the DRAG's path: it drives <c>Core</c>, whose change hook rewrites the
+    /// box (keeping it in step) and arms the same debounce, so nothing about exact entry bypasses apply/persist.</summary>
+    [Fact]
+    public void TheTypedValueFlowsThroughTheSameCorePropertyAsADrag()
+    {
+        var vm = new GpuViewModel("GPU", (-200, 300), (-1000, 1500), [],
+                                  new GpuAxisState(0, 0), set: (_, _) => { }, setPower: _ => { });
+
+        vm.CoreText = "275";
+        vm.ApplyCoreText();
+
+        Assert.Equal(275, vm.Core);
+        Assert.Equal("+275", vm.CoreText);
+    }
+
+    /// <summary>The display format the view model writes into the box ("+42" / "-150" / "0"), mirrored here so
+    /// the assertions above read the applied number rather than re-deriving it.</summary>
+    private static string Fmt(int mhz) => $"{(mhz > 0 ? "+" : "")}{mhz}";
+
     /// <summary>The port's canonical rows, shared by the tests above. Their order is the EC's own (most power
     /// first), which is what the dropdown index has to follow. The label keys are placeholders — no assertion
     /// here reads a row NAME, only the index mapping.</summary>

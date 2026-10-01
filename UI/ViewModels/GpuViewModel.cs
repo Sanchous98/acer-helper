@@ -62,23 +62,33 @@ public sealed partial class GpuViewModel : SectionViewModel
         _core = Math.Clamp(initial.Core, CoreMin, CoreMax);
         _mem = Math.Clamp(initial.Mem, MemMin, MemMax);
         _powerIndex = IndexOfLevel(initial.Power);
-        _coreLabel = Fmt(_core);
-        _memLabel = Fmt(_mem);
+        _coreText = Fmt(_core);
+        _memText = Fmt(_mem);
         _loading = false;
     }
 
     [ObservableProperty] private double _core;
     [ObservableProperty] private double _mem;
-    [ObservableProperty] private string _coreLabel;
-    [ObservableProperty] private string _memLabel;
+
+    /// <summary>The exact-entry text beside each slider — a plain signed MHz number ("+275", "-150", "0"), with
+    /// the unit shown as a separate label so editing is just editing the number. Typing is the answer to the
+    /// slider's coarse resolution: at the driver's full range a 2000 MHz core span sits on ~250 px of track, so a
+    /// drag can only land within several MHz — a typed number is exact.
+    ///
+    /// THE BOX IS A COMMIT-TARGET, NOT A LIVE SOURCE: the parse+clamp happens in <see cref="ApplyCoreText"/> /
+    /// <see cref="ApplyMemText"/> (Enter / lost focus), never on every keystroke, so a half-typed "-" or "1" does
+    /// not drag the slider around mid-edit. A value out of range is CLAMPED (like the slider itself) rather than
+    /// refused, and the box is rewritten to the clamped result so what it shows is what was applied.</summary>
+    [ObservableProperty] private string _coreText;
+    [ObservableProperty] private string _memText;
 
     /// <summary>The selected power row: 0 is <em>follow the profile</em>, and 1..N index <c>_levels</c>. A pick
     /// is applied immediately — no debounce — because it is a discrete change, not a slider drag; the EC write
     /// is enqueue-only anyway, so it lands on the controller's writer thread.</summary>
     [ObservableProperty] private int _powerIndex;
 
-    partial void OnCoreChanged(double value) { CoreLabel = Fmt(value); Debounce(); }
-    partial void OnMemChanged(double value)  { MemLabel = Fmt(value); Debounce(); }
+    partial void OnCoreChanged(double value) { CoreText = Fmt(value); Debounce(); }
+    partial void OnMemChanged(double value)  { MemText = Fmt(value); Debounce(); }
     partial void OnPowerIndexChanged(int value) { if (!_loading) _setPower(LevelAt(value)); }
 
     /// <summary>Reset the offsets to stock (0/0). Setting the properties fires the debounced apply, so this
@@ -114,6 +124,33 @@ public sealed partial class GpuViewModel : SectionViewModel
         _debounce.Restart();
     }
 
+    /// <summary>Commit the typed exact core offset (Enter / lost focus): parse, clamp to the slider's range, apply.</summary>
+    public void ApplyCoreText()
+    {
+        if (ParseMhz(CoreText, out var value)) Core = Math.Clamp(value, CoreMin, CoreMax);
+        else CoreText = Fmt(Core);   // unparsable -> snap the box back to what is actually applied
+    }
+
+    /// <summary>Commit the typed exact memory offset (Enter / lost focus).</summary>
+    public void ApplyMemText()
+    {
+        if (ParseMhz(MemText, out var value)) Mem = Math.Clamp(value, MemMin, MemMax);
+        else MemText = Fmt(Mem);
+    }
+
+    /// <summary>Parse a MHz entry: an optional sign, digits, and an optional trailing unit/non-digits. Returns
+    /// false for anything that carries no number at all (empty, "abc", a lone "-"). Tolerates a leading "+", a
+    /// Unicode minus and spaces, and ignores a trailing unit, so a paste of the label ("+250 MHz") still works.</summary>
+    internal static bool ParseMhz(string? text, out int mhz)
+    {
+        mhz = 0;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var s = text.Trim().Replace('\u2212', '-');   // U+2212 MINUS SIGN -> ASCII
+        var end = 0;
+        while (end < s.Length && (s[end] == '+' || s[end] == '-' || s[end] == ' ' || char.IsDigit(s[end]))) end++;
+        return int.TryParse(s[..end].Replace(" ", ""), out mhz);
+    }
+
     private void Apply() => _set((int)Core, (int)Mem);
 
     // The debounce tick: stop the (periodic) schedule first, so a late tick cannot re-enter, then apply once.
@@ -134,5 +171,5 @@ public sealed partial class GpuViewModel : SectionViewModel
     private GpuPowerLevel? LevelAt(int index)
         => index >= 1 && index <= _levels.Length ? _levels[index - 1] : null;
 
-    private static string Fmt(double mhz) => $"{(mhz > 0 ? "+" : "")}{(int)mhz} MHz";
+    private static string Fmt(double mhz) => $"{(mhz > 0 ? "+" : "")}{(int)mhz}";
 }
