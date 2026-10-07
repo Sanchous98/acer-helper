@@ -196,8 +196,8 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
     }
 
-    /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch, the guided sweep's
-    /// transient force/restore) — the caller passes the profile that actually landed, so nothing has to be read
+    /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
+    /// profile that actually landed, so nothing has to be read
     /// back out of the hardware. Paint NOW, in the same instant as the firmware's own palette flash, so the two
     /// coincide into one.
     ///

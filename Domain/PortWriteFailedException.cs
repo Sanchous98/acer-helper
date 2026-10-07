@@ -23,7 +23,7 @@ namespace AcerHelper.Domain;
 /// no-op the app has always shown is preserved WITHOUT calling a port.
 ///
 /// WHO CATCHES IT. A USER action catches it at its own boundary and shows the message (the control that was
-/// enabled is the one that failed). A SYSTEM path — the guided sweep's volatile writes, a per-source restore, the
+/// enabled is the one that failed). A SYSTEM path — a per-source restore, the
 /// boot re-apply — catches it and turns it into its NON-VERDICT outcome; a throw must never escape a
 /// background/poll path unobserved.</summary>
 public sealed class PortWriteFailedException(string operation, string? reason)

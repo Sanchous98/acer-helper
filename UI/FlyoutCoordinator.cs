@@ -146,21 +146,6 @@ internal sealed class FlyoutCoordinator : IDisposable
             Loc.T("gpu.change"));
     }
 
-    /// <summary>Shown over the flyout before the guided undervolt sweep starts. The sweep is long, invasive and
-    /// can destabilise the machine or force a reboot, and it shares the SMU/PCI lock with other tuning tools, so
-    /// the prompt says all of that once — and says the two conditions that are not negotiable: it requires AC
-    /// power, and it will temporarily switch to a performance profile (Turbo where available), restoring the
-    /// previous profile afterwards. It also says that nothing is saved automatically and a reboot restores stock.
-    /// Same modal-over-flyout idiom as the prompts above.</summary>
-    public Task<bool> ConfirmUndervoltSweepAsync()
-    {
-        _main.SuppressDismiss = true;
-        return Views.ConfirmDialog.ShowAsync(_main,
-            Loc.T("uv.confirm_title"),
-            Loc.T("uv.confirm_body"),
-            Loc.T("uv.sweep_start"));
-    }
-
     /// <summary>Shown over the flyout to ask before installing a third-party driver. Names the driver and where it
     /// comes from, because that is somebody else's kernel software and the user is agreeing to install it — not to
     /// "enable a feature".</summary>

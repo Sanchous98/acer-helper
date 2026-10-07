@@ -49,13 +49,6 @@ public sealed class CoAxis
     /// both is pinned by whichever gives out first — and a CPU exposing none takes a single all-core value.</summary>
     public bool UsesRails => _rails.Count > 0;
 
-    /// <summary>Whether a rail is a CPU cluster the guided sweep may walk. The rail identities are the port's
-    /// (<c>ccd:&lt;n&gt;</c> for a core cluster, <c>gfx</c> for the integrated GPU), and this is the ONE place the
-    /// sweep reads that convention: the iGPU is deliberately left manual — AMD does not auto-derive the graphics
-    /// curve either (see docs/auto-undervolt.md, Prior art) — and a future non-cluster rail is excluded by the
-    /// same rule rather than by a second list that could drift.</summary>
-    public static bool IsCpuCluster(string key) => key.StartsWith("ccd:", StringComparison.Ordinal);
-
     /// <summary>Clamp one rail's request against THAT RAIL's own range where it has one, and against the port's
     /// where it does not. Per rail rather than per port because the rails are different silicon: on an APU the
     /// graphics rail moves about 5 mV per count against the cores' 2.5.</summary>

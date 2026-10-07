@@ -267,9 +267,8 @@
                MainWindow.LockFrameHeight), so the drawer is handed a definite height and each page lays its
                content out to FIT it — Options distributes its rows across the full frame (OptionsView's
                UniformGrid), Lighting docks its tab body to fill — so neither scrolls nor leaves a blank band
-               (the owner's "не должно быть прокрутки"). A page whose content is genuinely variable — Tuning,
-               which grows while a guided sweep is running and after it shows results — keeps a ScrollViewer as
-               a safety valve: it does not scroll at the frame height today, but it never clips a long result. -->
+               (the owner's "не должно быть прокрутки"). Tuning keeps a ScrollViewer as a safety valve so a page
+               whose content is genuinely variable is never clipped at the frame height. -->
           <Panel>
             <ContentControl Content="{Binding OptionsPage}"  IsVisible="{Binding IsOptionsPage}"/>
             <ContentControl Content="{Binding LightingPage}" IsVisible="{Binding IsLightingPage}"/>

@@ -312,11 +312,11 @@ The switch instant fixed profile switches; two paths still blinked twice, each b
   that re-sent it on its first ticks — the same second blink, 400 ms later. With the burst palette-free the flip
   is a single palette send.
 
-### The guided sweep's force/restore, and the one switch use case (the 2–3× flash)
+### The one switch use case (the 2–3× flash)
 
 The owner's later report — the palette flashing **2–3×** during a guided undervolt sweep and on resume — was a
 third instance of the same class, with a structural cause rather than a second timing bug. The sweep temporarily
-forces a performance profile for the run and restores it afterwards. It did the port write with a **private**
+forced a performance profile for the run and restored it afterwards. It did the port write with a **private**
 transient method (`LaptopService.ApplyProfileTransient`) that bypassed `LightingCoordinator.OnProfileApplied` —
 the call that records `_pendingId` so the ~1 s refresh poll does not repaint the palette the firmware has already
 flashed. So the sweep flashed the palette on the force, the poll repainted it (~1 s later), the restore flashed
@@ -324,12 +324,15 @@ it again, and a manual Turbo on top made three.
 
 The port write and the lighting claim were **two separate steps the sweep could take only one of**. The fix makes
 them one indivisible action: `Application/ProfileSwitch.cs` (`SwitchProfile`) now owns **both**, and every profile
-switch routes through it — `ApplyProfile`, `SetTurbo`, `TogglePerformance` and the sweep's force/restore alike.
+switch routes through it — `ApplyProfile`, `SetTurbo`, `TogglePerformance` and the (since-removed) sweep's
+force/restore alike.
 The announcement is a second Application contract, `IProfileAnnouncer`, implemented by `LightingCoordinator`
-(which marshals to the UI thread, since the sweep runs off it); the profile target is `IProfileTarget`, implemented
+(which marshals to the UI thread, since a background switch can run off it); the profile target is `IProfileTarget`,
+implemented
 by `LaptopService`. Because the use case owns both halves, there is no path by which a switch can write the port
-and skip the claim. A forced-and-restored sweep therefore produces exactly **one announcement per switch**, which
-is what the per-switch tests pin.
+and skip the claim. **2026-10-07: the guided sweep was removed outright** (it could not reliably find a stable
+voltage), and with it the transient force/restore — but `SwitchProfile` remains the one door for every profile
+write, so the property it protects (one write → one announcement) still holds for the paths that are left.
 
 ### The power-source change on resume (the old-profile-then-new-profile flash)
 

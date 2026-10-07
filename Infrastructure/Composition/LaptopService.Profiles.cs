@@ -30,7 +30,7 @@ public sealed partial class LaptopService
     //
     // EVERY profile write in this class goes through ONE SwitchProfile, and that is the point: the port write and
     // the lighting announcement are one action inside the use case, so no path — a pick, the tray, the hotkey, the
-    // Turbo switch, the guided sweep's transient force/restore, or the per-source restore (ApplyStoredMode) — can
+    // Turbo switch, or the per-source restore (ApplyStoredMode) — can
     // write the profile without also recording the light claim (the double palette flash this closes). The
     // per-source restore was the last hand-written port write, and it is routed through the use case too now; the
     // omission that used to be named here as a decision was the source-change half of the same double flash.
@@ -84,7 +84,7 @@ public sealed partial class LaptopService
     // true), which is ALL Windows reports — and it reports USB-C Power Delivery as plain "AC". _adapter is the
     // TYPED source the Acer EC channel exposes (Barrel / USB-C / Battery), which distinguishes them. _onAc is
     // the EFFECTIVE answer the rest of this file reads, derived from both: USB-C PD is a limited source and is
-    // treated exactly like the battery (same profile set, and the guided sweep is refused on it), while the
+    // treated exactly like the battery (same profile set), while the
     // barrel charger and machines with no EC channel keep the OS answer. See RecomputeOnAc.
     private bool? _osOnAc;
     private PowerSource? _adapter;
@@ -94,8 +94,7 @@ public sealed partial class LaptopService
     /// <summary>The live power source as last seen, EFFECTIVE: true on the barrel/DC-in charger, false on the
     /// battery OR on USB-C Power Delivery, null before any reading (no battery, or a desktop). Derived by
     /// <see cref="RecomputeOnAc"/> from the OS state and the typed EC adapter. Null is deliberately distinct
-    /// from false: it means "we do not know", and a caller that must fail closed — the guided undervolt sweep,
-    /// which is long and invasive and must not run on an unproven source — treats null exactly as "not AC".
+    /// from false: it means "we do not know", and a caller that must fail closed treats null exactly as "not AC".
     /// This is a read only; nothing here changes the source or applies a mode.</summary>
     public bool? OnAc
     {
@@ -106,7 +105,7 @@ public sealed partial class LaptopService
     /// the slow <c>AcerPowerSourceSchedule</c> read. This is what separates USB-C Power Delivery from the barrel
     /// charger, which the OS alone cannot: on a machine whose EC channel said <see cref="PowerSource.UsbC"/> the
     /// effective source is forced to "battery-like" (see <see cref="RecomputeOnAc"/>), so the profile set is the
-    /// battery one and the guided sweep is refused — the owner's rule. <see cref="PowerSource.Unknown"/> is
+    /// battery one — the owner's rule. <see cref="PowerSource.Unknown"/> is
     /// IGNORED (the last named reading is kept): a transient failed read must not flap the profiles, and the
     /// battery card hides the row for it. On a machine with no EC channel this is never called (the adapter stays
     /// null) and the OS answer stands. Runs OFF the UI thread, like <see cref="SyncPowerSource"/>.</summary>
@@ -147,23 +146,6 @@ public sealed partial class LaptopService
             try { ApplyStoredMode(); }
             catch (PortWriteFailedException) { /* the next pass re-syncs */ }
         }
-    }
-
-    /// <summary>Apply <paramref name="profile"/> as a TRANSIENT, in-app purpose only, WITHOUT touching the
-    /// remembered per-source slot or Settings, and ANNOUNCE it so the lighting repaints. This is the path the
-    /// guided sweep's forced profile and its restore take, through the same switch use case every other profile
-    /// change uses — which is what closes the double-flash: the sweep can no longer write the port without also
-    /// recording the light claim. The write is to the same port a persistent switch uses, so the machine really
-    /// switches; only the memory is skipped. Availability is the live source's own check (the sweep picked the
-    /// profile from what the source offers). Returns what landed (null when it did not), for the restore.
-    ///
-    /// A SYSTEM path: a present profile port's refusal THROWS out of the switch use case, so it is caught here and
-    /// reported as null — the same "nothing landed" a refusing port gave before, which the sweep's force/restore
-    /// already handles. A throw must never escape a sweep's background run.</summary>
-    internal PerformanceProfile? ApplyProfileTransient(PerformanceProfile profile)
-    {
-        try { return ProfileSwitch.Run(profile, transient: true); }
-        catch (PortWriteFailedException) { return null; }
     }
 
     /// <summary>Key identifying the current performance "mode" for per-mode presets: the profile id, except
@@ -432,8 +414,7 @@ public sealed partial class LaptopService
     /// A slot pointing at a profile the source does not offer reports the FALLBACK rather than the stale id
     /// (NitroSense parity): the per-source row in Options then shows what the machine would actually use, not a
     /// mode the source disables. A port with no availability policy keeps returning the stored id verbatim.
-    /// `internal` rather than public: the UI reaches it through the use case, and the sweep's restore calls it
-    /// by name.</summary>
+    /// `internal` rather than public: the UI reaches it through the use case.</summary>
     internal PerformanceProfile? SourceProfile(bool onAc)
     {
         var pp = device.PowerProfiles;

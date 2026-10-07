@@ -63,7 +63,7 @@ namespace AcerHelper.Infrastructure.Composition;
 /// by the UI — is what the owner overruled; see Infrastructure/Composition/LaptopService.Lighting.cs.
 /// </summary>
 public sealed partial class LaptopService : IDisposable,
-    IFanAxisTarget, IGpuOffsetsTarget, IGpuPowerTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget, ITuningGate,
+    IFanAxisTarget, IGpuOffsetsTarget, IGpuPowerTarget, ICpuPowerOverlayTarget, IUndervoltTarget, IDeclaredSettingTarget,
     IProfileTarget, IPreferenceStore, IClamshellTarget, IBatteryControlTarget, IKeyboardBrightnessTarget,
     IAutostartTarget, IBlueLightTarget, ISetTurboTarget, ITogglePerformanceTarget, ISourceProfileTarget,
     IPowerSourceSyncTarget, IFanModeTarget, IGpuOcModeTarget, ICpuPowerModeTarget, ICoModeTarget, IFanDriveTarget,
@@ -273,9 +273,9 @@ public sealed partial class LaptopService : IDisposable,
     /// (docs/domain-refactoring-plan.md §7).
     ///
     /// THE COMMITTED UNDERVOLT IS RE-APPLIED AS IT STANDS. There is no startup auto-revert: an offset is committed
-    /// only when the user moves the manual sliders or confirms a guided-sweep proposal, so on restart the app
-    /// re-applies exactly the last committed value (stock, 0, for a mode never committed) and never silently steps
-    /// it back. The removed watchdog/canary is recorded in docs/auto-undervolt.md and docs/open-decisions.md.
+    /// only when the user moves the manual sliders, so on restart the app re-applies exactly the last committed
+    /// value (stock, 0, for a mode never committed) and never silently steps it back. The removed watchdog/canary
+    /// is recorded in docs/open-decisions.md.
     ///
     /// The GPU offsets (the driver zeroed them at boot) and the CPU power overlay are written on THIS thread, and
     /// the Curve Optimizer is handed to the pool, because its SMU mailbox transaction waits on a machine-wide PCI

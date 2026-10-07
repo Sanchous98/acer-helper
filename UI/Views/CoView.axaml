@@ -13,8 +13,7 @@
     <Grid ColumnDefinitions="*,Auto">
       <TextBlock Classes="muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                  ToolTip.Tip="{Binding CpuName}" Text="{Binding CpuName}"/>
-      <Button Grid.Column="1" Content="{l:Tr 'oc.reset'}" Padding="10,4"
-              IsEnabled="{Binding SlidersEnabled}" Command="{Binding ResetCommand}"/>
+      <Button Grid.Column="1" Content="{l:Tr 'oc.reset'}" Padding="10,4" Command="{Binding ResetCommand}"/>
     </Grid>
 
     <!-- One row per voltage domain ("Zen 5" / "Zen 5c" / "iGPU"): separate rails at different voltages, so one number
@@ -24,16 +23,8 @@
          at idle, not under load, so the user needs it before dragging rather than after. It no longer quotes a
          millivolts-per-step figure, because that is a property of one rail and they differ: measured here, the cores
          move 2.5 mV per step and the graphics rail 5. Each row prints its own mV in the value box instead. -->
-    <ItemsControl ItemsSource="{Binding Rows}" IsEnabled="{Binding SlidersEnabled}"
+    <ItemsControl ItemsSource="{Binding Rows}"
                   ToolTip.Tip="{l:Tr 'uv.hint'}">
-      <ItemsControl.Styles>
-        <!-- A previewed sweep PROPOSAL: the value reads in the accent colour, so a thumb moved by a sweep is
-             distinguishable at a glance from a committed offset (the slider thumb itself keeps the shared
-             geometry — only the text is tinted, so the fixed-frame fit is untouched). -->
-        <Style Selector="TextBlock.proposed">
-          <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
-        </Style>
-      </ItemsControl.Styles>
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:CoRowViewModel">
           <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
@@ -42,7 +33,7 @@
                     VerticalAlignment="Center" Value="{Binding Offset, Mode=TwoWay}"/>
             <!-- Wider than the GPU rows' value box: it carries the step count plus the millivolts in brackets. -->
             <TextBlock Grid.Column="2" Width="116" Margin="8,0,0,0" TextAlignment="Right" VerticalAlignment="Center"
-                       Classes.proposed="{Binding IsProposed}" Text="{Binding OffsetLabel}"/>
+                       Text="{Binding OffsetLabel}"/>
           </Grid>
         </DataTemplate>
       </ItemsControl.ItemTemplate>

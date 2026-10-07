@@ -185,10 +185,8 @@ public class ArchitectureMapTests
     /// Undervolt, DeclaredSetting, each one contract plus its use cases), the family of ACTION use cases that
     /// came off the service's public surface next (ProfileSwitch, Preferences, HardwareToggles, ProfilePower,
     /// ModeApply, AppActions), and the family of QUERY use cases that came off it after those (Queries.cs — the
-    /// profile/fan/GPU/CO/CPU-power/sensor/battery readers, each a contract plus the use case that owns it); the
-    /// automatic-undervolt wrapper
-    /// (CpuLoadTest, UndervoltSweep) was among them until it left for Infrastructure on 2026-09-27 (see the
-    /// paragraph below), which is why the count is what it is and not larger — and the rule is the reason for
+    /// profile/fan/GPU/CO/CPU-power/sensor/battery readers, each a contract plus the use case that owns it); — the
+    /// rule is the reason for
     /// every boundary in each of them, not an accident of the moves.
     ///
     /// WHAT IT STILL FORBIDS, so nobody mistakes the above for a relaxation: a use case that needs the STORED
@@ -224,14 +222,14 @@ public class ArchitectureMapTests
     /// WHAT LEFT APPLICATION 2026-09-27, AND WHY THE RULE GOT SMALLER RATHER THAN LOOSER. The owner ruled that
     /// the automatic undervolt is in substance a WRAPPER over the manual voltage change
     /// (<c>Application/Undervolt.cs</c>) and carries no independent domain logic — it is UI + Infrastructure
-    /// only. So the whole feature moved out of Application into <c>Infrastructure/Vendors/Generic/</c>:
-    /// <c>CpuLoadTest.cs</c> (the load runner) and <c>UndervoltSweep.cs</c>, plus <c>Domain/CpuStress.cs</c> (the
-    /// kernel) into the same folder. (The compute-error canary and the startup watchdog — <c>UndervoltCanary.cs</c>,
-    /// <c>UndervoltWatchdog.cs</c> — were removed outright on 2026-09-27; see docs/auto-undervolt.md.) The
+    /// only, so the whole feature left Application. It was removed outright on 2026-10-07 (the owner's call: the
+    /// guided sweep could not reliably find a stable voltage — a run's "stable" proposal failed under real load),
+    /// and with it the load stack it drove (<c>CpuLoadTest.cs</c>, <c>CpuStress.cs</c>, <c>CoreAffinity.*.cs</c>,
+    /// <c>UndervoltSweep.cs</c>), the tuning gate and the sweep's transient-profile path. The
     /// manual undervolt's own contract pair (<c>Application/Undervolt.cs</c>: <c>IUndervoltTarget</c>/
     /// <c>ApplyUndervolt</c>) — a genuine use case over the domain port — STAYS, which is exactly the point:
-    /// Application shed the wrapper, not the operation. The rule below is unchanged and no exception was added;
-    /// the move only makes the enumerated set smaller.
+    /// Application kept the operation and shed the wrapper. The rule below is unchanged and no exception was
+    /// added; the removal only makes the enumerated set smaller.
     ///
     /// MUTATION-VERIFIED, so the rule is not vacuous: <c>using AcerHelper.Infrastructure.Composition;</c> added to
     /// <c>Application/LightZone.cs</c> reddens this test and no other in the file.</summary>

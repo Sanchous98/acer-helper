@@ -49,7 +49,6 @@ internal static class CompositionRoot
         // the ports, so it is the one implementation of each. The forward registrations are what let a use case
         // depend on a contract without naming the service.
         services.AddSingleton<IUndervoltTarget>(sp => sp.GetRequiredService<LaptopService>());
-        services.AddSingleton<ITuningGate>(sp => sp.GetRequiredService<LaptopService>());
         services.AddSingleton<IFanAxisTarget>(sp => sp.GetRequiredService<LaptopService>());
         services.AddSingleton<IGpuOffsetsTarget>(sp => sp.GetRequiredService<LaptopService>());
         services.AddSingleton<IGpuPowerTarget>(sp => sp.GetRequiredService<LaptopService>());
@@ -134,7 +133,7 @@ internal static class CompositionRoot
         // The moved use cases. Each owns its dependencies through its constructor, so the UI depends on the
         // ACTION, not on the infrastructure contract behind it.
         services.AddSingleton(sp => new ApplyUndervolt(
-            sp.GetRequiredService<IUndervoltTarget>(), sp.GetRequiredService<ITuningGate>()));
+            sp.GetRequiredService<IUndervoltTarget>()));
         services.AddSingleton(sp => new ApplyGpuOffsets(sp.GetRequiredService<IGpuOffsetsTarget>()));
         services.AddSingleton(sp => new ApplyGpuPower(sp.GetRequiredService<IGpuPowerTarget>()));
         services.AddSingleton(sp => new ApplyCpuPowerOverlay(sp.GetRequiredService<ICpuPowerOverlayTarget>()));

@@ -9,10 +9,10 @@ namespace AcerHelper.Tests;
 /// stubs — no <c>LaptopService</c>, no lighting coordinator, no port.
 ///
 /// WHY THIS FILE EXISTS. The switch used to be a lock inside <c>LaptopService.ApplyProfile</c>, and the lighting
-/// announcement was a SEPARATE step at each call site (AppController's pick, tray, hotkey and Turbo paths, and —
-/// the bug — NOT at all in the guided sweep's forced profile). Splitting the write from the announcement is what
-/// let the sweep flash the palette twice: the firmware repainted on the port write, and the ~1 s refresh pass
-/// repainted again because nothing had recorded the light claim. The use case now owns BOTH halves, so the rules
+/// announcement was a SEPARATE step at each call site (AppController's pick, tray, hotkey and Turbo paths).
+/// Splitting the write from the announcement is what could let a path repaint the palette twice: the firmware
+/// repainted on the port write, and the ~1 s refresh pass repainted again because nothing had recorded the light
+/// claim. The use case now owns BOTH halves, so the rules
 /// to pin are: the source gate runs first, only what LANDED is remembered, a transient switch skips the memory,
 /// and EVERY landed switch is announced exactly once.
 ///

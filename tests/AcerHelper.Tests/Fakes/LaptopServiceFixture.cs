@@ -137,7 +137,7 @@ public sealed class LaptopServiceFixture
         declare?.Invoke(Device);
         Store = new FakeSettingsStore(settings);
         Service = new LaptopService(Device, Store);
-        ApplyUndervolt = new ApplyUndervolt(Service, Service);
+        ApplyUndervolt = new ApplyUndervolt(Service);
         ApplyGpuOffsets = new ApplyGpuOffsets(Service);
         ApplyGpuPower = new ApplyGpuPower(Service);
         ApplyCpuPower = new ApplyCpuPowerOverlay(Service);

@@ -18,7 +18,7 @@ namespace AcerHelper.Tests;
 /// flash, then the "new" one).</item>
 /// <item><b>The unannounced write.</b> Neither Set went through <c>SwitchProfile</c>, so nothing recorded the
 /// light claim (<c>LightingCoordinator._pendingId</c>) and the ~1 s refresh pass repainted the palette again —
-/// the same mechanism already closed for user picks and the guided sweep.</item>
+/// the same mechanism already closed for user picks.</item>
 /// </list>
 ///
 /// The fix routes the restore through the switch use case (as a TRANSIENT — the slot already holds the mode, so

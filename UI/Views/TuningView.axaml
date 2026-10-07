@@ -19,7 +19,7 @@
   </UserControl.Styles>
 
   <!-- The Tuning drawer body: the GPU axis (clock offsets + the GPU-mode/MUX switch) in ONE acrylic card and the
-       CPU axis (power mode + undervolt + the guided sweep) in another, each with a section header — the SAME
+       CPU axis (power mode + undervolt) in another, each with a section header — the SAME
        frosted, borderless card as the main-page sections (Monitor/Fans/…). The child views (GpuView/CpuView/…) are
        bare and rendered via their DataTemplates. Cards carry their own bottom margin (see the .card style), so no
        outer spacing. TWO cards, not four: the fixed frame is exactly Home's height, so grouping by subject (GPU,
@@ -80,9 +80,6 @@
         <TextBlock Classes="section" Text="{l:Tr CPU}"/>
         <ContentControl Content="{Binding Cpu}" IsVisible="{Binding HasCpu}"/>
         <ContentControl Content="{Binding Co}" IsVisible="{Binding HasCo}"/>
-        <!-- The guided sweep sits under the manual sliders it disables while it runs: same capability, and the
-             result panel's proposals are the same offsets the sliders show. -->
-        <ContentControl Content="{Binding Sweep}" IsVisible="{Binding HasSweep}"/>
       </StackPanel>
     </ExperimentalAcrylicBorder>
 

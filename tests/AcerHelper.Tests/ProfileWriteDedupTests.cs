@@ -127,11 +127,11 @@ public class ProfileWriteDedupTests
         Assert.Single(announcer.Announced);                // ONE announcement (so ONE flash)
     }
 
-    /// <summary>THE SWEEP'S FORCE/RESTORE STILL BEHAVES. A forced-and-restored sweep changes target twice (Turbo
+    /// <summary>A TRANSIENT FORCE/RESTORE STILL BEHAVES. A forced-and-restored sequence changes target twice (Turbo
     /// then Balanced), so the dedup — keyed on the target — leaves both writes and both announcements intact; this
-    /// is the edge the window must not swallow, asserted through the real service.</summary>
+    /// is the edge the window must not swallow, asserted through the real service's switch.</summary>
     [Fact]
-    public void ASweepsForcedProfileAndRestore_AreDifferentTargets_AndBothWrite()
+    public void ATransientForceAndRestore_AreDifferentTargets_AndBothWrite()
     {
         var f = LaptopServiceFixture.WithProfiles(
             settings: new Settings
@@ -143,10 +143,9 @@ public class ProfileWriteDedupTests
         var announcer = new RecordingAnnouncer();
         f.Service.ProfileAnnouncer = announcer;
 
-        // Force Turbo (transient) then restore the pre-sweep profile (different target) in quick succession — the
-        // sweep's own force/restore shape, driven directly so no minutes-long run is needed.
-        f.Service.ApplyProfileTransient(TestProfiles.Turbo);
-        var restored = f.Service.ApplyProfileTransient(TestProfiles.Balanced);
+        // Force Turbo (transient) then restore the pre-force profile (different target) in quick succession.
+        f.Service.ProfileSwitch.Run(TestProfiles.Turbo, transient: true);
+        var restored = f.Service.ProfileSwitch.Run(TestProfiles.Balanced, transient: true);
 
         Assert.Equal(TestProfiles.Balanced, restored);
         Assert.Equal(["turbo", "balanced"], f.Pp!.SetCallIds);   // neither is deduplicated
@@ -166,7 +165,7 @@ public class ProfileWriteDedupTests
         var announcer = new RecordingAnnouncer();
         f.Service.ProfileAnnouncer = announcer;
 
-        f.Service.ApplyProfileTransient(TestProfiles.Turbo);   // the sweep's force (transient)
+        f.Service.ProfileSwitch.Run(TestProfiles.Turbo, transient: true);   // a transient force
         var applied = f.Service.ApplyProfile(TestProfiles.Turbo);  // a persistent pick of the same target
 
         Assert.True(applied);

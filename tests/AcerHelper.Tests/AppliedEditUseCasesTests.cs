@@ -392,15 +392,6 @@ public class AppliedEditUseCasesTests
         }
     }
 
-    /// <summary>A gate that is never busy and simply runs the write — the use case now owns ITS gate, so a test
-    /// that means to pin the edit's rules (not the sweep exclusion, which the service tests cover) passes an open
-    /// one. The exclusion itself is pinned in <c>UndervoltSweepServiceTests</c>.</summary>
-    private sealed class StubGate : ITuningGate
-    {
-        public bool SweepActive => false;
-        public (bool ok, string? error) Guard(Func<(bool ok, string? error)> write) => write();
-    }
-
     /// <summary>An empty edit is a refusal that touches nothing: no reason, nothing remembered, no SMU traffic.
     /// It is a rule about the EDIT rather than about the CPU, which is why it is stated in the use case — the
     /// per-rail path ACCEPTS an empty list (that is how a machine with no rails is disarmed) and the two must not
@@ -413,7 +404,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt();
 
-        var r = new ApplyUndervolt(target, new StubGate()).Run([]);
+        var r = new ApplyUndervolt(target).Run([]);
 
         Assert.Equal((false, (string?)null), r);
         Assert.Empty(target.Calls);
@@ -431,7 +422,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt { Remembered = _ => [-5, -6] };
 
-        var r = new ApplyUndervolt(target, new StubGate()).Run([-50, -60]);
+        var r = new ApplyUndervolt(target).Run([-50, -60]);
 
         Assert.Equal([-50, -60], target.RememberedFrom);
         Assert.Equal([-5, -6], target.Written);
@@ -449,7 +440,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt { Remembered = _ => null };
 
-        var r = new ApplyUndervolt(target, new StubGate()).Run([-5]);
+        var r = new ApplyUndervolt(target).Run([-5]);
 
         Assert.Equal((false, (string?)null), r);
         Assert.Equal(["store"], target.Calls);
@@ -457,7 +448,7 @@ public class AppliedEditUseCasesTests
 
     /// <summary>A PRESENT SMU that refuses now THROWS <see cref="PortWriteFailedException"/>, carrying its own
     /// words, rather than returning <c>(false, error)</c>. The remember has already happened when it does, which is
-    /// the store-before-write order this use case states; the exception escapes the use case and the gate (the UI's
+    /// the store-before-write order this use case states; the exception escapes the use case (the UI's
     /// <c>SetCo</c> catches it at its boundary, the boot re-apply turns it into its non-verdict outcome).
     ///
     /// MUTATION THAT REDDENS IT: catching the exception inside <c>ApplyUndervolt.Run</c> and returning
@@ -467,7 +458,7 @@ public class AppliedEditUseCasesTests
     {
         var target = new StubUndervolt { ThrowOnApply = new PortWriteFailedException("Curve Optimizer offsets", "SMU refused") };
 
-        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyUndervolt(target, new StubGate()).Run([-12]));
+        var ex = Assert.Throws<PortWriteFailedException>(() => new ApplyUndervolt(target).Run([-12]));
 
         Assert.Equal("Curve Optimizer offsets", ex.Operation);
         Assert.Equal("SMU refused", ex.Reason);

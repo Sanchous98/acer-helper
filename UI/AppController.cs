@@ -363,8 +363,7 @@ internal sealed class AppController
             new OptionsSection(opts.Toggles(), opts.Choices(), opts.PowerSourceProfiles(),
                 _svc.TurboToggles, SetTurboToggles,
                 b => _actions.Clamshell.Run(b), b => _actions.Autostart.Run(b),
-                _svc.Language, SetLanguage),
-            BuildSweepSection()),
+                _svc.Language, SetLanguage)),
             lighting, _notifications);   // the session's notifications: handed in, not built here — see the field
 
         var windows = new FlyoutCoordinator(vm);
@@ -655,7 +654,7 @@ internal sealed class AppController
     // rediscover it by polling: the firmware flashes the new palette the moment the profile byte is written, so
     // a repaint that lands ~750 ms later reads as a SECOND blink cycle of the keyboard and lightbar (and, if it
     // catches a still-running burst from the previous switch, in the PREVIOUS profile's colour). Every path that
-    // changes the profile — pick, tray, hotkey, Turbo switch, and now the guided sweep's force/restore — goes
+    // changes the profile — pick, tray, hotkey, Turbo switch — goes
     // through the ONE switch use case, which owns both the write and this repaint (Application/ProfileSwitch.cs).
     // The tray's apply: the result has no reader there, so it is discarded. The section
     // (ProfilesViewModel) uses TryApplyProfile below and rolls its optimistic selection back on false.
@@ -781,30 +780,6 @@ internal sealed class AppController
         });
     }
 
-    // The guided sweep, built only where the service says this machine can run one (a Curve Optimizer, the load
-    // tool's affinity adapter, sensors, and at least one CPU cluster). The run and save bodies are pool tasks —
-    // the sweep blocks for minutes and the save is a mailbox transaction that can wait on the shared PCI lock —
-    // and the progress crosses as an IProgress captured on the UI thread below. The confirmation is the same
-    // modal-over-flyout idiom as every other dangerous write; _windows is assigned after BuildUi returns, and the
-    // lambda reads it at call time.
-    private SweepSection? BuildSweepSection()
-    {
-        if (!_svc.CanSweepUndervolt) return null;
-        var options = new SweepOptions();
-        return new SweepSection(
-            _svc.SweepDomains(),
-            _svc.UndervoltSweepEta(options),
-            () => _windows.ConfirmUndervoltSweepAsync(),
-            (progress, ct) => Task.Run(() => _svc.RunUndervoltSweep(options, p => progress?.Report(p), ct), ct),
-            result => Task.Run(() =>
-            {
-                var (ok, error) = _svc.SaveUndervoltSweep(result);
-                IReadOnlyList<int>? counts = ok ? _queries.CoDomains.Run() : null;
-                return (ok, counts, error);
-            }),
-            _svc.OnAc);
-    }
-
     private Task ShowFanCurve(FanCurveDialogViewModel vm) => _windows.EditFanCurveAsync(vm);
 
     private Task<bool> ConfirmCalibrationAsync() => _windows.ConfirmCalibrationAsync();
@@ -895,7 +870,7 @@ internal sealed class AppController
         SensorSnapshot Sensors, string? Status, bool TurboToggles,
         bool ModeChanged, FanAxisState? Fan, GpuAxisState? Gpu, string? CpuId, int[]? Co,
         bool ProfileChanged, bool CpuPrimed, AccentColor? Flash,
-        ILightZoneMode? Lights, bool? OnAc);
+        ILightZoneMode? Lights);
 
     // Kick a refresh. All hardware I/O runs on a pool thread (BackgroundPass) so a stalled EC/WMI read can never
     // freeze the UI; the VM/tray updates are posted back to the UI thread (UiPass). Single-flight: if a pass is
@@ -955,7 +930,7 @@ internal sealed class AppController
     // THE SAME READING ALSO TYPES THE SOURCE FOR THE REST OF THE APP. The OS alone calls USB-C Power Delivery
     // "AC"; this is the one place the app learns it is really USB-C, so it is handed to the service
     // (SetPowerAdapter) as well as to the card. That is what makes a USB-C machine show the battery profile set
-    // and refuse the guided sweep (see LaptopService.RecomputeOnAc). SetPowerAdapter ignores Unknown, so a
+    // (see LaptopService.RecomputeOnAc). SetPowerAdapter ignores Unknown, so a
     // transient failed read neither flaps the profiles nor hides a last-good type.
     private void RefreshPowerSource()
     {
@@ -1041,8 +1016,7 @@ internal sealed class AppController
             var baseP = _queries.BaseProfile.Run(current);
 
             var t = new Tick(current, selectable, baseP, sensors, status, turbo,
-                             modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights,
-                             _svc.OnAc);
+                             modeChanged, fan, gpu, cpu, co, profileChanged, cpuPrimed, flash, lights);
             // Posted at Normal, ABOVE the render priority (Default is below it on some backends): the reflected
             // values are applied before the next paint, so a continuously-rendering window cannot keep a stale
             // reading on screen behind a backlog of render jobs.
@@ -1069,10 +1043,6 @@ internal sealed class AppController
     // inline Refresh exactly. No hardware reads here — everything is pre-read in the Tick.
     private void UiPass(Tick t)
     {
-        // The guided sweep's AC gate needs the live source on the UI thread: the refresh pass reads it in the
-        // background and posts it here, so the Start button reflects a plug/unplug without a rebuild. It is
-        // pushed before anything else because the sweep section reads it when the user starts a run.
-        _vm.TuningPage?.SetOnAc(t.OnAc);
         if (t.ModeChanged)
         {
             if (t.Fan is { } fan) _vm.ReloadFans(fan);

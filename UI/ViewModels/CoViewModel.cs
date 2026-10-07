@@ -26,28 +26,6 @@ public sealed partial class CoViewModel : SectionViewModel
     private readonly Action<int[]> _apply;
     private readonly PeriodicSchedule _debounce;
     private bool _loading;
-    private int[]? _previewSnapshot;
-
-    /// <summary>True while the guided sweep owns the SMU. The sliders are disabled (the view binds
-    /// <see cref="SlidersEnabled"/>) and a late debounce is refused, so a manual edit cannot land between two of
-    /// the sweep's probes. The service's own gate is the second line of defence.</summary>
-    [ObservableProperty] private bool _sweepRunning;
-
-    /// <summary>True while a sweep proposal is being PREVIEWED on the sliders. The preview is NOT a commit: the
-    /// thumbs read the proposed counts (accented), but nothing is written and nothing is persisted — the only
-    /// actions are Save (which commits through <see cref="Load"/>) and Discard (which restores
-    /// <see cref="_previewSnapshot"/>). While it shows, the sliders are disabled so a drag cannot commit an
-    /// unverified offset.</summary>
-    [ObservableProperty] private bool _hasPreview;
-
-    public bool SlidersEnabled => !SweepRunning && !HasPreview;
-
-    partial void OnSweepRunningChanged(bool value) => OnPropertyChanged(nameof(SlidersEnabled));
-    partial void OnHasPreviewChanged(bool value) => OnPropertyChanged(nameof(SlidersEnabled));
-
-    /// <summary>Called by the sweep card when a run starts and when it ends (the finally), so the sliders are
-    /// never left locked if the run throws.</summary>
-    public void SetSweepRunning(bool running) => SweepRunning = running;
 
     public string CpuName { get; }
 
@@ -92,8 +70,7 @@ public sealed partial class CoViewModel : SectionViewModel
 
     /// <summary>Reflect a mode's saved offsets without triggering apply/persist (the service already set the hardware
     /// on the mode switch). The <c>_loading</c> guard neuters the change hooks; a pending debounce from the PREVIOUS
-    /// mode is dropped so it can't fire the new mode's values and re-persist them. This is also the COMMIT path for a
-    /// previewed proposal (Save reaches here with the saved counts), so it clears the preview marks and flag.</summary>
+    /// mode is dropped so it can't fire the new mode's values and re-persist them.</summary>
     public void Load(IReadOnlyList<int> counts)
     {
         _debounce.Stop();
@@ -104,63 +81,16 @@ public sealed partial class CoViewModel : SectionViewModel
             Rows[i].IsProposed = false;
         }
         _loading = false;
-        _previewSnapshot = null;
-        HasPreview = false;
-    }
-
-    /// <summary>Show a sweep's proposal ON the sliders without committing it. The rows' current offsets are
-    /// snapshotted first (so <see cref="DiscardPreview"/> can put them back exactly), then only the listed indices
-    /// move — to the proposed value clamped into that row's own range — and are marked proposed. The <c>_loading</c>
-    /// guard is reused so the moves do NOT arm the debounce: no SMU write, no settings write. The iGPU is never in
-    /// <paramref name="proposed"/> (the sweep excludes it), so its row is left untouched.</summary>
-    public void Preview(IReadOnlyList<(int Index, int Value)> proposed)
-    {
-        _debounce.Stop();
-        var snapshot = new int[Rows.Count];
-        for (var i = 0; i < Rows.Count; i++) snapshot[i] = (int)Rows[i].Offset;
-        _previewSnapshot = snapshot;
-
-        _loading = true;
-        foreach (var (index, value) in proposed)
-        {
-            if (index < 0 || index >= Rows.Count) continue;
-            Rows[index].Offset = Math.Clamp(value, Rows[index].OffsetMin, Rows[index].OffsetMax);
-            Rows[index].IsProposed = true;
-        }
-        _loading = false;
-        HasPreview = true;
-    }
-
-    /// <summary>Drop a preview and put the sliders back on the pre-preview committed values. Nothing is written —
-    /// the machine is already on them (the sweep's finally restored the pre-sweep state), so this only moves the
-    /// thumbs and clears the proposal marks.</summary>
-    public void DiscardPreview()
-    {
-        if (_previewSnapshot is { } snapshot)
-        {
-            _debounce.Stop();
-            _loading = true;
-            for (var i = 0; i < Rows.Count; i++)
-            {
-                if (i < snapshot.Length) Rows[i].Offset = snapshot[i];
-                Rows[i].IsProposed = false;
-            }
-            _loading = false;
-        }
-        _previewSnapshot = null;
-        HasPreview = false;
     }
 
     private void Debounce()
     {
-        // The sweep owns the SMU while it runs, and a proposal must not be committed by a stray drag: refuse both.
-        if (_loading || SweepRunning || HasPreview) return;
+        if (_loading) return;
         _debounce.Restart();
     }
 
     private void Apply()
     {
-        if (SweepRunning || HasPreview) return;  // defence in depth for a debounce armed before the sweep/preview
         var counts = new int[Rows.Count];
         for (var i = 0; i < Rows.Count; i++) counts[i] = (int)Rows[i].Offset;
         _apply(counts);

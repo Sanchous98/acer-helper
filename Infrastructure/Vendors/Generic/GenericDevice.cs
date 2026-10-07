@@ -27,7 +27,6 @@ public partial class GenericDevice : Device
         // generic OS surface can promise — are added by a vendor's InitVendor one property at a time.
         if (GenericBattery.TryCreate() is { } info) Battery.Telemetry = info.Read;
         Autostart = new Autostart();                // cross-platform (.desktop on Linux, scheduled task on Windows)
-        CoreAffinity = new CoreAffinity();          // cross-platform contract, per-OS mechanism (CoreAffinity.*.cs)
         InitPlatform();
     }
 

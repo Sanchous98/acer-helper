@@ -71,15 +71,10 @@ public interface IUndervoltTarget
 /// counts are not clamped-and-sent anyway, because a value the axis would not remember is not one it will be
 /// asked to put back. And the write is given the values <see cref="IUndervoltTarget.Store"/> handed back rather
 /// than the caller's, so the two cannot be a clamp apart.</item>
-/// <item><b>The whole edit runs under the tuning gate</b> (<see cref="ITuningGate"/>): a manual edit must never
-/// land between two of a running sweep's probes, and the gate is what makes "is a sweep running" and the write
-/// atomic. This is the reason the operation owns the gate through its constructor rather than leaving the caller
-/// to remember a lock — the four call sites that used to hold it by hand are gone.</item>
 /// </list>
 ///
-/// WHAT THE RETURN STILL CARRIES, now that the write is exceptional: the pair's non-ok path is ONLY the gate's
-/// busy precondition — "a guided sweep is running" — and the three value refusals above (empty edit, absent port,
-/// count mismatch). A PRESENT SMU's refusal is a <see cref="PortWriteFailedException"/> and escapes the gate and
+/// WHAT THE RETURN STILL CARRIES: the pair's non-ok path is ONLY the three value refusals above (empty edit,
+/// absent port, count mismatch). A PRESENT SMU's refusal is a <see cref="PortWriteFailedException"/> and escapes
 /// the use case to the caller, which catches it at its boundary (the UI) or turns it into its non-verdict outcome
 /// (the boot re-apply); it is deliberately NOT caught here, so only the remember has happened when it throws.
 ///
@@ -87,7 +82,7 @@ public interface IUndervoltTarget
 /// actually writes are the rails fork and the clamp, and both are <c>CoAxis</c>'s, in Infrastructure
 /// (<see cref="IUndervoltTarget"/>'s docstring measures that). What is left on this side of the wall is the edit's
 /// own vocabulary — empty, refused, remembered, written — and that is what is stated here.</summary>
-public sealed class ApplyUndervolt(IUndervoltTarget target, ITuningGate gate)
+public sealed class ApplyUndervolt(IUndervoltTarget target)
 {
     public (bool ok, string? error) Run(IReadOnlyList<int> counts)
     {
@@ -96,13 +91,8 @@ public sealed class ApplyUndervolt(IUndervoltTarget target, ITuningGate gate)
             return (false, null);
         }
 
-        // The gate's busy refusal stays a VALUE (its own precondition, not a port refusal); a present port's
-        // refusal THROWS out of target.Apply and is not caught here.
-        return gate.Guard(() =>
-        {
-            if (target.Store(counts) is not { } remembered) return (false, (string?)null);
-            target.Apply(remembered);
-            return (true, (string?)null);
-        });
+        if (target.Store(counts) is not { } remembered) return (false, (string?)null);
+        target.Apply(remembered);
+        return (true, (string?)null);
     }
 }

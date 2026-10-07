@@ -138,15 +138,8 @@ public sealed partial class MainViewModel : ObservableObject
         // card itself renders only the one stable current-mode sentence (see GpuMuxViewModel).
         var muxVm = device.GpuMux is { } mux
             ? new GpuMuxViewModel(mux, a.GpuMux.Confirm, a.GpuMux.Request, ReportGpuMuxOutcome) : null;
-        // The guided undervolt needs the manual rows to disable and reload, so it is built only beside them (the
-        // section is null when the service says the machine cannot sweep, e.g. no affinity/sensors/CPU clusters).
-        var sweepVm = a.Sweep is { } sweep && coVm != null
-            ? new UndervoltSweepViewModel(sweep.Domains, sweep.Eta, sweep.Confirm, sweep.Run, sweep.Save,
-                                          coVm.SetSweepRunning, coVm.Load, coVm.Preview, coVm.DiscardPreview,
-                                          ReportSweepOutcome, UiSchedule.Normal, sweep.OnAc)
-            : null;
-        if (gpuVm != null || cpuVm != null || coVm != null || muxVm != null || sweepVm != null)
-            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm, muxVm, sweepVm);
+        if (gpuVm != null || cpuVm != null || coVm != null || muxVm != null)
+            _tuning = new TuningViewModel(gpuVm, cpuVm, coVm, muxVm);
     }
 
     /// <summary>The bell: show the list, or put it away again. A toggle, like the drawer buttons, so the one
@@ -271,10 +264,6 @@ public sealed partial class MainViewModel : ObservableObject
     /// card line and NOT a notification: the MUX card renders only its one stable current-mode sentence, and the
     /// status line is rewritten by the refresh pass like every other transient message in the app.</summary>
     private void ReportGpuMuxOutcome(string text) => Status = text;
-
-    /// <summary>Surface a guided-sweep outcome (finished, saved, refused) on the app's existing transient status
-    /// line, the same surface every other control report uses — the sweep's own card carries the proposal.</summary>
-    private void ReportSweepOutcome(string text) => Status = text;
 
     [RelayCommand] private void CloseDrawer() => IsDrawerOpen = false;
 

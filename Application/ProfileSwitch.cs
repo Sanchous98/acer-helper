@@ -82,8 +82,7 @@ public interface IProfileAnnouncer
 /// landed so the lighting repaints from it in the same instant.
 ///
 /// WHAT IT DECIDES, and each half answers a failure the four hand-written call sites could each get wrong
-/// (a pick, the tray, the hotkey, the Turbo switch — and, since it exists, the guided sweep's temporary force and
-/// its restore):
+/// (a pick, the tray, the hotkey, the Turbo switch):
 /// <list type="number">
 /// <item><b>An unavailable profile is not written.</b> The source gate is asked first, so a segment the UI has
 /// greyed out cannot be written by a path that forgot to check — the same refusal the section's optimistic
