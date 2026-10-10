@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THROWAWAY SPIKE. Its only job is to answer, with a real build, whether WinUI 3 + Native AOT is a viable
+       front-end for this app on Windows. It deliberately does NOT reference AcerHelper.csproj: the core
+       (Domain/Application/Infrastructure) is already toolkit-agnostic, so the risk being measured here is the
+       UI stack, not the core reuse. Nothing else in the repo builds this file. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>Spike.WinUI</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- The two make-or-break knobs for our shipping model: no MSIX, and Native AOT. -->
+    <PublishAot>true</PublishAot>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+  </ItemGroup>
+
+</Project>

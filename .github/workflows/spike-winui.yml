@@ -1,0 +1,37 @@
+name: spike-winui
+
+# MANUAL ONLY. This workflow exists to answer one question on a runner that has the MSVC C++ build tools the local
+# machine lacks: does the WinUI 3 spike publish under Native AOT, unpackaged? It builds NOTHING that ships — no tag
+# trigger, no release, no artefact upload — so it cannot affect a release. Delete it (and spike/winui) when the
+# evaluation is over.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  winui-aot:
+    name: WinUI 3 spike under Native AOT
+    runs-on: windows-2022
+    # A hung restore (the Windows App SDK runtime pack is large) must fail rather than idle; see the build job's
+    # own bound in build.yml.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # Unpackaged (WindowsPackageType=None) + Native AOT + self-contained Windows App SDK: the exact shipping
+      # shape we would need. A failure here is the go/no-go for a WinUI front-end.
+      - name: Publish WinUI 3 spike (Native AOT, unpackaged)
+        working-directory: spike/winui
+        run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o out
+
+      - name: Report the AOT output size
+        shell: pwsh
+        working-directory: spike/winui
+        run: |
+          Get-ChildItem out -File | Measure-Object -Property Length -Sum |
+            ForEach-Object { "files=$($_.Count) totalMB=$([math]::Round($_.Sum/1MB,1))" }
