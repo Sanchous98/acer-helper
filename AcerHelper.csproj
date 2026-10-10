@@ -80,12 +80,6 @@
     <Compile Remove="tests/**" />
     <EmbeddedResource Remove="tests/**" />
     <None Remove="tests/**" />
-    <!-- The same exclusion for the throwaway WinUI spike (spike/winui): it is its own project with its own SDK
-         and its own TFM, and the root project's implicit **/*.cs glob would otherwise compile its .cs into the
-         shipped app. See spike/winui/Spike.WinUI.csproj. -->
-    <Compile Remove="spike/**" />
-    <EmbeddedResource Remove="spike/**" />
-    <None Remove="spike/**" />
   </ItemGroup>
 
   <!-- The silent-failure targets are private by design (they are internal encodings, not API), so the test
