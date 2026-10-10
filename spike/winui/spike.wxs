@@ -10,7 +10,8 @@
            Scope="perMachine"
            Compressed="yes">
 
-    <MajorUpgrade AllowSameVersionUpgrades="yes" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Spike WinUI is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Feature Id="Main" Title="Spike WinUI">
