@@ -25,10 +25,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- GRANULAR, NOT THE METAPACKAGE. Microsoft.WindowsAppSDK 2.x is a meta-package that also drags in
-         WindowsAppSDK.AI / .ML / .Search / .Widgets — measured at 46.5 MB of onnxruntime/DirectML/widget DLLs a
-         tray flyout never touches. A UI app references .WinUI (+ its transitive Foundation/Base/DWrite/
-         InteractiveExperiences) and, for self-contained deployment, .Runtime. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
@@ -36,5 +32,19 @@
          finding for the evaluation (the real app would either pin a beta or hand-roll Shell_NotifyIcon). -->
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
   </ItemGroup>
+
+  <!-- WindowsAppSDK#6394. With PublishAot=true and WindowsPackageType=None the compiler drops the app's compiled
+       XAML resources (.xbf) and the package resource index (.pri) from the PUBLISH folder, so the published exe
+       dies at startup with STATUS_STOWED_EXCEPTION (0xC000027B) inside Microsoft.UI.Xaml.dll — exactly the crash
+       this spike hit. The workaround the issue documents is to copy them out of the build output after Publish. -->
+  <Target Name="CopyXamlResourcesForAot" AfterTargets="Publish" Condition="'$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <_XamlResources Include="$(OutputPath)**\*.xbf" />
+      <_XamlResources Include="$(OutputPath)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_XamlResources)"
+          DestinationFiles="@(_XamlResources->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>
