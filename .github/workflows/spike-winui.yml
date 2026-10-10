@@ -46,3 +46,12 @@ jobs:
           wix build spike.wxs -arch x64 -d "PublishDir=$PWD\out" -o Spike-WinUI.msi
           $mb = [math]::Round((Get-Item Spike-WinUI.msi).Length/1MB, 1)
           Write-Host "SHIPPING-SIZE: Spike-WinUI.msi = $mb MB"
+
+      # The AOT exe itself, so its RUNTIME memory can be measured locally (the working set of the JIT build is
+      # not comparable to the app's AOT one). Deleted from the run once the number is taken.
+      - name: Upload the AOT output
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-winui-aot
+          path: spike/winui/out
+          if-no-files-found: error
