@@ -29,10 +29,13 @@ jobs:
         working-directory: spike/winui
         run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o out
 
+      # Drop the symbols FIRST, exactly as the app's own CI does before WiX (`Remove-Item publish\*.pdb`): the
+      # app's MSI carries no PDB, so leaving the spike's in would make the size comparison meaningless.
       - name: Report the AOT output size
         shell: pwsh
         working-directory: spike/winui
         run: |
+          Remove-Item out\*.pdb -ErrorAction SilentlyContinue
           Get-ChildItem out -File | Measure-Object -Property Length -Sum |
             ForEach-Object { "files=$($_.Count) totalMB=$([math]::Round($_.Sum/1MB,1))" }
 
