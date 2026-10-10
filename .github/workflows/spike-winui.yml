@@ -35,3 +35,14 @@ jobs:
         run: |
           Get-ChildItem out -File | Measure-Object -Property Length -Sum |
             ForEach-Object { "files=$($_.Count) totalMB=$([math]::Round($_.Sum/1MB,1))" }
+
+      # The shipping-size number: pack the AOT output into the SAME kind of per-machine MSI the app ships
+      # (embedded cab, WiX 5), so the two are comparable. The app's own MSI is ~17.7 MB.
+      - name: Build the spike MSI (WiX) and report its size
+        shell: pwsh
+        working-directory: spike/winui
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix build spike.wxs -arch x64 -d "PublishDir=$PWD\out" -o Spike-WinUI.msi
+          $mb = [math]::Round((Get-Item Spike-WinUI.msi).Length/1MB, 1)
+          Write-Host "SHIPPING-SIZE: Spike-WinUI.msi = $mb MB"

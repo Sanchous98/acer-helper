@@ -21,7 +21,6 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
         // 1. Acrylic. WinUI 3 owns the backdrop; no DWM interop needed for the material itself.
         SystemBackdrop = new DesktopAcrylicBackdrop();
         ExtendsContentIntoTitleBar = true;
@@ -50,6 +49,20 @@ public sealed partial class MainWindow : Window
         {
             if (e.WindowActivationState == WindowActivationState.Deactivated) AppWindow.Hide();
         };
+    }
+
+    /// <summary>Show the flyout (and focus it) or put it away — what a tray left-click does.</summary>
+    public void Toggle()
+    {
+        if (Visible)
+        {
+            AppWindow.Hide();
+        }
+        else
+        {
+            AppWindow.Show();
+            Activate();
+        }
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]

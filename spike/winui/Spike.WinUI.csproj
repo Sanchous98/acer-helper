@@ -27,6 +27,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+    <!-- The tray. Note the version: H.NotifyIcon has no stable WinUI release — only beta/dev. That is itself a
+         finding for the evaluation (the real app would either pin a beta or hand-roll Shell_NotifyIcon). -->
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
   </ItemGroup>
 
 </Project>
