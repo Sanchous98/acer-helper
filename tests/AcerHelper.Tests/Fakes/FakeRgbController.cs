@@ -17,10 +17,12 @@ public sealed class FakeRgbController : IRgbController
     public string? ProfileFollowKey { get; set; }
 
     public bool SetProfileFlashResult { get; set; }
+    public bool SetFollowColorResult { get; set; }
     public bool BlankResult { get; set; }
     public bool ThrowOnDispose { get; set; }
 
     public List<AccentColor> FlashCalls { get; } = [];
+    public List<AccentColor> FollowColorCalls { get; } = [];
     public int BlankCalls { get; private set; }
     public int DisposeCalls { get; private set; }
 
@@ -28,6 +30,12 @@ public sealed class FakeRgbController : IRgbController
     {
         FlashCalls.Add(color);
         return SetProfileFlashResult;
+    }
+
+    public bool SetFollowColor(AccentColor color)
+    {
+        FollowColorCalls.Add(color);
+        return SetFollowColorResult;
     }
 
     public bool Blank()

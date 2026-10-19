@@ -15,9 +15,15 @@ namespace AcerHelper.Tests;
 /// not a second action, and sends no palette.</item>
 /// <item><b>Lightbar mode switch.</b> The flip used to paint the palette and then <c>KickReapply(withFlash:
 /// true)</c> re-sent it on the burst's first ticks, 400 ms after the first — the same second blink. The burst is
-/// now palette-free by construction: every path sends the palette ONCE, at the action instant, and the burst
-/// only re-applies the per-zone colours (which is silent when already correct).</item>
+/// now palette-free by construction: every path sends the GLOBAL palette ONCE, at the action instant, and the
+/// burst only re-applies the per-zone colours (which is silent when already correct).</item>
 /// </list>
+///
+/// THE ONE THING THE BURST DOES RE-SEND IS THE INDICATOR'S STEADY COLOUR, on a different channel:
+/// <c>SetFollowColor</c> paints only the follows-profile lightbar (A4 65), never the keyboard, so repeating it is
+/// silent. It has to be repeated, because the global palette is a one-shot write the firmware may overwrite with
+/// its amber default and the lightbar has no per-zone panel to self-heal it (the owner's post-sleep report: Eco
+/// mode, amber lightbar). That is NOT a second palette flash and must not be folded into the guarded block.
 ///
 /// WHY BOTH SHAPES. <c>IsWakeTail</c> is asserted behaviourally — it is a pure function, so the rule that
 /// decides the resume case is checked directly rather than by reading the source. The palette-free burst is
@@ -86,6 +92,26 @@ public class LightingReapplyFlashTests
         Assert.Contains("Paint(includeFlash: false);", source, StringComparison.Ordinal);   // the tick's shape
         Assert.DoesNotContain("withFlash", source, StringComparison.Ordinal);               // no per-burst flash switch
         Assert.DoesNotContain("FlashTicks", source, StringComparison.Ordinal);              // no per-burst flash count
+    }
+
+    /// <summary>THE BURST MUST RE-ASSERT THE FOLLOWS-PROFILE INDICATOR, and on its own channel. The owner's
+    /// report was the post-sleep state the guard above cannot see: the mode was Eco but the lightbar showed
+    /// amber (Balanced's colour) — the firmware's default after it repainted its operating-mode slot, with no
+    /// per-zone panel to self-heal because the lightbar follows the profile. The fix is an indicator-only write
+    /// (<c>SetFollowColor</c>) on every pass, INSIDE the follows-profile branch but OUTSIDE the
+    /// <c>includeFlash</c> guard — so a palette-free tick still corrects the lightbar, while the global flash is
+    /// still sent only once.
+    ///
+    /// The indentation is the assertion: moving the call into the <c>includeFlash</c> block (16 spaces) would
+    /// make the burst stop correcting it again, which is the regression this pins. MUTATION THAT REDDENS IT:
+    /// deleting the call, or moving it one level deeper.</summary>
+    [Fact]
+    public void TheBurstReAssertsTheFollowIndicator_WithoutTheGlobalFlash()
+    {
+        var source = Source("UI/LightingCoordinator.cs");
+
+        Assert.Contains("\n            _svc.Device.Lighting?.SetFollowColor(flash);\n",
+                        source.Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 
     /// <summary>Each action still sends its palette ONCE, at the action instant, before the palette-free burst

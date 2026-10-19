@@ -96,6 +96,16 @@ public interface IRgbDevice
     /// a profile switch (the firmware only accepts its per-profile palette here). Returns false if unsupported.</summary>
     bool SetProfileFlash(AccentColor color);
 
+    /// <summary>Re-assert the STEADY colour of a follows-profile indicator (the Acer lightbar) without the
+    /// global flash. <see cref="SetProfileFlash"/> is a one-shot GLOBAL write: it paints the indicator but also
+    /// briefly repaints the keyboard, so it may be sent only once per action. It is also the firmware's own
+    /// operating-mode slot, which the firmware can repaint with its default (amber) after a switch or a wake —
+    /// and a follows-profile indicator has no per-zone panel, so the re-apply burst cannot self-heal it the way
+    /// it does the keyboard. This is the indicator-only channel those passes use: it paints just the
+    /// follows-profile zones with the profile's palette colour, so repeating it is silent on the keyboard.
+    /// Returns false if the device has no follows-profile zone or the transport does not support it.</summary>
+    bool SetFollowColor(AccentColor color);
+
     /// <summary>Turn every controllable zone off (brightness 0). Used to blank a backlight that's hidden — e.g.
     /// the lid is shut but the machine stays awake in clamshell (keep-awake) mode — without disturbing the app's
     /// stored per-zone state; restore by re-applying the current mode's lighting. Returns false if no controller

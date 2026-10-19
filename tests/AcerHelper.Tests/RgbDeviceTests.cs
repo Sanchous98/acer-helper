@@ -171,6 +171,7 @@ public class RgbDeviceTests
 
         Assert.Empty(device.Zones);
         Assert.False(device.SetProfileFlash(new AccentColor(255, 0, 0)));
+        Assert.False(device.SetFollowColor(new AccentColor(255, 0, 0)));
         Assert.False(device.Blank());
         Assert.Null(device.ProfileFollowKey);
     }
@@ -260,6 +261,27 @@ public class RgbDeviceTests
         Assert.Equal(1, second.BlankCalls);   // <- skipped entirely under `||`
     }
 
+    /// <summary>THE INDICATOR-ONLY RE-ASSERT FOLDS LIKE THE FLASH. <c>SetFollowColor</c> is the pass that keeps a
+    /// follows-profile lightbar correct after the firmware repaints its slot, and the lightbar is a LATER
+    /// controller than the keyboard on the shipped arrangement — so a short-circuiting fold would ask the
+    /// keyboard, get its answer, and never reach the zone the call exists for. The per-controller call records
+    /// are the only observable: every controller in the shipped arrangement declines the flash and only the
+    /// lightbar takes the follow colour, so the return value alone cannot tell "asked and declined" from
+    /// "never asked".</summary>
+    [Fact]
+    public void EveryControllerIsAskedForTheFollowColour_EvenAfterOneReportsSuccess()
+    {
+        var keyboard = new FakeRgbController { SetFollowColorResult = false };
+        var lightbar = new FakeRgbController { SetFollowColorResult = true };
+        using var device = new RgbDevice(keyboard, lightbar);
+
+        Assert.True(device.SetFollowColor(new AccentColor(0, 220, 16)));
+
+        Assert.Single(keyboard.FollowColorCalls);
+        Assert.Single(lightbar.FollowColorCalls);
+        Assert.Equal(new AccentColor(0, 220, 16), lightbar.FollowColorCalls[0]);
+    }
+
     /// <summary>The aggregate's RESULT is "did anybody take it", not "did the last one" and not "did they all":
     /// the caller uses it to decide whether the machine has a profile indicator at all, so a controller that
     /// declines must not veto one that succeeded, and a false must still be reported when nobody could.</summary>
@@ -268,13 +290,15 @@ public class RgbDeviceTests
     {
         using var mixed = new RgbDevice(
             new FakeRgbController(),
-            new FakeRgbController { SetProfileFlashResult = true, BlankResult = true },
+            new FakeRgbController { SetProfileFlashResult = true, SetFollowColorResult = true, BlankResult = true },
             new FakeRgbController());
         Assert.True(mixed.SetProfileFlash(new AccentColor(1, 2, 3)));
+        Assert.True(mixed.SetFollowColor(new AccentColor(1, 2, 3)));
         Assert.True(mixed.Blank());
 
         using var none = new RgbDevice(new FakeRgbController(), new FakeRgbController());
         Assert.False(none.SetProfileFlash(new AccentColor(1, 2, 3)));
+        Assert.False(none.SetFollowColor(new AccentColor(1, 2, 3)));
         Assert.False(none.Blank());
     }
 

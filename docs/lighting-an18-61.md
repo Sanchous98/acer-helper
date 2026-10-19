@@ -232,6 +232,18 @@ schedules a **bounded burst of re-applies**, not one.
   earlier shape re-sent the palette on the first couple of ticks, which turned **every** restore and the
   follows-profile flip into **two** blinks — the second write landing 400 ms after the first. The rule is one
   flash per action; the per-zone self-heal is the safety net the burst keeps.
+- **The burst DOES re-assert the follows-profile lightbar's STEADY colour, on a different channel.** A
+  follows-profile lightbar has **no per-zone panel** (the firmware owns it), so the per-zone self-heal above
+  never reaches it. The palette reaches it only through the one-shot global OPMODE write, which the firmware can
+  repaint with its amber default after a switch **or a wake** — and that left the owner with **Eco mode but an
+  amber (Balanced-coloured) lightbar after a sleep** until the next switch. `IRgbDevice.SetFollowColor` is the
+  indicator-only write for that: `A4 65` STATIC (the arbitrary-colour lightbar path, R,G,B) with the profile's
+  palette colour, so the **keyboard is untouched** and the write is **silent when the lightbar is already
+  correct**. `LightingCoordinator.Paint` sends it on **every** pass — inside the follows-profile branch but
+  outside the `includeFlash` guard — so the palette-free burst ticks correct a lightbar the firmware repainted
+  or a palette write the transport lost. Proven on the AN18-61: an `A4 65` write turns the amber lightbar green
+  independently of the OPMODE path. The colour still belongs to the profile (it is the same palette value), so
+  "follows the profile" remains the rule; only the delivery is now idempotent.
 
 ### Why applying on the switch instant matters (the double blink)
 

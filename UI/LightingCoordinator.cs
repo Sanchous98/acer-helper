@@ -324,10 +324,13 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
 
     // Repaint from the cached flash colour and the section's own values. First paint the profile's palette on a
     // follow-lightbar (a GLOBAL write that also flashes the keyboard), then re-apply the per-zone colours so the
-    // keyboard settles back to its own custom colour on top. The HID writes are async (EneHidController queues
-    // them), so this never blocks the UI thread; and it reads nothing from the EC — it asks the section, which
-    // holds the values as its own (LaptopService's door is not re-entered here). Called immediately on a switch
-    // and repeated by _lightReapply / resume / lid as a safety net against a late firmware repaint.
+    // keyboard settles back to its own custom colour on top. THE GLOBAL PALETTE IS SENT ONLY WHEN `includeFlash`
+    // (once per action); the follow lightbar's STEADY colour is re-asserted on every pass through the
+    // indicator-only channel (SetFollowColor), because the palette write is one-shot and the firmware can repaint
+    // its slot afterwards — see the comments inside. The HID writes are async (EneHidController queues them), so
+    // this never blocks the UI thread; and it reads nothing from the EC — it asks the section, which holds the
+    // values as its own (LaptopService's door is not re-entered here). Called immediately on a switch and repeated
+    // by _lightReapply / resume / lid as a safety net against a late firmware repaint.
     //
     // `rebind` is the ONE case that needs state this class does not have: a pass that reports the mode or the
     // profile moved hands in the new mode's door, and the panels rebind through it before painting (exactly one
@@ -338,16 +341,29 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
 
-        if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
+        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
         {
-            // ARM THE SPURIOUS-ZERO SUSPICION BEFORE THE FLASH LANDS. The OPMODE write below zeroes the EC's
-            // keyboard-brightness register while the keyboard stays lit (docs/lighting-an18-61.md), and that
-            // register now lies for a short window — so a 0 an Fn-key read reports in it is the flash, not the
-            // user. The panels refuse a 0 only while this is fresh (LightViewModel.NoteProfileFlash), which is
-            // what lets a genuine Fn dim to 0 land at any other time. It must be armed in the same instant as the
-            // write, and the section drives the same panels that will consume the read.
-            _lighting.NoteProfileFlash();
-            _svc.Device.Lighting?.SetProfileFlash(flash);
+            if (includeFlash)
+            {
+                // ARM THE SPURIOUS-ZERO SUSPICION BEFORE THE FLASH LANDS. The OPMODE write below zeroes the EC's
+                // keyboard-brightness register while the keyboard stays lit (docs/lighting-an18-61.md), and that
+                // register now lies for a short window — so a 0 an Fn-key read reports in it is the flash, not the
+                // user. The panels refuse a 0 only while this is fresh (LightViewModel.NoteProfileFlash), which is
+                // what lets a genuine Fn dim to 0 land at any other time. It must be armed in the same instant as the
+                // write, and the section drives the same panels that will consume the read.
+                _lighting.NoteProfileFlash();
+                _svc.Device.Lighting?.SetProfileFlash(flash);
+            }
+
+            // AND RE-ASSERT THE INDICATOR'S STEADY COLOUR ON EVERY PASS, including the palette-free burst ticks.
+            // The OPMODE write above is a one-shot GLOBAL FLASH: it also repaints the keyboard, and the firmware
+            // may repaint its slot with the amber default a moment after a switch or a wake. A follows-profile
+            // lightbar has no per-zone panel, so the burst's per-zone self-heal never reaches it — that is the
+            // owner's report: after a sleep the mode was Eco but the lightbar stayed amber (Balanced) until the
+            // next switch. This indicator-only write paints just that zone with the same palette colour, so it is
+            // silent on the keyboard and safe to repeat. Proven on the AN18-61: an A4 65 write turns the amber
+            // lightbar green independently of the OPMODE path.
+            _svc.Device.Lighting?.SetFollowColor(flash);
         }
         if (rebind is { } mode) _vm.ReloadLighting(mode);
         else _vm.RepaintLighting();
@@ -442,6 +458,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
                 _blankedByLid = false;
                 Paint(rebind: _rebindWhenVisible);
                 _rebindWhenVisible = null;
+                KickReapply();   // same silent self-heal as a switch/restore: re-assert the zones AND the follow lightbar
             }
         }
         else if (_svc.Device.Clamshell?.Enabled == true)
