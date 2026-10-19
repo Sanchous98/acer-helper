@@ -137,9 +137,10 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         // The palette flash itself is firmware and can't be suppressed.)
         _lightReapply = new PeriodicSchedule(ReapplyTick, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
-        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — ONCE.
-        // The internal keyboard is always connected and never re-enumerates across sleep, so its HID handle
-        // stays valid and a single write lands; there's nothing to poll for. (See OnResume.)
+        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — the palette
+        // ONCE, then a palette-free self-heal burst (see OnResume). The internal keyboard is always connected and
+        // never re-enumerates across sleep, so its HID handle stays valid and a single write lands; there's
+        // nothing to poll for. (See OnResume.)
         _resume = new ResumeWatcher(() => _uiPost(OnResume));
         _resume.Start();
 
@@ -422,6 +423,14 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
             {
                 var restored = _pendingId != null && _pendingSince >= _lastResume;
                 Paint(includeFlash: !restored);
+                // ONE palette send, then a palette-free self-heal burst. The wake paints at the instant the OS
+                // reports resume, which can be before the EC has finished re-initialising its operating-mode slot;
+                // the firmware can then repaint that slot amber AFTER our single write. The burst is what covers
+                // that late repaint: every tick now also re-asserts the follows-profile lightbar's steady colour
+                // (SetFollowColor), which the keyboard-only per-zone re-apply never could — the gap that left the
+                // owner's Eco machine showing an amber lightbar until the next switch. Restarting an already-running
+                // burst coalesces, and both the per-zone and indicator writes are silent when already correct.
+                KickReapply();
             });
         });
 

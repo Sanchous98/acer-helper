@@ -241,9 +241,11 @@ schedules a **bounded burst of re-applies**, not one.
   palette colour, so the **keyboard is untouched** and the write is **silent when the lightbar is already
   correct**. `LightingCoordinator.Paint` sends it on **every** pass — inside the follows-profile branch but
   outside the `includeFlash` guard — so the palette-free burst ticks correct a lightbar the firmware repainted
-  or a palette write the transport lost. Proven on the AN18-61: an `A4 65` write turns the amber lightbar green
-  independently of the OPMODE path. The colour still belongs to the profile (it is the same palette value), so
-  "follows the profile" remains the rule; only the delivery is now idempotent.
+  or a palette write the transport lost. `OnResume` kicks that burst as well, because a wake that changed neither
+  the profile nor the mode gets no refresh-pass paint to start one, and the EC may finish re-initialising its
+  slot *after* the wake's single palette write. Proven on the AN18-61: an `A4 65` write turns the amber lightbar
+  green independently of the OPMODE path. The colour still belongs to the profile (it is the same palette value),
+  so "follows the profile" remains the rule; only the delivery is now idempotent.
 
 ### Why applying on the switch instant matters (the double blink)
 

@@ -114,6 +114,23 @@ public class LightingReapplyFlashTests
                         source.Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 
+    /// <summary>THE WAKE MUST KICK THE BURST, not paint once and stop. The OS reports resume before the EC has
+    /// necessarily finished re-initialising its operating-mode slot, so the firmware can repaint the slot amber
+    /// AFTER the wake's single palette write; only a pass that follows can correct it. The wake's paint is posted
+    /// asynchronously (after the power-source re-sync), so the burst must be kicked by that same post — a refresh
+    /// pass only paints when the profile or mode changed, which is NOT the case for a wake that changed neither
+    /// (the owner's Eco-over-sleep case).</summary>
+    [Fact]
+    public void TheWakeKicksThePaletteFreeBurst_SoALateRepaintIsCorrected()
+    {
+        var source = Source("UI/LightingCoordinator.cs").Replace("\r\n", "\n");
+
+        var paint = source.IndexOf("Paint(includeFlash: !restored);", StringComparison.Ordinal);
+        Assert.True(paint >= 0, "the wake still paints once, with the palette unless the restore already did");
+        var kick = source.IndexOf("KickReapply();", paint, StringComparison.Ordinal);
+        Assert.True(kick > paint, "the wake's paint must be followed by the self-heal burst");
+    }
+
     /// <summary>Each action still sends its palette ONCE, at the action instant, before the palette-free burst
     /// backs it: the restore/flip paints, then kicks. A refactor that dropped the <c>Paint()</c> and left the
     /// palette to the burst would make these actions stop flashing at all — the opposite failure — so the send
