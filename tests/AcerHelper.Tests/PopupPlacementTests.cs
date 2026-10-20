@@ -245,10 +245,39 @@ public class PopupPlacementTests
     /// assign is a verification of nothing.</summary>
     [Theory]
     [InlineData("PopupPlacement.Settle(")]
-    [InlineData("screen.WorkingArea, screen.Bounds")]
+    [InlineData("workingArea, screenBounds, new PixelSize(w, h), gap, scale")]
     [InlineData("place: ask => { Position = ask; return Position; }")]
     public void TheFlyoutAsksTheMeasuredDecision(string required)
         => Assert.Contains(required, Source("UI/MainWindow.axaml.cs"), StringComparison.Ordinal);
+
+    /// <summary>THE EMPTY-SCREEN STATE MUST STILL PLACE THE WINDOW. Avalonia caches its screen list from the
+    /// first read and refreshes it only on a display-mode change, so a process started at logon can have an
+    /// empty list for its whole life. If the flyout returned there, it stayed at Windows' CW_USEDEFAULT
+    /// position (measured: 38,38) on every open. On Windows the work area must therefore come from the
+    /// monitor API when the toolkit reports no screen.</summary>
+    [Fact]
+    public void TheFlyoutFallsBackToTheMonitorApiWhenTheScreenListIsEmpty()
+    {
+        var source = Source("UI/MainWindow.axaml.cs");
+        Assert.Contains("OperatingSystem.IsWindows() && TryGetPrimaryMonitor(out workingArea, out screenBounds)",
+            source, StringComparison.Ordinal);
+        Assert.Contains("MonitorFromPoint(default, MonitorDefaultToPrimary)", source, StringComparison.Ordinal);
+        Assert.Contains("GetMonitorInfoW(monitor, ref info)", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>The fallback reads REAL geometry, not just a compile-time shape: on Windows the primary work
+    /// area is non-empty and fits inside the output's own rectangle. This is the one part of the empty-screen
+    /// repair that can be exercised against the platform in a test.</summary>
+    [Fact]
+    public void TheMonitorFallbackReadsTheRealPrimaryWorkArea()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.True(UI.MainWindow.TryGetPrimaryMonitor(out var work, out var output));
+        Assert.True(work.Width > 0 && work.Height > 0);
+        Assert.True(output.Width >= work.Width && output.Height >= work.Height);
+        Assert.Equal(0, output.X);
+        Assert.Equal(0, output.Y);
+    }
 
     /// <summary>And the removed assumption must not creep back: the old arithmetic scaled the area by the scale
     /// on the way into the corner. If a future edit reintroduces it, the flyout goes off the screen again in the

@@ -104,6 +104,11 @@ public partial class MainWindow : Window
         // growth would push the bottom off-screen and it grows upward instead.
         SizeChanged += (_, _) => { if (IsOpen) Reanchor(); };
 
+        // A display change (undock, lid, resolution, DPI) can make Windows move the window under us; while
+        // it is open, take the corner back. This is also the moment Avalonia's screen cache - empty since a
+        // bad first read at logon - finally refills (see Reanchor).
+        Screens.Changed += OnScreensChanged;
+
         // A click on the transparent shadow margin around the card (the Backdrop itself, not the card) is
         // a click "outside" the flyout -> dismiss, like clicking outside it.
         Backdrop.PointerPressed += (_, e) =>
@@ -163,6 +168,7 @@ public partial class MainWindow : Window
     /// low-level mouse hook first. Used when the app rebuilds its UI for a live language switch.</summary>
     public void Destroy()
     {
+        Screens.Changed -= OnScreensChanged;
         CloseFlyout();           // hide + unhook the outside-click mouse hook
         _slideCache.Stop();      // a pending disarm must not fire against a torn-down tree
         _slideCache.Dispose();
@@ -283,35 +289,102 @@ public partial class MainWindow : Window
         if (IsOpen) Reanchor();              // the pinned size is what the corner should be measured against
     }
 
+    /// <summary>Put the frame's bottom-right corner where it belongs - on every open, on a height change, and
+    /// when the session's screens change.
+    ///
+    /// THE TOOLKIT'S SCREEN LIST CAN BE EMPTY FOR THE LIFE OF THE PROCESS. Avalonia builds its screen list on
+    /// the first read and rebuilds it only when the display mode changes (WM_DISPLAYCHANGE). A process the
+    /// logon task starts while the desktop is still coming up can enumerate ZERO monitors; if the resolution
+    /// then never changes, the cached list stays empty. This method used to return in that state, so the
+    /// flyout stayed wherever Windows had put the never-placed HWND - CW_USEDEFAULT, the top-left cascade,
+    /// measured at (38,38) on the owner's machine - on every open, for the whole session. A process started
+    /// later, with the desktop ready, enumerates normally; that is why a dev run placed correctly while the
+    /// installed instance did not.
+    ///
+    /// So when Avalonia reports no screen, the geometry comes from Win32 instead: the primary monitor's work
+    /// and output rectangles are read live on every call (no cache), and the window's own DIP-to-device
+    /// factor still comes from RenderScaling. When Avalonia does have a screen, its numbers are used
+    /// unchanged.
+    ///
+    /// WHICH SPACE THE WORKING AREA ARRIVES IN IS MEASURED, NOT ASSUMED - because it is not a property of the
+    /// display, it is a property of what the toolkit happens to report.
+    ///
+    /// This used to hard-code the factor. The first measurement said WorkingArea.Width comes back as 2752 on
+    /// a 3440-wide output, i.e. LOGICAL units, so the area was multiplied by the scale; the unconverted
+    /// arithmetic had put the flyout at x=2142 instead of 2830, a quarter of the screen short of the corner,
+    /// which read as "the window sits near the middle". Then the SAME session reported the same area as 3440
+    /// - DEVICE pixels - and that multiplication asked for x=3690: past the right edge, and the flyout came
+    /// up off the screen. Nothing about the display, the scale or the layout had changed; only what the
+    /// toolkit reported. So the space is now OBSERVED: PopupPlacement.SpaceOf compares the area against the
+    /// output's own rectangle (Screen.Bounds, the one report that is the same in both spaces), and
+    /// PopupPlacement.Settle places the window there, reads its position back, and falls back to the other
+    /// space if the compositor moved it. A 1.0-scale session is unaffected either way (both candidates are
+    /// the same corner there), and on the Windows TFM none of this differs from before.
+    ///
+    /// (THE SAME DISAGREEMENT IS NOT ONLY HERE: popups and the two CenterOwner modals are placed by the
+    /// toolkit and land wrong on this session for the same reason - the correction for those, and the
+    /// measurement it comes from, is in PopupPlacement.cs, which is the sibling of this method.)</summary>
     private void Reanchor()
     {
-        var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
-        if (screen == null) return;
-        var s = screen.Scaling;
-        var w = (int)(Bounds.Width * s);
-        var h = (int)(Bounds.Height * s);
-        var gap = (int)(20 * s);   // 20 DIP visual gap from the screen corner (card is no longer margined)
-        // WHICH SPACE THE WORKING AREA ARRIVES IN IS MEASURED, NOT ASSUMED — because it is not a property of the
-        // display, it is a property of what the toolkit happens to report.
-        //
-        // This used to hard-code the factor. The first measurement said WorkingArea.Width comes back as 2752 on
-        // a 3440-wide output, i.e. LOGICAL units, so the area was multiplied by the scale; the unconverted
-        // arithmetic had put the flyout at x=2142 instead of 2830, a quarter of the screen short of the corner,
-        // which read as "the window sits near the middle". Then the SAME session reported the same area as 3440
-        // — DEVICE pixels — and that multiplication asked for x=3690: past the right edge, and the flyout came
-        // up off the screen. Nothing about the display, the scale or the layout had changed; only what the
-        // toolkit reported. So the space is now OBSERVED: PopupPlacement.SpaceOf compares the area against the
-        // output's own rectangle (Screen.Bounds, the one report that is the same in both spaces), and
-        // PopupPlacement.Settle places the window there, reads its position back, and falls back to the other
-        // space if the compositor moved it. A 1.0-scale session is unaffected either way (both candidates are
-        // the same corner there), and on the Windows TFM none of this differs from before.
-        //
-        // (THE SAME DISAGREEMENT IS NOT ONLY HERE: popups and the two CenterOwner modals are placed by the
-        // toolkit and land wrong on this session for the same reason — the correction for those, and the
-        // measurement it comes from, is in PopupPlacement.cs, which is the sibling of this method.)
+        if (!TryGetAnchorGeometry(out var workingArea, out var screenBounds, out var scale)) return;
+        var w = (int)(Bounds.Width * scale);
+        var h = (int)(Bounds.Height * scale);
+        if (w <= 0 || h <= 0) return;
+        var gap = (int)(20 * scale);   // 20 DIP visual gap from the screen corner (card is no longer margined)
         Position = PopupPlacement.Settle(
-            screen.WorkingArea, screen.Bounds, new PixelSize(w, h), gap, s,
+            workingArea, screenBounds, new PixelSize(w, h), gap, scale,
             place: ask => { Position = ask; return Position; }).Position;
+    }
+
+    /// <summary>The working area, output rectangle and DIP-to-device factor to anchor against, or false when
+    /// no usable geometry exists at all (nothing can be placed then). See <see cref="Reanchor"/> for why the
+    /// Win32 fallback is not just belt-and-braces.</summary>
+    private bool TryGetAnchorGeometry(out PixelRect workingArea, out PixelRect screenBounds, out double scale)
+    {
+        if ((Screens.Primary ?? Screens.All.FirstOrDefault()) is { } screen)
+        {
+            workingArea = screen.WorkingArea;
+            screenBounds = screen.Bounds;
+            scale = screen.Scaling;
+            return true;
+        }
+
+        if (OperatingSystem.IsWindows() && TryGetPrimaryMonitor(out workingArea, out screenBounds))
+        {
+            // Both rectangles are already device pixels (the monitor API is physical and this process is
+            // per-monitor DPI aware), so only the window's own size still needs the factor.
+            scale = RenderScaling > 0 ? RenderScaling : 1.0;
+            return true;
+        }
+
+        workingArea = default;
+        screenBounds = default;
+        scale = 1.0;
+        return false;
+    }
+
+    /// <summary>The primary monitor's work and output rectangles in device pixels, read live from Win32. The
+    /// primary output's origin is (0,0), so the point query names it without enumerating monitors. Internal
+    /// rather than private so the tests can assert the fallback against the real machine.</summary>
+    internal static bool TryGetPrimaryMonitor(out PixelRect workingArea, out PixelRect screenBounds)
+    {
+        workingArea = default;
+        screenBounds = default;
+        var monitor = MonitorFromPoint(default, MonitorDefaultToPrimary);
+        if (monitor == IntPtr.Zero) return false;
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfoW(monitor, ref info)) return false;
+        workingArea = ToPixelRect(info.rcWork);
+        screenBounds = ToPixelRect(info.rcMonitor);
+        return workingArea.Width > 0 && workingArea.Height > 0;
+    }
+
+    private static PixelRect ToPixelRect(RECT r)
+        => new(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+
+    private void OnScreensChanged(object? sender, EventArgs e)
+    {
+        if (IsOpen) Reanchor();
     }
 
     private void ForceForeground()
@@ -390,7 +463,7 @@ public partial class MainWindow : Window
     private bool PointInWindow(int px, int py)
     {
         var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
-        var s = screen?.Scaling ?? 1.0;
+        var s = screen?.Scaling ?? (RenderScaling > 0 ? RenderScaling : 1.0);
         int w = (int)(Bounds.Width * s), h = (int)(Bounds.Height * s);
         var p = Position;
         return px >= p.X && px < p.X + w && py >= p.Y && py < p.Y + h;
@@ -408,6 +481,19 @@ public partial class MainWindow : Window
     }
 
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    private const uint MonitorDefaultToPrimary = 1;
+
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+    [DllImport("user32.dll")] private static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
 
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
