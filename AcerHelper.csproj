@@ -9,7 +9,7 @@
     <AssemblyName>AcerHelper</AssemblyName>
     <RootNamespace>AcerHelper</RootNamespace>
     <Product>Acer Helper</Product>
-    <Version>0.39.2</Version>
+    <Version>0.39.3</Version>
 
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- The Windows WMI layer talks to the WMI COM API directly via source-generated COM interop
@@ -192,17 +192,17 @@
        12.1.0, so the four pins below sit on 12.1.x rather than 12.0.5. They stay there deliberately —
        that line is the current stable one and the owner keeps it ("раз уж avalonia обновился"). -->
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.1.2" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
-    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.1.2" />
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.1.4" />
     <!-- MVVM: source-generated (AOT/trim-safe) ObservableObject/[ObservableProperty]/[RelayCommand]. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <!-- THE COMPOSITION CONTAINER (docs/... — the graph is stated once in UI/CompositionRoot.cs instead of being
          hand-wired at each site). Every registration uses a FACTORY delegate, never the `<TService, TImpl>` type
          pair: the type pair makes the container reflect over a constructor, and this app is Native AOT on both
          TFMs (README), so a delegate registration is the shape that survives the AOT/trim analysis. -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
   </ItemGroup>
 
   <!-- Windows-only platform packages. WMI is accessed via source-generated COM interop to the WMI COM
@@ -211,7 +211,7 @@
        HidSharp only serves the Windows RGB transport — Linux talks to hidraw directly
        (EneHidController.Linux.cs), because HidSharp's Linux enumeration misses HID-over-I2C devices. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.13" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 
