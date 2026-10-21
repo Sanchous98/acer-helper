@@ -187,6 +187,40 @@ public class LightingReapplyFlashTests
         Assert.Contains("_pendingId = applied.Id;", source, StringComparison.Ordinal);
     }
 
+    /// <summary>THE BURST IS BOUNDED, SO IT CANNOT BE THE ONLY CORRECTION. A wake that misses the resume event (a
+    /// Modern-Standby machine whose profile did not change) never starts the burst at all, and a firmware repaint
+    /// that lands after the ~3 s window is likewise missed; either way the Eco lightbar stays amber until the next
+    /// profile switch. The long-lived keeper closes that hole on the indicator-only channel: it re-asserts the
+    /// steady colour on a slow schedule, with the same follows-profile + clamshell guards as <c>Paint</c>, and
+    /// never sends the global palette or repaints the keyboard. A source guard for the same reason as the burst
+    /// tests above — the coordinator needs a desktop lifetime and a live refresh loop to drive.
+    ///
+    /// MUTATION THAT REDDENS IT: removing the schedule/start/dispose, dropping the <c>BacklightHidden</c> or
+    /// follows-profile gate (the keeper would relight a hidden bar or override a user-owned lightbar), or adding
+    /// <c>SetProfileFlash</c>/a zone repaint to the tick (the palette is the global write that blinks).</summary>
+    [Fact]
+    public void TheLongLivedKeeperReAssertsTheIndicator_WithoutThePalette()
+    {
+        var source = Source("UI/LightingCoordinator.cs").Replace("\r\n", "\n");
+
+        Assert.Contains("_followKeeper = new PeriodicSchedule(FollowKeeperTick, FollowKeeperInterval, UiSchedule.Normal);",
+                        source, StringComparison.Ordinal);
+        Assert.Contains("_followKeeper.Start();", source, StringComparison.Ordinal);
+        Assert.Contains("_followKeeper.Dispose();", source, StringComparison.Ordinal);
+
+        var tick = source.IndexOf("private void FollowKeeperTick()", StringComparison.Ordinal);
+        Assert.True(tick >= 0, "the keeper's tick must exist");
+        var end = source.IndexOf("\n    }", tick, StringComparison.Ordinal);
+        Assert.True(end > tick, "the keeper's tick must have a body");
+        var body = source[tick..end];
+
+        Assert.Contains("if (BacklightHidden) return;", body, StringComparison.Ordinal);
+        Assert.Contains("_lighting is { ShowFollowsProfile: true, FollowsProfile: true }", body, StringComparison.Ordinal);
+        Assert.Contains("SetFollowColor(flash)", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetProfileFlash", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("RepaintLighting", body, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>The repository root, from the COMPILER's path: the test host's working directory is its output

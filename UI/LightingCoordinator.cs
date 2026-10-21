@@ -43,6 +43,19 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     private readonly PeriodicSchedule _lightReapply;  // re-applies the per-zone lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
 
+    // THE LONG-LIVED HALF OF THE LIGHTBAR SELF-HEAL. The burst above is deliberately bounded (~3 s), so it only
+    // covers a firmware repaint that lands in that window, and it only runs at all if the wake event reaches us.
+    // The owner's case is neither guaranteed: after sleep the mode is Eco but the lightbar stays amber until the
+    // next profile switch (the EC repaints its operating-mode slot after our burst, or the resume event is missed
+    // on a Modern-Standby machine whose profile did not change). This slow keeper re-asserts the indicator's
+    // steady colour forever, on the indicator-only channel: no palette (that is the global write which blinks),
+    // no keyboard, no rebind. Re-asserting the colour the firmware already holds is visually silent, so a tick
+    // that lands on a correct lightbar is a no-op to the user; a tick that lands after a late repaint corrects it
+    // within one interval instead of waiting for the next action. Bounded callers keep their bounded retry; this
+    // is a separate, cheap safety net, not a bus-retry loop.
+    private readonly PeriodicSchedule _followKeeper;
+    private static readonly TimeSpan FollowKeeperInterval = TimeSpan.FromSeconds(5);
+
     // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) restore the per-zone
     // colours the firmware's own palette repaint clobbers after a profile switch, and (2) self-heal a
     // corrupted apply on a display-contended HID-over-I2C bus (booted-with-external-display), where the first
@@ -137,6 +150,12 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         // The palette flash itself is firmware and can't be suppressed.)
         _lightReapply = new PeriodicSchedule(ReapplyTick, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
+        // The trigger-independent lightbar safety net (see _followKeeper). It starts here, before any UI exists,
+        // and no-ops until Attach hands over a section with follows-profile on, so it adds nothing to startup and
+        // nothing at all to a machine with no lightbar or with the toggle off.
+        _followKeeper = new PeriodicSchedule(FollowKeeperTick, FollowKeeperInterval, UiSchedule.Normal);
+        _followKeeper.Start();
+
         // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — the palette
         // ONCE, then a palette-free self-heal burst (see OnResume). The internal keyboard is always connected and
         // never re-enumerates across sleep, so its HID handle stays valid and a single write lands; there's
@@ -195,6 +214,18 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     {
         Paint(includeFlash: false);
         if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
+    }
+
+    // One slow tick of the long-lived lightbar keeper (see _followKeeper): re-assert ONLY the follows-profile
+    // indicator's steady colour. The guards are Paint's indicator branch plus the clamshell blank, so the keeper
+    // can never relight a hidden bar, never touches a lightbar the user took over by turning follows-profile off,
+    // and never writes before the colour has been seeded. Runs on the UI thread (UiSchedule.Normal), like every
+    // other paint, so the cached section and the lid state are read where they are written.
+    private void FollowKeeperTick()
+    {
+        if (BacklightHidden) return;
+        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
+            _svc.Device.Lighting?.SetFollowColor(flash);
     }
 
     /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
@@ -489,6 +520,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     public void Dispose()
     {
         _lightReapply.Stop();
+        _followKeeper.Dispose();
         _resume.Dispose();
         _lid.Dispose();
     }

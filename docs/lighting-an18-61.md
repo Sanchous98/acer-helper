@@ -246,6 +246,19 @@ schedules a **bounded burst of re-applies**, not one.
   slot *after* the wake's single palette write. Proven on the AN18-61: an `A4 65` write turns the amber lightbar
   green independently of the OPMODE path. The colour still belongs to the profile (it is the same palette value),
   so "follows the profile" remains the rule; only the delivery is now idempotent.
+- **A SLOW, LONG-LIVED KEEPER backs the burst, and it is the part that is trigger-independent.** The burst is
+  bounded to ~3 s and starts from `OnResume`; if the resume event never reaches the app (a Modern-Standby wake
+  whose profile and mode did not change gets no refresh-pass paint either) or the EC repaints its slot *after*
+  the burst has stopped, the amber lightbar stays until the next profile switch �?" the owner's recurrence on
+  0.39.3, with the profile correctly showing Eco. `LightingCoordinator._followKeeper` therefore re-asserts the
+  same `SetFollowColor` steady colour on a **5 s** schedule for the life of the process. It is the same
+  indicator-only `A4 65` write as the burst's, so it **never sends the palette, never touches the keyboard and
+  never rebinds a mode**, and it is **silent when the colour is already correct**. It is gated exactly like
+  `Paint`'s indicator branch (follows-profile on, a seeded palette colour) **plus** `BacklightHidden`, so it can
+  never relight a bar blanked under a shut lid in clamshell mode or override a lightbar the user took over by
+  turning follows-profile off. This is not the forever-retry the bounded burst deliberately avoids: the burst
+  retries a possibly-corrupt bus every 400 ms; the keeper corrects one indicator write every 5 s and stops
+  mattering as soon as the firmware's slot agrees.
 
 ### Why applying on the switch instant matters (the double blink)
 
