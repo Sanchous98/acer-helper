@@ -78,16 +78,16 @@ internal sealed partial class EneHidController : IRgbController
     public bool SetProfileFlash(AccentColor color)
         => SetFeature([ReportId, TgtKeyboard, OpMode, 0x00, 0x00, FlagEffect, color.B, color.G, color.R, KbAllZones, 0x00]);
 
-    /// <summary>Re-assert the follows-profile indicator's STEADY colour (see
-    /// <see cref="IRgbDevice.SetFollowColor"/>): a lightbar-only STATIC write on the same arbitrary-colour path
-    /// the follows-profile-OFF panel uses, so the keyboard is untouched and the write may be repeated on every
-    /// pass. Needed because the profile palette reaches the lightbar through the GLOBAL OPMODE flash
-    /// (<see cref="SetProfileFlash"/>), which is sent once per action and which the firmware can repaint with
-    /// its amber default after a switch or a wake — a lightbar that follows the profile has no per-zone panel,
-    /// so nothing else would ever correct it. A no-op on a controller with no follows-profile zone.</summary>
-    public bool SetFollowColor(AccentColor color)
-        => _zones.Any(z => z.CanFollowProfile)
-           && Send(TgtLightbar, RgbEffects.StaticModeByte, isEffect: false, FullBright, speed: 0, FlagStatic, color, LbAllZones);
+    /// <summary>THE FOLLOWS-PROFILE ZONE IS NOT WRITTEN AT ALL. The lightbar's per-profile colour reaches it
+    /// through the ONE channel the firmware gives it: the global OPMODE flash (<see cref="SetProfileFlash"/>),
+    /// which paints the keyboard and the lightbar together in the profile's palette colour. The arbitrary-colour
+    /// path below (<c>A4 65</c>) is a DIFFERENT firmware path: it renders a slightly different shade of the same
+    /// RGB, and it disturbs the EC's brightness state - which is exactly the pair of regressions the app shipped
+    /// with when it started re-asserting the lightbar through it (0.39.4). A zone the firmware paints per profile
+    /// is therefore left to the firmware, and the colour is re-asserted by re-sending the palette - once per
+    /// action, at the action instant. See docs/lighting-an18-61.md.</summary>
+    /// <remarks>There is deliberately no <c>A4 65</c> write here: the zone is addressed only by the operating-mode
+    /// slot, and the lightbar's own custom colour (follows-profile OFF) goes through the panel's own apply op.</remarks>
 
     // Turn every zone off — blanks the backlight while it's hidden under a shut lid in clamshell (keep-awake)
     // mode; the app restores it by re-applying the current mode's lighting on lid-open. The keyboard honours the

@@ -93,18 +93,15 @@ public interface IRgbDevice
 
     /// <summary>Paint the device's "operating mode" indicator (a global flash across the lit surfaces) with a
     /// colour, if any controller supports it. Used to reproduce the per-performance-profile lightbar colour on
-    /// a profile switch (the firmware only accepts its per-profile palette here). Returns false if unsupported.</summary>
+    /// a profile switch (the firmware only accepts its per-profile palette here). Returns false if unsupported.
+    ///
+    /// IT IS ALSO THE ONLY CHANNEL a follows-profile zone has. A zone the firmware paints per profile (the Acer
+    /// lightbar) is left ENTIRELY to the firmware: the app sends it nothing, because a zone write is a different
+    /// firmware path than the operating-mode slot and does not render the same colour (a zone write shows a
+    /// slightly different shade, and it disturbs the EC's brightness state). The zone's colour is therefore
+    /// re-asserted by re-sending this palette - once per action, at the action instant - and never by writing
+    /// the zone. See <see cref="RgbZone.CanFollowProfile"/> and docs/lighting-an18-61.md.</summary>
     bool SetProfileFlash(AccentColor color);
-
-    /// <summary>Re-assert the STEADY colour of a follows-profile indicator (the Acer lightbar) without the
-    /// global flash. <see cref="SetProfileFlash"/> is a one-shot GLOBAL write: it paints the indicator but also
-    /// briefly repaints the keyboard, so it may be sent only once per action. It is also the firmware's own
-    /// operating-mode slot, which the firmware can repaint with its default (amber) after a switch or a wake —
-    /// and a follows-profile indicator has no per-zone panel, so the re-apply burst cannot self-heal it the way
-    /// it does the keyboard. This is the indicator-only channel those passes use: it paints just the
-    /// follows-profile zones with the profile's palette colour, so repeating it is silent on the keyboard.
-    /// Returns false if the device has no follows-profile zone or the transport does not support it.</summary>
-    bool SetFollowColor(AccentColor color);
 
     /// <summary>Turn every controllable zone off (brightness 0). Used to blank a backlight that's hidden — e.g.
     /// the lid is shut but the machine stays awake in clamshell (keep-awake) mode — without disturbing the app's

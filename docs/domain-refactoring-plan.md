@@ -278,7 +278,7 @@
 предположенное; это меняет объём волны.
 
 - **Сайтов четыре, не три.** К старту (`LaptopService.ApplyStartupState`), смене
-  режима (`AppController.BackgroundPass`) и resume (`LightingCoordinator.OnResume`)
+  режима (`AppController.BackgroundPass`) и resume (`LightingCoordinator.OnWake`)
   добавляется EC-синк в конструкторе устройства
   (`Infrastructure/Vendors/Acer/AcerDevice.Windows.cs:50`) — не ось `ModeAxis`, но
   такая же рукописная копия boot-состояния.
@@ -1056,7 +1056,7 @@ BlGetOff)`) — **ноль красных**: ни один тест не стр�
   меняется и краснеют два стража — фикстура и `EveryDeclaredPropertyStillReachesTheDisk`.
   §4 и §7.1 это запрещают. Тот же класс противоречия, что уже остановил волну 3.
 - **Первая половина критерия недостижима.** «Переприменение на resume/смене режима» —
-  это `LightingCoordinator.OnResume` и `AppController.BackgroundPass`, и **оба
+  это `LightingCoordinator.OnWake` и `AppController.BackgroundPass`, и **оба
   недостижимы** для набора; единственный достижимый сайт — старт, которого критерий
   не называет. Критерий в нынешней редакции нельзя ни принять, ни опровергнуть.
   Переписать: «переприменение на старте идёт через объект» плюс тесты на сами

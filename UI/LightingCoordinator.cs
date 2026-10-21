@@ -24,10 +24,10 @@ namespace AcerHelper.UI;
 /// it resolves the LANDED profile's door through the service (<c>LightsForCurrentMode(applied)</c>, the overload
 /// that takes an already-read profile and so costs no EC read) rather than repainting the section's stale cache,
 /// which is what makes a profile saved at brightness 0 come back dark. This keeps every path on the UI thread
-/// free of a blocking EC read. <see cref="OnResume"/> is the exception because a wake is also a source-change
+/// free of a blocking EC read. <see cref="OnWake"/> is the exception because a wake is also a source-change
 /// moment the app cannot see from a cache: it drives the two Application use cases (<see cref="ReadBatteryInfo"/>
 /// and <see cref="SyncPowerSource"/>) so a source that changed over sleep is restored BEFORE any paint, and the
-/// battery read there is the cheap OS gauge, not an EC transaction. See OnResume.</summary>
+/// battery read there is the cheap OS gauge, not an EC transaction. See OnWake.</summary>
 internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
 {
     private readonly LaptopService _svc;
@@ -35,7 +35,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     // the service's boot path and the controller's refresh pass: the resume handler names the ACTION
     // (Reapply.Run(ReapplyTrigger.Resume)), not the executor behind it.
     private readonly ReapplySettings _reapply;
-    // The two use cases the WAKE source re-sync needs (see OnResume): the cheap OS battery read and the same
+    // The two use cases the WAKE source re-sync needs (see OnWake): the cheap OS battery read and the same
     // per-source restore the refresh pass drives. Held as Application use cases, not as the service, so this
     // stays the coordinator naming an ACTION rather than a hardware method.
     private readonly ReadBatteryInfo _readBattery;
@@ -43,18 +43,16 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     private readonly PeriodicSchedule _lightReapply;  // re-applies the per-zone lighting for a while after a profile switch
     private int _lightReapplyLeft;                     // remaining re-apply ticks
 
-    // THE LONG-LIVED HALF OF THE LIGHTBAR SELF-HEAL. The burst above is deliberately bounded (~3 s), so it only
-    // covers a firmware repaint that lands in that window, and it only runs at all if the wake event reaches us.
-    // The owner's case is neither guaranteed: after sleep the mode is Eco but the lightbar stays amber until the
-    // next profile switch (the EC repaints its operating-mode slot after our burst, or the resume event is missed
-    // on a Modern-Standby machine whose profile did not change). This slow keeper re-asserts the indicator's
-    // steady colour forever, on the indicator-only channel: no palette (that is the global write which blinks),
-    // no keyboard, no rebind. Re-asserting the colour the firmware already holds is visually silent, so a tick
-    // that lands on a correct lightbar is a no-op to the user; a tick that lands after a late repaint corrects it
-    // within one interval instead of waiting for the next action. Bounded callers keep their bounded retry; this
-    // is a separate, cheap safety net, not a bus-retry loop.
-    private readonly PeriodicSchedule _followKeeper;
-    private static readonly TimeSpan FollowKeeperInterval = TimeSpan.FromSeconds(5);
+    // THE WAKE'S PALETTE, SENT ONCE AND LATE. The EC re-initialises its operating-mode slot right after a wake
+    // and repaints it with the firmware's amber default, so a palette write that lands in that window is undone -
+    // the owner's recurrence (the mode was Eco, the lightbar was amber, and only the next profile switch fixed
+    // it). The palette is therefore NOT sent at the wake instant: the mode's own zones (the keyboard's colours
+    // and its SAVED brightness) come back at once, and the palette follows once the EC has settled, so the
+    // follows-profile lightbar takes the profile's colour from the ONE firmware path that renders it exactly.
+    // One action, one flash. See OnWake and docs/lighting-an18-61.md.
+    private static readonly TimeSpan WakePaletteDelay = TimeSpan.FromSeconds(5);
+    private readonly PeriodicSchedule _wakePalette;   // one-shot: the wake's palette, armed by the wake and stopped by its own tick
+    private AccentColor? _wakeFlash;                 // the profile's colour at the wake; a change since then means the pass painted it
 
     // How many re-apply ticks a kick schedules (× the 400 ms interval ≈ 3 s). Two jobs: (1) restore the per-zone
     // colours the firmware's own palette repaint clobbers after a profile switch, and (2) self-heal a
@@ -80,9 +78,17 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     // confirmed within one pass (~1 s).
     private const double PendingTimeoutSeconds = 5;
 
-    // The window that coalesces a wake with the refresh pass that follows it. OnResume paints the current
-    // profile's palette once; the 3 s poll then re-reads the same profile and reports it changed. When that pass
-    // still describes the palette the wake just painted it is the TAIL of the wake, not a second action, and
+    // The window that coalesces a wake with everything else that describes it: the OS raises the resume event
+    // twice (PBT_APMRESUMEAUTOMATIC + PBT_APMRESUMESUSPEND), the app's own poll notices the same sleep as a
+    // gap a moment later, and the refresh pass that follows re-reads the same profile. ONE wake, ONE action - a
+    // second one would be a second flash of the same palette. Ten seconds is wide enough for the poll's own gap
+    // (the poll runs every three seconds) to land inside it however busy the machine was, and narrow enough that
+    // two real wakes cannot be confused - a machine cannot sleep and wake twice inside ten seconds.
+    private const double WakeCoalesceSeconds = 10;
+
+    // The window that coalesces a wake with the refresh pass that follows it. The wake sends the profile's
+    // palette once (see OnWake); the 3 s poll then re-reads the same profile and reports it changed. When that
+    // pass still describes the palette the wake just painted it is the TAIL of the wake, not a second action, and
     // repainting it is the other half of the reported resume double blink (see OnStateChanged). The window
     // covers the poll interval, so the tail lands inside it. A pass carrying a DIFFERENT palette is a genuine
     // restore and keeps its one flash.
@@ -91,7 +97,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     private readonly LidWatcher _lid;                  // blanks/restores the RGB as the lid shuts/opens in clamshell mode
     private bool _lidShut;           // last lid state from the LidWatcher (Windows); true = shut. Drives blanking.
     private bool _blankedByLid;      // WE blanked the backlight under a shut lid; restore on the next open (see OnLidChanged)
-    private DateTime _lastResume = DateTime.MinValue;   // coalesce Windows' double Resume event (see OnResume)
+    private DateTime _lastWake = DateTime.MinValue;   // when the last wake was handled (coalesces the triggers, see OnWake)
 
     // Cached lighting inputs, refreshed by the caller (who reads them off the UI thread): the current profile's
     // palette flash colour. The per-zone lights are NOT cached here any more — they belong to the lighting
@@ -150,17 +156,16 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         // The palette flash itself is firmware and can't be suppressed.)
         _lightReapply = new PeriodicSchedule(ReapplyTick, TimeSpan.FromMilliseconds(400), UiSchedule.Normal);
 
-        // The trigger-independent lightbar safety net (see _followKeeper). It starts here, before any UI exists,
-        // and no-ops until Attach hands over a section with follows-profile on, so it adds nothing to startup and
-        // nothing at all to a machine with no lightbar or with the toggle off.
-        _followKeeper = new PeriodicSchedule(FollowKeeperTick, FollowKeeperInterval, UiSchedule.Normal);
-        _followKeeper.Start();
+        // The wake's palette: a ONE-SHOT, armed by the wake and stopped by its own tick (see WakePaletteTick).
+        // It exists because the EC repaints its operating-mode slot right after a wake, so the palette has to
+        // land AFTER that repaint - not at the wake instant, and not in a loop.
+        _wakePalette = new PeriodicSchedule(WakePaletteTick, WakePaletteDelay, UiSchedule.Normal);
 
-        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake — the palette
-        // ONCE, then a palette-free self-heal burst (see OnResume). The internal keyboard is always connected and
-        // never re-enumerates across sleep, so its HID handle stays valid and a single write lands; there's
-        // nothing to poll for. (See OnResume.)
-        _resume = new ResumeWatcher(() => _uiPost(OnResume));
+        // Sleep/hibernate clears the EC's RGB state; re-apply the current mode's lighting on wake - the zones
+        // at once, the profile's palette once the EC has settled (see OnWake). The internal keyboard is always
+        // connected and never re-enumerates across sleep, so its HID handle stays valid and a single write lands;
+        // there's nothing to poll for. (See OnWake.)
+        _resume = new ResumeWatcher(OnWake);
         _resume.Start();
 
         // In clamshell (keep-awake) mode the machine stays on with the lid shut, but the backlight is then hidden —
@@ -193,6 +198,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
             KickReapply();
             return;
         }
+        CancelWakePalette();   // the flip paints the palette itself; the wake's own is no longer owed
         Paint();                          // ON: send this profile's palette once, now
         KickReapply();                    // ...and back it with the per-zone self-heal, no further flash
     }
@@ -216,17 +222,88 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         if (--_lightReapplyLeft <= 0) _lightReapply.Stop();
     }
 
-    // One slow tick of the long-lived lightbar keeper (see _followKeeper): re-assert ONLY the follows-profile
-    // indicator's steady colour. The guards are Paint's indicator branch plus the clamshell blank, so the keeper
-    // can never relight a hidden bar, never touches a lightbar the user took over by turning follows-profile off,
-    // and never writes before the colour has been seeded. Runs on the UI thread (UiSchedule.Normal), like every
-    // other paint, so the cached section and the lid state are read where they are written.
-    private void FollowKeeperTick()
+    /// <summary>A WAKE - reported by the OS (<see cref="ResumeWatcher"/>) or DETECTED by the app itself (a gap in
+    /// the refresh pass; see <c>PollSchedule</c>'s wake gap). ONE action: the machine was asleep, the firmware
+    /// dropped the RGB, and the EC re-initialises its operating-mode slot - so the mode's lighting has to be put
+    /// back.
+    ///
+    /// THE TWO TRIGGERS ARE THE SAME EVENT SEEN TWICE, and this is where they become one: the OS's resume event
+    /// and the poll's own gap arrive within a second or two of each other, and <see cref="WakeCoalesceSeconds"/>
+    /// folds them into a single action - a second one would be a second flash of the same palette.
+    ///
+    /// WHAT THE WAKE DOES, in order: the power source is re-synced first (a source that changed over the sleep
+    /// must be restored BEFORE anything is painted, or the old profile's colours are flashed); then the mode's own
+    /// zones are re-applied, so the keyboard's colours and its SAVED brightness come back at once; and the
+    /// profile's palette follows ONCE, after the EC has settled (see <see cref="WakePaletteDelay"/>). The
+    /// follows-profile lightbar is painted by that palette and by nothing else - it is a zone the firmware owns,
+    /// and a zone write would render a slightly different shade and disturb the EC's brightness state.
+    ///
+    /// It runs on the UI thread (the caller's thread is the OS's or the poll's), and the source re-sync runs off
+    /// it, because the EC can stall right after a wake.</summary>
+    public void OnWake() => _uiPost(Wake);
+
+    private void Wake()
     {
-        if (BacklightHidden) return;
-        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
-            _svc.Device.Lighting?.SetFollowColor(flash);
+        var now = DateTime.UtcNow;
+        if ((now - _lastWake).TotalSeconds < WakeCoalesceSeconds) return;   // one action per wake
+        _lastWake = now;
+        _wakeFlash = _flash;      // the profile's colour as of the wake (see WakePaletteTick)
+
+        // Re-sync the power source over the sleep through the SAME use cases the refresh pass drives. The battery
+        // read is the cheap OS gauge (GetSystemPowerStatus — no EC transaction); the sync restores the now-live
+        // source's remembered mode, whose landing is announced (and thus painted) by the switch use case. An
+        // unchanged source is a no-op that announces nothing. The catch is this path's own guarantee, like the
+        // deferred re-apply below: the device can be tearing down (an exit racing the wake), and the next pass
+        // re-syncs anyway.
+        _ = Task.Run(() =>
+        {
+            try { _syncSource.Run(_readBattery.Run()); } catch { /* the next pass re-syncs */ }
+            // ON THE UI THREAD. If the sync announced a landing it set _pendingId and already sent the profile's
+            // palette (OnProfileApplied), so this wake must not send one of its own: the zones only. With no
+            // landing, the zones come back now and the palette follows on the wake's own schedule.
+            //
+            // THE CLAIM MUST BE ONE THIS WAKE MADE, not a stale one: a switch in the very last moments before
+            // sleep can leave _pendingId set (the poll that would clear it was suspended), and treating that as
+            // "the restore painted for us" would drop the wake's palette entirely when the source did NOT change.
+            // The claim's stamp is compared against this wake's, so only an announcement made after _lastWake
+            // (i.e. by the restore just above) suppresses the palette.
+            Dispatcher.UIThread.Post(() =>
+            {
+                var restored = _pendingId != null && _pendingSince >= _lastWake;
+                Paint(includeFlash: false);              // the zones: the keyboard's colours and its saved brightness
+                KickReapply();                            // ...and the bounded per-zone self-heal
+                if (!restored) _wakePalette.Restart();    // the palette, once, after the EC has settled
+            });
+        });
+
+        // The HARDWARE half of a wake, from the one place that knows the schedule: the GPU clock offsets (the dGPU
+        // power-cycles across suspend, Optimus D3-cold, and comes back at 0), the CPU power overlay and the Curve
+        // Optimizer (SMU state the platform restores to stock across a power transition). The reconciler drives
+        // all three off this (UI) thread — ApplyModeCpuPower reads the EC, which can stall right after wake, and
+        // we must not block the UI — in the domain's order, under ONE catch, which is this path's guarantee and
+        // not one shared with the other sites: the failure is swallowed because the device can be tearing down
+        // (an exit racing the wake) while the task runs, because the next resume or mode switch re-asserts, and
+        // because an escaping throw here would be an unobserved task exception. No UI reflect needed (the values
+        // are unchanged), so the outcome is discarded. No-op where those ports are absent.
+        // See docs/nvidia-gpu-oc.md and docs/curve-optimizer-strix-point.md.
+        _reapply.Run(ReapplyTrigger.Resume);
     }
+
+    // The wake's palette, ONE shot: the tick stops the schedule (a wake has one palette, not a series) and sends
+    // it - the single firmware path that renders the follows-profile lightbar's colour exactly. If the profile
+    // changed since the wake, the refresh pass already painted the new palette, and painting it again would be a
+    // second flash of a colour that is already on screen.
+    private void WakePaletteTick()
+    {
+        _wakePalette.Stop();
+        if (!Equals(_flash, _wakeFlash)) { Paint(includeFlash: false); return; }
+        Paint(includeFlash: true);
+    }
+
+    // A pending wake palette is dropped when something else painted the palette in the meantime - a profile
+    // switch, a follows-profile flip, or a refresh pass that reported a profile change. Two palettes for one
+    // wake is the double flash the app is careful about.
+    private void CancelWakePalette() => _wakePalette.Stop();
 
     /// <summary>A profile was just applied BY US (user pick, tray, hotkey, Turbo switch) — the caller passes the
     /// profile that actually landed, so nothing has to be read
@@ -258,6 +335,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         _pendingId = applied.Id;          // suppress the stale passes still describing the previous profile
         _pendingSince = DateTime.UtcNow;
         _flash = _svc.FlashColorOf(applied);
+        CancelWakePalette();              // the switch paints the palette itself; the wake's own is no longer owed
 
         // REBIND TO THE TARGET MODE, do not repaint the section's cache. At this instant the section is still
         // bound to the PREVIOUS mode — the refresh poll has not read the new one's door yet — so a plain repaint
@@ -315,29 +393,33 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
         // the burst re-assert the zones. Everything else — a mode-only change, or the tail of our own switch —
         // just binds the new mode's zones; the profile's colour is either unchanged or already on screen.
         //
-        // THE PASS THAT FOLLOWS A WAKE IS THE WAKE'S TAIL, NOT A SECOND ACTION. OnResume painted the profile's
-        // palette at the wake instant; the poll then re-reads the same profile and reports it changed. Painting
-        // that palette again is the resume half of the double blink — the wake itself, plus the pass that
+        // THE PASS THAT FOLLOWS A WAKE IS THE WAKE'S TAIL, NOT A SECOND ACTION. The wake sent the profile's
+        // palette (see OnWake); the poll then re-reads the same profile and reports it changed. Painting
+        // that palette again is the resume half of the double blink - the wake itself, plus the pass that
         // followed it, each sending one. When the pass carries the SAME palette the wake just painted, the wake
         // already did this pass's work: bind the mode's zones and send no palette. A pass carrying a DIFFERENT
         // palette is a real restore (the firmware changed the profile under us) and keeps its one flash.
-        var wakesTail = IsWakeTail(_lastResume, DateTime.UtcNow, flash, _flash);
-        if (profileChanged && !wakesTail) _flash = flash;
+        var wakesTail = IsWakeTail(_lastWake, DateTime.UtcNow, flash, _flash);
+        if (profileChanged && !wakesTail)
+        {
+            _flash = flash;
+            CancelWakePalette();   // this pass painted the palette; the wake's own is no longer owed
+        }
         Paint(includeFlash: profileChanged && !wakesTail, rebind: mode);
         KickReapply();
     }
 
-    /// <summary>Whether a refresh pass is the TAIL of a wake — i.e. it reports a profile change but carries the
-    /// very palette <see cref="OnResume"/> already painted within <see cref="WakeTailSeconds"/>. Read as "the wake
+    /// <summary>Whether a refresh pass is the TAIL of a wake - i.e. it reports a profile change but carries the
+    /// very palette <see cref="OnWake"/> already painted within <see cref="WakeTailSeconds"/>. Read as "the wake
     /// already did this pass's work", so the pass must not send the palette a second time (the reported resume
     /// double blink). Pure and static so the rule can be asserted directly without a desktop lifetime, which
     /// <c>LightingCoordinator</c> itself needs (the limit <c>ReconcileScheduleTests</c> records).
     ///
-    /// A pass carrying a DIFFERENT palette is not a tail — the firmware really changed the profile, and that
+    /// A pass carrying a DIFFERENT palette is not a tail - the firmware really changed the profile, and that
     /// restore keeps its single flash. Nor is one outside the window: the wake's own work is done, and a later
     /// profile change is a new action with its own one flash.</summary>
-    internal static bool IsWakeTail(DateTime lastResume, DateTime now, AccentColor? passFlash, AccentColor? cachedFlash)
-        => (now - lastResume).TotalSeconds < WakeTailSeconds && Equals(passFlash, cachedFlash);
+    internal static bool IsWakeTail(DateTime lastWake, DateTime now, AccentColor? passFlash, AccentColor? cachedFlash)
+        => (now - lastWake).TotalSeconds < WakeTailSeconds && Equals(passFlash, cachedFlash);
 
     /// <summary>Startup / language-rebuild paint: seed the cached flash colour (read by the caller off the UI
     /// thread), paint it ONCE, then re-apply the per-zone colours for a few seconds. Startup is exactly the
@@ -357,12 +439,11 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     // Repaint from the cached flash colour and the section's own values. First paint the profile's palette on a
     // follow-lightbar (a GLOBAL write that also flashes the keyboard), then re-apply the per-zone colours so the
     // keyboard settles back to its own custom colour on top. THE GLOBAL PALETTE IS SENT ONLY WHEN `includeFlash`
-    // (once per action); the follow lightbar's STEADY colour is re-asserted on every pass through the
-    // indicator-only channel (SetFollowColor), because the palette write is one-shot and the firmware can repaint
-    // its slot afterwards — see the comments inside. The HID writes are async (EneHidController queues them), so
+    // (once per action) - it is the ONLY channel the follows-profile lightbar has, so the zone itself is never
+    // written (see RgbZone.CanFollowProfile). The HID writes are async (EneHidController queues them), so
     // this never blocks the UI thread; and it reads nothing from the EC — it asks the section, which holds the
     // values as its own (LaptopService's door is not re-entered here). Called immediately on a switch and repeated
-    // by _lightReapply / resume / lid as a safety net against a late firmware repaint.
+    // by _lightReapply / wake / lid as a safety net against a late firmware repaint.
     //
     // `rebind` is the ONE case that needs state this class does not have: a pass that reports the mode or the
     // profile moved hands in the new mode's door, and the panels rebind through it before painting (exactly one
@@ -373,109 +454,19 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     {
         if (BacklightHidden) { BlankBacklight(); return; }   // lid shut in clamshell mode -> keep it dark
 
-        if (_lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
+        if (includeFlash && _lighting is { ShowFollowsProfile: true, FollowsProfile: true } && _flash is { } flash)
         {
-            if (includeFlash)
-            {
-                // ARM THE SPURIOUS-ZERO SUSPICION BEFORE THE FLASH LANDS. The OPMODE write below zeroes the EC's
-                // keyboard-brightness register while the keyboard stays lit (docs/lighting-an18-61.md), and that
-                // register now lies for a short window — so a 0 an Fn-key read reports in it is the flash, not the
-                // user. The panels refuse a 0 only while this is fresh (LightViewModel.NoteProfileFlash), which is
-                // what lets a genuine Fn dim to 0 land at any other time. It must be armed in the same instant as the
-                // write, and the section drives the same panels that will consume the read.
-                _lighting.NoteProfileFlash();
-                _svc.Device.Lighting?.SetProfileFlash(flash);
-            }
-
-            // AND RE-ASSERT THE INDICATOR'S STEADY COLOUR ON EVERY PASS, including the palette-free burst ticks.
-            // The OPMODE write above is a one-shot GLOBAL FLASH: it also repaints the keyboard, and the firmware
-            // may repaint its slot with the amber default a moment after a switch or a wake. A follows-profile
-            // lightbar has no per-zone panel, so the burst's per-zone self-heal never reaches it — that is the
-            // owner's report: after a sleep the mode was Eco but the lightbar stayed amber (Balanced) until the
-            // next switch. This indicator-only write paints just that zone with the same palette colour, so it is
-            // silent on the keyboard and safe to repeat. Proven on the AN18-61: an A4 65 write turns the amber
-            // lightbar green independently of the OPMODE path.
-            _svc.Device.Lighting?.SetFollowColor(flash);
+            // ARM THE SPURIOUS-ZERO SUSPICION BEFORE THE FLASH LANDS. The OPMODE write below zeroes the EC's
+            // keyboard-brightness register while the keyboard stays lit (docs/lighting-an18-61.md), and that
+            // register now lies for a short window — so a 0 an Fn-key read reports in it is the flash, not the
+            // user. The panels refuse a 0 only while this is fresh (LightViewModel.NoteProfileFlash), which is
+            // what lets a genuine Fn dim to 0 land at any other time. It must be armed in the same instant as the
+            // write, and the section drives the same panels that will consume the read.
+            _lighting.NoteProfileFlash();
+            _svc.Device.Lighting?.SetProfileFlash(flash);
         }
         if (rebind is { } mode) _vm.ReloadLighting(mode);
         else _vm.RepaintLighting();
-    }
-
-    // Wake from sleep/hibernation: re-establish the RGB the firmware dropped over the suspend — ONE palette
-    // send. Windows raises PowerModeChanged(Resume) ~twice per wake (PBT_APMRESUMEAUTOMATIC +
-    // PBT_APMRESUMESUSPEND); coalesce within a few seconds so the OS's own double event doesn't paint twice.
-    // (The refresh pass that follows the wake is coalesced separately — see OnStateChanged's wake tail.)
-    //
-    // A WAKE IS ALSO THE MOMENT THE POWER SOURCE MAY HAVE CHANGED, and this handler must let THAT win. Sleep
-    // suspends the app's polling, so the power source can move over the sleep (the machine is unplugged, or
-    // plugged in, while it sleeps); the refresh pass would only discover it up to a poll later. If we painted
-    // the OLD cached palette here, the source restore would then land on its own port write and flash the NEW
-    // palette — two flashes, one per profile, which is the owner's report («подсветка моргает дважды ... один
-    // раз для старого профиля, другой — для нового»). So the source is re-synced FIRST, through the same
-    // Application use cases the refresh pass uses (SyncPowerSource -> ApplyStoredMode): when it changed and the
-    // restore announces a landing, OnProfileApplied has already painted the NEW palette and recorded the
-    // _pendingId claim, so the wake's own paint carries only the per-zone colours and sends no palette of its
-    // own — ONE palette send for the whole wake. When the source did NOT change the restore writes nothing,
-    // nothing is announced, and the wake paints its single palette exactly as before.
-    //
-    // THE RE-SYNC RUNS OFF THE UI THREAD, because ApplyStoredMode may write the EC and the bus can stall right
-    // after wake (the same rule the refresh pass follows, and the same reason ApplyModeCpuPower below is
-    // deferred). The paint is posted back after it, so the UI-thread ordering this class requires is kept; the
-    // restore's announcement is posted from inside the sync, ahead of this paint, which is what makes the
-    // _pendingId check below see it. `_lastResume` is stamped BEFORE either path, so the pass that follows
-    // still reads as a tail.
-    private void OnResume()
-    {
-        var now = DateTime.UtcNow;
-        if ((now - _lastResume).TotalSeconds < 3) return;
-        _lastResume = now;   // stamped BEFORE the restore/paint, so a pass that lands during it still reads as a tail
-
-        // Re-sync the power source over the sleep through the SAME use cases the refresh pass drives. The battery
-        // read is the cheap OS gauge (GetSystemPowerStatus — no EC transaction); the sync restores the now-live
-        // source's remembered mode, whose landing is announced (and thus painted) by the switch use case. An
-        // unchanged source is a no-op that announces nothing. The catch is this path's own guarantee, like the
-        // deferred re-apply below: the device can be tearing down (an exit racing the wake), and the next pass
-        // re-syncs anyway.
-        _ = Task.Run(() =>
-        {
-            try { _syncSource.Run(_readBattery.Run()); } catch { /* the next pass re-syncs */ }
-            // Paint ONCE, on the UI thread. If the sync announced a landing it set _pendingId and already sent
-            // the profile's palette (OnProfileApplied), so this paint re-establishes only the per-zone colours
-            // that sleep clobbered — sending the cached palette here would be the "old profile" flash over the
-            // new one the restore just painted. With no landing, _pendingId is null and this is the wake's
-            // single palette send.
-            //
-            // THE CLAIM MUST BE ONE THIS WAKE MADE, not a stale one: a switch in the very last moments before
-            // sleep can leave _pendingId set (the poll that would clear it was suspended), and treating that as
-            // "the restore painted for us" would drop the wake's palette send entirely when the source did NOT
-            // change. The claim's stamp is compared against this wake's, so only an announcement made after
-            // _lastResume (i.e. by the restore just above) suppresses the paint.
-            Dispatcher.UIThread.Post(() =>
-            {
-                var restored = _pendingId != null && _pendingSince >= _lastResume;
-                Paint(includeFlash: !restored);
-                // ONE palette send, then a palette-free self-heal burst. The wake paints at the instant the OS
-                // reports resume, which can be before the EC has finished re-initialising its operating-mode slot;
-                // the firmware can then repaint that slot amber AFTER our single write. The burst is what covers
-                // that late repaint: every tick now also re-asserts the follows-profile lightbar's steady colour
-                // (SetFollowColor), which the keyboard-only per-zone re-apply never could — the gap that left the
-                // owner's Eco machine showing an amber lightbar until the next switch. Restarting an already-running
-                // burst coalesces, and both the per-zone and indicator writes are silent when already correct.
-                KickReapply();
-            });
-        });
-
-        // The HARDWARE half of a wake, from the one place that knows the schedule: the GPU clock offsets (the dGPU
-        // power-cycles across suspend, Optimus D3-cold, and comes back at 0), the CPU power overlay and the Curve
-        // Optimizer (SMU state the platform restores to stock across a power transition). The reconciler drives
-        // all three off this (UI) thread — ApplyModeCpuPower reads the EC, which can stall right after wake, and
-        // we must not block the UI — in the domain's order, under ONE catch, which is this path's guarantee and
-        // not one shared with the other sites: the failure is swallowed because the device can be tearing down
-        // (an exit racing the wake) while the task runs, because the next resume or mode switch re-asserts, and
-        // because an escaping throw here would be an unobserved task exception. No UI reflect needed (the values
-        // are unchanged), so the outcome is discarded. No-op where those ports are absent.
-        // See docs/nvidia-gpu-oc.md and docs/curve-optimizer-strix-point.md.
-        _reapply.Run(ReapplyTrigger.Resume);
     }
 
     // Lid opened/closed: shut while clamshell keep-awake is enabled -> blank the (now hidden) backlight without
@@ -498,7 +489,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
                 _blankedByLid = false;
                 Paint(rebind: _rebindWhenVisible);
                 _rebindWhenVisible = null;
-                KickReapply();   // same silent self-heal as a switch/restore: re-assert the zones AND the follow lightbar
+                KickReapply();   // same silent self-heal as a switch/restore: re-assert the per-zone colours
             }
         }
         else if (_svc.Device.Clamshell?.Enabled == true)
@@ -520,7 +511,7 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     public void Dispose()
     {
         _lightReapply.Stop();
-        _followKeeper.Dispose();
+        _wakePalette.Dispose();
         _resume.Dispose();
         _lid.Dispose();
     }

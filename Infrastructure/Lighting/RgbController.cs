@@ -21,11 +21,6 @@ public interface IRgbController : IDisposable
     /// Default: unsupported (controllers without a profile indicator don't override this).</summary>
     bool SetProfileFlash(AccentColor color) => false;
 
-    /// <summary>Re-assert the steady colour of a follows-profile indicator (see
-    /// <see cref="IRgbDevice.SetFollowColor"/>). Default: unsupported — a controller with no such zone, or one
-    /// whose transport cannot address it without the global flash, leaves the firmware in charge.</summary>
-    bool SetFollowColor(AccentColor color) => false;
-
     /// <summary>Turn every zone this controller drives off (see <see cref="IRgbDevice.Blank"/>). Default:
     /// unsupported (no-op) — controllers that can blank their zones override this.</summary>
     bool Blank() => false;
@@ -44,11 +39,6 @@ public sealed class RgbDevice(params IRgbController[] controllers) : IRgbDevice,
     public bool SetProfileFlash(AccentColor color)
     {
         return controllers.Aggregate(false, (current, c) => current | c.SetProfileFlash(color));
-    }
-
-    public bool SetFollowColor(AccentColor color)
-    {
-        return controllers.Aggregate(false, (current, c) => current | c.SetFollowColor(color));
     }
 
     public bool Blank()

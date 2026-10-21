@@ -232,33 +232,25 @@ schedules a **bounded burst of re-applies**, not one.
   earlier shape re-sent the palette on the first couple of ticks, which turned **every** restore and the
   follows-profile flip into **two** blinks — the second write landing 400 ms after the first. The rule is one
   flash per action; the per-zone self-heal is the safety net the burst keeps.
-- **The burst DOES re-assert the follows-profile lightbar's STEADY colour, on a different channel.** A
-  follows-profile lightbar has **no per-zone panel** (the firmware owns it), so the per-zone self-heal above
-  never reaches it. The palette reaches it only through the one-shot global OPMODE write, which the firmware can
-  repaint with its amber default after a switch **or a wake** — and that left the owner with **Eco mode but an
-  amber (Balanced-coloured) lightbar after a sleep** until the next switch. `IRgbDevice.SetFollowColor` is the
-  indicator-only write for that: `A4 65` STATIC (the arbitrary-colour lightbar path, R,G,B) with the profile's
-  palette colour, so the **keyboard is untouched** and the write is **silent when the lightbar is already
-  correct**. `LightingCoordinator.Paint` sends it on **every** pass — inside the follows-profile branch but
-  outside the `includeFlash` guard — so the palette-free burst ticks correct a lightbar the firmware repainted
-  or a palette write the transport lost. `OnResume` kicks that burst as well, because a wake that changed neither
-  the profile nor the mode gets no refresh-pass paint to start one, and the EC may finish re-initialising its
-  slot *after* the wake's single palette write. Proven on the AN18-61: an `A4 65` write turns the amber lightbar
-  green independently of the OPMODE path. The colour still belongs to the profile (it is the same palette value),
-  so "follows the profile" remains the rule; only the delivery is now idempotent.
-- **A SLOW, LONG-LIVED KEEPER backs the burst, and it is the part that is trigger-independent.** The burst is
-  bounded to ~3 s and starts from `OnResume`; if the resume event never reaches the app (a Modern-Standby wake
-  whose profile and mode did not change gets no refresh-pass paint either) or the EC repaints its slot *after*
-  the burst has stopped, the amber lightbar stays until the next profile switch �?" the owner's recurrence on
-  0.39.3, with the profile correctly showing Eco. `LightingCoordinator._followKeeper` therefore re-asserts the
-  same `SetFollowColor` steady colour on a **5 s** schedule for the life of the process. It is the same
-  indicator-only `A4 65` write as the burst's, so it **never sends the palette, never touches the keyboard and
-  never rebinds a mode**, and it is **silent when the colour is already correct**. It is gated exactly like
-  `Paint`'s indicator branch (follows-profile on, a seeded palette colour) **plus** `BacklightHidden`, so it can
-  never relight a bar blanked under a shut lid in clamshell mode or override a lightbar the user took over by
-  turning follows-profile off. This is not the forever-retry the bounded burst deliberately avoids: the burst
-  retries a possibly-corrupt bus every 400 ms; the keeper corrects one indicator write every 5 s and stops
-  mattering as soon as the firmware's slot agrees.
+- **The follows-profile lightbar is NOT written at all.** It has **no per-zone panel** (the firmware owns it), and
+  the ONE channel that reaches it is the global OPMODE write — so its colour is re-asserted by re-sending the
+  palette, and never by writing the zone. The alternative was tried and reverted (0.39.1–0.39.4): a direct zone
+  write (`A4 65` STATIC, the arbitrary-colour path) is a **different firmware path**, and it renders a
+  **slightly different shade** of the same RGB — the owner saw the lightbar change colour the moment a profile
+  was switched — and it **disturbs the EC's brightness state**, which is the brightness regression that shipped
+  with it. `IRgbDevice` therefore has **no member that could write a follows-profile zone**, and the app never
+  writes one in a loop either (the 0.39.4 five-second "keeper" is gone). A zone the firmware paints per profile is
+  the firmware's to keep: `RgbZone.CanFollowProfile` says so, and the code now matches it.
+- **A WAKE IS AN EVENT, AND IT SENDS THE PALETTE ONCE.** The owner's recurrence was the post-sleep state: the
+  mode was **Eco** but the lightbar was **amber** (the firmware's default for its operating-mode slot) until the
+  next profile switch. Two reasons the wake's own write did not fix it: the resume event does not always arrive
+  (a Modern-Standby session), and a palette write that lands **before** the EC has finished re-initialising that
+  slot is repainted by the firmware. So the wake is detected **twice over** — by the OS (`ResumeWatcher`) **and by
+  the app's own poll** (`PollSchedule.WakeGap`: a pool timer does not fire while the machine sleeps, so a tick that
+  arrives far later than the 3 s period IS the evidence of a wake) — and the two are coalesced into one action.
+  That action re-applies the **zones** at once (the keyboard's colours and its **saved brightness** come back
+  immediately) and sends the **palette once, after the EC has settled** (`WakePaletteDelay`, 5 s) — one action, one
+  flash, and the lightbar's colour is the firmware's own rendering of the profile's palette.
 
 ### Why applying on the switch instant matters (the double blink)
 
@@ -330,11 +322,12 @@ mode-change differential).
 
 The switch instant fixed profile switches; two paths still blinked twice, each by a different mechanism:
 
-- **Resume.** `OnResume` paints the palette once at the wake instant. The refresh pass that follows the wake
-  re-reads the same profile and **reports it changed** — a second palette send ~1 s later. A pass within the
-  wake window that carries the **same** palette the wake just painted is the wake's **tail**, not a second
-  action: it binds the mode's zones and sends no palette (`LightingCoordinator.IsWakeTail`). A pass carrying a
-  **different** palette is a genuine out-of-band restore and keeps its one flash.
+- **Resume.** The wake sends the palette once (after the EC has settled — see the re-apply regime above). The
+  refresh pass that follows the wake re-reads the same profile and **reports it changed** — a second palette send
+  ~1 s later. A pass within the wake window that carries the **same** palette the wake just painted is the wake's
+  **tail**, not a second action: it binds the mode's zones and sends no palette
+  (`LightingCoordinator.IsWakeTail`). A pass carrying a **different** palette is a genuine out-of-band restore and
+  keeps its one flash.
 - **Lightbar mode switch (the follows-profile toggle).** The flip painted the palette and then kicked a burst
   that re-sent it on its first ticks — the same second blink, 400 ms later. With the burst palette-free the flip
   is a single palette send.
@@ -387,16 +380,16 @@ the switch instant) and the stale pass is suppressed — while `transient` keeps
 (the slot already holds it; `SetSourceProfile` is the door that remembers a choice). The "already in that profile
 → do nothing" guard is kept, so a same-mode source change stays flash-free.
 
-The **wake** is where the owner saw it, and `LightingCoordinator.OnResume` is part of the fix: sleep suspends the
+The **wake** is where the owner saw it, and `LightingCoordinator.OnWake` is part of the fix: sleep suspends the
 polling, so the source may have moved over the sleep and the refresh pass would only discover it a poll later.
-`OnResume` therefore **re-syncs the power source first** (through the same `SyncPowerSource` → `ApplyStoredMode`
+`OnWake` therefore **re-syncs the power source first** (through the same `SyncPowerSource` → `ApplyStoredMode`
 use cases the refresh pass uses), **off the UI thread** (the restore may write the EC, which can stall right after
 wake). When that restore announces a landing, `OnProfileApplied` has already painted the **new** palette and set
 `_pendingId`, so the wake's own paint carries **only the per-zone colours** — no cached **old** palette is sent
 over the profile the restore just painted. When the source did not change, the restore writes nothing, nothing is
-announced, and the wake paints its one palette exactly as before. The wake-tail suppression (`IsWakeTail`) that
-coalesces the refresh pass after a wake is unchanged. One palette repaint per wake, whichever way the source
-went.
+announced, and the wake's own palette goes out on its own schedule, once, after the EC has settled. The wake-tail
+suppression (`IsWakeTail`) that coalesces the refresh pass after a wake is unchanged. One palette repaint per wake,
+whichever way the source went.
 
 ### Repeated commands to the SAME target are deduplicated at the write seam (the plug-in-then-pick flash)
 

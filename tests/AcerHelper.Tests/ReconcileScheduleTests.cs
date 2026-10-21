@@ -18,7 +18,7 @@ namespace AcerHelper.Tests;
 /// executes it (<c>Infrastructure/Composition/HardwareReconciler</c>) and the sites name only the trigger. Startup is the only
 /// site this suite can drive end to end, so it is still the only one characterised here: the reconcile
 /// operation itself is covered — set, order, thread and throw behaviour — in <c>HardwareReconcilerTests</c>,
-/// while <c>AppController.BackgroundPass</c> and <c>LightingCoordinator.OnResume</c> need a desktop lifetime and
+/// while <c>AppController.BackgroundPass</c> and <c>LightingCoordinator.OnWake</c> need a desktop lifetime and
 /// a live refresh loop, which this suite does not have (<c>CpuPrimeTests</c> records that). A test that drove
 /// those two would be asserting its own copy of the schedule rather than the product's.
 ///

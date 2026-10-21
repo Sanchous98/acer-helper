@@ -21,7 +21,7 @@ namespace AcerHelper.Tests;
 ///
 /// WHAT IS NOT CHECKED HERE, and it is not a small part. That the SITES actually call the reconciler cannot be
 /// observed by this suite for two of the three: <c>AppController.BackgroundPass</c> and
-/// <c>LightingCoordinator.OnResume</c> need a desktop lifetime and a live refresh loop (the same limit
+/// <c>LightingCoordinator.OnWake</c> need a desktop lifetime and a live refresh loop (the same limit
 /// <c>ReconcileScheduleTests</c> and <c>CpuPrimeTests</c> record). Their wiring is therefore unproven — what is
 /// proven is that the operation they now call behaves, so a site that kept its own list would be invisible here.
 /// The startup site IS reachable, and the existing startup tests drive it end to end (<c>ReconcileScheduleTests</c>

@@ -171,7 +171,6 @@ public class RgbDeviceTests
 
         Assert.Empty(device.Zones);
         Assert.False(device.SetProfileFlash(new AccentColor(255, 0, 0)));
-        Assert.False(device.SetFollowColor(new AccentColor(255, 0, 0)));
         Assert.False(device.Blank());
         Assert.Null(device.ProfileFollowKey);
     }
@@ -261,25 +260,23 @@ public class RgbDeviceTests
         Assert.Equal(1, second.BlankCalls);   // <- skipped entirely under `||`
     }
 
-    /// <summary>THE INDICATOR-ONLY RE-ASSERT FOLDS LIKE THE FLASH. <c>SetFollowColor</c> is the pass that keeps a
-    /// follows-profile lightbar correct after the firmware repaints its slot, and the lightbar is a LATER
-    /// controller than the keyboard on the shipped arrangement — so a short-circuiting fold would ask the
-    /// keyboard, get its answer, and never reach the zone the call exists for. The per-controller call records
-    /// are the only observable: every controller in the shipped arrangement declines the flash and only the
-    /// lightbar takes the follow colour, so the return value alone cannot tell "asked and declined" from
-    /// "never asked".</summary>
+    /// <summary>THE FOLLOWS-PROFILE ZONE HAS NO WRITE CHANNEL, and that is the invariant this file now pins.
+    /// A zone the firmware paints per profile (the Acer lightbar) is left ENTIRELY to the firmware: the app sends
+    /// it nothing. The per-profile colour reaches it through the ONE global operating-mode flash
+    /// (<c>SetProfileFlash</c>), which the firmware renders in its own palette. The alternative - writing the zone
+    /// directly - is a DIFFERENT firmware path: it renders a slightly different shade of the same RGB, and it
+    /// disturbs the EC's brightness state. The app shipped both regressions in 0.39.4, so the port that made the
+    /// zone writable is GONE: there is no member to call, and the aggregate has no second fold to get wrong.
+    ///
+    /// A source guard, because the absence of a member cannot be asserted by calling it - the assertion is that the
+    /// PORT does not offer it.</summary>
     [Fact]
-    public void EveryControllerIsAskedForTheFollowColour_EvenAfterOneReportsSuccess()
+    public void TheDeviceHasNoChannelToWriteAFollowsProfileZone()
     {
-        var keyboard = new FakeRgbController { SetFollowColorResult = false };
-        var lightbar = new FakeRgbController { SetFollowColorResult = true };
-        using var device = new RgbDevice(keyboard, lightbar);
+        var device = typeof(IRgbDevice);
 
-        Assert.True(device.SetFollowColor(new AccentColor(0, 220, 16)));
-
-        Assert.Single(keyboard.FollowColorCalls);
-        Assert.Single(lightbar.FollowColorCalls);
-        Assert.Equal(new AccentColor(0, 220, 16), lightbar.FollowColorCalls[0]);
+        Assert.DoesNotContain("SetFollowColor", device.GetMembers().Select(m => m.Name));
+        Assert.DoesNotContain("SetFollowColor", typeof(IRgbController).GetMembers().Select(m => m.Name));
     }
 
     /// <summary>The aggregate's RESULT is "did anybody take it", not "did the last one" and not "did they all":
@@ -290,15 +287,13 @@ public class RgbDeviceTests
     {
         using var mixed = new RgbDevice(
             new FakeRgbController(),
-            new FakeRgbController { SetProfileFlashResult = true, SetFollowColorResult = true, BlankResult = true },
+            new FakeRgbController { SetProfileFlashResult = true, BlankResult = true },
             new FakeRgbController());
         Assert.True(mixed.SetProfileFlash(new AccentColor(1, 2, 3)));
-        Assert.True(mixed.SetFollowColor(new AccentColor(1, 2, 3)));
         Assert.True(mixed.Blank());
 
         using var none = new RgbDevice(new FakeRgbController(), new FakeRgbController());
         Assert.False(none.SetProfileFlash(new AccentColor(1, 2, 3)));
-        Assert.False(none.SetFollowColor(new AccentColor(1, 2, 3)));
         Assert.False(none.Blank());
     }
 

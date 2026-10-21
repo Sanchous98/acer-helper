@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using AcerHelper.Domain;
+using AcerHelper.Infrastructure;
+using AcerHelper.Infrastructure.Lighting;
 using AcerHelper.UI;
 
 namespace AcerHelper.Tests;
@@ -9,21 +11,25 @@ namespace AcerHelper.Tests;
 /// switching the lightbar mode — was the same defect in two places, both in <c>LightingCoordinator</c>:
 ///
 /// <list type="number">
-/// <item><b>Resume.</b> <c>OnResume</c> paints the palette once at the wake instant, and the very refresh pass
-/// that follows the wake re-discovers the same profile and paints it again — a second flash ~1 s later. The
-/// guard is <c>IsWakeTail</c>: a pass carrying the SAME palette the wake just painted is the tail of the wake,
-/// not a second action, and sends no palette.</item>
+/// <item><b>Resume.</b> The wake sends the palette once, and the very refresh pass that follows the wake
+/// re-discovers the same profile and paints it again — a second flash ~1 s later. The guard is
+/// <c>IsWakeTail</c>: a pass carrying the SAME palette the wake just painted is the tail of the wake, not a
+/// second action, and sends no palette.</item>
 /// <item><b>Lightbar mode switch.</b> The flip used to paint the palette and then <c>KickReapply(withFlash:
 /// true)</c> re-sent it on the burst's first ticks, 400 ms after the first — the same second blink. The burst is
 /// now palette-free by construction: every path sends the GLOBAL palette ONCE, at the action instant, and the
 /// burst only re-applies the per-zone colours (which is silent when already correct).</item>
 /// </list>
 ///
-/// THE ONE THING THE BURST DOES RE-SEND IS THE INDICATOR'S STEADY COLOUR, on a different channel:
-/// <c>SetFollowColor</c> paints only the follows-profile lightbar (A4 65), never the keyboard, so repeating it is
-/// silent. It has to be repeated, because the global palette is a one-shot write the firmware may overwrite with
-/// its amber default and the lightbar has no per-zone panel to self-heal it (the owner's post-sleep report: Eco
-/// mode, amber lightbar). That is NOT a second palette flash and must not be folded into the guarded block.
+/// THE FOLLOWS-PROFILE LIGHTBAR IS NOT WRITTEN AT ALL. It used to be re-asserted on a second channel
+/// (<c>SetFollowColor</c>, an <c>A4 65</c> zone write) on every pass, and a long-lived keeper repeated it every
+/// five seconds. That was wrong twice over: a zone the firmware paints per profile is the firmware's to keep
+/// (<c>RgbZone.CanFollowProfile</c>), and the zone-write path is a DIFFERENT firmware path — it renders a
+/// slightly different shade of the same RGB (the owner saw the lightbar change colour right after a profile
+/// switch) and it disturbs the EC's brightness state (the owner's brightness regression). The lightbar's colour
+/// is therefore the operating-mode palette and nothing else, and the zone has no write channel in the port at
+/// all. What replaces the keeper is an EVENT, not a loop: a wake is detected (the OS's resume event, or the gap
+/// the app's own poll sees) and the palette is sent once, after the EC has settled.
 ///
 /// WHY BOTH SHAPES. <c>IsWakeTail</c> is asserted behaviourally — it is a pure function, so the rule that
 /// decides the resume case is checked directly rather than by reading the source. The palette-free burst is
@@ -36,7 +42,8 @@ namespace AcerHelper.Tests;
 /// MUTATION-VERIFIED. Reverting <c>IsWakeTail</c> to <c>false</c> reddens the two positive rows; making it
 /// ignore the palette (always true inside the window) reddens the different-palette row; deleting the <c>Paint(
 /// includeFlash: false)</c> from <c>ReapplyTick</c> — or reintroducing <c>withFlash</c>/<c>FlashTicks</c> —
-/// reddens <see cref="TheBurstReAppliesTheZonesAndNeverReSendsThePalette"/>.
+/// reddens <see cref="TheBurstReAppliesTheZonesAndNeverReSendsThePalette"/>; restoring the zone write or the
+/// keeper reddens <see cref="TheFollowsProfileZoneIsNeverWritten"/>.
 /// </summary>
 public class LightingReapplyFlashTests
 {
@@ -94,39 +101,103 @@ public class LightingReapplyFlashTests
         Assert.DoesNotContain("FlashTicks", source, StringComparison.Ordinal);              // no per-burst flash count
     }
 
-    /// <summary>THE BURST MUST RE-ASSERT THE FOLLOWS-PROFILE INDICATOR, and on its own channel. The owner's
-    /// report was the post-sleep state the guard above cannot see: the mode was Eco but the lightbar showed
-    /// amber (Balanced's colour) — the firmware's default after it repainted its operating-mode slot, with no
-    /// per-zone panel to self-heal because the lightbar follows the profile. The fix is an indicator-only write
-    /// (<c>SetFollowColor</c>) on every pass, INSIDE the follows-profile branch but OUTSIDE the
-    /// <c>includeFlash</c> guard — so a palette-free tick still corrects the lightbar, while the global flash is
-    /// still sent only once.
+    /// <summary>THE FOLLOWS-PROFILE ZONE IS NEVER WRITTEN. The lightbar that follows the performance profile is
+    /// painted by the firmware's own operating-mode slot, and the app's only channel for it is the global palette
+    /// (<c>SetProfileFlash</c>). A direct zone write is a DIFFERENT firmware path: it renders a slightly different
+    /// shade of the same RGB — the owner saw the lightbar change colour the moment a profile was switched — and it
+    /// disturbs the EC's brightness state, which is the brightness regression the app shipped in 0.39.4.
     ///
-    /// The indentation is the assertion: moving the call into the <c>includeFlash</c> block (16 spaces) would
-    /// make the burst stop correcting it again, which is the regression this pins. MUTATION THAT REDDENS IT:
-    /// deleting the call, or moving it one level deeper.</summary>
+    /// So the zone is left to the firmware, the port has no member that could write it, and NOTHING in the app
+    /// writes it in a loop either: the 0.39.4 keeper (a five-second timer re-asserting the zone) is gone, because
+    /// a timer that keeps writing a zone the firmware owns is the same mistake in a loop.
+    ///
+    /// The guard reads the sources, because "no member" and "no call" are absences: the port is checked by
+    /// reflection (there is no <c>SetFollowColor</c> to call) and the tree by source (there is no call and no
+    /// keeper). MUTATION THAT REDDENS IT: restoring the port member, a call to it, or the keeper's schedule.</summary>
     [Fact]
-    public void TheBurstReAssertsTheFollowIndicator_WithoutTheGlobalFlash()
+    public void TheFollowsProfileZoneIsNeverWritten()
     {
-        var source = Source("UI/LightingCoordinator.cs");
+        Assert.DoesNotContain("SetFollowColor", typeof(IRgbDevice).GetMembers().Select(m => m.Name));
+        Assert.DoesNotContain("SetFollowColor", typeof(IRgbController).GetMembers().Select(m => m.Name));
 
-        Assert.Contains("\n            _svc.Device.Lighting?.SetFollowColor(flash);\n",
-                        source.Replace("\r\n", "\n"), StringComparison.Ordinal);
+        var coordinator = Source("UI/LightingCoordinator.cs");
+        Assert.DoesNotContain("SetFollowColor", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("_followKeeper", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("FollowKeeperTick", coordinator, StringComparison.Ordinal);
+
+        // The ENE transport must not carry an A4 65 steady-colour write either: the zone is addressed by the
+        // operating-mode slot only, and the panel's own apply op is the follows-profile-OFF path.
+        Assert.DoesNotContain("SetFollowColor", Source("Infrastructure/Vendors/Acer/EneHidController.cs"),
+                              StringComparison.Ordinal);
     }
 
-    /// <summary>THE WAKE MUST KICK THE BURST, not paint once and stop. The OS reports resume before the EC has
-    /// necessarily finished re-initialising its operating-mode slot, so the firmware can repaint the slot amber
-    /// AFTER the wake's single palette write; only a pass that follows can correct it. The wake's paint is posted
-    /// asynchronously (after the power-source re-sync), so the burst must be kicked by that same post — a refresh
-    /// pass only paints when the profile or mode changed, which is NOT the case for a wake that changed neither
-    /// (the owner's Eco-over-sleep case).</summary>
+    /// <summary>THE WAKE IS AN EVENT, AND IT SENDS THE PALETTE ONCE. The owner's recurrence: after a sleep the
+    /// mode was Eco but the lightbar was amber, and only the next profile switch fixed it — because the wake was
+    /// either not reported (a Modern-Standby session does not always deliver the OS's resume event) or was
+    /// reported before the EC had finished re-initialising its operating-mode slot, so the palette landed in a
+    /// window the firmware then repainted.
+    ///
+    /// So the wake is detected by the app itself as well (the gap in its own poll — see
+    /// <see cref="AcerHelper.Infrastructure.PollSchedule"/>), and the palette goes out ONCE, after the EC has
+    /// settled, not at the wake instant. The zones (the keyboard's colours and its SAVED brightness) come back at
+    /// once instead: a wake that left the keyboard's brightness wrong is the owner's other regression.
+    ///
+    /// MUTATION THAT REDDENS IT: dropping the delayed palette (the lightbar would stay amber again), sending the
+    /// palette at the wake instant instead (the firmware would repaint the slot), or dropping the zone paint (the
+    /// keyboard's saved brightness would not come back).</summary>
+    [Fact]
+    public void TheWakeSendsTheZonesAtOnceAndThePaletteOnce_AfterTheEcHasSettled()
+    {
+        var source = Source("UI/LightingCoordinator.cs").Replace("\r\n", "\n");
+
+        Assert.Contains("public void OnWake()", source, StringComparison.Ordinal);
+        Assert.Contains("WakePaletteDelay", source, StringComparison.Ordinal);
+        Assert.Contains("_wakePalette.Restart();", source, StringComparison.Ordinal);
+        Assert.Contains("private void WakePaletteTick()", source, StringComparison.Ordinal);
+        // the tick stops the schedule: ONE palette per wake, not a series
+        Assert.Contains("_wakePalette.Stop();", source, StringComparison.Ordinal);
+
+        var wake = source.IndexOf("private void Wake()", StringComparison.Ordinal);
+        Assert.True(wake >= 0, "the wake must have a body");
+        var end = source.IndexOf("\n    }", wake, StringComparison.Ordinal);
+        var body = source[wake..end];
+        // the zones come back at once, and the palette is NOT sent at the wake instant
+        Assert.Contains("Paint(includeFlash: false);", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Paint(includeFlash: true);", body, StringComparison.Ordinal);
+        Assert.Contains("KickReapply();", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>THE APP DETECTS THE WAKE ITSELF, because the OS's event is not always delivered. The full pass
+    /// runs every three seconds on a pool timer, and a timer does not fire while the machine is asleep — so a tick
+    /// that arrives far later than the period IS the evidence of a wake. The poll is the app's own clock, and the
+    /// lighting is re-applied from it.
+    ///
+    /// The threshold is a fact about the poll, so it lives with the poll: <c>PollSchedule.WakeGap</c>. The rule
+    /// itself is pure and asserted behaviourally; the wiring (the gap reaches the coordinator's wake) is a source
+    /// guard, because the wiring is what the app does and nothing else can observe it.</summary>
+    [Fact]
+    public void ThePollsGapIsTheAppsOwnEvidenceOfAWake()
+    {
+        Assert.True(PollSchedule.IsWakeGap(PollSchedule.WakeGap));
+        Assert.True(PollSchedule.IsWakeGap(PollSchedule.WakeGap + TimeSpan.FromMinutes(5)));
+        Assert.False(PollSchedule.IsWakeGap(PollSchedule.WakeGap - TimeSpan.FromSeconds(1)));
+        Assert.False(PollSchedule.IsWakeGap(TimeSpan.Zero));
+
+        var controller = Source("UI/AppController.cs");
+        Assert.Contains("onGap: () => _lightingCoord.OnWake()", controller, StringComparison.Ordinal);
+    }
+
+    /// <summary>THE WAKE MUST KICK THE BURST, not paint once and stop. The wake re-applies the mode's zones, and
+    /// the per-zone self-heal follows it: the firmware's own repaint can land after the wake's write, and a burst
+    /// that re-asserts the zones a few times is what covers that. The burst carries NO palette (the palette is the
+    /// wake's own single send), so the two never add up to a second flash.</summary>
     [Fact]
     public void TheWakeKicksThePaletteFreeBurst_SoALateRepaintIsCorrected()
     {
         var source = Source("UI/LightingCoordinator.cs").Replace("\r\n", "\n");
 
-        var paint = source.IndexOf("Paint(includeFlash: !restored);", StringComparison.Ordinal);
-        Assert.True(paint >= 0, "the wake still paints once, with the palette unless the restore already did");
+        var paint = source.IndexOf("Paint(includeFlash: false);", source.IndexOf("private void Wake()", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(paint >= 0, "the wake re-applies the zones");
         var kick = source.IndexOf("KickReapply();", paint, StringComparison.Ordinal);
         Assert.True(kick > paint, "the wake's paint must be followed by the self-heal burst");
     }
@@ -187,38 +258,25 @@ public class LightingReapplyFlashTests
         Assert.Contains("_pendingId = applied.Id;", source, StringComparison.Ordinal);
     }
 
-    /// <summary>THE BURST IS BOUNDED, SO IT CANNOT BE THE ONLY CORRECTION. A wake that misses the resume event (a
-    /// Modern-Standby machine whose profile did not change) never starts the burst at all, and a firmware repaint
-    /// that lands after the ~3 s window is likewise missed; either way the Eco lightbar stays amber until the next
-    /// profile switch. The long-lived keeper closes that hole on the indicator-only channel: it re-asserts the
-    /// steady colour on a slow schedule, with the same follows-profile + clamshell guards as <c>Paint</c>, and
-    /// never sends the global palette or repaints the keyboard. A source guard for the same reason as the burst
-    /// tests above — the coordinator needs a desktop lifetime and a live refresh loop to drive.
+    /// <summary>NO PERPETUAL WRITER. The 0.39.4 keeper was a five-second timer in the UI that re-asserted the
+    /// follows-profile lightbar for the life of the process. It was a symptom patch in the wrong place: a timer
+    /// that keeps writing a zone the firmware owns, from the layer that owns no hardware schedule, and it brought
+    /// two regressions with it (the shade the owner saw change right after a profile switch, and the EC's
+    /// brightness state drifting away from the saved value). A wake is an EVENT, and the event is handled once.
     ///
-    /// MUTATION THAT REDDENS IT: removing the schedule/start/dispose, dropping the <c>BacklightHidden</c> or
-    /// follows-profile gate (the keeper would relight a hidden bar or override a user-owned lightbar), or adding
-    /// <c>SetProfileFlash</c>/a zone repaint to the tick (the palette is the global write that blinks).</summary>
+    /// MUTATION THAT REDDENS IT: any <c>PeriodicSchedule</c> in the coordinator that is not the bounded re-apply
+    /// burst or the wake's one-shot palette.</summary>
     [Fact]
-    public void TheLongLivedKeeperReAssertsTheIndicator_WithoutThePalette()
+    public void TheCoordinatorHasNoPerpetualHardwareWriter()
     {
-        var source = Source("UI/LightingCoordinator.cs").Replace("\r\n", "\n");
+        var source = Source("UI/LightingCoordinator.cs");
 
-        Assert.Contains("_followKeeper = new PeriodicSchedule(FollowKeeperTick, FollowKeeperInterval, UiSchedule.Normal);",
-                        source, StringComparison.Ordinal);
-        Assert.Contains("_followKeeper.Start();", source, StringComparison.Ordinal);
-        Assert.Contains("_followKeeper.Dispose();", source, StringComparison.Ordinal);
-
-        var tick = source.IndexOf("private void FollowKeeperTick()", StringComparison.Ordinal);
-        Assert.True(tick >= 0, "the keeper's tick must exist");
-        var end = source.IndexOf("\n    }", tick, StringComparison.Ordinal);
-        Assert.True(end > tick, "the keeper's tick must have a body");
-        var body = source[tick..end];
-
-        Assert.Contains("if (BacklightHidden) return;", body, StringComparison.Ordinal);
-        Assert.Contains("_lighting is { ShowFollowsProfile: true, FollowsProfile: true }", body, StringComparison.Ordinal);
-        Assert.Contains("SetFollowColor(flash)", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("SetProfileFlash", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("RepaintLighting", body, StringComparison.Ordinal);
+        var schedules = System.Text.RegularExpressions.Regex.Matches(source, "new PeriodicSchedule\\(")
+                          .Select(m => m.Value).ToList();
+        // exactly two: the bounded re-apply burst and the wake's one-shot palette
+        Assert.Equal(2, schedules.Count);
+        Assert.Contains("_lightReapply = new PeriodicSchedule(", source, StringComparison.Ordinal);
+        Assert.Contains("_wakePalette = new PeriodicSchedule(", source, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- helpers

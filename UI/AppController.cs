@@ -212,7 +212,14 @@ internal sealed class AppController
         // UpdateSchedule uses. The periodic gate-stats write rides the same tick (it self-throttles to a line a
         // minute), so instrumentation costs no timer of its own; periodic and not only on exit, because a killed
         // process never reaches ExitApp and an owner's real session is exactly the one worth measuring.
-        _poll = new PollSchedule(() => { Refresh(); GateStatsLog.MaybeWrite(); });
+        //
+        // THE WAKE GAP IS THE POLL'S OWN TRIGGER FOR A WAKE the OS did not report: a timer does not fire while the
+        // machine is asleep, so a tick that arrives far later than the period means the machine slept and came
+        // back (PollSchedule.WakeGap). The lighting has to be re-applied for it - the EC defaults its
+        // operating-mode slot to amber over a suspend, and a Modern-Standby session does not always deliver the
+        // OS's resume event, which is what left the owner with an amber lightbar and an Eco profile.
+        _poll = new PollSchedule(() => { Refresh(); GateStatsLog.MaybeWrite(); },
+                                 onGap: () => _lightingCoord.OnWake());
         _poll.Start();
         // ...and the battery row on its own, faster schedule. The full pass above reads the battery too
         // (SyncPowerSource needs the state), but only once per three seconds; the reading gets the cheap

@@ -135,12 +135,12 @@ public class SourceChangeFlashTests
 
     // ---- the wake ordering (source guard) ----
 
-    /// <summary>THE WAKE ITSELF IS RE-SYNCED BEFORE IT PAINTS. This is the <c>OnResume</c> half of the fix, and
+    /// <summary>THE WAKE ITSELF IS RE-SYNCED BEFORE IT PAINTS. This is the <c>OnWake</c> half of the fix, and
     /// it is pinned by a source guard because the handler needs a desktop lifetime and a live ResumeWatcher to
     /// drive headlessly. Two things must hold together: the source is re-synced over the sleep (through the same
     /// SyncPowerSource use case the refresh pass uses) BEFORE the wake's paint, and the wake's paint is
     /// palette-free when that restore announced a landing — otherwise the cached OLD palette is sent over the
-    /// NEW one the restore just painted, the owner's "old profile" flash. The stamp of <c>_lastResume</c> and
+    /// NEW one the restore just painted, the owner's "old profile" flash. The stamp of <c>_lastWake</c> and
     /// the wake-tail suppression stay, so the pass that follows is still coalesced.</summary>
     [Fact]
     public void TheWakeResyncsTheSourceBeforeItPaints()
@@ -149,15 +149,16 @@ public class SourceChangeFlashTests
 
         // The restore runs through the injected use case, and the paint comes after it.
         var sync = source.IndexOf("_syncSource.Run(_readBattery.Run());", StringComparison.Ordinal);
-        Assert.True(sync >= 0, "OnResume must re-sync the power source over the sleep");
-        var paint = source.IndexOf("var restored = _pendingId != null && _pendingSince >= _lastResume;",
+        Assert.True(sync >= 0, "OnWake must re-sync the power source over the sleep");
+        var paint = source.IndexOf("var restored = _pendingId != null && _pendingSince >= _lastWake;",
                                    StringComparison.Ordinal);
         Assert.True(paint > sync, "the source re-sync must precede the wake's paint decision");
-        Assert.Contains("Paint(includeFlash: !restored);", source, StringComparison.Ordinal);
+        Assert.Contains("Paint(includeFlash: false);", source, StringComparison.Ordinal);
 
-        // The wake still coalesces Windows' double Resume event and the pass that follows (wake tail).
-        Assert.Contains("private void OnResume()", source, StringComparison.Ordinal);
-        Assert.Contains("IsWakeTail(_lastResume, DateTime.UtcNow, flash, _flash)", source, StringComparison.Ordinal);
+        // The wake still coalesces Windows' double Resume event, the poll's own wake gap, and the pass that
+        // follows (wake tail).
+        Assert.Contains("private void Wake()", source, StringComparison.Ordinal);
+        Assert.Contains("IsWakeTail(_lastWake, DateTime.UtcNow, flash, _flash)", source, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- helpers
