@@ -86,6 +86,30 @@ internal sealed class LightingCoordinator : IDisposable, IProfileAnnouncer
     // two real wakes cannot be confused - a machine cannot sleep and wake twice inside ten seconds.
     private const double WakeCoalesceSeconds = 10;
 
+    // THE GAP THAT MEANS THE MACHINE WAS ASLEEP. A pool timer does not fire while the machine is suspended, so a
+    // tick that arrives far later than the poll's period is the app's own evidence of a wake - and it is the
+    // ONLY reliable one: a Modern-Standby session does not always deliver the OS's resume event, and when it
+    // does not, the lighting stays as the firmware left it (the EC defaults its operating-mode slot to amber)
+    // until the next profile switch.
+    //
+    // IT LIVES HERE, with the wake, and not in the poll: the poll reports how late it came (a fact about a
+    // cadence) and the WAKE decides what a late tick means. Ten seconds is three poll periods plus slack: long
+    // enough that a busy machine is not read as asleep, short enough that the lighting is back before the owner
+    // has looked at the keyboard.
+    public static readonly TimeSpan WakeGap = TimeSpan.FromSeconds(10);
+
+    /// <summary>Whether a gap between two refresh passes is a WAKE. Pure and static, so the rule can be asserted
+    /// without a timer: a gap under <see cref="WakeGap"/> is an ordinary late tick.</summary>
+    internal static bool IsWakeGap(TimeSpan gap) => gap >= WakeGap;
+
+    /// <summary>The refresh pass came this much late. A late tick is the app's own evidence of a wake (see
+    /// <see cref="WakeGap"/>), and this is where that evidence becomes the action: the same <see cref="OnWake"/>
+    /// the OS's resume event drives, so the two are one event seen twice.</summary>
+    public void OnPollGap(TimeSpan gap)
+    {
+        if (IsWakeGap(gap)) OnWake();
+    }
+
     // The window that coalesces a wake with the refresh pass that follows it. The wake sends the profile's
     // palette once (see OnWake); the 3 s poll then re-reads the same profile and reports it changed. When that
     // pass still describes the palette the wake just painted it is the TAIL of the wake, not a second action, and

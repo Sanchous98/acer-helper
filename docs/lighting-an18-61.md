@@ -172,6 +172,23 @@ The guard is NOT deleted: the spurious-0 protection the flash needs is kept, onl
 permanent device fact to the event that can actually produce the lie. Pinned in `LightingAdoptionTests` (the Fn
 dim table, the refused in-window 0, the window expiry, the early clear) and, for the arming order, by the source
 guard `TheFlashArmsTheSpuriousZeroSuspicion_BeforeThePaletteLands` in `LightingReapplyFlashTests`.
+
+### The Fn change is adopted even when the drawer is shut (2026-10-22)
+
+The guard above is about WHICH read may be adopted. This is about WHETHER the read happens at all — and the
+owner's report: **«меняю яркость с клавиатуры, затем переключаюсь на вкладку "Подсветка" и она
+восстанавливается»**. The level was changed with the Fn key while the Lighting drawer was closed; the app
+adopted such a change only while that drawer was on screen, so the app's stored value stayed stale and the next
+re-apply (the drawer opening, which pushes the app's value — the doubt moment reads nothing, because a
+CONFIGURED zone's stored value is the source of truth) sent the stale level back over the user's change.
+
+The app's own rule — **«ввод вне UI (Fn, hotkey) → принять прочитанное как новое намерение, сохранить»** —
+carries no visibility condition, so the gate was the deviation. What it was really for is the read's COST: the
+read is a WMI transaction behind the global WMI lock, and the event that asks for it fires on every keypress
+(the raw-input port reports any input). The cost is now bounded where it belongs — the **re-reads of a burst**
+wait out `AdoptReadIntervalMs` inside the panel's own read loop, while a **fresh request** (the user's own key)
+reads at once. Bounded cost, not a dropped intent.
+
 Colour order on the wire is mode-dependent — **R,G,B** for arbitrary-colour writes (keyboard STATIC, lightbar),
 **B,G,R** for the OPMODE profile-flash whitelist (see the `A4` layout note above). On Linux the identical `A4`
 report goes via

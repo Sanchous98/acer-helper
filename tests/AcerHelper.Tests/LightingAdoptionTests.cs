@@ -611,7 +611,55 @@ public class LightingAdoptionTests
                applyZone: null, mode[ZoneName], s => new ApplyLightZone(mode).Run(ZoneName, s), register.Read, post,
                clock);
 
-    /// <summary>A controllable brightness register that LIES: nothing we write changes what a read reports, which
+    /// <summary>
+    /// THE OUT-OF-BAND CHANGE IS ADOPTED WHETHER OR NOT THE DRAWER IS ON SCREEN. The owner's report: «меняю
+    /// яркость с клавиатуры, затем переключаюсь на вкладку "Подсветка" и она восстанавливается» — the Fn key
+    /// changed the level, the app never learned it (its adoption was gated on the Lighting drawer being open),
+    /// and the next re-apply pushed the stale stored value back over the user's change.
+    ///
+    /// The app's own rule — «ввод вне UI (Fn, hotkey) → принять прочитанное как новое намерение, сохранить» —
+    /// carries NO visibility condition, so the gate was the deviation and it is gone. What replaced it is a
+    /// bound on the READ's COST (the re-reads of a typing burst wait out an interval), never a refusal of the
+    /// user's own key.
+    ///
+    /// A source guard, because the wiring lives in <c>AppController</c> and <c>MainViewModel</c>, which need a
+    /// desktop lifetime and a live input hook — the same limit the rest of this file records.
+    ///
+    /// MUTATION THAT REDDENS IT: putting the visibility check back, or refusing the request instead of the
+    /// re-read (which would drop the user's own key again).
+    /// </summary>
+    [Fact]
+    public void TheOutOfBandChangeIsAdopted_EvenWhileTheDrawerIsShut()
+    {
+        var controller = Source("UI/AppController.cs");
+        var main = Source("UI/ViewModels/MainViewModel.cs");
+        var panel = Source("UI/ViewModels/LightingViewModel.cs");
+
+        // The event path adopts UNCONDITIONALLY.
+        Assert.Contains("_vm.AdoptLighting()", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsLightingVisible", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsLightingVisible", main, StringComparison.Ordinal);
+
+        // And the COST is bounded by the re-read's interval, not by refusing the request: a fresh request (the
+        // user's own key) reads at once, and only the loop's re-read waits.
+        Assert.Contains("AdoptReadIntervalMs", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("TotalMilliseconds < AdoptReadIntervalMs) return;", panel, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    /// <summary>The repository root, from the COMPILER's path: the test host's working directory is its output
+    /// folder, where a relative path finds nothing.</summary>
+    private static string Root([System.Runtime.CompilerServices.CallerFilePath] string thisFile = "")
+        => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "..", ".."));
+
+    private static string Source(string relative)
+    {
+        var path = Path.Combine(Root(), relative);
+        Assert.True(File.Exists(path), $"expected a source file at {relative} — a guard that reads nothing passes for the wrong reason");
+        return File.ReadAllText(path);
+    }
+
     /// is the wire's lag after a profile switch — the write is sent, the EC has not applied it, and the register
     /// still holds the previous value. <see cref="Reads"/> is counted so "this path never asked the device" is an
     /// assertion rather than a claim about the source.</summary>

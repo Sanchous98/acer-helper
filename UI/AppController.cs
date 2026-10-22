@@ -213,13 +213,14 @@ internal sealed class AppController
         // minute), so instrumentation costs no timer of its own; periodic and not only on exit, because a killed
         // process never reaches ExitApp and an owner's real session is exactly the one worth measuring.
         //
-        // THE WAKE GAP IS THE POLL'S OWN TRIGGER FOR A WAKE the OS did not report: a timer does not fire while the
+        // THE WAKE GAP IS THE POLL'S OWN EVIDENCE OF A WAKE the OS did not report: a timer does not fire while the
         // machine is asleep, so a tick that arrives far later than the period means the machine slept and came
-        // back (PollSchedule.WakeGap). The lighting has to be re-applied for it - the EC defaults its
+        // back. The poll reports HOW LATE it came — a fact about a cadence — and the wake (the coordinator, which
+        // owns it) decides what a late tick means. The lighting has to be re-applied for it: the EC defaults its
         // operating-mode slot to amber over a suspend, and a Modern-Standby session does not always deliver the
         // OS's resume event, which is what left the owner with an amber lightbar and an Eco profile.
         _poll = new PollSchedule(() => { Refresh(); GateStatsLog.MaybeWrite(); },
-                                 onGap: () => _lightingCoord.OnWake());
+                                 onGap: _lightingCoord.OnPollGap);
         _poll.Start();
         // ...and the battery row on its own, faster schedule. The full pass above reads the battery too
         // (SyncPowerSource needs the state), but only once per three seconds; the reading gets the cheap
@@ -648,12 +649,12 @@ internal sealed class AppController
     // (docs/state-and-events.md). The read is off-thread and coalesces back-to-back requests, so rapid presses
     // track without piling up or blocking input.
     // Marshaled to the UI thread like OnHotkey: on Linux the event fires on the evdev reader thread, and
-    // IsLightingVisible/AdoptLightingIfVisible touch UI-bound state (incl. enumerating the Panels collection the
-    // UI mutates).
-    private void OnInputActivity() => Dispatcher.UIThread.Post(() =>
-    {
-        if (_vm.IsLightingVisible) _vm.AdoptLightingIfVisible();
-    });
+    // AdoptLighting touches UI-bound state (incl. enumerating the Panels collection the UI mutates).
+    //
+    // NOT GATED ON THE DRAWER BEING OPEN: the Fn key is an author of intent whether or not the user is looking
+    // at the Lighting drawer, and the gate that made it so lost the intent (the next re-apply then reverted the
+    // user's change). The read's cost is bounded by the panel's own rate limit.
+    private void OnInputActivity() => Dispatcher.UIThread.Post(() => _vm.AdoptLighting());
 
     // ---- actions ----
 

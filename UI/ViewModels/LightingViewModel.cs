@@ -261,6 +261,14 @@ public sealed partial class LightViewModel : ObservableObject
     // coalescing, since the worker can post an adoption while the coordinator arms the suspicion.
     private DateTime? _flashSuspectedAt;
     private readonly Func<DateTime> _clock;
+    // The minimum interval between the READS the out-of-band event asks for. The event fires on every
+    // keypress (the raw-input port reports any input) and the read is a WMI transaction behind the global
+    // lock, so the COST is bounded here rather than by the number of keystrokes. It bounds the RE-READS of a
+    // burst (the loop below), never a fresh request: a human's own presses are seconds apart, and each of
+    // them must be adopted (the app's rule: «ввод вне UI (Fn, hotkey) → принять прочитанное как новое
+    // намерение, сохранить»), so a request that finds no read in flight reads at once.
+    private const double AdoptReadIntervalMs = 500;
+    private DateTime _lastAdoptReadAt = DateTime.MinValue;
     // How long a flash keeps a read-back 0 suspicious. The register is zeroed AT the switch; the app's own
     // InputActivity re-reads (and the refresh pass) land within a few seconds, and any non-zero read clears the
     // suspicion early, so the window only has to outlast the immediate post-flash reads. 5 s is the same "short
@@ -391,7 +399,15 @@ public sealed partial class LightViewModel : ObservableObject
     /// not author can appear: the Fn key is an author of intent exactly like the slider is, it just delivers its
     /// value through a read instead of through the UI. Never call this on a schedule — a read taken while our own
     /// write is still in flight carries the PREVIOUS value, and adopting it persists the wire's lag as the user's
-    /// choice. See docs/state-and-events.md and <see cref="Reapply"/>.</summary>
+    /// choice. See docs/state-and-events.md and <see cref="Reapply"/>.
+    ///
+    /// IT IS NOT GATED ON THE PANEL BEING OPEN. The rule the app states — «ввод вне UI (Fn, hotkey) → принять
+    /// прочитанное как новое намерение, сохранить» — carries no visibility condition, and the gate that had one
+    /// LOST the user's intent: the brightness was changed with the Fn key while the drawer was shut, the app
+    /// never learned it, and the next re-apply (the drawer opening) pushed the stale stored value back — the
+    /// owner's report: «меняю яркость с клавиатуры, затем переключаюсь на вкладку "Подсветка" и она
+    /// восстанавливается». The gate existed to keep a device transaction off every keystroke; the RATE LIMIT
+    /// below does that instead, without dropping the intent.</summary>
     public void AdoptFromHardware()
     {
         var read = _readBrightness;
@@ -404,6 +420,7 @@ public sealed partial class LightViewModel : ObservableObject
         {
             if (_reading) { _readPending = true; return; }
             _reading = true;
+            _lastAdoptReadAt = _clock();
         }
         Task.Run(() =>
         {
@@ -417,9 +434,28 @@ public sealed partial class LightViewModel : ObservableObject
                     if (!_readPending) { _reading = false; return; }
                     _readPending = false;   // do one more pass to catch the latest
                 }
+                // THE RE-READ WAITS OUT THE INTERVAL: the read is a device transaction behind the global
+                // lock, and the event that asks for it fires on every keystroke, so a typing burst must not
+                // turn into a read per key. A fresh request (one that finds no read in flight) is NOT delayed —
+                // that is the user's own key, and it must be adopted at once.
+                var wait = AdoptReadIntervalMs - (_clock() - _lastAdoptReadAt).TotalMilliseconds;
+                if (wait > 0) Thread.Sleep((int)wait);
+                _lastAdoptReadAt = _clock();
             }
         });
     }
+
+    /// <summary>THE DOUBT MOMENT — it pushes OUR value and reads nothing, and that is the rule: a CONFIGURED
+    /// zone's stored value is the source of truth, and the register is not consulted outside the event path
+    /// (the owner's «настройки яркости не пишутся» and the stale-read acceptance criterion both live here).
+    /// Re-applying is idempotent — the device is last-write-wins, and an already-correct value is visually
+    /// silent.
+    ///
+    /// IT DOES NOT REVERT THE USER, and that is the EVENT PATH's job: the Fn key's change is adopted the moment
+    /// it happens (see <see cref="AdoptFromHardware"/>), so the value pushed here is the one the hardware
+    /// already holds. The gate that used to sit in front of that adoption (it only ran while this panel was on
+    /// screen) is what let the stale value reach the device.</summary>
+    public void Reapply() => ApplyNow();
 
     /// <summary>The app is about to drive a profile flash (the palette write that the Acer OPMODE handler
     /// performs at a switch). From this instant, for <see cref="FlashSuspectSeconds"/>, a 0 this zone reports over
@@ -432,13 +468,6 @@ public sealed partial class LightViewModel : ObservableObject
     {
         lock (_readGate) _flashSuspectedAt = _clock();
     }
-
-    /// <summary>The doubt moment at this panel's level: push OUR state at the device and read nothing. Called
-    /// when the panel opens (see <see cref="LightingViewModel.Reapply"/>). Reading here is what loses the value:
-    /// the write we sent may not have landed, so the register still holds the PREVIOUS profile's brightness (or
-    /// the zero the profile flash leaves behind) and believing it undoes the switch. Re-applying is idempotent —
-    /// the device is last-write-wins, and an already-correct value is visually silent.</summary>
-    public void Reapply() => ApplyNow();
 
     /// <summary>Point this panel at another mode's persisted state, reflect it in the UI, and re-apply it to
     /// the device. Called when the performance mode changes. Unlike startup, this ALWAYS applies: the app is

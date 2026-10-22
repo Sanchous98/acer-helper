@@ -292,23 +292,24 @@ public sealed partial class MainViewModel : ObservableObject
     /// the values ARE the section's, and re-reading the graph on every tick is what this replaced.</summary>
     public void RepaintLighting() => _lighting?.Repaint();
 
-    /// <summary>True while the Lighting drawer is the one actually on screen. Cheap check the input-driven
-    /// brightness adoption gates on, so nothing happens on keystrokes when lighting isn't visible.</summary>
-    public bool IsLightingVisible => IsShowing(_lighting);
-
     /// <summary>Whether <paramref name="content"/> is the section the open drawer is showing — the toggle rule,
     /// stated once because two callers need to know its answer before they act: <see cref="OpenDrawer"/> closes
     /// the drawer when it is true, and <see cref="OpenLighting"/> skips its re-apply when it is true (the click
     /// is then a close, not an open).</summary>
     private bool IsShowing(object? content) => IsDrawerOpen && ReferenceEquals(content, DrawerContent);
 
-    /// <summary>An out-of-band input event (a special key) while the Lighting drawer is showing: ADOPT the
-    /// brightness the hardware now holds as the new intent. The read runs off the UI thread and is the only path
-    /// on which a read changes state — see docs/state-and-events.md and
-    /// <see cref="LightingViewModel.AdoptFromInput"/>.</summary>
-    public void AdoptLightingIfVisible()
+    /// <summary>An out-of-band input event (a special key): ADOPT the brightness the hardware now holds as the
+    /// new intent. The read runs off the UI thread and is the only path on which a read changes state - see
+    /// docs/state-and-events.md and <see cref="LightingViewModel.AdoptFromInput"/>.
+    ///
+    /// IT IS NOT GATED ON THE DRAWER BEING OPEN. The app's rule — «ввод вне UI (Fn, hotkey) → принять
+    /// прочитанное как новое намерение, сохранить» — carries no visibility condition, and the gate that had one
+    /// lost the user's intent: an Fn brightness change made while the drawer was shut was never learned, and the
+    /// next re-apply (the drawer opening) pushed the stale stored value back over it. The read's COST is bounded
+    /// by the panel's own rate limit, not by whether the user happens to be looking at the drawer.</summary>
+    public void AdoptLighting()
     {
-        if (IsLightingVisible) _lighting?.AdoptFromInput();
+        _lighting?.AdoptFromInput();
     }
 
     private void OpenDrawer(string title, object? content)

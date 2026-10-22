@@ -172,19 +172,20 @@ public class LightingReapplyFlashTests
     /// that arrives far later than the period IS the evidence of a wake. The poll is the app's own clock, and the
     /// lighting is re-applied from it.
     ///
-    /// The threshold is a fact about the poll, so it lives with the poll: <c>PollSchedule.WakeGap</c>. The rule
-    /// itself is pure and asserted behaviourally; the wiring (the gap reaches the coordinator's wake) is a source
-    /// guard, because the wiring is what the app does and nothing else can observe it.</summary>
+    /// THE THRESHOLD LIVES WITH THE WAKE, not with the cadence: the poll reports how late it came (a fact about
+    /// a schedule) and the wake decides what a late tick means. The rule itself is pure and asserted
+    /// behaviourally; the wiring (the gap reaches the coordinator's wake) is a source guard, because the wiring
+    /// is what the app does and nothing else can observe it.</summary>
     [Fact]
     public void ThePollsGapIsTheAppsOwnEvidenceOfAWake()
     {
-        Assert.True(PollSchedule.IsWakeGap(PollSchedule.WakeGap));
-        Assert.True(PollSchedule.IsWakeGap(PollSchedule.WakeGap + TimeSpan.FromMinutes(5)));
-        Assert.False(PollSchedule.IsWakeGap(PollSchedule.WakeGap - TimeSpan.FromSeconds(1)));
-        Assert.False(PollSchedule.IsWakeGap(TimeSpan.Zero));
+        Assert.True(LightingCoordinator.IsWakeGap(LightingCoordinator.WakeGap));
+        Assert.True(LightingCoordinator.IsWakeGap(LightingCoordinator.WakeGap + TimeSpan.FromMinutes(5)));
+        Assert.False(LightingCoordinator.IsWakeGap(LightingCoordinator.WakeGap - TimeSpan.FromSeconds(1)));
+        Assert.False(LightingCoordinator.IsWakeGap(TimeSpan.Zero));
 
         var controller = Source("UI/AppController.cs");
-        Assert.Contains("onGap: () => _lightingCoord.OnWake()", controller, StringComparison.Ordinal);
+        Assert.Contains("onGap: _lightingCoord.OnPollGap", controller, StringComparison.Ordinal);
     }
 
     /// <summary>THE WAKE MUST KICK THE BURST, not paint once and stop. The wake re-applies the mode's zones, and
