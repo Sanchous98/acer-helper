@@ -1070,6 +1070,10 @@ internal sealed class AppController
             _lightingCoord.OnStateChanged(t.ProfileChanged, t.Current?.Id, t.Flash, t.Lights!);
 
         _vm.Refresh(t.Current, t.Selectable, t.TurboToggles, t.Base, t.Sensors, t.Status);
+        // The lighting section's own honesty line: is the RGB transport answering? It reads what the writer
+        // thread recorded on its last write, not the hardware — so a controller that comes back (or one that
+        // dies) is reflected here within a pass, with no extra bus traffic.
+        _vm.SyncLightingController();
         // No lighting sync on the UI pass: a read taken here carries whatever the wire last held, so the pass
         // used to ADOPT the previous profile's brightness (and persist it) while our own write was still in
         // flight. The Fn-key read on OnInputActivity is the event path; everything else re-applies instead.

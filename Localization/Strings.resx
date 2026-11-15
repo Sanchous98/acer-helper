@@ -303,6 +303,9 @@
   <data name="light.lightbar_follows_profile" xml:space="preserve">
     <value>Lightbar follows performance profile</value>
   </data>
+  <data name="light.controller_unavailable" xml:space="preserve">
+    <value>The lighting controller is not responding. Your settings are kept and will be applied once it answers — Windows may be reporting a problem with the device itself (Device Manager shows it with a warning).</value>
+  </data>
   <data name="light.zone" xml:space="preserve">
     <value>Zone {0}</value>
   </data>

@@ -303,6 +303,9 @@
   <data name="light.lightbar_follows_profile" xml:space="preserve">
     <value>Световая панель следует за профилем производительности</value>
   </data>
+  <data name="light.controller_unavailable" xml:space="preserve">
+    <value>Контроллер подсветки не отвечает. Настройки сохранены и будут применены, как только он ответит — возможно, Windows сообщает о проблеме с самим устройством (в Диспетчере устройств оно помечено предупреждением).</value>
+  </data>
   <data name="light.zone" xml:space="preserve">
     <value>Зона {0}</value>
   </data>

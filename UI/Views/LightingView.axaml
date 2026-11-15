@@ -33,6 +33,15 @@
               IsChecked="{Binding FollowsProfile, Mode=TwoWay}"
               IsVisible="{Binding ShowFollowsProfile}"/>
 
+    <!-- THE HONEST LINE ABOUT A CONTROLLER THAT IS NOT ANSWERING. The section is built from the model, so it
+         survives a transport that failed its probe (see LightingViewModel.ControllerUnavailable and
+         EneHidController's ctor) — but then the panels below show stored values that are not reaching the
+         hardware, and the user has to be told that rather than left to wonder why nothing changes. Docked with
+         the other one-line controls; the row disappears by itself on the pass after a write lands. -->
+    <TextBlock DockPanel.Dock="Top" Classes="muted" Margin="0,0,0,12" TextWrapping="Wrap"
+               IsVisible="{Binding ControllerUnavailable}"
+               Text="{l:Tr 'light.controller_unavailable'}"/>
+
     <!-- One tab per RGB zone the device advertises — built entirely from the bound Panels collection, so it
          adapts to any number of zones (keyboard, lightbar, or whatever a controller exposes). Each tab's
          content is the adaptive LightView; with a single zone there is just one tab. The tab strip wraps so

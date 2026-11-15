@@ -47,7 +47,13 @@ public sealed partial class AcerDevice : GenericDevice
     /// controller is the same brick on both OSes (same device + packets); only the keyboard-brightness
     /// read-back differs (gaming WMI on Windows, none on Linux — it's a write-only HID device), so the
     /// per-OS InitVendor passes that delegate in. Kept here so a change to the adopt/dispose handling is
-    /// made once.</summary>
+    /// made once.
+    ///
+    /// THE ZONES COME FROM THE MODEL, NOT FROM THE CONTROLLER'S PROBE: <c>EneHidController</c> builds them even
+    /// when the device does not answer (see its ctor), so this adopts the RGB surface of a machine that HAS a lit
+    /// keyboard even while that keyboard cannot be driven — a wedged controller must not remove the Lighting
+    /// section, only mark it (see <see cref="IRgbDevice.Reachable"/>). The else branch is therefore the model's
+    /// own "no RGB on this machine" case.</summary>
     private void WireRgb(Func<int?>? readKeyboardBrightness)
     {
         var rgb = new EneHidController(_model.Zones, _model.Lightbar, readKeyboardBrightness);

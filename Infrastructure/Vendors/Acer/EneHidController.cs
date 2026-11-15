@@ -29,16 +29,26 @@ internal sealed partial class EneHidController : IRgbController
 
     private readonly List<RgbZone> _zones = [];
 
+    // Whether the ENE device answered the LAST time it was asked — a probe at construction, then whatever each
+    // queued write reported (see WorkerLoop). THE ZONES DO NOT DEPEND ON IT. This controller used to return from
+    // its constructor when OpenTransport() failed, which meant no zones, which meant no LightingViewModel, which
+    // meant the Lighting page did not exist at all — the owner's report after the controller was left wedged by a
+    // failed firmware handshake (PCI/Acpi Code 10, STATUS_DEVICE_POWER_FAILURE). One failed probe at startup must
+    // not delete a section of the app for the whole session: the model says this machine HAS a lit keyboard, so
+    // the section is built with its stored values, and this flag is the one thing that says the writes are not
+    // landing. It also recovers, because the writer re-opens the transport on every write.
+    private volatile bool _reachable;
+
     public EneHidController(int keyboardZones, bool hasLightbar, Func<int?>? readKeyboardBrightness)
     {
-        if (!OpenTransport()) return;   // no ENE interface -> no zones -> composition skips lighting
+        _reachable = OpenTransport();   // a probe, NOT a gate — see _reachable
 
         // Feature writes go through a single background worker (see SetFeature), never the caller's (UI) thread:
         // WriteFeature is a synchronous no-timeout HID write, and on HID-over-I2C models (AN18-61) it can block
         // for a long time when that shared bus is saturated — e.g. an external USB-C display, worst at boot.
         // Doing it on the UI thread froze the whole app until the bus freed (monitor unplug); the worker keeps
-        // such a stall off the UI thread. Started only on the keep-path (transport opened above).
-        // See docs/lighting-an18-61.md.
+        // such a stall off the UI thread. Always started: with no reachable controller it simply waits, and it is
+        // the thread that performs the re-open that brings the lighting back without an app restart.
         _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "ene-hid-writer" };
         _worker.Start();
 
@@ -58,6 +68,11 @@ internal sealed partial class EneHidController : IRgbController
     // neutral IRgbController port so the app persists it generically (Settings stays vendor-agnostic). Only
     // present when this device actually has a lightbar (a CanFollowProfile zone).
     public string? ProfileFollowKey => _zones.Any(z => z.CanFollowProfile) ? "acer.lightbarFollowsProfile" : null;
+
+    /// <summary>Whether the ENE answered last time it was asked (see <see cref="IRgbDevice.Reachable"/> and the
+    /// ctor's note). Read by the lighting section on the UI thread, written by the writer thread and by the
+    /// constructor — hence the volatile field.</summary>
+    public bool Reachable => _reachable;
 
     private bool ApplyKeyboard(RgbModeInfo effect, byte brightness, byte speed, byte direction, AccentColor color)
     {
@@ -221,8 +236,10 @@ internal sealed partial class EneHidController : IRgbController
                 _pending.RemoveAt(0);
             }
             // WriteFeature drops the transport handle on failure so the next write re-opens (a bad boot-time
-            // handle otherwise sticks forever); it swallows its own errors, the catch is belt-and-braces.
-            try { WriteFeature(report); } catch { /* keep the worker alive */ }
+            // handle otherwise sticks forever); it swallows its own errors, the catch is belt-and-braces. The
+            // RESULT is the controller's answer to "did the transport work just now" — the one thing the UI is
+            // told, so a wedged device shows up as such instead of as a section that silently does nothing.
+            try { _reachable = WriteFeature(report); } catch { _reachable = false; /* keep the worker alive */ }
             // Space the next report (see PacingMs). Outside _gate, so SetFeature can keep enqueuing meanwhile;
             // a trailing sleep with nothing queued only delays the worker's return to Wait — harmless.
             if (PacingMs > 0) Thread.Sleep(PacingMs);

@@ -35,6 +35,9 @@ public sealed partial class LightingViewModel : ObservableObject
     private readonly Action<Action>? _post;   // UI-thread marshaller handed to every panel (null -> the real one)
     private readonly Func<DateTime> _clock;   // time source forwarded to every panel (flash-suspicion window)
 
+    // The device's own answer to "can the transports drive these zones" — asked again by SyncControllerState.
+    private readonly IRgbDevice? _rgb;
+
     // THE MODE THIS SECTION IS BOUND TO, and the values of its zones. The mode is FIXED when the door is taken
     // (LaptopService.LightsForCurrentMode), so every edit here lands in the mode the user is looking at — which
     // is what the old live dictionary did too, since the read handed over one mode's bucket and the UI wrote
@@ -50,6 +53,17 @@ public sealed partial class LightingViewModel : ObservableObject
 
     /// <summary>True when the device has a follow-capable zone (a lightbar) — the switch is only shown then.</summary>
     public bool ShowFollowsProfile => _followZones.Count > 0;
+
+    /// <summary>THE CONTROLLER IS NOT ANSWERING, so the panels below are showing stored values that are not
+    /// reaching the hardware. This is the honest replacement for what used to happen instead: the whole section
+    /// silently disappearing, because the controller's failed probe produced no zones and the app therefore built
+    /// no LightingViewModel at all (the owner's report after the ENE was left wedged by a failed firmware
+    /// handshake — see EneHidController's ctor). The section and the values stay; this says why nothing lights up.
+    ///
+    /// Refreshed by <see cref="SyncControllerState"/>, which the refresh pass calls: <see cref="IRgbDevice.Reachable"/>
+    /// is corrected by USE (a write that lands, one that does not), so a controller that recovers clears this on
+    /// the next pass — no timer, no hardware read, and no assumption that it is still broken.</summary>
+    [ObservableProperty] private bool _controllerUnavailable;
 
     /// <summary>When on (default), follow-capable zones (the lightbar) are left to the firmware — their
     /// per-profile palette colour, flash-free — and get no panel. When off they become normal user-controlled
@@ -87,6 +101,7 @@ public sealed partial class LightingViewModel : ObservableObject
 
         var zones = (rgb?.Zones ?? []).Where(z => z.Effects.Count > 0).ToList();
         _followZones = zones.Where(z => z.CanFollowProfile).ToList();
+        _rgb = rgb;
 
         // Build a panel per zone — but skip follow-capable zones while syncing (they're left to the firmware).
         foreach (var zone in zones)
@@ -97,7 +112,21 @@ public sealed partial class LightingViewModel : ObservableObject
         // per-zone, so it's shown only when there are no zones).
         if (Panels.Count == 0 && backlight != null && applyBacklight != null)
             Backlight = new BacklightViewModel(backlight, applyBacklight, post);
+
+        // Last, so it can see the panels built above (a field write: no change notification during construction).
+        _controllerUnavailable = Unavailable;
     }
+
+    // The condition behind ControllerUnavailable, asked of the device rather than remembered: this machine has
+    // zones to drive AND the device says its transport is not answering. A device with no panels (a plain
+    // backlight, no RGB) has no RGB transport to warn about, so it never shows the note.
+    private bool Unavailable => HasZones && _rgb is { Reachable: false };
+
+    /// <summary>Re-ask the device whether its transport is answering, and reflect it in
+    /// <see cref="ControllerUnavailable"/>. Called by the refresh pass (no hardware: it reads the answer the
+    /// writer thread recorded on its last write), so a controller that comes back clears the note by itself and
+    /// one that dies starts showing it — see <see cref="IRgbDevice.Reachable"/>.</summary>
+    public void SyncControllerState() => ControllerUnavailable = Unavailable;
 
     // The value this section is holding for a zone, creating it when the mode has none. The creation is the
     // READ's (Application/LightZone.cs ReadLightZone, built over this section's mode), not this section's: what

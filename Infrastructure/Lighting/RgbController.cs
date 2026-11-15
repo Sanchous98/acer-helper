@@ -28,6 +28,10 @@ public interface IRgbController : IDisposable
     /// <summary>Settings key for this controller's "follows performance profile" preference (see
     /// <see cref="IRgbDevice.ProfileFollowKey"/>); null when it has no profile-indicator zone.</summary>
     string? ProfileFollowKey => null;
+
+    /// <summary>Whether this transport last answered (see <see cref="IRgbDevice.Reachable"/>). Default: true —
+    /// a controller that does not track it is not one the app should warn about.</summary>
+    bool Reachable => true;
 }
 
 /// <summary>Assembles an <see cref="IRgbDevice"/> from one or more controllers by concatenating their zones,
@@ -47,6 +51,11 @@ public sealed class RgbDevice(params IRgbController[] controllers) : IRgbDevice,
     }
 
     public string? ProfileFollowKey => controllers.Select(c => c.ProfileFollowKey).FirstOrDefault(k => k != null);
+
+    /// <summary>Every controller has to be able to drive its zones: one unreachable transport (the ENE wedged
+    /// behind a Code 10 parent) is enough to make some of the zones below dead, and the UI has no way to tell
+    /// which. Vacuously true with no controllers, which is the "no RGB" case anyway.</summary>
+    public bool Reachable => controllers.All(c => c.Reachable);
 
     public void Dispose()
     {

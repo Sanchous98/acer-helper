@@ -513,3 +513,28 @@ stays well under the **~120 ms** apply debounce, so a normal apply is still visu
 
 This gate is **pacing and coalescing, not serialisation**, and must not be merged into the WMI EC gate (see
 `docs/wmi-interop.md` and the constraints in `docs/open-decisions.md`).
+
+### A controller that is not answering is REPORTED, never removed (2026-11-15)
+
+The constructor of `EneHidController` used to open the transport and **return early on failure** — no zones, so
+`AcerDevice.WireRgb` adopted no lighting, so `AppController.BuildUi` built no `LightingViewModel`. The lighting
+page then **did not exist** for the whole session. It surfaced as the owner's «пропал экран Подсветки вообще»,
+after the ENE was left wedged by a failed firmware handshake (its ACPI parent `ACPI\ENEK5130` in Code 10 with
+`STATUS_DEVICE_POWER_FAILURE` = `0xC000009E`: the HID descriptor request could not power the device up). Nothing
+in the app was broken — but nothing in the app could be seen either, and only a restart would re-probe.
+
+The rule now:
+
+- **The zones come from the MODEL, not from the probe.** A machine that has a lit keyboard still has one when
+  the controller is dead. The section is built, shows the user's stored values, and is bounded by the same rules
+  as always.
+- **The probe is recorded, not obeyed.** `Reachable` starts as the construction probe's answer and is corrected
+  by USE: the writer thread stores the outcome of every write (`_reachable = WriteFeature(report)`), so a
+  controller that comes back is noticed by the next write and one that dies starts reporting itself.
+- **The writer re-opens the device.** The Windows transport re-enumerates when `_device` is null, at most once
+  per `ProbeBackoffMs = 5 s` — the recovery path that makes an app restart unnecessary (the Linux half already
+  re-opened its hidraw node per write).
+- **The section says so.** `LightingViewModel.ControllerUnavailable` (refreshed each pass by
+  `MainViewModel.SyncLightingController`, no hardware read) shows one line: the settings are kept and will be
+  applied once the controller answers. It clears itself when a write lands.
+

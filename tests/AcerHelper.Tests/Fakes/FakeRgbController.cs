@@ -16,6 +16,10 @@ public sealed class FakeRgbController : IRgbController
     public IReadOnlyList<RgbZone> Zones { get; set; } = [];
     public string? ProfileFollowKey { get; set; }
 
+    /// <summary>Whether this controller's transport is answering (see <see cref="IRgbController.Reachable"/>).
+    /// Default true, like the port's own default.</summary>
+    public bool Reachable { get; set; } = true;
+
     public bool SetProfileFlashResult { get; set; }
     public bool BlankResult { get; set; }
     public bool ThrowOnDispose { get; set; }

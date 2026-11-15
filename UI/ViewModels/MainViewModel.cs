@@ -292,6 +292,12 @@ public sealed partial class MainViewModel : ObservableObject
     /// the values ARE the section's, and re-reading the graph on every tick is what this replaced.</summary>
     public void RepaintLighting() => _lighting?.Repaint();
 
+    /// <summary>Re-ask the device whether the lighting transport answers, so the section can say so (see
+    /// <see cref="LightingViewModel.ControllerUnavailable"/>). Carries no hardware read — the answer is what the
+    /// writer thread last recorded — and is called from every refresh pass, so a controller that recovered stops
+    /// being reported as broken without an app restart.</summary>
+    public void SyncLightingController() => _lighting?.SyncControllerState();
+
     /// <summary>Whether <paramref name="content"/> is the section the open drawer is showing — the toggle rule,
     /// stated once because two callers need to know its answer before they act: <see cref="OpenDrawer"/> closes
     /// the drawer when it is true, and <see cref="OpenLighting"/> skips its re-apply when it is true (the click

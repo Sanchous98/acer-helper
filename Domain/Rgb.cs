@@ -113,4 +113,16 @@ public interface IRgbDevice
     /// zone is stored, or null if the device has none. The key string is owned by the backend (opaque here), so
     /// the flag stays vendor-scoped while the app plumbing (LaptopService.GetDeviceFlag) stays generic.</summary>
     string? ProfileFollowKey { get; }
+
+    /// <summary>Whether the transport LAST ANSWERED — i.e. whether the zones above can be driven right now.
+    /// THE ZONES AND THIS ANSWER ARE INDEPENDENT, and that separation is the point: a model that HAS a lit
+    /// keyboard still has one when its controller is wedged (the Acer ENE sitting in Code 10 after a failed
+    /// firmware handshake), so the section is still built, still shows the user's stored values, and says the
+    /// controller is not answering instead of vanishing from the app.
+    ///
+    /// It is the last KNOWN answer, not a live probe: a controller learns it failed when a write fails and
+    /// learned it works when a write lands, so the value is corrected by USE. True by default, which is the
+    /// honest answer for a port that does not track it — and the reason a fake in a test needs to say nothing.
+    /// See <c>EneHidController.Reachable</c> and docs/lighting-an18-61.md.</summary>
+    bool Reachable => true;
 }
